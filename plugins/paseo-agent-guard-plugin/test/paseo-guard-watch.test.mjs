@@ -91,6 +91,7 @@ test("selectWatchTimeout shortens waits after agent status dependent decisions",
   try {
     const config = makeConfig(root);
     config.watch.agentStatusPollTimeout = "2s";
+    config.watch.cooldownPollTimeout = "3s";
     assert.equal(selectWatchTimeout({ status: "active", lastDecision: null }, config), "10m");
     assert.equal(
       selectWatchTimeout(
@@ -106,6 +107,21 @@ test("selectWatchTimeout shortens waits after agent status dependent decisions",
         { agentStatusPollTimeout: "1s" }
       ),
       "1s"
+    );
+    assert.equal(
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "cooldown_active" } },
+        config
+      ),
+      "3s"
+    );
+    assert.equal(
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "cooldown_active" } },
+        config,
+        { cooldownPollTimeout: "4s" }
+      ),
+      "4s"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -238,6 +254,85 @@ test("watch rechecks quickly after child_agent_running and continues when child 
     assert.equal(writes.some((line) => line.includes('"previousDecisionReason":"child_agent_running"')), true);
     assert.equal(writes.some((line) => line.includes('"reason":"safe_signal_continue"')), true);
     assert.equal(writes.some((line) => line.includes('"messageId":"m-fixed"')), true);
+  } finally {
+    process.stdout.write = originalWrite;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("watch rechecks quickly after cooldown_active and continues when cooldown has expired", async () => {
+  const root = tempRoot();
+  const originalWrite = process.stdout.write;
+  const writes = [];
+  const calls = [];
+  try {
+    const config = makeConfig(root);
+    config.watch.cooldownPollTimeout = "2s";
+    initObjective(config);
+    updateObjective(config, {
+      lastDecision: {
+        action: "wait",
+        reason: "cooldown_active",
+        signal: "DONE",
+        messageId: "m-done",
+        decidedAt: "2000-01-01T00:00:01.000Z"
+      },
+      lastContinuationAt: "2000-01-01T00:00:00.000Z"
+    });
+
+    process.stdout.write = (chunk) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    await watch(config, {
+      maxCycles: 1,
+      dryRun: true,
+      runner(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "chat" && args[1] === "wait") {
+          return { status: 0, stdout: '{"messages":[]}', stderr: "" };
+        }
+        if (args[0] === "ls" && args.includes("role=orchestrator")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } }
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } }
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "chat" && args[1] === "read") {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              {
+                id: "m-done",
+                author: "orch-1",
+                createdAt: "2026-05-11T00:00:05.000Z",
+                body: "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=continue"
+              }
+            ]),
+            stderr: ""
+          };
+        }
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
+      }
+    });
+
+    const chatWaitCall = calls.find(([, args]) => args[0] === "chat" && args[1] === "wait");
+    assert.deepEqual(chatWaitCall[1], ["chat", "wait", "room-a", "--timeout", "2s", "--json"]);
+    assert.equal(writes.some((line) => line.includes('"previousDecisionReason":"cooldown_active"')), true);
+    assert.equal(writes.some((line) => line.includes('"reason":"safe_signal_continue"')), true);
+    assert.equal(writes.some((line) => line.includes('"messageId":"m-done"')), true);
   } finally {
     process.stdout.write = originalWrite;
     rmSync(root, { recursive: true, force: true });

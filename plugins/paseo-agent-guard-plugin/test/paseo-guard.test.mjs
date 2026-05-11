@@ -571,7 +571,9 @@ test("handoff mode continues PR_CREATED into review until clean", () => {
   assert.equal(result.action, "send");
   assert.equal(result.reason, "handoff_pr_review_until_clean");
   assert.match(result.prompt, /Handoff mode is enabled/);
-  assert.match(result.prompt, /PR review gates must continue until all available reviewers report no findings before merge/);
+  assert.match(result.prompt, /PR review gates must continue without human confirmation through review\/fix\/re-review until all available reviewers report no findings, then merge/);
+  assert.match(result.prompt, /do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation/i);
+  assert.match(result.prompt, /Stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker/);
 });
 
 test("handoff mode continues MERGED into the next phase", () => {
@@ -879,6 +881,7 @@ test("continuation prompt includes multi-agent review policy", () => {
   assert.match(prompt, /if a reviewer\/provider is unavailable, record that skip in the room evidence and continue/);
   assert.match(prompt, /PRD flow: draft or update PRD, run multi-agent review .* fix findings, then stop for human review\./);
   assert.match(prompt, /Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: plan=3, feature=3, pr=3\./);
+  assert.match(prompt, /Human confirmation is required at configured terminal gates unless the user explicitly approved continuation\./);
   assert.match(prompt, /review until there are no issues, continue review\/fix\/re-review cycles until all available reviewers report no findings/);
   assert.match(prompt, /Do not treat PRD as human-review-ready until the multi-agent review findings are resolved\./);
 });
@@ -1298,5 +1301,6 @@ test("template and example configs include default multi-agent review policy", (
     assert.deepEqual(config.commands.agentWait, ["wait", "{agentId}", "--json"]);
     assert.equal(config.watch.timeout, "10m");
     assert.equal(config.watch.agentStatusPollTimeout, "15s");
+    assert.equal(config.watch.cooldownPollTimeout, "15s");
   }
 });

@@ -12,6 +12,7 @@ import {
 
 let stopping = false;
 const AGENT_STATUS_WAIT_REASONS = new Set(["child_agent_running", "orchestrator_not_idle"]);
+const COOLDOWN_WAIT_REASONS = new Set(["cooldown_active"]);
 
 process.on("SIGINT", () => {
   stopping = true;
@@ -80,12 +81,21 @@ export function needsAgentStatusPoll(objective) {
     AGENT_STATUS_WAIT_REASONS.has(objective.lastDecision.reason);
 }
 
+export function needsCooldownPoll(objective) {
+  return objective?.status === "active" &&
+    objective?.lastDecision?.action === "wait" &&
+    COOLDOWN_WAIT_REASONS.has(objective.lastDecision.reason);
+}
+
 export function selectWatchTimeout(objective, config, options = {}) {
   const timeout = options.timeout || config.watch?.timeout || "10m";
-  if (!needsAgentStatusPoll(objective)) {
-    return timeout;
+  if (needsAgentStatusPoll(objective)) {
+    return options.agentStatusPollTimeout || config.watch?.agentStatusPollTimeout || "15s";
   }
-  return options.agentStatusPollTimeout || config.watch?.agentStatusPollTimeout || "15s";
+  if (needsCooldownPoll(objective)) {
+    return options.cooldownPollTimeout || config.watch?.cooldownPollTimeout || "15s";
+  }
+  return timeout;
 }
 
 export async function watch(config, options = {}) {
@@ -140,7 +150,7 @@ export async function watch(config, options = {}) {
 function usage() {
   return [
     "Usage:",
-    "  paseo-guard-watch --config <config> [--timeout 10m] [--agent-status-poll-timeout 15s] [--dry-run] [--max-cycles 1]"
+    "  paseo-guard-watch --config <config> [--timeout 10m] [--agent-status-poll-timeout 15s] [--cooldown-poll-timeout 15s] [--dry-run] [--max-cycles 1]"
   ].join("\n");
 }
 
@@ -154,6 +164,7 @@ export async function main(argv = process.argv.slice(2)) {
   await watch(config, {
     timeout: args.timeout,
     agentStatusPollTimeout: args["agent-status-poll-timeout"],
+    cooldownPollTimeout: args["cooldown-poll-timeout"],
     dryRun: Boolean(args["dry-run"]),
     maxCycles: args["max-cycles"]
   });

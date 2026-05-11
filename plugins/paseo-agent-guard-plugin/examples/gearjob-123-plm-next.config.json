@@ -96,6 +96,7 @@
   "chatReadLimit": 50,
   "watch": {
     "timeout": "10m",
-    "agentStatusPollTimeout": "15s"
+    "agentStatusPollTimeout": "15s",
+    "cooldownPollTimeout": "15s"
   }
 }

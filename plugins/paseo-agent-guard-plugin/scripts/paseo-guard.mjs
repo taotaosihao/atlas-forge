@@ -113,7 +113,8 @@ const DEFAULT_CONFIG = {
   chatReadLimit: 50,
   watch: {
     timeout: "10m",
-    agentStatusPollTimeout: "15s"
+    agentStatusPollTimeout: "15s",
+    cooldownPollTimeout: "15s"
   }
 };
 
@@ -1056,7 +1057,7 @@ function buildReviewPolicyInstructions(config) {
     .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
   const prdRounds = phases.prd?.defaultRounds || 1;
   const reviewRoundsInstruction = isHandoffMode(config)
-    ? `- Plan and feature review gates must run exactly these default review rounds: ${prePrPhases.join(", ")}. PR review gates must continue until all available reviewers report no findings before merge.`
+    ? `- Plan and feature review gates must run exactly these default review rounds: ${prePrPhases.join(", ")}. PR review gates must continue without human confirmation through review/fix/re-review until all available reviewers report no findings, then merge.`
     : `- Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: ${threeRoundPhases.join(", ")}.`;
 
   const instructions = [
@@ -1067,6 +1068,9 @@ function buildReviewPolicyInstructions(config) {
       : "- Try every configured reviewer for each required review gate; unavailable reviewers are blockers unless the user explicitly overrides.",
     `- PRD flow: draft or update PRD, run multi-agent review with the available reviewers for ${prdRounds} round(s), fix findings, then stop for human review.`,
     reviewRoundsInstruction,
+    isHandoffMode(config)
+      ? "- In handoff mode, do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation; stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker that genuinely requires human intervention."
+      : "- Human confirmation is required at configured terminal gates unless the user explicitly approved continuation.",
     "- If the user asks to review until there are no issues, continue review/fix/re-review cycles until all available reviewers report no findings.",
     "- Do not treat PRD as human-review-ready until the multi-agent review findings are resolved."
   ];
@@ -1315,7 +1319,7 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
   const recoveryLine = formatRecoveryContext(recovery);
   const cleanupLine = formatCleanupAgents(cleanupAgents);
   const protectedActionInstruction = isHandoffMode(config)
-    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, or restart the daemon without separate explicit approval."
+    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean without human confirmation, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. Stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker that genuinely requires human intervention. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, or restart the daemon without separate explicit approval."
     : "9. Do not merge, delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, restart the daemon, or start a new post-merge phase without explicit user approval.";
 
   return [

@@ -108,6 +108,7 @@ When `policy.handoffMode` is true, the config itself grants approval for this PR
 
 - On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
 - On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence. In handoff mode this intentionally takes precedence over `policy.allowNewPhaseAfterMerge`.
+- Do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation. Stop only for PRD human review after resolved multi-agent findings, or for an unrecoverable blocker that genuinely cannot continue without human input.
 - Allow only exact protected-action entries `merge` and `new project phase`. Archiving completed child agents after required room evidence is allowed by the cleanup contract below. Branch deletion, agent deletion, force-archiving/running-agent closure, and daemon restart remain protected.
 
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.

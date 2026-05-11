@@ -56,7 +56,7 @@ The watcher is event-driven:
 paseo chat wait <room> --timeout 10m --json
 ```
 
-Timeouts are heartbeats. They trigger a guarded reconcile pass so missing child-agent evidence can be inspected, but they do not create schedule agents. When the last guard decision is waiting on agent status, such as `child_agent_running` or `orchestrator_not_idle`, the watcher uses `watch.agentStatusPollTimeout` for a shorter status poll before reconciling again. Per-child `paseo wait <agent-id>` processes are auxiliary idle diagnostics; durable continuation is handled by the guard watcher plus valid room `SIGNAL` evidence.
+Timeouts are heartbeats. They trigger a guarded reconcile pass so missing child-agent evidence can be inspected, but they do not create schedule agents. When the last guard decision is waiting on agent status, such as `child_agent_running` or `orchestrator_not_idle`, the watcher uses `watch.agentStatusPollTimeout` for a shorter status poll before reconciling again. When the last decision is `cooldown_active`, it uses `watch.cooldownPollTimeout` so handoff flows resume promptly after cooldown expires. Per-child `paseo wait <agent-id>` processes are auxiliary idle diagnostics; durable continuation is handled by the guard watcher plus valid room `SIGNAL` evidence.
 
 ## Install Locally
 
