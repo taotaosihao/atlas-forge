@@ -50,22 +50,21 @@ Timeouts are heartbeats. They do not create schedule agents.
 
 ## Install Locally
 
-The repo can be registered from `~/.agents/plugins/marketplace.json` with a local source path:
+The repo is a Codex plugin marketplace through `.agents/plugins/marketplace.json`. Register it with the official Codex marketplace command:
 
-```json
-{
-  "name": "paseo-agent-guard-plugin",
-  "source": {
-    "source": "local",
-    "path": "./work/paseo-agent-guard-plugin"
-  },
-  "policy": {
-    "installation": "AVAILABLE",
-    "authentication": "ON_INSTALL"
-  },
-  "category": "Productivity"
-}
+```bash
+codex plugin marketplace add taotaosihao/paseo-agent-guard-plugin
 ```
+
+## Update Local Plugin
+
+After pushing changes to the Git marketplace repo, refresh the Codex runtime cache with one command:
+
+```bash
+npm run plugin:update
+```
+
+This runs the official `codex plugin marketplace upgrade paseo-agent-guard-plugin` path. Start a new Codex session, or reload the plugin context, before relying on updated skill text.
 
 ## Checks
 
@@ -75,4 +74,3 @@ node scripts/paseo-guard.mjs init --config examples/gearjob-123-plm-next.config.
 node scripts/paseo-guard.mjs reconcile --config examples/gearjob-123-plm-next.config.json --dry-run
 paseo chat wait gearjob-123-plm-next --timeout 5s --json
 ```
-

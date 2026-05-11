@@ -533,6 +533,11 @@ test("plugin manifest and skill frontmatter are valid", () => {
   assert.equal(plugin.skills, "./skills/");
   assert.ok(plugin.interface.displayName);
 
+  const marketplace = JSON.parse(readFileSync(join(repoRoot, ".agents/plugins/marketplace.json"), "utf8"));
+  assert.equal(marketplace.name, "paseo-agent-guard-plugin");
+  assert.equal(marketplace.plugins[0].name, "paseo-agent-guard-plugin");
+  assert.equal(marketplace.plugins[0].source.path, ".");
+
   const skill = readFileSync(join(repoRoot, "skills/paseo-agent-guard/SKILL.md"), "utf8");
   assert.match(skill, /^---\nname: paseo-agent-guard\n/m);
   assert.match(skill, /description: .+\n---/m);

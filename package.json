@@ -8,12 +8,12 @@
     "paseo-guard-watch": "./scripts/paseo-guard-watch.mjs"
   },
   "scripts": {
-    "check": "node --check scripts/paseo-guard.mjs && node --check scripts/paseo-guard-watch.mjs && npm test",
+    "check": "node --check scripts/paseo-guard.mjs && node --check scripts/paseo-guard-watch.mjs && node --check scripts/update-codex-plugin.mjs && npm test",
     "test": "node --test",
+    "plugin:update": "node scripts/update-codex-plugin.mjs",
     "guard:init": "node scripts/paseo-guard.mjs init --config examples/gearjob-123-plm-next.config.json",
     "guard:status": "node scripts/paseo-guard.mjs status --config examples/gearjob-123-plm-next.config.json",
     "guard:dry-run": "node scripts/paseo-guard.mjs reconcile --config examples/gearjob-123-plm-next.config.json --dry-run",
     "guard:watch": "node scripts/paseo-guard-watch.mjs --config examples/gearjob-123-plm-next.config.json"
   }
 }
-
