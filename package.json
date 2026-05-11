@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "node --check plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs && node --check plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs && node --check scripts/update-codex-plugin.mjs && npm test",
-    "test": "node --test plugins/paseo-agent-guard-plugin/test/*.mjs",
+    "test": "node --test plugins/paseo-agent-guard-plugin/test/*.mjs test/*.mjs",
     "plugin:update": "node scripts/update-codex-plugin.mjs",
     "guard:init": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs init --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",
     "guard:status": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs status --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",

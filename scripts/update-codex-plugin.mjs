@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
-  readFileSync
+  readFileSync,
+  readdirSync
 } from "node:fs";
 import { homedir } from "node:os";
 import {
@@ -128,6 +130,37 @@ function validatePluginManifest(root, plugin) {
   }
 }
 
+function listDirectories(path) {
+  if (!existsSync(path)) {
+    return [];
+  }
+  return readdirSync(path, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(path, entry.name));
+}
+
+export function repairInstalledPluginCacheManifests(codexHome, plugin) {
+  const cacheRoot = join(codexHome, "plugins", "cache");
+  const repaired = [];
+  for (const marketplaceCacheDir of listDirectories(cacheRoot)) {
+    const pluginCacheDir = join(marketplaceCacheDir, plugin);
+    if (!existsSync(pluginCacheDir)) {
+      continue;
+    }
+
+    for (const cacheEntryDir of [pluginCacheDir, ...listDirectories(pluginCacheDir)]) {
+      const runtimeManifestPath = join(cacheEntryDir, "plugin.json");
+      const scaffoldManifestPath = join(cacheEntryDir, ".codex-plugin/plugin.json");
+      if (existsSync(runtimeManifestPath) || !existsSync(scaffoldManifestPath)) {
+        continue;
+      }
+      copyFileSync(scaffoldManifestPath, runtimeManifestPath);
+      repaired.push(runtimeManifestPath);
+    }
+  }
+  return repaired;
+}
+
 function validateMarketplaceManifest(root, marketplace, plugin) {
   const marketplacePath = join(root, ".agents/plugins/marketplace.json");
   if (!existsSync(marketplacePath)) {
@@ -157,6 +190,7 @@ export function updateCodexPlugin(options = buildOptions()) {
   const root = repoRoot();
   validatePluginManifest(root, options.plugin);
   validateMarketplaceManifest(root, options.marketplace, options.plugin);
+  const repairedCacheManifests = repairInstalledPluginCacheManifests(options.codexHome, options.plugin);
 
   run("codex", ["plugin", "marketplace", "upgrade", options.marketplace], { cwd: root });
 
@@ -166,7 +200,8 @@ export function updateCodexPlugin(options = buildOptions()) {
     marketplace: options.marketplace,
     plugin: options.plugin,
     source: root,
-    codexHome: options.codexHome
+    codexHome: options.codexHome,
+    repairedCacheManifests
   };
 }
 
