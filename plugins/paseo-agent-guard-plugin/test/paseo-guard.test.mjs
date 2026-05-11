@@ -606,6 +606,40 @@ test("handoff mode continues PR_CREATED into review until clean", () => {
   assert.match(result.prompt, /Stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker/);
 });
 
+test("handoff mode accepts PR_CREATED child evidence with task inside labels", () => {
+  const config = makeHandoffConfig();
+  const prCreated = message(
+    "m5",
+    `SIGNAL signal=PR_CREATED labels={room=room-a,parent=orch-1,phase=approved-release,task=20260512-001-approved-release,role=implementation} cwd=${config.targetWorkspace} branch=feat/approved-release changed_files=[a.py] commit=abc123 pr=https://example.test/pr/72 validation="PASS tests"`,
+    "child-1"
+  );
+  const snapshot = baseSnapshot(config, prCreated);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "idle",
+      cwd: config.targetWorkspace,
+      labels: {
+        room: config.room,
+        parent: "orch-1",
+        phase: "approved-release",
+        task: "20260512-001-approved-release",
+        role: "implementation"
+      },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+
+  assert.equal(validateDelegationContract({ message: prCreated, signal: "PR_CREATED" }, snapshot, config), null);
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "handoff_pr_review_until_clean");
+  assert.equal(result.signal, "PR_CREATED");
+  assert.equal(result.messageId, "m5");
+});
+
 test("handoff mode continues MERGED into the next phase", () => {
   const config = makeHandoffConfig();
   assert.equal(config.policy.allowNewPhaseAfterMerge, false);

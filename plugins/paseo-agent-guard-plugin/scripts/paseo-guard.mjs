@@ -853,6 +853,19 @@ function labelsFromMessageFields(fields) {
   return labels;
 }
 
+function evidenceFieldValue(key, fields, labels, agent) {
+  if (key === "agent") {
+    return fields.agent || agent?.id;
+  }
+  if (key === "labels") {
+    return fields.labels || Object.keys(labels).length > 0;
+  }
+  if (key === "cwd") {
+    return fields.cwd || agent?.cwd;
+  }
+  return fields[key] || labels[key];
+}
+
 export function validateDelegationContract(entry, snapshot, config) {
   if (!entry?.message) {
     return null;
@@ -897,15 +910,9 @@ export function validateDelegationContract(entry, snapshot, config) {
   }
 
   const missingLabels = (config.childAgents?.requiredLabels || []).filter((key) => !labels[key]);
-  const missingEvidence = (config.childAgents?.requiredEvidenceFields || []).filter((key) => {
-    if (key === "agent") {
-      return !fields.agent && !agent?.id;
-    }
-    if (key === "labels") {
-      return !fields.labels && Object.keys(messageLabels).length === 0;
-    }
-    return !fields[key];
-  });
+  const missingEvidence = (config.childAgents?.requiredEvidenceFields || []).filter(
+    (key) => !evidenceFieldValue(key, fields, messageLabels, agent)
+  );
 
   const cwd = fields.cwd || agent?.cwd;
   const workspaceKind = agent?.workspaceKind || classifyWorkspace(cwd, config);
