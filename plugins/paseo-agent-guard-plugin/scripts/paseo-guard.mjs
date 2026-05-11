@@ -51,6 +51,7 @@ const DEFAULT_CONFIG = {
   },
   policy: {
     autoContinue: true,
+    handoffMode: false,
     cooldownSeconds: 60,
     maxRetries: 3,
     allowNewPhaseAfterMerge: false,
@@ -102,6 +103,7 @@ const STATUS_ACTIVE = "active";
 const STATUS_PAUSED = "paused";
 const STATUS_BLOCKED = "blocked";
 const STATUS_COMPLETE = "complete";
+const HANDOFF_ALLOWED_PROTECTED_ACTIONS = new Set(["merge", "new project phase"]);
 
 export class GuardError extends Error {
   constructor(message, code = "guard_error") {
@@ -727,9 +729,17 @@ export function validateDelegationContract(entry, snapshot, config) {
   };
 }
 
-function containsProtectedAction(text, config) {
+function isHandoffMode(config) {
+  return Boolean(config.policy?.handoffMode);
+}
+
+function isHandoffAllowedProtectedAction(action, config) {
+  return isHandoffMode(config) && HANDOFF_ALLOWED_PROTECTED_ACTIONS.has(String(action || "").toLowerCase());
+}
+
+function protectedActionsInText(text, config) {
   const lower = String(text || "").toLowerCase();
-  return (config.workflow?.protectedActions || []).find((action) => {
+  return (config.workflow?.protectedActions || []).filter((action) => {
     const escaped = String(action)
       .toLowerCase()
       .trim()
@@ -740,6 +750,10 @@ function containsProtectedAction(text, config) {
     }
     return new RegExp(`(^|[^a-z0-9_])${escaped}([^a-z0-9_]|$)`).test(lower);
   });
+}
+
+function blockingProtectedAction(text, config) {
+  return protectedActionsInText(text, config).find((action) => !isHandoffAllowedProtectedAction(action, config));
 }
 
 function isRunningAgent(agent, config) {
@@ -773,19 +787,33 @@ function buildReviewPolicyInstructions(config) {
   const threeRoundPhases = ["plan", "feature", "pr"]
     .filter((phase) => phases[phase]?.multiAgentReview)
     .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
+  const prePrPhases = ["plan", "feature"]
+    .filter((phase) => phases[phase]?.multiAgentReview)
+    .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
   const prdRounds = phases.prd?.defaultRounds || 1;
+  const reviewRoundsInstruction = isHandoffMode(config)
+    ? `- Plan and feature review gates must run exactly these default review rounds: ${prePrPhases.join(", ")}. PR review gates must continue until all available reviewers report no findings before merge.`
+    : `- Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: ${threeRoundPhases.join(", ")}.`;
 
-  return [
+  const instructions = [
     "Review policy:",
     `- Required multi-agent reviewers: ${reviewers}.`,
     policy.ignoreUnavailableReviewers
       ? "- Try every configured reviewer for each required review gate; if a reviewer/provider is unavailable, record that skip in the room evidence and continue with the available reviewers."
       : "- Try every configured reviewer for each required review gate; unavailable reviewers are blockers unless the user explicitly overrides.",
     `- PRD flow: draft or update PRD, run multi-agent review with the available reviewers for ${prdRounds} round(s), fix findings, then stop for human review.`,
-    `- Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: ${threeRoundPhases.join(", ")}.`,
+    reviewRoundsInstruction,
     "- If the user asks to review until there are no issues, continue review/fix/re-review cycles until all available reviewers report no findings.",
     "- Do not treat PRD as human-review-ready until the multi-agent review findings are resolved."
   ];
+
+  if (isHandoffMode(config)) {
+    instructions.push(
+      "- Handoff mode requires PR review/fix/re-review cycles until all available reviewers report no findings before merge."
+    );
+  }
+
+  return instructions;
 }
 
 export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation }) {
@@ -795,6 +823,9 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
   const violationLine = violation
     ? `contractViolation=${violation.violations.join("; ")}`
     : "contractViolation=none";
+  const protectedActionInstruction = isHandoffMode(config)
+    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, archive/delete agents, or restart the daemon without separate explicit approval."
+    : "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval.";
 
   return [
     "PASEO_AGENT_GUARD_CONTINUATION",
@@ -816,7 +847,7 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "6. Immediately inspect each created child agent and verify its cwd before relying on it.",
     "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
     "8. Use background or no-wait mode for child agents and continue through room evidence.",
-    "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval.",
+    protectedActionInstruction,
     "",
     ...buildReviewPolicyInstructions(config)
   ].join("\n");
@@ -889,7 +920,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
       });
     }
 
-    if ((config.workflow?.terminalSignals || []).includes(entry.signal)) {
+    const isTerminalSignal = (config.workflow?.terminalSignals || []).includes(entry.signal);
+    if (isTerminalSignal && !isHandoffMode(config)) {
       const nextStatus =
         entry.signal === "MERGED" && !config.policy?.allowNewPhaseAfterMerge
           ? STATUS_COMPLETE
@@ -903,7 +935,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
       });
     }
 
-    const protectedAction = containsProtectedAction(entry.message.body, config);
+    const protectedAction = blockingProtectedAction(entry.message.body, config);
     if (protectedAction) {
       return decision("block", "protected_action_detected", {
         signal: entry.signal,
@@ -930,6 +962,41 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
   }
 
   const signalEntry = signalEntries.at(-1);
+  if (isHandoffMode(config) && (config.workflow?.terminalSignals || []).includes(signalEntry.signal)) {
+    if (cooldownActive(objective, config, now)) {
+      return decision("wait", "cooldown_active", {
+        signal: signalEntry.signal,
+        messageId: signalEntry.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    if (!config.policy?.autoContinue) {
+      return decision("wait", "auto_continue_disabled", {
+        signal: signalEntry.signal,
+        messageId: signalEntry.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    const reason = signalEntry.signal === "MERGED"
+      ? "handoff_next_phase_continue"
+      : "handoff_pr_review_until_clean";
+    return decision("send", reason, {
+      signal: signalEntry.signal,
+      messageId: signalEntry.message.id,
+      orchestratorId: orchestrator.id,
+      prompt: buildContinuationPrompt({
+        objective,
+        config,
+        signalEntry,
+        reason
+      }),
+      lastHandledMessageId: signalEntry.message.id,
+      decidedAt: timestamp
+    });
+  }
+
   if ((config.workflow?.blockedSignals || []).includes(signalEntry.signal)) {
     const recoverable = (config.workflow?.recoverableBlockedSignals || []).includes(signalEntry.signal);
     if (!recoverable) {

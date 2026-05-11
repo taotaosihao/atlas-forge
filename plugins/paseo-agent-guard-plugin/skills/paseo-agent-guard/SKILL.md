@@ -89,9 +89,17 @@ When reconciling, continue only if all are true:
 - No child agent is running.
 - Latest unhandled signal is safe or configured recoverable.
 - Cooldown has passed.
-- The next action is not protected.
+- The next action is not protected, unless `policy.handoffMode` explicitly allows that protected action.
 
-Never auto-run merges, branch deletion, agent deletion or archive, daemon restart, or a new project phase after merge unless the user explicitly approves it.
+Default mode remains conservative: `PR_CREATED` stops for human review, `MERGED` completes the objective, and merge or new-phase actions are protected unless the user explicitly approves them.
+
+When `policy.handoffMode` is true, the config itself grants approval for this PR handoff flow:
+
+- On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
+- On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence.
+- Allow only `merge` and `new project phase` protected-action mentions. Branch deletion, agent deletion/archive, and daemon restart remain protected.
+
+The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.
 
 Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
 

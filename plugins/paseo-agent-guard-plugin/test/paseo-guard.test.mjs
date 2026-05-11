@@ -276,6 +276,82 @@ test("MERGED terminal signal is not mistaken for protected merge action", () => 
   assert.equal(result.nextStatus, "complete");
 });
 
+test("handoff mode continues PR_CREATED into review until clean", () => {
+  const config = makeConfig(tempRoot(), {
+    policy: {
+      autoContinue: true,
+      handoffMode: true,
+      cooldownSeconds: 0,
+      checkGitWorktrees: false
+    }
+  });
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "PR_CREATED PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "handoff_pr_review_until_clean");
+  assert.match(result.prompt, /Handoff mode is enabled/);
+  assert.match(result.prompt, /PR review\/fix\/re-review cycles until all available reviewers report no findings before merge/);
+});
+
+test("handoff mode continues MERGED into the next phase", () => {
+  const config = makeConfig(tempRoot(), {
+    policy: {
+      autoContinue: true,
+      handoffMode: true,
+      cooldownSeconds: 0,
+      checkGitWorktrees: false
+    }
+  });
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "handoff_next_phase_continue");
+  assert.match(result.prompt, /continue into the next approved project phase/);
+});
+
+test("handoff mode allows merge and new project phase protected mentions", () => {
+  const config = makeConfig(tempRoot(), {
+    policy: {
+      autoContinue: true,
+      handoffMode: true,
+      cooldownSeconds: 0,
+      checkGitWorktrees: false
+    }
+  });
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR then start new project phase'"))
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+});
+
+test("handoff mode still blocks destructive protected actions", () => {
+  const config = makeConfig(tempRoot(), {
+    policy: {
+      autoContinue: true,
+      handoffMode: true,
+      cooldownSeconds: 0,
+      checkGitWorktrees: false
+    }
+  });
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR then delete branch'"))
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "delete branch");
+});
+
 test("recoverable blocker nudges orchestrator", () => {
   const config = makeConfig();
   const result = decideReconcile(
@@ -551,6 +627,7 @@ test("template and example configs include default multi-agent review policy", (
   ]) {
     const config = JSON.parse(readFileSync(join(pluginRoot, relativePath), "utf8"));
     assert.deepEqual(config.reviewPolicy.reviewers, ["claude", "codex", "gemini", "mimo"]);
+    assert.equal(config.policy.handoffMode, false);
     assert.equal(config.reviewPolicy.ignoreUnavailableReviewers, true);
     assert.equal(config.reviewPolicy.phases.prd.defaultRounds, 1);
     assert.equal(config.reviewPolicy.phases.prd.humanReviewAfterMultiAgent, true);

@@ -36,6 +36,7 @@
   },
   "policy": {
     "autoContinue": true,
+    "handoffMode": false,
     "cooldownSeconds": 60,
     "maxRetries": 3,
     "allowNewPhaseAfterMerge": false,
