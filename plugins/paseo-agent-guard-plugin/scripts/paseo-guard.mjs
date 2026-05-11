@@ -30,8 +30,11 @@ const DEFAULT_CONFIG = {
   childAgents: {
     requiredLabels: ["room", "parent", "phase", "task", "role"],
     requiredEvidenceFields: ["agent", "cwd", "branch", "task", "labels"],
+    requiredSkills: ["paseo-agent-guard"],
     implementationRoles: ["implementation", "fix", "validation", "audit", "pr"],
     runningStatuses: ["running", "thinking", "queued", "starting", "needs_permission"],
+    finishedStatuses: ["idle", "complete", "completed", "done"],
+    failureStatuses: ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"],
     permissionModeDefaults: {
       codex: "full-access",
       claude: "bypassPermissions",
@@ -44,6 +47,7 @@ const DEFAULT_CONFIG = {
     blockedSignals: ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
     recoverableBlockedSignals: ["BLOCKED", "NEEDS_FIX"],
     terminalSignals: ["PR_CREATED", "MERGED"],
+    diagnosticSignals: ["PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
     protectedActions: [
       "merge",
       "delete branch",
@@ -616,18 +620,31 @@ export function parseSignal(body, config) {
   return knownSignals.has(signal) ? signal : null;
 }
 
+function parseDiagnosticSignal(body, config) {
+  const match = String(body || "").trim().match(/^([A-Z][A-Z0-9_]+)/);
+  if (!match) {
+    return null;
+  }
+  const signal = match[1];
+  const diagnosticSignals = new Set(config.workflow?.diagnosticSignals || []);
+  return diagnosticSignals.has(signal) ? signal : null;
+}
+
 function messageTime(message) {
   const time = Date.parse(message.createdAt || "");
   return Number.isNaN(time) ? 0 : time;
 }
 
-export function unhandledSignals(messages, objective, config) {
+function unhandledMessages(messages, objective) {
   const ordered = [...messages].sort((left, right) => messageTime(left) - messageTime(right));
   const handledIndex = objective.lastHandledMessageId
     ? ordered.findIndex((message) => message.id === objective.lastHandledMessageId)
     : -1;
-  const candidates = handledIndex >= 0 ? ordered.slice(handledIndex + 1) : ordered;
-  return candidates
+  return handledIndex >= 0 ? ordered.slice(handledIndex + 1) : ordered;
+}
+
+export function unhandledSignals(messages, objective, config) {
+  return unhandledMessages(messages, objective)
     .map((message) => ({ message, signal: parseSignal(message.body, config) }))
     .filter((entry) => entry.signal);
 }
@@ -832,13 +849,146 @@ function buildAgentPermissionInstructions(config) {
   ];
 }
 
-export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation }) {
+function buildChildAgentPromptInstructions(config) {
+  const requiredSkills = Array.isArray(config.childAgents?.requiredSkills)
+    ? config.childAgents.requiredSkills.filter(Boolean)
+    : [];
+  const skillsText = requiredSkills.length > 0 ? requiredSkills.join(", ") : "none";
+
+  return [
+    "Child-agent prompt contract:",
+    `- Every child-agent prompt must explicitly tell the child agent to use these required skill(s): ${skillsText}.`,
+    "- Put the room, workspace, label, permission-mode, and evidence requirements directly in each child-agent prompt; do not rely on inherited parent context.",
+    "- If the child task has a domain-specific skill, name that skill explicitly in the child-agent prompt together with the guard skill."
+  ];
+}
+
+function buildMissingEvidenceInstructions() {
+  return [
+    "Missing room evidence recovery:",
+    "- If a time check or room read does not show the expected child-agent signal, inspect the child agent status, state, and latest log/error before waiting.",
+    "- If a child agent failed, hit quota, lost provider access, or needs permission, record that as room evidence and retry with an available provider or mark the reviewer unavailable according to the review policy.",
+    "- If a child agent is idle/complete but did not post room evidence, send it a follow-up asking it to post the required SIGNAL line. If it cannot respond, post a relayed status marked relayed=true and do not count it as reviewer PASS unless the underlying result was observed.",
+    "- If the latest room item is only a status summary, read a larger room tail and reconcile against contract signals before concluding there is no work to continue."
+  ];
+}
+
+function latestUnhandledDiagnostic(messages, objective, config) {
+  return unhandledMessages(messages, objective)
+    .map((message) => ({
+      message,
+      signal: parseSignal(message.body, config),
+      diagnosticSignal: parseDiagnosticSignal(message.body, config)
+    }))
+    .filter((entry) => !entry.signal && entry.diagnosticSignal)
+    .at(-1) || null;
+}
+
+function agentStatusSet(config, key) {
+  return new Set((config.childAgents?.[key] || []).map((item) => String(item).toLowerCase()));
+}
+
+function agentTimestamp(agent) {
+  const candidates = [
+    agent.updatedAt,
+    agent.UpdatedAt,
+    agent.completedAt,
+    agent.CompletedAt,
+    agent.finishedAt,
+    agent.FinishedAt,
+    agent.createdAt,
+    agent.CreatedAt,
+    agent.state?.updatedAt,
+    agent.state?.UpdatedAt,
+    agent.state?.completedAt,
+    agent.state?.CompletedAt,
+    agent.state?.finishedAt,
+    agent.state?.FinishedAt,
+    agent.state?.createdAt,
+    agent.state?.CreatedAt
+  ];
+  const times = candidates
+    .map((value) => Date.parse(value || ""))
+    .filter((value) => !Number.isNaN(value));
+  return times.length > 0 ? Math.max(...times) : 0;
+}
+
+function objectiveCheckpointTime(objective) {
+  const candidates = [
+    objective.lastContinuationAt,
+    objective.lastDecision?.decidedAt,
+    objective.createdAt
+  ];
+  const times = candidates
+    .map((value) => Date.parse(value || ""))
+    .filter((value) => !Number.isNaN(value));
+  return times.length > 0 ? Math.max(...times) : 0;
+}
+
+function messageReportsAgent(message, agentId) {
+  if (!agentId) {
+    return false;
+  }
+  const fields = parseFields(message.body);
+  return fields.agent === agentId || message.author === agentId;
+}
+
+function hasContractSignalFromAgent(messages, agentId, config) {
+  return messages.some((message) => parseSignal(message.body, config) && messageReportsAgent(message, agentId));
+}
+
+function latestChildEvidenceAnomaly(snapshot, objective, config) {
+  const failureStatuses = agentStatusSet(config, "failureStatuses");
+  const finishedStatuses = agentStatusSet(config, "finishedStatuses");
+  const checkpoint = objectiveCheckpointTime(objective);
+
+  const candidates = snapshot.childAgents
+    .filter((agent) => !isRunningAgent(agent, config))
+    .filter((agent) => !hasContractSignalFromAgent(snapshot.messages, agent.id, config))
+    .filter((agent) => {
+      const status = String(agent.status || "").toLowerCase();
+      if (failureStatuses.has(status)) {
+        return true;
+      }
+      if (!finishedStatuses.has(status)) {
+        return false;
+      }
+      const timestamp = agentTimestamp(agent);
+      return timestamp > 0 && (checkpoint === 0 || timestamp >= checkpoint);
+    })
+    .sort((left, right) => agentTimestamp(left) - agentTimestamp(right));
+
+  return candidates.at(-1) || null;
+}
+
+function formatRecoveryContext(recovery) {
+  if (!recovery) {
+    return "recoveryContext=none";
+  }
+  const parts = [`type=${recovery.type}`];
+  if (recovery.messageId) {
+    parts.push(`messageId=${recovery.messageId}`);
+  }
+  if (recovery.author) {
+    parts.push(`author=${recovery.author}`);
+  }
+  if (recovery.childAgentId) {
+    parts.push(`childAgentId=${recovery.childAgentId}`);
+  }
+  if (recovery.childAgentStatus) {
+    parts.push(`childAgentStatus=${recovery.childAgentStatus}`);
+  }
+  return `recoveryContext=${parts.join(" ")}`;
+}
+
+export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
     : "lastSignal=none\nlastMessageId=none";
   const violationLine = violation
     ? `contractViolation=${violation.violations.join("; ")}`
     : "contractViolation=none";
+  const recoveryLine = formatRecoveryContext(recovery);
   const protectedActionInstruction = isHandoffMode(config)
     ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, archive/delete agents, or restart the daemon without separate explicit approval."
     : "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval.";
@@ -853,6 +1003,7 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     `reason=${reason}`,
     signalLine,
     violationLine,
+    recoveryLine,
     "",
     "Instructions:",
     "1. Read the room state and current project evidence before acting.",
@@ -864,6 +1015,10 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
     "8. Use background or no-wait mode for child agents and continue through room evidence.",
     protectedActionInstruction,
+    "",
+    ...buildChildAgentPromptInstructions(config),
+    "",
+    ...buildMissingEvidenceInstructions(config),
     "",
     ...buildAgentPermissionInstructions(config),
     "",
@@ -913,6 +1068,55 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
 
   const signalEntries = unhandledSignals(snapshot.messages, objective, config);
   if (signalEntries.length === 0) {
+    const childAnomaly = latestChildEvidenceAnomaly(snapshot, objective, config);
+    const diagnosticEntry = latestUnhandledDiagnostic(snapshot.messages, objective, config);
+    const recovery = childAnomaly
+      ? {
+          type: "child_agent_missing_room_evidence",
+          childAgentId: childAnomaly.id,
+          childAgentStatus: childAnomaly.status
+        }
+      : diagnosticEntry
+        ? {
+            type: "unrecognized_room_update",
+            messageId: diagnosticEntry.message.id,
+            author: diagnosticEntry.message.author
+          }
+        : null;
+
+    if (recovery) {
+      if (cooldownActive(objective, config, now)) {
+        return decision("wait", "cooldown_active", {
+          messageId: recovery.messageId,
+          childAgentId: recovery.childAgentId,
+          decidedAt: timestamp
+        });
+      }
+
+      if (!config.policy?.autoContinue) {
+        return decision("wait", "auto_continue_disabled", {
+          messageId: recovery.messageId,
+          childAgentId: recovery.childAgentId,
+          decidedAt: timestamp
+        });
+      }
+
+      return decision("send", "missing_room_evidence_recovery", {
+        messageId: recovery.messageId,
+        childAgentId: recovery.childAgentId,
+        orchestratorId: orchestrator.id,
+        recovery,
+        prompt: buildContinuationPrompt({
+          objective,
+          config,
+          reason: "missing_room_evidence_recovery",
+          recovery
+        }),
+        lastHandledMessageId: recovery.messageId,
+        decidedAt: timestamp
+      });
+    }
+
     return decision("wait", "no_unhandled_signal", {
       decidedAt: timestamp
     });

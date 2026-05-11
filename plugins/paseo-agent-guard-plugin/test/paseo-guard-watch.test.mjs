@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { normalizeConfig } from "../scripts/paseo-guard.mjs";
-import { parseWaitMessages, waitForRoomEvent } from "../scripts/paseo-guard-watch.mjs";
+import { initObjective, normalizeConfig } from "../scripts/paseo-guard.mjs";
+import { parseWaitMessages, waitForRoomEvent, watch } from "../scripts/paseo-guard-watch.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "paseo-guard-watch-test-"));
@@ -75,3 +75,51 @@ test("waitForRoomEvent survives non-timeout chat wait failures", async () => {
   }
 });
 
+test("watch reconciles on heartbeat so missing room evidence can be recovered", async () => {
+  const root = tempRoot();
+  const originalWrite = process.stdout.write;
+  const writes = [];
+  try {
+    const config = makeConfig(root);
+    initObjective(config);
+    process.stdout.write = (chunk) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    await watch(config, {
+      timeout: "1s",
+      maxCycles: 1,
+      dryRun: true,
+      runner(command, args) {
+        if (args[0] === "chat" && args[1] === "wait") {
+          return { status: 0, stdout: '{"messages":[]}', stderr: "" };
+        }
+        if (args[0] === "ls" && args.includes("role=orchestrator")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "chat" && args[1] === "read") {
+          return { status: 0, stdout: "[]", stderr: "" };
+        }
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
+      }
+    });
+
+    assert.equal(writes.some((line) => line.includes('"type":"heartbeat"')), true);
+    assert.equal(writes.some((line) => line.includes('"type":"reconcile"')), true);
+    assert.equal(writes.some((line) => line.includes('"reason":"no_unhandled_signal"')), true);
+  } finally {
+    process.stdout.write = originalWrite;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

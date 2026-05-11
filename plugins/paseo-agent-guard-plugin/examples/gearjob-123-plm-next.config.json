@@ -15,8 +15,11 @@
   "childAgents": {
     "requiredLabels": ["room", "parent", "phase", "task", "role"],
     "requiredEvidenceFields": ["agent", "cwd", "branch", "task", "labels"],
+    "requiredSkills": ["paseo-agent-guard"],
     "implementationRoles": ["implementation", "fix", "validation", "audit", "pr"],
     "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"],
+    "finishedStatuses": ["idle", "complete", "completed", "done"],
+    "failureStatuses": ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"],
     "permissionModeDefaults": {
       "codex": "full-access",
       "claude": "bypassPermissions",
@@ -29,6 +32,7 @@
     "blockedSignals": ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
     "recoverableBlockedSignals": ["BLOCKED", "NEEDS_FIX"],
     "terminalSignals": ["PR_CREATED", "MERGED"],
+    "diagnosticSignals": ["PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
     "protectedActions": [
       "merge",
       "delete branch",

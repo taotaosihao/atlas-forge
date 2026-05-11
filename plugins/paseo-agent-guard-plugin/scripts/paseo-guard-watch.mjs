@@ -97,7 +97,7 @@ export async function watch(config, options = {}) {
 
     const event = await waitForRoomEvent(config, { timeout, runner: options.runner });
     printEvent(event);
-    if (event.type === "message") {
+    if (event.type === "message" || event.type === "heartbeat") {
       try {
         const result = reconcile(config, { dryRun: Boolean(options.dryRun), runner: options.runner });
         printEvent({ type: "reconcile", decision: result.decision });

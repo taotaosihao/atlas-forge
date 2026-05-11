@@ -52,7 +52,7 @@ The watcher is event-driven:
 paseo chat wait <room> --timeout 10m --json
 ```
 
-Timeouts are heartbeats. They do not create schedule agents.
+Timeouts are heartbeats. They trigger a guarded reconcile pass so missing child-agent evidence can be inspected, but they do not create schedule agents.
 
 ## Install Locally
 

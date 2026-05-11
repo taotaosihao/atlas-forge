@@ -147,6 +147,87 @@ test("lastHandledMessageId prevents duplicate continuation", () => {
   assert.equal(result.reason, "no_unhandled_signal");
 });
 
+test("non-signal room update triggers missing evidence recovery", () => {
+  const config = makeConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m2", "PR_REVIEW_STATUS codex=PASS gemini=result_not_observed mimo=running"))
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "missing_room_evidence_recovery");
+  assert.equal(result.messageId, "m2");
+  assert.equal(result.lastHandledMessageId, "m2");
+  assert.match(result.prompt, /reason=missing_room_evidence_recovery/);
+  assert.match(result.prompt, /recoveryContext=type=unrecognized_room_update messageId=m2 author=orch-1/);
+  assert.match(result.prompt, /If a child agent failed, hit quota, lost provider access, or needs permission/);
+});
+
+test("failed child without room signal triggers missing evidence recovery", () => {
+  const config = makeConfig();
+  const snapshot = baseSnapshot(config);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "failed",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "missing_room_evidence_recovery");
+  assert.equal(result.childAgentId, "child-1");
+  assert.equal(result.lastHandledMessageId, undefined);
+  assert.match(result.prompt, /recoveryContext=type=child_agent_missing_room_evidence childAgentId=child-1 childAgentStatus=failed/);
+});
+
+test("finished child after checkpoint without room signal triggers recovery", () => {
+  const config = makeConfig();
+  const snapshot = baseSnapshot(config);
+  snapshot.childAgents = [
+    {
+      id: "child-2",
+      status: "done",
+      updatedAt: "2026-05-11T00:00:03.000Z",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t2", role: "audit" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-2"] = snapshot.childAgents[0];
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "missing_room_evidence_recovery");
+  assert.equal(result.childAgentId, "child-2");
+});
+
+test("ordinary non-signal room chatter does not trigger continuation", () => {
+  const config = makeConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m2", "noted, thanks"))
+  );
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "no_unhandled_signal");
+});
+
+test("handled non-signal room update is not repeated", () => {
+  const config = makeConfig();
+  const result = decideReconcile(
+    objective(config, { lastHandledMessageId: "m2" }),
+    config,
+    baseSnapshot(config, message("m2", "PR_REVIEW_STATUS codex=PASS gemini=result_not_observed mimo=running"))
+  );
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "no_unhandled_signal");
+});
+
 test("implementation agent in research workspace returns contract violation", () => {
   const config = makeConfig();
   const entry = {
@@ -451,6 +532,12 @@ test("continuation prompt includes multi-agent review policy", () => {
   });
 
   assert.match(prompt, /Required multi-agent reviewers: claude, codex, gemini, mimo\./);
+  assert.match(prompt, /Child-agent prompt contract:/);
+  assert.match(prompt, /Every child-agent prompt must explicitly tell the child agent to use these required skill\(s\): paseo-agent-guard\./);
+  assert.match(prompt, /do not rely on inherited parent context/);
+  assert.match(prompt, /Missing room evidence recovery:/);
+  assert.match(prompt, /If a child agent is idle\/complete but did not post room evidence/);
+  assert.match(prompt, /relayed=true/);
   assert.match(prompt, /Agent launch defaults:/);
   assert.match(prompt, /Provider mode defaults: codex=full-access, claude=bypassPermissions, gemini=yolo, mimo=bypassPermissions\./);
   assert.match(prompt, /Codex uses mode `full-access` as its YOLO-equivalent mode\./);
@@ -719,5 +806,16 @@ test("template and example configs include default multi-agent review policy", (
       gemini: "yolo",
       mimo: "bypassPermissions"
     });
+    assert.deepEqual(config.childAgents.requiredSkills, ["paseo-agent-guard"]);
+    assert.deepEqual(config.childAgents.finishedStatuses, ["idle", "complete", "completed", "done"]);
+    assert.deepEqual(config.childAgents.failureStatuses, ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"]);
+    assert.deepEqual(config.workflow.diagnosticSignals, [
+      "PR_REVIEW_STATUS",
+      "REVIEW_STATUS",
+      "AGENT_STATUS",
+      "CHILD_AGENT_STATUS",
+      "PROGRESS",
+      "CHECKPOINT"
+    ]);
   }
 });

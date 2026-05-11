@@ -51,6 +51,12 @@ Every child agent must include these labels:
 - `task`
 - `role`
 
+Every child-agent prompt must explicitly name required skills. By default, include:
+
+- `paseo-agent-guard`
+
+If the task needs a domain-specific skill, name that skill in the child-agent prompt too. Do not rely on inherited parent context for skill use, workspace boundaries, labels, permission modes, or evidence shape.
+
 After creating a child agent, immediately run:
 
 ```bash
@@ -102,6 +108,17 @@ When `policy.handoffMode` is true, the config itself grants approval for this PR
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.
 
 Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
+
+## Missing Evidence Recovery
+
+If a timed check or room read does not show the expected child-agent room evidence, do not just wait from the latest room line. Inspect the real agent state first:
+
+- Read a larger room tail and reconcile against contract signals, not only status summaries.
+- Treat diagnostic status lines such as `PR_REVIEW_STATUS`, `REVIEW_STATUS`, `AGENT_STATUS`, `CHILD_AGENT_STATUS`, `PROGRESS`, and `CHECKPOINT` as prompts to inspect missing evidence, not as final PASS/DONE evidence.
+- Inspect each relevant child agent by id, including status, cwd, labels, and latest log/error.
+- If a child errored, hit quota, lost provider access, or needs permission, record that as room evidence and retry with an available provider or mark the reviewer unavailable according to review policy.
+- If a child is idle/complete but did not post room evidence, send it a follow-up asking it to post the required `SIGNAL agent=...` line.
+- If the child cannot respond, the parent may post a relayed status marked `relayed=true`, but relayed review text does not count as reviewer `PASS` unless the underlying result was observed.
 
 ## Agent Permission Defaults
 
