@@ -942,19 +942,68 @@ function isHandoffAllowedProtectedAction(action, config) {
   return isHandoffMode(config) && HANDOFF_ALLOWED_PROTECTED_ACTIONS.has(String(action || "").toLowerCase());
 }
 
+function escapedProtectedAction(action) {
+  return String(action)
+    .toLowerCase()
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+}
+
+function protectedActionRegex(action, flags = "") {
+  const escaped = escapedProtectedAction(action);
+  if (!escaped) {
+    return null;
+  }
+  return new RegExp(`(^|[^a-z0-9_])(${escaped})([^a-z0-9_]|$)`, flags);
+}
+
+function containsProtectedActionMention(text, protectedActions) {
+  return protectedActions.some((action) => {
+    const pattern = protectedActionRegex(action);
+    return pattern?.test(text);
+  });
+}
+
+function negationPrefixCoversAction(prefix, protectedActions) {
+  if (!/(?:,|\band\b|\bor\b)/.test(prefix)) {
+    return true;
+  }
+  return containsProtectedActionMention(prefix, protectedActions);
+}
+
+function isNegatedProtectedActionMention(lower, actionStart, protectedActions) {
+  const context = lower.slice(Math.max(0, actionStart - 120), actionStart);
+  const currentClause = context.split(/[.!?:;\n\r]/).pop() || "";
+  const normalized = currentClause.replace(/[("'`[\]{}]/g, " ").replace(/\s+/g, " ");
+  const listNegation = normalized.match(/(?:^|[^a-z0-9_])(?:no|without|never)\s+((?:(?:[a-z0-9_#/-]+|,|and|or)\s*){0,12})$/);
+  if (listNegation && negationPrefixCoversAction(listNegation[1] || "", protectedActions)) {
+    return true;
+  }
+
+  const directNegation = normalized.match(/(?:^|[^a-z0-9_])(?:not|did\s+not|do\s+not|does\s+not|didn't|don't|doesn't)\s+((?:(?:[a-z0-9_#/-]+|and|or)\s*){0,8})$/);
+  return Boolean(directNegation && negationPrefixCoversAction(directNegation[1] || "", protectedActions));
+}
+
+function hasUnnegatedProtectedAction(lower, action, protectedActions) {
+  const pattern = protectedActionRegex(action, "g");
+  if (!pattern) {
+    return false;
+  }
+
+  for (let match = pattern.exec(lower); match; match = pattern.exec(lower)) {
+    const actionStart = match.index + match[1].length;
+    if (!isNegatedProtectedActionMention(lower, actionStart, protectedActions)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function protectedActionsInText(text, config) {
   const lower = String(text || "").toLowerCase();
-  return (config.workflow?.protectedActions || []).filter((action) => {
-    const escaped = String(action)
-      .toLowerCase()
-      .trim()
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/\s+/g, "\\s+");
-    if (!escaped) {
-      return false;
-    }
-    return new RegExp(`(^|[^a-z0-9_])${escaped}([^a-z0-9_]|$)`).test(lower);
-  });
+  const protectedActions = config.workflow?.protectedActions || [];
+  return protectedActions.filter((action) => hasUnnegatedProtectedAction(lower, action, protectedActions));
 }
 
 function blockingProtectedAction(text, config) {

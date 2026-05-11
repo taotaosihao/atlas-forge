@@ -593,6 +593,77 @@ test("handoff mode allows merge and new project phase protected mentions", () =>
   assert.equal(result.reason, "safe_signal_continue");
 });
 
+test("handoff mode ignores negated protected actions in terminal evidence", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(
+      config,
+      message(
+        "m5",
+        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"cleanup complete; no merge, branch deletion, daemon restart, or new child launched; next guarded step is PR71 re-review\""
+      )
+    )
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+});
+
+test("negated protected action detection does not cross sentence boundaries", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(
+      config,
+      message(
+        "m5",
+        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"not blocked. delete branch\""
+      )
+    )
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "delete branch");
+});
+
+test("direct negation detection does not treat comma follow-up as negated", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(
+      config,
+      message(
+        "m5",
+        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"not blocked, delete branch\""
+      )
+    )
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "delete branch");
+});
+
+test("list negation requires previous protected action before comma follow-up", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(
+      config,
+      message(
+        "m5",
+        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"no blockers, delete branch\""
+      )
+    )
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "delete branch");
+});
+
 test("handoff mode still blocks destructive protected actions", () => {
   const config = makeHandoffConfig();
   const result = decideReconcile(
