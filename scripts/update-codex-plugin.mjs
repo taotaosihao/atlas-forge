@@ -12,7 +12,7 @@ import {
 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_MARKETPLACE = "paseo-agent-guard-plugin";
+const DEFAULT_MARKETPLACE = "codex-plugins";
 const DEFAULT_PLUGIN = "paseo-agent-guard-plugin";
 
 class UpdateError extends Error {
@@ -87,7 +87,7 @@ function usage() {
     "  npm run plugin:update",
     "",
     "Environment overrides:",
-    "  CODEX_PLUGIN_MARKETPLACE=paseo-agent-guard-plugin",
+    "  CODEX_PLUGIN_MARKETPLACE=codex-plugins",
     "  CODEX_PLUGIN_NAME=paseo-agent-guard-plugin"
   ].join("\n");
 }
@@ -103,7 +103,7 @@ export function buildOptions(argv = process.argv.slice(2), env = process.env) {
 }
 
 function validatePluginManifest(root, plugin) {
-  const manifestPath = join(root, ".codex-plugin/plugin.json");
+  const manifestPath = join(root, "plugins", plugin, ".codex-plugin/plugin.json");
   if (!existsSync(manifestPath)) {
     throw new UpdateError(`plugin_manifest_missing: ${manifestPath}`, "plugin_manifest_missing");
   }
@@ -131,6 +131,13 @@ function validateMarketplaceManifest(root, marketplace, plugin) {
   const entry = (manifest.plugins || []).find((candidate) => candidate.name === plugin);
   if (!entry) {
     throw new UpdateError(`marketplace_plugin_missing: ${plugin}`, "marketplace_plugin_missing");
+  }
+  const expectedPath = `./plugins/${plugin}`;
+  if (entry.source?.path !== expectedPath) {
+    throw new UpdateError(
+      `marketplace_plugin_path_mismatch: expected ${expectedPath}, got ${entry.source?.path}`,
+      "marketplace_plugin_path_mismatch"
+    );
   }
 }
 

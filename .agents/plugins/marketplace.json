@@ -1,14 +1,14 @@
 {
-  "name": "paseo-agent-guard-plugin",
+  "name": "codex-plugins",
   "interface": {
-    "displayName": "Paseo Agent Guard Plugin"
+    "displayName": "Codex Plugins"
   },
   "plugins": [
     {
       "name": "paseo-agent-guard-plugin",
       "source": {
         "source": "local",
-        "path": "."
+        "path": "./plugins/paseo-agent-guard-plugin"
       },
       "policy": {
         "installation": "AVAILABLE",

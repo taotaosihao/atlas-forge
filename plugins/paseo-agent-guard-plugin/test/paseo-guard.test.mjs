@@ -17,7 +17,8 @@ import {
   validateDelegationContract
 } from "../scripts/paseo-guard.mjs";
 
-const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const marketplaceRoot = dirname(dirname(pluginRoot));
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "paseo-guard-test-"));
@@ -528,17 +529,17 @@ test("dry-run reports send decision without invoking paseo send", () => {
 });
 
 test("plugin manifest and skill frontmatter are valid", () => {
-  const plugin = JSON.parse(readFileSync(join(repoRoot, ".codex-plugin/plugin.json"), "utf8"));
+  const plugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
   assert.equal(plugin.name, "paseo-agent-guard-plugin");
   assert.equal(plugin.skills, "./skills/");
   assert.ok(plugin.interface.displayName);
 
-  const marketplace = JSON.parse(readFileSync(join(repoRoot, ".agents/plugins/marketplace.json"), "utf8"));
-  assert.equal(marketplace.name, "paseo-agent-guard-plugin");
+  const marketplace = JSON.parse(readFileSync(join(marketplaceRoot, ".agents/plugins/marketplace.json"), "utf8"));
+  assert.equal(marketplace.name, "codex-plugins");
   assert.equal(marketplace.plugins[0].name, "paseo-agent-guard-plugin");
-  assert.equal(marketplace.plugins[0].source.path, ".");
+  assert.equal(marketplace.plugins[0].source.path, "./plugins/paseo-agent-guard-plugin");
 
-  const skill = readFileSync(join(repoRoot, "skills/paseo-agent-guard/SKILL.md"), "utf8");
+  const skill = readFileSync(join(pluginRoot, "skills/paseo-agent-guard/SKILL.md"), "utf8");
   assert.match(skill, /^---\nname: paseo-agent-guard\n/m);
   assert.match(skill, /description: .+\n---/m);
 });
@@ -548,7 +549,7 @@ test("template and example configs include default multi-agent review policy", (
     "templates/paseo-guard.config.json",
     "examples/gearjob-123-plm-next.config.json"
   ]) {
-    const config = JSON.parse(readFileSync(join(repoRoot, relativePath), "utf8"));
+    const config = JSON.parse(readFileSync(join(pluginRoot, relativePath), "utf8"));
     assert.deepEqual(config.reviewPolicy.reviewers, ["claude", "codex", "gemini", "mimo"]);
     assert.equal(config.reviewPolicy.ignoreUnavailableReviewers, true);
     assert.equal(config.reviewPolicy.phases.prd.defaultRounds, 1);
