@@ -771,7 +771,9 @@ test("dry-run reports send decision without invoking paseo send", () => {
 });
 
 test("plugin manifest and skill frontmatter are valid", () => {
-  const plugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
+  const plugin = JSON.parse(readFileSync(join(pluginRoot, "plugin.json"), "utf8"));
+  const scaffoldPlugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
+  assert.deepEqual(plugin, scaffoldPlugin);
   assert.equal(plugin.name, "paseo-agent-guard-plugin");
   assert.equal(plugin.skills, "./skills/");
   assert.ok(plugin.interface.displayName);

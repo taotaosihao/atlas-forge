@@ -103,15 +103,27 @@ export function buildOptions(argv = process.argv.slice(2), env = process.env) {
 }
 
 function validatePluginManifest(root, plugin) {
-  const manifestPath = join(root, "plugins", plugin, ".codex-plugin/plugin.json");
-  if (!existsSync(manifestPath)) {
-    throw new UpdateError(`plugin_manifest_missing: ${manifestPath}`, "plugin_manifest_missing");
+  const pluginRoot = join(root, "plugins", plugin);
+  const runtimeManifestPath = join(pluginRoot, "plugin.json");
+  const scaffoldManifestPath = join(pluginRoot, ".codex-plugin/plugin.json");
+  for (const manifestPath of [runtimeManifestPath, scaffoldManifestPath]) {
+    if (!existsSync(manifestPath)) {
+      throw new UpdateError(`plugin_manifest_missing: ${manifestPath}`, "plugin_manifest_missing");
+    }
   }
-  const manifest = loadJson(manifestPath);
+
+  const manifest = loadJson(runtimeManifestPath);
   if (manifest.name !== plugin) {
     throw new UpdateError(
       `plugin_name_mismatch: expected ${plugin}, got ${manifest.name}`,
       "plugin_name_mismatch"
+    );
+  }
+  const scaffoldManifest = loadJson(scaffoldManifestPath);
+  if (JSON.stringify(scaffoldManifest) !== JSON.stringify(manifest)) {
+    throw new UpdateError(
+      `plugin_manifest_mismatch: ${runtimeManifestPath} differs from ${scaffoldManifestPath}`,
+      "plugin_manifest_mismatch"
     );
   }
 }
