@@ -103,6 +103,19 @@ The guard never directly runs git or GitHub merge commands in handoff mode. It s
 
 Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
 
+## Agent Permission Defaults
+
+Launch child agents with YOLO-equivalent permissions by default. Always pass the provider-specific mode at launch time, either as `paseo run --mode <mode>` or API `modeId=<mode>`.
+
+Default provider modes:
+
+- `codex`: `full-access` (Codex YOLO-equivalent mode)
+- `gemini`: `yolo`
+- `claude`: `bypassPermissions`
+- `mimo`: `bypassPermissions`
+
+Treat Claude Code-based providers as bypass mode providers. This includes `claude` and Claude-derived providers such as `mimo`.
+
 ## Multi-Agent Review Policy
 
 PRD, plan, feature, and PR gates require multi-agent review before they are treated as ready.

@@ -16,7 +16,13 @@
     "requiredLabels": ["room", "parent", "phase", "task", "role"],
     "requiredEvidenceFields": ["agent", "cwd", "branch", "task", "labels"],
     "implementationRoles": ["implementation", "fix", "validation", "audit", "pr"],
-    "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"]
+    "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"],
+    "permissionModeDefaults": {
+      "codex": "full-access",
+      "claude": "bypassPermissions",
+      "gemini": "yolo",
+      "mimo": "bypassPermissions"
+    }
   },
   "workflow": {
     "safeSignals": ["PLAN_READY", "DONE", "FIXED", "PASS"],

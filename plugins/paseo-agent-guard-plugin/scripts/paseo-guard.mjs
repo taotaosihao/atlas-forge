@@ -31,7 +31,13 @@ const DEFAULT_CONFIG = {
     requiredLabels: ["room", "parent", "phase", "task", "role"],
     requiredEvidenceFields: ["agent", "cwd", "branch", "task", "labels"],
     implementationRoles: ["implementation", "fix", "validation", "audit", "pr"],
-    runningStatuses: ["running", "thinking", "queued", "starting", "needs_permission"]
+    runningStatuses: ["running", "thinking", "queued", "starting", "needs_permission"],
+    permissionModeDefaults: {
+      codex: "full-access",
+      claude: "bypassPermissions",
+      gemini: "yolo",
+      mimo: "bypassPermissions"
+    }
   },
   workflow: {
     safeSignals: ["PLAN_READY", "DONE", "FIXED", "PASS"],
@@ -810,6 +816,22 @@ function buildReviewPolicyInstructions(config) {
   return instructions;
 }
 
+function buildAgentPermissionInstructions(config) {
+  const modes = config.childAgents?.permissionModeDefaults || {};
+  const modeEntries = Object.entries(modes)
+    .map(([provider, mode]) => `${provider}=${mode}`)
+    .join(", ");
+  const effectiveModes = modeEntries || "none";
+
+  return [
+    "Agent launch defaults:",
+    `- Use YOLO-equivalent permissions by default for child agents. Provider mode defaults: ${effectiveModes}.`,
+    "- Codex uses mode `full-access` as its YOLO-equivalent mode.",
+    "- Claude Code-based providers, including `claude` and `mimo`, use mode `bypassPermissions`.",
+    "- Pass the provider-specific mode at launch time (`paseo run --mode <mode>` or API `modeId=<mode>`); do not leave child agents on default permission prompts."
+  ];
+}
+
 export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
@@ -842,6 +864,8 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
     "8. Use background or no-wait mode for child agents and continue through room evidence.",
     protectedActionInstruction,
+    "",
+    ...buildAgentPermissionInstructions(config),
     "",
     ...buildReviewPolicyInstructions(config)
   ].join("\n");

@@ -451,6 +451,11 @@ test("continuation prompt includes multi-agent review policy", () => {
   });
 
   assert.match(prompt, /Required multi-agent reviewers: claude, codex, gemini, mimo\./);
+  assert.match(prompt, /Agent launch defaults:/);
+  assert.match(prompt, /Provider mode defaults: codex=full-access, claude=bypassPermissions, gemini=yolo, mimo=bypassPermissions\./);
+  assert.match(prompt, /Codex uses mode `full-access` as its YOLO-equivalent mode\./);
+  assert.match(prompt, /Claude Code-based providers, including `claude` and `mimo`, use mode `bypassPermissions`\./);
+  assert.match(prompt, /paseo run --mode <mode>/);
   assert.match(prompt, /if a reviewer\/provider is unavailable, record that skip in the room evidence and continue/);
   assert.match(prompt, /PRD flow: draft or update PRD, run multi-agent review .* fix findings, then stop for human review\./);
   assert.match(prompt, /Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: plan=3, feature=3, pr=3\./);
@@ -708,5 +713,11 @@ test("template and example configs include default multi-agent review policy", (
     assert.equal(config.reviewPolicy.phases.plan.defaultRounds, 3);
     assert.equal(config.reviewPolicy.phases.feature.defaultRounds, 3);
     assert.equal(config.reviewPolicy.phases.pr.defaultRounds, 3);
+    assert.deepEqual(config.childAgents.permissionModeDefaults, {
+      codex: "full-access",
+      claude: "bypassPermissions",
+      gemini: "yolo",
+      mimo: "bypassPermissions"
+    });
   }
 });
