@@ -586,15 +586,19 @@ function messageTime(message) {
   return Number.isNaN(time) ? 0 : time;
 }
 
-export function latestUnhandledSignal(messages, objective, config) {
+export function unhandledSignals(messages, objective, config) {
   const ordered = [...messages].sort((left, right) => messageTime(left) - messageTime(right));
   const handledIndex = objective.lastHandledMessageId
     ? ordered.findIndex((message) => message.id === objective.lastHandledMessageId)
     : -1;
   const candidates = handledIndex >= 0 ? ordered.slice(handledIndex + 1) : ordered;
-  const signaled = candidates
+  return candidates
     .map((message) => ({ message, signal: parseSignal(message.body, config) }))
     .filter((entry) => entry.signal);
+}
+
+export function latestUnhandledSignal(messages, objective, config) {
+  const signaled = unhandledSignals(messages, objective, config);
   return signaled.at(-1) || null;
 }
 
@@ -698,7 +702,17 @@ export function validateDelegationContract(entry, snapshot, config) {
 
 function containsProtectedAction(text, config) {
   const lower = String(text || "").toLowerCase();
-  return (config.workflow?.protectedActions || []).find((action) => lower.includes(String(action).toLowerCase()));
+  return (config.workflow?.protectedActions || []).find((action) => {
+    const escaped = String(action)
+      .toLowerCase()
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+    if (!escaped) {
+      return false;
+    }
+    return new RegExp(`(^|[^a-z0-9_])${escaped}([^a-z0-9_]|$)`).test(lower);
+  });
 }
 
 function isRunningAgent(agent, config) {
@@ -795,58 +809,74 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
     });
   }
 
-  const signalEntry = latestUnhandledSignal(snapshot.messages, objective, config);
-  if (!signalEntry) {
+  const signalEntries = unhandledSignals(snapshot.messages, objective, config);
+  if (signalEntries.length === 0) {
     return decision("wait", "no_unhandled_signal", {
       decidedAt: timestamp
     });
   }
 
-  const contractViolation = validateDelegationContract(signalEntry, snapshot, config);
-  if (contractViolation) {
-    return decision("block", "delegation_contract_violation", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      violation: contractViolation,
-      prompt: buildContinuationPrompt({
-        objective,
-        config,
-        signalEntry,
-        reason: "delegation_contract_violation",
-        violation: contractViolation
-      }),
-      nextStatus: STATUS_BLOCKED,
-      lastHandledMessageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
+  for (const entry of signalEntries) {
+    const contractViolation = validateDelegationContract(entry, snapshot, config);
+    if (contractViolation) {
+      return decision("block", "delegation_contract_violation", {
+        signal: entry.signal,
+        messageId: entry.message.id,
+        violation: contractViolation,
+        prompt: buildContinuationPrompt({
+          objective,
+          config,
+          signalEntry: entry,
+          reason: "delegation_contract_violation",
+          violation: contractViolation
+        }),
+        nextStatus: STATUS_BLOCKED,
+        lastHandledMessageId: entry.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    if ((config.workflow?.terminalSignals || []).includes(entry.signal)) {
+      const nextStatus =
+        entry.signal === "MERGED" && !config.policy?.allowNewPhaseAfterMerge
+          ? STATUS_COMPLETE
+          : STATUS_BLOCKED;
+      return decision("stop", entry.signal === "PR_CREATED" ? "terminal_review_gate" : "terminal_signal", {
+        signal: entry.signal,
+        messageId: entry.message.id,
+        nextStatus,
+        lastHandledMessageId: entry.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    const protectedAction = containsProtectedAction(entry.message.body, config);
+    if (protectedAction) {
+      return decision("block", "protected_action_detected", {
+        signal: entry.signal,
+        messageId: entry.message.id,
+        protectedAction,
+        nextStatus: STATUS_BLOCKED,
+        lastHandledMessageId: entry.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    if ((config.workflow?.blockedSignals || []).includes(entry.signal)) {
+      const recoverable = (config.workflow?.recoverableBlockedSignals || []).includes(entry.signal);
+      if (!recoverable) {
+        return decision("block", "human_decision_required", {
+          signal: entry.signal,
+          messageId: entry.message.id,
+          nextStatus: STATUS_BLOCKED,
+          lastHandledMessageId: entry.message.id,
+          decidedAt: timestamp
+        });
+      }
+    }
   }
 
-  const protectedAction = containsProtectedAction(signalEntry.message.body, config);
-  if (protectedAction) {
-    return decision("block", "protected_action_detected", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      protectedAction,
-      nextStatus: STATUS_BLOCKED,
-      lastHandledMessageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
-  }
-
-  if ((config.workflow?.terminalSignals || []).includes(signalEntry.signal)) {
-    const nextStatus =
-      signalEntry.signal === "MERGED" && !config.policy?.allowNewPhaseAfterMerge
-        ? STATUS_COMPLETE
-        : STATUS_BLOCKED;
-    return decision("stop", signalEntry.signal === "PR_CREATED" ? "terminal_review_gate" : "terminal_signal", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      nextStatus,
-      lastHandledMessageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
-  }
-
+  const signalEntry = signalEntries.at(-1);
   if ((config.workflow?.blockedSignals || []).includes(signalEntry.signal)) {
     const recoverable = (config.workflow?.recoverableBlockedSignals || []).includes(signalEntry.signal);
     if (!recoverable) {

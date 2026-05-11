@@ -74,7 +74,7 @@ function baseSnapshot(config, message) {
     childAgents: [],
     allAgents: [],
     agentById: {},
-    messages: message ? [message] : []
+    messages: message ? (Array.isArray(message) ? message : [message]) : []
   };
 }
 
@@ -262,6 +262,18 @@ test("PR_CREATED PASS is a terminal human review gate", () => {
   assert.equal(result.nextStatus, "blocked");
 });
 
+test("MERGED terminal signal is not mistaken for protected merge action", () => {
+  const config = makeConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+  );
+  assert.equal(result.action, "stop");
+  assert.equal(result.reason, "terminal_signal");
+  assert.equal(result.nextStatus, "complete");
+});
+
 test("recoverable blocker nudges orchestrator", () => {
   const config = makeConfig();
   const result = decideReconcile(
@@ -286,6 +298,75 @@ test("NEEDS_USER_DECISION and ERROR require human handling", () => {
     assert.equal(result.reason, "human_decision_required");
     assert.equal(result.nextStatus, "blocked");
   }
+});
+
+test("earlier unhandled child contract violation blocks later safe signal", () => {
+  const config = makeConfig();
+  const badChildSignal = message(
+    "m1",
+    `DONE agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
+    "child-1"
+  );
+  const laterSafeSignal = message(
+    "m2",
+    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
+  );
+  const snapshot = baseSnapshot(config, [badChildSignal, laterSafeSignal]);
+  snapshot.agentById["child-1"] = {
+    id: "child-1",
+    cwd: config.researchWorkspace,
+    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
+    workspaceKind: "research"
+  };
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "delegation_contract_violation");
+  assert.equal(result.messageId, "m1");
+  assert.match(result.violation.violations.join("\n"), /must run in targetWorkspace/);
+});
+
+test("earlier unhandled protected action blocks later safe signal", () => {
+  const config = makeConfig();
+  const protectedSignal = message(
+    "m1",
+    "DONE agent=orch-1 cwd=/tmp branch=feat task=t1 labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR'"
+  );
+  const laterSafeSignal = message(
+    "m2",
+    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
+  );
+
+  const result = decideReconcile(objective(config), config, baseSnapshot(config, [protectedSignal, laterSafeSignal]));
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.messageId, "m1");
+  assert.equal(result.protectedAction, "merge");
+});
+
+test("valid earlier child signal still allows latest safe signal continuation", () => {
+  const config = makeConfig();
+  const childDone = message(
+    "m1",
+    `DONE agent=child-1 cwd=${config.targetWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
+    "child-1"
+  );
+  const laterSafeSignal = message(
+    "m2",
+    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
+  );
+  const snapshot = baseSnapshot(config, [childDone, laterSafeSignal]);
+  snapshot.agentById["child-1"] = {
+    id: "child-1",
+    cwd: config.targetWorkspace,
+    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
+    workspaceKind: "target"
+  };
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.messageId, "m2");
 });
 
 test("non-dry-run sends inline prompt instead of prompt file", () => {
