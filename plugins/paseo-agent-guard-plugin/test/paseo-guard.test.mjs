@@ -45,6 +45,18 @@ function makeConfig(root = tempRoot(), overrides = {}) {
   );
 }
 
+function makeHandoffConfig(policy = {}) {
+  return makeConfig(tempRoot(), {
+    policy: {
+      autoContinue: true,
+      handoffMode: true,
+      cooldownSeconds: 0,
+      checkGitWorktrees: false,
+      ...policy
+    }
+  });
+}
+
 function objective(config, overrides = {}) {
   return {
     objective: config.objective,
@@ -277,14 +289,7 @@ test("MERGED terminal signal is not mistaken for protected merge action", () => 
 });
 
 test("handoff mode continues PR_CREATED into review until clean", () => {
-  const config = makeConfig(tempRoot(), {
-    policy: {
-      autoContinue: true,
-      handoffMode: true,
-      cooldownSeconds: 0,
-      checkGitWorktrees: false
-    }
-  });
+  const config = makeHandoffConfig();
   const result = decideReconcile(
     objective(config),
     config,
@@ -293,18 +298,12 @@ test("handoff mode continues PR_CREATED into review until clean", () => {
   assert.equal(result.action, "send");
   assert.equal(result.reason, "handoff_pr_review_until_clean");
   assert.match(result.prompt, /Handoff mode is enabled/);
-  assert.match(result.prompt, /PR review\/fix\/re-review cycles until all available reviewers report no findings before merge/);
+  assert.match(result.prompt, /PR review gates must continue until all available reviewers report no findings before merge/);
 });
 
 test("handoff mode continues MERGED into the next phase", () => {
-  const config = makeConfig(tempRoot(), {
-    policy: {
-      autoContinue: true,
-      handoffMode: true,
-      cooldownSeconds: 0,
-      checkGitWorktrees: false
-    }
-  });
+  const config = makeHandoffConfig();
+  assert.equal(config.policy.allowNewPhaseAfterMerge, false);
   const result = decideReconcile(
     objective(config),
     config,
@@ -315,15 +314,54 @@ test("handoff mode continues MERGED into the next phase", () => {
   assert.match(result.prompt, /continue into the next approved project phase/);
 });
 
+test("handoff mode prioritizes terminal signal over later safe signals", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, [
+      message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"),
+      message("m6", "PASS agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+    ])
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "handoff_next_phase_continue");
+  assert.equal(result.messageId, "m5");
+  assert.equal(result.lastHandledMessageId, "m6");
+});
+
+test("handoff mode respects cooldown before terminal continuation", () => {
+  const now = new Date("2026-05-11T00:01:00.000Z");
+  const config = makeHandoffConfig({ cooldownSeconds: 60 });
+  const result = decideReconcile(
+    objective(config, {
+      lastDecision: {
+        action: "send",
+        reason: "safe_signal_continue",
+        decidedAt: "2026-05-11T00:00:30.000Z"
+      }
+    }),
+    config,
+    baseSnapshot(config, message("m5", "PR_CREATED agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")),
+    { now }
+  );
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "cooldown_active");
+});
+
+test("handoff mode respects autoContinue before terminal continuation", () => {
+  const config = makeHandoffConfig({ autoContinue: false });
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "PR_CREATED agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+  );
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "auto_continue_disabled");
+});
+
 test("handoff mode allows merge and new project phase protected mentions", () => {
-  const config = makeConfig(tempRoot(), {
-    policy: {
-      autoContinue: true,
-      handoffMode: true,
-      cooldownSeconds: 0,
-      checkGitWorktrees: false
-    }
-  });
+  const config = makeHandoffConfig();
   const result = decideReconcile(
     objective(config),
     config,
@@ -334,14 +372,7 @@ test("handoff mode allows merge and new project phase protected mentions", () =>
 });
 
 test("handoff mode still blocks destructive protected actions", () => {
-  const config = makeConfig(tempRoot(), {
-    policy: {
-      autoContinue: true,
-      handoffMode: true,
-      cooldownSeconds: 0,
-      checkGitWorktrees: false
-    }
-  });
+  const config = makeHandoffConfig();
   const result = decideReconcile(
     objective(config),
     config,
@@ -350,6 +381,49 @@ test("handoff mode still blocks destructive protected actions", () => {
   assert.equal(result.action, "block");
   assert.equal(result.reason, "protected_action_detected");
   assert.equal(result.protectedAction, "delete branch");
+});
+
+test("handoff mode blocks destructive protected actions on terminal signals", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='delete branch'"))
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "delete branch");
+});
+
+test("handoff mode blocks terminal child contract violations", () => {
+  const config = makeHandoffConfig();
+  const childSignal = message(
+    "m5",
+    `PR_CREATED agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=implementation}`,
+    "child-1"
+  );
+  const snapshot = baseSnapshot(config, childSignal);
+  snapshot.agentById["child-1"] = {
+    id: "child-1",
+    cwd: config.researchWorkspace,
+    labels: { room: config.room, parent: "orch-1", phase: "p", task: "t", role: "implementation" },
+    workspaceKind: "research"
+  };
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "delegation_contract_violation");
+});
+
+test("handoff mode still blocks non-recoverable signals", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "ERROR agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "human_decision_required");
 });
 
 test("recoverable blocker nudges orchestrator", () => {

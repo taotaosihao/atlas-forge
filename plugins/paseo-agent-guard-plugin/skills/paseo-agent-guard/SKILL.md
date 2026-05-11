@@ -96,8 +96,8 @@ Default mode remains conservative: `PR_CREATED` stops for human review, `MERGED`
 When `policy.handoffMode` is true, the config itself grants approval for this PR handoff flow:
 
 - On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
-- On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence.
-- Allow only `merge` and `new project phase` protected-action mentions. Branch deletion, agent deletion/archive, and daemon restart remain protected.
+- On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence. In handoff mode this intentionally takes precedence over `policy.allowNewPhaseAfterMerge`.
+- Allow only exact protected-action entries `merge` and `new project phase`. Branch deletion, agent deletion/archive, and daemon restart remain protected.
 
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.
 

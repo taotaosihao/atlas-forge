@@ -807,12 +807,6 @@ function buildReviewPolicyInstructions(config) {
     "- Do not treat PRD as human-review-ready until the multi-agent review findings are resolved."
   ];
 
-  if (isHandoffMode(config)) {
-    instructions.push(
-      "- Handoff mode requires PR review/fix/re-review cycles until all available reviewers report no findings before merge."
-    );
-  }
-
   return instructions;
 }
 
@@ -961,7 +955,27 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
     }
   }
 
-  const signalEntry = signalEntries.at(-1);
+  let signalEntry = signalEntries.at(-1);
+  let lastHandledMessageId = signalEntry.message.id;
+  if (isHandoffMode(config)) {
+    const terminalSignals = new Set(config.workflow?.terminalSignals || []);
+    const safeSignals = new Set(config.workflow?.safeSignals || []);
+    for (let index = signalEntries.length - 1; index >= 0; index -= 1) {
+      const candidate = signalEntries[index];
+      if (!terminalSignals.has(candidate.signal)) {
+        continue;
+      }
+
+      const laterSignalsAreSafe = signalEntries
+        .slice(index + 1)
+        .every((entry) => safeSignals.has(entry.signal));
+      if (laterSignalsAreSafe) {
+        signalEntry = candidate;
+      }
+      break;
+    }
+  }
+
   if (isHandoffMode(config) && (config.workflow?.terminalSignals || []).includes(signalEntry.signal)) {
     if (cooldownActive(objective, config, now)) {
       return decision("wait", "cooldown_active", {
@@ -992,7 +1006,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         signalEntry,
         reason
       }),
-      lastHandledMessageId: signalEntry.message.id,
+      lastHandledMessageId,
       decidedAt: timestamp
     });
   }
