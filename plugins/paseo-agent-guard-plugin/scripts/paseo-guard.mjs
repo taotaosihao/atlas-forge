@@ -1014,6 +1014,15 @@ function isRunningAgent(agent, config) {
   return new Set(config.childAgents?.runningStatuses || []).has(String(agent.status || "").toLowerCase());
 }
 
+function isUnavailableOrchestrator(agent) {
+  const status = String(agent?.status || "").toLowerCase();
+  return Boolean(agent?.archived || agent?.Archived) || status === "closed" || status === "failed" || status === "error";
+}
+
+function selectOrchestrator(orchestrators = []) {
+  return orchestrators.find((agent) => !isUnavailableOrchestrator(agent)) || null;
+}
+
 function isOrchestratorIdle(agent) {
   const status = String(agent?.status || "").toLowerCase();
   return status === "idle" || status === "complete" || status === "done";
@@ -1361,10 +1370,15 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
     });
   }
 
-  const orchestrator = snapshot.orchestrators[0];
+  const orchestrator = selectOrchestrator(snapshot.orchestrators);
   if (!orchestrator) {
-    return decision("block", "orchestrator_not_found", {
+    const closedOrchestrators = snapshot.orchestrators.map((agent) => ({
+      id: agent.id,
+      status: agent.status
+    }));
+    return decision("block", snapshot.orchestrators.length > 0 ? "orchestrator_unavailable" : "orchestrator_not_found", {
       nextStatus: STATUS_BLOCKED,
+      closedOrchestrators,
       decidedAt: timestamp
     });
   }

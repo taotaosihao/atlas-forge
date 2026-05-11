@@ -198,6 +198,57 @@ test("lastHandledMessageCreatedAt fallback keeps same-timestamp messages", () =>
   assert.equal(result.messageId, "m2");
 });
 
+test("closed orchestrator is skipped when a replacement orchestrator is available", () => {
+  const config = makeConfig();
+  const snapshot = baseSnapshot(
+    config,
+    message("m2", "PASS agent=orch-2 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}", "orch-2")
+  );
+  snapshot.orchestrators = [
+    {
+      id: "orch-1",
+      status: "closed",
+      cwd: config.researchWorkspace,
+      labels: { room: config.room, role: "orchestrator" },
+      workspaceKind: "research"
+    },
+    {
+      id: "orch-2",
+      status: "idle",
+      cwd: config.researchWorkspace,
+      labels: { room: config.room, role: "orchestrator" },
+      workspaceKind: "research"
+    }
+  ];
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.orchestratorId, "orch-2");
+});
+
+test("all closed orchestrators block instead of waiting forever", () => {
+  const config = makeConfig();
+  const snapshot = baseSnapshot(
+    config,
+    message("m2", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+  );
+  snapshot.orchestrators = [
+    {
+      id: "orch-1",
+      status: "closed",
+      cwd: config.researchWorkspace,
+      labels: { room: config.room, role: "orchestrator" },
+      workspaceKind: "research"
+    }
+  ];
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "orchestrator_unavailable");
+  assert.equal(result.nextStatus, "blocked");
+});
+
 test("parseSignal accepts canonical and legacy child evidence shapes", () => {
   const config = makeConfig();
   assert.equal(
