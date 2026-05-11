@@ -12,7 +12,7 @@ import {
 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_MARKETPLACE = "codex-plugins";
+const DEFAULT_MARKETPLACE = "atlas-forge";
 const DEFAULT_PLUGIN = "paseo-agent-guard-plugin";
 
 class UpdateError extends Error {
@@ -87,7 +87,7 @@ function usage() {
     "  npm run plugin:update",
     "",
     "Environment overrides:",
-    "  CODEX_PLUGIN_MARKETPLACE=codex-plugins",
+    "  CODEX_PLUGIN_MARKETPLACE=atlas-forge",
     "  CODEX_PLUGIN_NAME=paseo-agent-guard-plugin"
   ].join("\n");
 }

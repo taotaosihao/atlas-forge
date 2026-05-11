@@ -535,7 +535,7 @@ test("plugin manifest and skill frontmatter are valid", () => {
   assert.ok(plugin.interface.displayName);
 
   const marketplace = JSON.parse(readFileSync(join(marketplaceRoot, ".agents/plugins/marketplace.json"), "utf8"));
-  assert.equal(marketplace.name, "codex-plugins");
+  assert.equal(marketplace.name, "atlas-forge");
   assert.equal(marketplace.plugins[0].name, "paseo-agent-guard-plugin");
   assert.equal(marketplace.plugins[0].source.path, "./plugins/paseo-agent-guard-plugin");
 

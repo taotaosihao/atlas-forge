@@ -1,4 +1,4 @@
-# Codex Plugins Marketplace
+# Atlas Forge
 
 Shared Codex plugin marketplace for local productivity plugins.
 
@@ -9,7 +9,7 @@ It keeps planning and research in `researchWorkspace`, while constraining implem
 ## Layout
 
 ```text
-codex-plugins/
+atlas-forge/
   .agents/plugins/marketplace.json
   scripts/update-codex-plugin.mjs
   plugins/
@@ -59,7 +59,7 @@ Timeouts are heartbeats. They do not create schedule agents.
 The repo is a Codex plugin marketplace through `.agents/plugins/marketplace.json`. Register it with the official Codex marketplace command:
 
 ```bash
-codex plugin marketplace add git@github.com:taotaosihao/codex-plugins.git
+codex plugin marketplace add git@github.com:taotaosihao/atlas-forge.git
 ```
 
 ## Update Local Plugin
@@ -70,7 +70,7 @@ After pushing changes to the Git marketplace repo, refresh the Codex runtime cac
 npm run plugin:update
 ```
 
-This runs the official `codex plugin marketplace upgrade codex-plugins` path. Start a new Codex session, or reload the plugin context, before relying on updated skill text.
+This runs the official `codex plugin marketplace upgrade atlas-forge` path. Start a new Codex session, or reload the plugin context, before relying on updated skill text.
 
 ## Checks
 
