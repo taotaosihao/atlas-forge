@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
+  closeSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -48,7 +50,7 @@ const DEFAULT_CONFIG = {
     blockedSignals: ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
     recoverableBlockedSignals: ["BLOCKED", "NEEDS_FIX"],
     terminalSignals: ["PR_CREATED", "MERGED"],
-    diagnosticSignals: ["PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
+    diagnosticSignals: ["START", "FIX_STARTED", "PR_REVIEW_GATE_STARTED", "PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
     protectedActions: [
       "merge",
       "delete branch",
@@ -232,6 +234,10 @@ export function normalizeConfig(rawConfig, configPath = process.cwd()) {
   config.allowedImplementationRoots = (config.allowedImplementationRoots || []).map((entry) =>
     resolveFromConfigDir(entry, configDir)
   );
+  config.watch = config.watch || {};
+  config.watch.logDir = config.watch.logDir
+    ? resolveFromConfigDir(config.watch.logDir, configDir)
+    : join(dirname(config.objectiveStoreDir), "logs");
   return config;
 }
 
@@ -269,6 +275,7 @@ export function createObjective(config, now = new Date()) {
     orchestratorSelector: config.orchestratorSelector,
     status: STATUS_ACTIVE,
     lastHandledMessageId: null,
+    lastHandledMessageCreatedAt: null,
     lastDecision: null,
     createdAt: timestamp,
     updatedAt: timestamp
@@ -296,6 +303,7 @@ export function initObjective(config, { now = new Date(), force = false } = {}) 
     targetWorkspace: config.targetWorkspace,
     orchestratorSelector: config.orchestratorSelector,
     status: existing?.status || STATUS_ACTIVE,
+    lastHandledMessageCreatedAt: existing?.lastHandledMessageCreatedAt ?? null,
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp
   };
@@ -393,6 +401,101 @@ function parseJsonOutput(result, commandName) {
   } catch (error) {
     throw new GuardError(`invalid_json_from_${commandName}: ${error.message}`, "invalid_json");
   }
+}
+
+function watcherPaths(config) {
+  return {
+    pidFile: join(
+      config.watch.logDir,
+      sanitizeSegment(config.projectName),
+      `${sanitizeSegment(config.room)}.pid`
+    ),
+    logFile: join(
+      config.watch.logDir,
+      sanitizeSegment(config.projectName),
+      `${sanitizeSegment(config.room)}.jsonl`
+    )
+  };
+}
+
+function readPidFile(path) {
+  if (!existsSync(path)) {
+    return null;
+  }
+  const raw = readFileSync(path, "utf8").trim();
+  const pid = Number(raw);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function isProcessAlive(pid) {
+  if (!pid) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+export function watcherStatus(config) {
+  const paths = watcherPaths(config);
+  const pid = readPidFile(paths.pidFile);
+  const running = isProcessAlive(pid);
+  return {
+    running,
+    stale: Boolean(pid && !running),
+    pid,
+    pidFile: paths.pidFile,
+    logFile: paths.logFile
+  };
+}
+
+function launchWatchProcess(config, paths) {
+  mkdirSync(dirname(paths.logFile), { recursive: true });
+  const fd = openSync(paths.logFile, "a", 0o600);
+  try {
+    const script = join(dirname(fileURLToPath(import.meta.url)), "paseo-guard-watch.mjs");
+    const child = spawn(process.execPath, [script, "--config", config.configPath], {
+      detached: true,
+      stdio: ["ignore", fd, fd]
+    });
+    child.unref();
+    return { pid: child.pid };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function ensureWatch(config, { dryRun = false, launcher = launchWatchProcess } = {}) {
+  const current = watcherStatus(config);
+  if (current.running) {
+    return {
+      action: "already_running",
+      watcherStatus: current
+    };
+  }
+
+  if (dryRun) {
+    return {
+      action: "would_start",
+      watcherStatus: current
+    };
+  }
+
+  const paths = watcherPaths(config);
+  mkdirSync(dirname(paths.pidFile), { recursive: true });
+  const launched = launcher(config, paths);
+  if (!launched?.pid) {
+    throw new GuardError("watcher_launch_failed: missing child pid", "watcher_launch_failed");
+  }
+  writeFileSync(paths.pidFile, `${launched.pid}\n`, { encoding: "utf8", mode: 0o600 });
+  return {
+    action: current.stale ? "restarted" : "started",
+    previousWatcherStatus: current,
+    watcherStatus: watcherStatus(config)
+  };
 }
 
 function normalizeAgent(raw) {
@@ -611,18 +714,48 @@ export function parseFields(body) {
   return fields;
 }
 
+function knownSignalSet(config) {
+  return new Set([
+    ...(config.workflow?.safeSignals || []),
+    ...(config.workflow?.blockedSignals || []),
+    ...(config.workflow?.terminalSignals || [])
+  ]);
+}
+
+function knownDiagnosticSignalSet(config) {
+  return new Set(config.workflow?.diagnosticSignals || []);
+}
+
+function firstSignalToken(value) {
+  const match = String(value || "")
+    .trim()
+    .match(/^([A-Z][A-Z0-9_]+)/);
+  return match ? match[1] : null;
+}
+
+function signalFromSignalEnvelope(body, signalSet) {
+  const fields = parseFields(body);
+  const explicitSignal = firstSignalToken(fields.signal);
+  if (explicitSignal && signalSet.has(explicitSignal)) {
+    return explicitSignal;
+  }
+
+  const evidenceSignal = firstSignalToken(fields.evidence);
+  return evidenceSignal && signalSet.has(evidenceSignal) ? evidenceSignal : null;
+}
+
 export function parseSignal(body, config) {
   const match = String(body || "").trim().match(/^([A-Z][A-Z0-9_]+)/);
   if (!match) {
     return null;
   }
   const signal = match[1];
-  const knownSignals = new Set([
-    ...(config.workflow?.safeSignals || []),
-    ...(config.workflow?.blockedSignals || []),
-    ...(config.workflow?.terminalSignals || [])
-  ]);
-  return knownSignals.has(signal) ? signal : null;
+  const knownSignals = knownSignalSet(config);
+  if (knownSignals.has(signal)) {
+    return signal;
+  }
+
+  return signal === "SIGNAL" ? signalFromSignalEnvelope(body, knownSignals) : null;
 }
 
 function parseDiagnosticSignal(body, config) {
@@ -631,8 +764,12 @@ function parseDiagnosticSignal(body, config) {
     return null;
   }
   const signal = match[1];
-  const diagnosticSignals = new Set(config.workflow?.diagnosticSignals || []);
-  return diagnosticSignals.has(signal) ? signal : null;
+  const diagnosticSignals = knownDiagnosticSignalSet(config);
+  if (diagnosticSignals.has(signal)) {
+    return signal;
+  }
+
+  return signal === "SIGNAL" ? signalFromSignalEnvelope(body, diagnosticSignals) : null;
 }
 
 function messageTime(message) {
@@ -645,7 +782,16 @@ function unhandledMessages(messages, objective) {
   const handledIndex = objective.lastHandledMessageId
     ? ordered.findIndex((message) => message.id === objective.lastHandledMessageId)
     : -1;
-  return handledIndex >= 0 ? ordered.slice(handledIndex + 1) : ordered;
+  if (handledIndex >= 0) {
+    return ordered.slice(handledIndex + 1);
+  }
+
+  const handledTime = Date.parse(objective.lastHandledMessageCreatedAt || "");
+  if (!Number.isNaN(handledTime)) {
+    return ordered.filter((message) => messageTime(message) > handledTime);
+  }
+
+  return ordered;
 }
 
 export function unhandledSignals(messages, objective, config) {
@@ -657,6 +803,13 @@ export function unhandledSignals(messages, objective, config) {
 export function latestUnhandledSignal(messages, objective, config) {
   const signaled = unhandledSignals(messages, objective, config);
   return signaled.at(-1) || null;
+}
+
+function lastHandledMessageIdFoundInTail(messages, objective) {
+  if (!objective?.lastHandledMessageId) {
+    return null;
+  }
+  return messages.some((message) => message.id === objective.lastHandledMessageId);
 }
 
 function labelsFromMessageFields(fields) {
@@ -875,9 +1028,9 @@ function buildChildAgentWaitInstructions(config) {
 
   return [
     "Child-agent wait contract:",
-    `- After every parent-launched child agent is created or sent in background/no-wait mode, immediately start a background wait with \`paseo ${command}\` so the parent can resume when the child becomes idle.`,
+    `- After every parent-launched child agent is created or sent in background/no-wait mode, immediately start a background wait with \`paseo ${command}\` as an auxiliary idle notification path.`,
     "- Run the wait as a background process/job; do not block the parent synchronously on the wait.",
-    "- This per-child wait supplements room evidence and the room watcher; it does not replace SIGNAL reporting or `paseo chat wait`."
+    "- This per-child wait supplements room evidence and the guard watcher; durable continuation comes from `paseo-guard-watch` plus valid SIGNAL reporting."
   ];
 }
 
@@ -1056,6 +1209,13 @@ function formatRecoveryContext(recovery) {
   return `recoveryContext=${parts.join(" ")}`;
 }
 
+function messageCreatedAtForId(messages, messageId) {
+  if (!messageId) {
+    return undefined;
+  }
+  return messages.find((message) => message.id === messageId)?.createdAt;
+}
+
 export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery, cleanupAgents }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
@@ -1089,8 +1249,8 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "4. Implementation, fix, validation, audit, and PR child agents must run in targetWorkspace or a linked target worktree.",
     "5. Every child agent must include labels: room, parent, phase, task, role.",
     "6. For every parent-launched child agent, use background/no-wait mode, inspect cwd/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle.",
-    "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
-    "8. Continue through room evidence; per-child waits supplement the room watcher and do not replace SIGNAL reporting.",
+    "7. Post room evidence in this shape: SIGNAL signal=<FIXED|PASS|DONE|PLAN_READY|BLOCKED|NEEDS_FIX|PR_CREATED|MERGED> agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>.",
+    "8. Continue through room evidence; per-child waits supplement the guard watcher and do not replace SIGNAL reporting.",
     protectedActionInstruction,
     "",
     ...buildChildAgentPromptInstructions(config),
@@ -1162,7 +1322,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         ? {
             type: "unrecognized_room_update",
             messageId: diagnosticEntry.message.id,
-            author: diagnosticEntry.message.author
+            author: diagnosticEntry.message.author,
+            messageCreatedAt: diagnosticEntry.message.createdAt
           }
         : null;
 
@@ -1196,6 +1357,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
           cleanupAgents
         }),
         lastHandledMessageId: recovery.messageId,
+        lastHandledMessageCreatedAt: recovery.messageCreatedAt,
         decidedAt: timestamp
       });
     }
@@ -1250,6 +1412,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         }),
         nextStatus: STATUS_BLOCKED,
         lastHandledMessageId: entry.message.id,
+        lastHandledMessageCreatedAt: entry.message.createdAt,
         decidedAt: timestamp
       });
     }
@@ -1265,6 +1428,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         messageId: entry.message.id,
         nextStatus,
         lastHandledMessageId: entry.message.id,
+        lastHandledMessageCreatedAt: entry.message.createdAt,
         decidedAt: timestamp
       });
     }
@@ -1277,6 +1441,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         protectedAction,
         nextStatus: STATUS_BLOCKED,
         lastHandledMessageId: entry.message.id,
+        lastHandledMessageCreatedAt: entry.message.createdAt,
         decidedAt: timestamp
       });
     }
@@ -1289,6 +1454,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
           messageId: entry.message.id,
           nextStatus: STATUS_BLOCKED,
           lastHandledMessageId: entry.message.id,
+          lastHandledMessageCreatedAt: entry.message.createdAt,
           decidedAt: timestamp
         });
       }
@@ -1348,6 +1514,10 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         cleanupAgents
       }),
       lastHandledMessageId,
+      lastHandledMessageCreatedAt: messageCreatedAtForId(
+        signalEntries.map((entry) => entry.message),
+        lastHandledMessageId
+      ),
       decidedAt: timestamp
     });
   }
@@ -1360,6 +1530,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         messageId: signalEntry.message.id,
         nextStatus: STATUS_BLOCKED,
         lastHandledMessageId: signalEntry.message.id,
+        lastHandledMessageCreatedAt: signalEntry.message.createdAt,
         decidedAt: timestamp
       });
     }
@@ -1392,6 +1563,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         cleanupAgents
       }),
       lastHandledMessageId: signalEntry.message.id,
+      lastHandledMessageCreatedAt: signalEntry.message.createdAt,
       decidedAt: timestamp
     });
   }
@@ -1432,6 +1604,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
       cleanupAgents
     }),
     lastHandledMessageId: signalEntry.message.id,
+    lastHandledMessageCreatedAt: signalEntry.message.createdAt,
     decidedAt: timestamp
   });
 }
@@ -1451,6 +1624,9 @@ function applyDecisionToObjective(objective, decisionResult, now = new Date()) {
   };
   if (decisionResult.lastHandledMessageId) {
     next.lastHandledMessageId = decisionResult.lastHandledMessageId;
+    if (decisionResult.lastHandledMessageCreatedAt) {
+      next.lastHandledMessageCreatedAt = decisionResult.lastHandledMessageCreatedAt;
+    }
   }
   if (decisionResult.nextStatus) {
     next.status = decisionResult.nextStatus;
@@ -1486,6 +1662,49 @@ function sendPrompt(config, agentId, prompt, runner = runCommand) {
   }
 }
 
+function guardRuntimeStatus(config, objective, messages = null, runner = runCommand) {
+  let tailMessages = messages;
+  let tailReadError = null;
+  if (!tailMessages && objective?.status === STATUS_ACTIVE) {
+    try {
+      const raw = parseJsonOutput(
+        runPaseoCommand(
+          config,
+          "chatRead",
+          { room: config.room, limit: config.chatReadLimit || 50 },
+          [],
+          runner
+        ),
+        "chatRead"
+      );
+      tailMessages = normalizeMessages(raw);
+    } catch (error) {
+      tailReadError = String(error.message || error).slice(0, 500);
+      tailMessages = [];
+    }
+  }
+
+  return {
+    effectiveHandoffMode: isHandoffMode(config),
+    lastHandledMessageIdFoundInTail: lastHandledMessageIdFoundInTail(tailMessages || [], objective),
+    lastHandledMessageCreatedAt: objective?.lastHandledMessageCreatedAt || null,
+    watcherStatus: watcherStatus(config),
+    tailReadError
+  };
+}
+
+export function status(config, { runner = runCommand } = {}) {
+  const objective = readObjective(config);
+  if (!objective) {
+    throw new GuardError("objective_missing: run init first", "objective_missing");
+  }
+  return {
+    path: objectivePathFor(config),
+    objective,
+    guard: guardRuntimeStatus(config, objective, null, runner)
+  };
+}
+
 export function reconcile(config, { dryRun = false, now = new Date(), runner = runCommand } = {}) {
   const objective = readObjective(config);
   if (!objective) {
@@ -1501,6 +1720,7 @@ export function reconcile(config, { dryRun = false, now = new Date(), runner = r
     dryRun,
     objectivePath: objectivePathFor(config),
     decision: decisionResult,
+    guard: guardRuntimeStatus(config, objective, snapshot.messages, runner),
     observed: {
       orchestrators: snapshot.orchestrators.map((agent) => ({
         id: agent.id,
@@ -1545,6 +1765,8 @@ function usage() {
     "Usage:",
     "  paseo-guard init --config <config>",
     "  paseo-guard status --config <config>",
+    "  paseo-guard watch-status --config <config>",
+    "  paseo-guard ensure-watch --config <config> [--dry-run]",
     "  paseo-guard pause --config <config>",
     "  paseo-guard resume --config <config>",
     "  paseo-guard clear --config <config>",
@@ -1567,11 +1789,17 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   if (command === "status") {
-    const objective = readObjective(config);
-    if (!objective) {
-      throw new GuardError("objective_missing: run init first", "objective_missing");
-    }
-    printJson({ path: objectivePathFor(config), objective });
+    printJson(status(config));
+    return 0;
+  }
+
+  if (command === "watch-status") {
+    printJson(watcherStatus(config));
+    return 0;
+  }
+
+  if (command === "ensure-watch") {
+    printJson(ensureWatch(config, { dryRun: Boolean(args["dry-run"]) }));
     return 0;
   }
 

@@ -40,6 +40,8 @@ node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs status --config <c
 node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs pause --config <config>
 node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs resume --config <config>
 node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs clear --config <config>
+node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs watch-status --config <config>
+node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs ensure-watch --config <config>
 node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs reconcile --config <config> --dry-run
 node plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs --config <config>
 ```
@@ -54,7 +56,7 @@ The watcher is event-driven:
 paseo chat wait <room> --timeout 10m --json
 ```
 
-Timeouts are heartbeats. They trigger a guarded reconcile pass so missing child-agent evidence can be inspected, but they do not create schedule agents.
+Timeouts are heartbeats. They trigger a guarded reconcile pass so missing child-agent evidence can be inspected, but they do not create schedule agents. Per-child `paseo wait <agent-id>` processes are auxiliary idle diagnostics; durable continuation is handled by the guard watcher plus valid room `SIGNAL` evidence.
 
 ## Install Locally
 

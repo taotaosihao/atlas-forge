@@ -33,7 +33,7 @@
     "blockedSignals": ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
     "recoverableBlockedSignals": ["BLOCKED", "NEEDS_FIX"],
     "terminalSignals": ["PR_CREATED", "MERGED"],
-    "diagnosticSignals": ["PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
+    "diagnosticSignals": ["START", "FIX_STARTED", "PR_REVIEW_GATE_STARTED", "PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
     "protectedActions": [
       "merge",
       "delete branch",

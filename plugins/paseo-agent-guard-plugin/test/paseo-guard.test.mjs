@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,12 +9,15 @@ import test from "node:test";
 import {
   buildContinuationPrompt,
   decideReconcile,
+  ensureWatch,
   initObjective,
   normalizeConfig,
+  parseSignal,
   readObjective,
   reconcile,
   setObjectiveStatus,
-  validateDelegationContract
+  validateDelegationContract,
+  watcherStatus
 } from "../scripts/paseo-guard.mjs";
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -145,6 +148,64 @@ test("lastHandledMessageId prevents duplicate continuation", () => {
   );
   assert.equal(result.action, "wait");
   assert.equal(result.reason, "no_unhandled_signal");
+});
+
+test("lastHandledMessageCreatedAt filters old tail when handled id is outside chat tail", () => {
+  const config = makeConfig();
+  const oldSignal = message(
+    "m1",
+    "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
+  );
+  oldSignal.createdAt = "2026-05-11T00:00:01.000Z";
+  const newSignal = message(
+    "m2",
+    "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
+  );
+  newSignal.createdAt = "2026-05-11T00:00:03.000Z";
+
+  const result = decideReconcile(
+    objective(config, {
+      lastHandledMessageId: "missing-from-tail",
+      lastHandledMessageCreatedAt: "2026-05-11T00:00:02.000Z"
+    }),
+    config,
+    baseSnapshot(config, [oldSignal, newSignal])
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.messageId, "m2");
+});
+
+test("parseSignal accepts canonical and legacy child evidence shapes", () => {
+  const config = makeConfig();
+  assert.equal(
+    parseSignal(
+      "FIXED agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=clean",
+      config
+    ),
+    "FIXED"
+  );
+  assert.equal(
+    parseSignal(
+      "SIGNAL signal=FIXED agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=clean",
+      config
+    ),
+    "FIXED"
+  );
+  assert.equal(
+    parseSignal(
+      "SIGNAL agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=FIXED linked before submit",
+      config
+    ),
+    "FIXED"
+  );
+  assert.equal(
+    parseSignal(
+      "SIGNAL agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=START inspecting",
+      config
+    ),
+    null
+  );
 });
 
 test("non-signal room update triggers missing evidence recovery", () => {
@@ -557,6 +618,45 @@ test("handoff mode blocks destructive protected actions on terminal signals", ()
   assert.equal(result.protectedAction, "delete branch");
 });
 
+test("handoff mode continues latest wrapped FIXED after old merge and recoverable PR fix", () => {
+  const config = makeHandoffConfig();
+  const merged = message(
+    "m1",
+    "MERGED agent=orch-1 cwd=/tmp/research branch=master task=old-task labels={room=room-a,parent=root,phase=old,task=old-task,role=orchestrator} evidence=old_pr_merged"
+  );
+  const needsFix = message(
+    "m2",
+    "NEEDS_FIX agent=orch-1 cwd=/tmp/research branch=master task=fix-task labels={room=room-a,parent=root,phase=pr-review-fix,task=fix-task,role=orchestrator} evidence=review_found_issue"
+  );
+  const fixStarted = message(
+    "m3",
+    "FIX_STARTED agent=orch-1 cwd=/tmp/research branch=master task=fix-task labels={room=room-a,parent=root,phase=pr-review-fix,task=fix-task,role=orchestrator} evidence=child_started"
+  );
+  const fixed = message(
+    "m4",
+    `SIGNAL agent=child-1 cwd=${config.targetWorkspace} branch=feat task=fix-task labels={room=room-a,parent=orch-1,phase=pr-review-fix,task=fix-task,role=fix} evidence=FIXED committed and pushed`,
+    "child-1"
+  );
+  const snapshot = baseSnapshot(config, [merged, needsFix, fixStarted, fixed]);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "idle",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "pr-review-fix", task: "fix-task", role: "fix" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.signal, "FIXED");
+  assert.equal(result.messageId, "m4");
+  assert.equal(result.lastHandledMessageId, "m4");
+});
+
 test("handoff mode blocks terminal child contract violations", () => {
   const config = makeHandoffConfig();
   const childSignal = message(
@@ -617,9 +717,10 @@ test("continuation prompt includes multi-agent review policy", () => {
   assert.match(prompt, /Every child-agent prompt must explicitly tell the child agent to use these required skill\(s\): paseo-agent-guard\./);
   assert.match(prompt, /do not rely on inherited parent context/);
   assert.match(prompt, /For every parent-launched child agent, use background\/no-wait mode, inspect cwd\/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle\./);
+  assert.match(prompt, /SIGNAL signal=<FIXED\|PASS\|DONE\|PLAN_READY\|BLOCKED\|NEEDS_FIX\|PR_CREATED\|MERGED>/);
   assert.match(prompt, /Child-agent wait contract:/);
   assert.match(prompt, /immediately start a background wait with `paseo wait <agent-id> --json`/);
-  assert.match(prompt, /does not replace SIGNAL reporting or `paseo chat wait`/);
+  assert.match(prompt, /durable continuation comes from `paseo-guard-watch` plus valid SIGNAL reporting/);
   assert.match(prompt, /Missing room evidence recovery:/);
   assert.match(prompt, /If a child agent is idle\/complete but did not post room evidence/);
   assert.match(prompt, /relayed=true/);
@@ -858,6 +959,40 @@ test("dry-run reports send decision without invoking paseo send", () => {
   }
 });
 
+test("ensureWatch restarts stale pidfile and does not duplicate a running watcher", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root);
+    const initial = watcherStatus(config);
+    mkdirSync(dirname(initial.pidFile), { recursive: true });
+    writeFileSync(initial.pidFile, "999999999\n");
+    const stale = watcherStatus(config);
+    assert.equal(stale.running, false);
+    assert.equal(stale.stale, true);
+
+    const restarted = ensureWatch(config, {
+      launcher(_config, paths) {
+        assert.equal(paths.pidFile, initial.pidFile);
+        assert.equal(paths.logFile, initial.logFile);
+        return { pid: process.pid };
+      }
+    });
+    assert.equal(restarted.action, "restarted");
+    assert.equal(restarted.watcherStatus.running, true);
+    assert.equal(restarted.watcherStatus.pid, process.pid);
+
+    const alreadyRunning = ensureWatch(config, {
+      launcher() {
+        throw new Error("launcher should not be called for live watcher");
+      }
+    });
+    assert.equal(alreadyRunning.action, "already_running");
+    assert.equal(alreadyRunning.watcherStatus.pid, process.pid);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("plugin manifest and skill frontmatter are valid", () => {
   const plugin = JSON.parse(readFileSync(join(pluginRoot, "plugin.json"), "utf8"));
   const scaffoldPlugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
@@ -883,7 +1018,7 @@ test("template and example configs include default multi-agent review policy", (
   ]) {
     const config = JSON.parse(readFileSync(join(pluginRoot, relativePath), "utf8"));
     assert.deepEqual(config.reviewPolicy.reviewers, ["claude", "codex", "gemini", "mimo"]);
-    assert.equal(config.policy.handoffMode, false);
+    assert.equal(config.policy.handoffMode, relativePath.startsWith("examples/"));
     assert.equal(config.reviewPolicy.ignoreUnavailableReviewers, true);
     assert.equal(config.reviewPolicy.phases.prd.defaultRounds, 1);
     assert.equal(config.reviewPolicy.phases.prd.humanReviewAfterMultiAgent, true);
@@ -903,6 +1038,9 @@ test("template and example configs include default multi-agent review policy", (
     assert.equal(config.workflow.protectedActions.includes("close agent"), true);
     assert.equal(config.workflow.protectedActions.includes("force archive"), true);
     assert.deepEqual(config.workflow.diagnosticSignals, [
+      "START",
+      "FIX_STARTED",
+      "PR_REVIEW_GATE_STARTED",
       "PR_REVIEW_STATUS",
       "REVIEW_STATUS",
       "AGENT_STATUS",

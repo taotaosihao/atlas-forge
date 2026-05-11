@@ -14,6 +14,8 @@
     "guard:init": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs init --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",
     "guard:status": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs status --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",
     "guard:dry-run": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs reconcile --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json --dry-run",
+    "guard:watch-status": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs watch-status --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",
+    "guard:ensure-watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs ensure-watch --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json",
     "guard:watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs --config plugins/paseo-agent-guard-plugin/examples/gearjob-123-plm-next.config.json"
   }
 }
