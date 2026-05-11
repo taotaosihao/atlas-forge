@@ -898,6 +898,9 @@ export function validateDelegationContract(entry, snapshot, config) {
 
   const missingLabels = (config.childAgents?.requiredLabels || []).filter((key) => !labels[key]);
   const missingEvidence = (config.childAgents?.requiredEvidenceFields || []).filter((key) => {
+    if (key === "agent") {
+      return !fields.agent && !agent?.id;
+    }
     if (key === "labels") {
       return !fields.labels && Object.keys(messageLabels).length === 0;
     }

@@ -498,6 +498,36 @@ test("implementation agent in target workspace passes contract", () => {
   assert.equal(validateDelegationContract(entry, snapshot, config), null);
 });
 
+test("child signal can infer missing agent evidence from room author", () => {
+  const config = makeConfig();
+  const entry = {
+    signal: "PASS",
+    message: message(
+      "m3",
+      `PASS labels={room=room-a,parent=orch-1,phase=pr71-review,task=pr71-review-until-clean,role=reviewer-codex} cwd=${config.targetWorkspace} branch=feat task=pr71-review-until-clean evidence="no findings"`,
+      "child-1"
+    )
+  };
+  const snapshot = baseSnapshot(config, entry.message);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "idle",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "pr71-review", task: "pr71-review-until-clean", role: "reviewer-codex" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+  assert.equal(validateDelegationContract(entry, snapshot, config), null);
+
+  const result = decideReconcile(objective(config), config, snapshot);
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.signal, "PASS");
+  assert.equal(result.messageId, "m3");
+});
+
 test("orchestrator self-reporting implementation work in research workspace is blocked", () => {
   const config = makeConfig();
   const entry = {
