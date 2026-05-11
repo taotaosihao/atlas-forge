@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "objective": "continue approved PLM delivery",
+  "projectName": "gearjob-123-plm-next",
+  "room": "gearjob-123-plm-next",
+  "researchWorkspace": "/Users/sihao/work/ai-saas-cloner-template",
+  "targetWorkspace": "/Users/sihao/work/gearjob",
+  "objectiveStoreDir": "~/.paseo-agent-guard/objectives",
+  "orchestratorSelector": {
+    "labels": {
+      "room": "gearjob-123-plm-next",
+      "role": "orchestrator"
+    }
+  },
+  "childAgents": {
+    "requiredLabels": ["room", "parent", "phase", "task", "role"],
+    "requiredEvidenceFields": ["agent", "cwd", "branch", "task", "labels"],
+    "implementationRoles": ["implementation", "fix", "validation", "audit", "pr"],
+    "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"]
+  },
+  "workflow": {
+    "safeSignals": ["PLAN_READY", "DONE", "FIXED", "PASS"],
+    "blockedSignals": ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
+    "recoverableBlockedSignals": ["BLOCKED", "NEEDS_FIX"],
+    "terminalSignals": ["PR_CREATED", "MERGED"],
+    "protectedActions": [
+      "merge",
+      "delete branch",
+      "branch deletion",
+      "delete agent",
+      "archive agent",
+      "daemon restart",
+      "restart daemon",
+      "new project phase"
+    ]
+  },
+  "policy": {
+    "autoContinue": true,
+    "cooldownSeconds": 60,
+    "maxRetries": 3,
+    "allowNewPhaseAfterMerge": false,
+    "checkGitWorktrees": true
+  },
+  "commands": {
+    "paseo": "paseo",
+    "ls": ["ls", "--json"],
+    "inspect": ["inspect", "{agentId}", "--json"],
+    "chatRead": ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
+    "chatPost": ["chat", "post", "{room}", "{message}", "--json"],
+    "send": ["send", "{agentId}", "--prompt-file", "{promptFile}", "--no-wait", "--json"],
+    "chatWait": ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
+  },
+  "chatReadLimit": 50,
+  "watch": {
+    "timeout": "10m"
+  }
+}
+
