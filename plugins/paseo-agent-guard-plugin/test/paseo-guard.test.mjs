@@ -206,6 +206,64 @@ test("finished child after checkpoint without room signal triggers recovery", ()
   assert.equal(result.childAgentId, "child-2");
 });
 
+test("completed child with valid room evidence triggers cleanup", () => {
+  const config = makeConfig();
+  const childDone = message(
+    "m-clean",
+    `PASS agent=child-1 cwd=${config.targetWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=review,task=t1,role=audit} evidence=clean`,
+    "child-1"
+  );
+  const snapshot = baseSnapshot(config, childDone);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "done",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+
+  const result = decideReconcile(
+    objective(config, { lastHandledMessageId: "m-clean" }),
+    config,
+    snapshot
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "completed_child_cleanup");
+  assert.deepEqual(result.cleanupAgentIds, ["child-1"]);
+  assert.match(result.prompt, /completedChildAgentsReadyToClose=id=child-1,status=done,role=audit,task=t1/);
+  assert.match(result.prompt, /paseo archive <agent-id> --json/);
+  assert.match(result.prompt, /Never use `--force` for cleanup/);
+});
+
+test("completed child cleanup requires valid room evidence", () => {
+  const config = makeConfig();
+  const childDone = message("m-clean", "PASS result=clean", "child-1");
+  const snapshot = baseSnapshot(config, childDone);
+  snapshot.childAgents = [
+    {
+      id: "child-1",
+      status: "done",
+      updatedAt: "2026-05-11T00:00:03.000Z",
+      cwd: config.targetWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
+      workspaceKind: "target"
+    }
+  ];
+  snapshot.agentById["child-1"] = snapshot.childAgents[0];
+
+  const result = decideReconcile(
+    objective(config, { lastHandledMessageId: "m-clean" }),
+    config,
+    snapshot
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "missing_room_evidence_recovery");
+  assert.equal(result.childAgentId, "child-1");
+});
+
 test("ordinary non-signal room chatter does not trigger continuation", () => {
   const config = makeConfig();
   const result = decideReconcile(
@@ -464,6 +522,29 @@ test("handoff mode still blocks destructive protected actions", () => {
   assert.equal(result.protectedAction, "delete branch");
 });
 
+test("generic agent close remains protected", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='close agent child-1'"))
+  );
+  assert.equal(result.action, "block");
+  assert.equal(result.reason, "protected_action_detected");
+  assert.equal(result.protectedAction, "close agent");
+});
+
+test("completed child archive wording is allowed", () => {
+  const config = makeHandoffConfig();
+  const result = decideReconcile(
+    objective(config),
+    config,
+    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='archive completed child agent child-1 after evidence'"))
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+});
+
 test("handoff mode blocks destructive protected actions on terminal signals", () => {
   const config = makeHandoffConfig();
   const result = decideReconcile(
@@ -538,6 +619,9 @@ test("continuation prompt includes multi-agent review policy", () => {
   assert.match(prompt, /Missing room evidence recovery:/);
   assert.match(prompt, /If a child agent is idle\/complete but did not post room evidence/);
   assert.match(prompt, /relayed=true/);
+  assert.match(prompt, /Child-agent cleanup:/);
+  assert.match(prompt, /After a child agent posts valid final room evidence and is idle\/done, close it promptly/);
+  assert.match(prompt, /delete agents, force-archive\/close running agents, close child agents before room evidence/);
   assert.match(prompt, /Agent launch defaults:/);
   assert.match(prompt, /Provider mode defaults: codex=full-access, claude=bypassPermissions, gemini=yolo, mimo=bypassPermissions\./);
   assert.match(prompt, /Codex uses mode `full-access` as its YOLO-equivalent mode\./);
@@ -811,6 +895,9 @@ test("template and example configs include default multi-agent review policy", (
     assert.deepEqual(config.childAgents.requiredSkills, ["paseo-agent-guard"]);
     assert.deepEqual(config.childAgents.finishedStatuses, ["idle", "complete", "completed", "done"]);
     assert.deepEqual(config.childAgents.failureStatuses, ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"]);
+    assert.equal(config.childAgents.closeOnCompletion, true);
+    assert.equal(config.workflow.protectedActions.includes("close agent"), true);
+    assert.equal(config.workflow.protectedActions.includes("force archive"), true);
     assert.deepEqual(config.workflow.diagnosticSignals, [
       "PR_REVIEW_STATUS",
       "REVIEW_STATUS",
@@ -819,5 +906,6 @@ test("template and example configs include default multi-agent review policy", (
       "PROGRESS",
       "CHECKPOINT"
     ]);
+    assert.deepEqual(config.commands.archive, ["archive", "{agentId}", "--json"]);
   }
 });

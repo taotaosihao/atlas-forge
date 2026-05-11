@@ -46,6 +46,8 @@ node plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs --config <co
 
 `reconcile` reads the objective, room messages, orchestrator state, and child agent state. It sends at most one continuation prompt to the orchestrator, and only when the policy allows it.
 
+Completed child agents are part of the guard lifecycle: once a child agent has posted valid final room evidence and is idle/done, the orchestrator is instructed to soft-close it with `paseo archive <agent-id> --json`. Running agents, agents without required evidence, and the orchestrator itself are not closed by cleanup.
+
 The watcher is event-driven:
 
 ```bash

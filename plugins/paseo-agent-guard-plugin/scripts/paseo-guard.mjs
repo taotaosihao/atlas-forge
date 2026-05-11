@@ -35,6 +35,7 @@ const DEFAULT_CONFIG = {
     runningStatuses: ["running", "thinking", "queued", "starting", "needs_permission"],
     finishedStatuses: ["idle", "complete", "completed", "done"],
     failureStatuses: ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"],
+    closeOnCompletion: true,
     permissionModeDefaults: {
       codex: "full-access",
       claude: "bypassPermissions",
@@ -54,6 +55,8 @@ const DEFAULT_CONFIG = {
       "branch deletion",
       "delete agent",
       "archive agent",
+      "close agent",
+      "force archive",
       "daemon restart",
       "restart daemon",
       "new project phase"
@@ -101,6 +104,7 @@ const DEFAULT_CONFIG = {
     chatRead: ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     chatPost: ["chat", "post", "{room}", "{message}", "--json"],
     send: ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
+    archive: ["archive", "{agentId}", "--json"],
     chatWait: ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },
   chatReadLimit: 50,
@@ -873,6 +877,40 @@ function buildMissingEvidenceInstructions() {
   ];
 }
 
+function formatCleanupAgents(cleanupAgents = []) {
+  if (!cleanupAgents.length) {
+    return "completedChildAgentsReadyToClose=none";
+  }
+  const summary = cleanupAgents
+    .map((agent) => {
+      const parts = [`id=${agent.id}`, `status=${agent.status || "unknown"}`];
+      if (agent.role) {
+        parts.push(`role=${agent.role}`);
+      }
+      if (agent.task) {
+        parts.push(`task=${agent.task}`);
+      }
+      return parts.join(",");
+    })
+    .join(";");
+  return `completedChildAgentsReadyToClose=${summary}`;
+}
+
+function buildChildAgentCleanupInstructions(config) {
+  const command = (config.commands?.archive || ["archive", "{agentId}", "--json"])
+    .join(" ")
+    .replace("{agentId}", "<agent-id>");
+  return [
+    "Child-agent cleanup:",
+    config.childAgents?.closeOnCompletion
+      ? `- After a child agent posts valid final room evidence and is idle/done, close it promptly with \`paseo ${command}\`.`
+      : "- Child-agent auto-close is disabled in config; leave completed child agents active unless the user explicitly asks.",
+    "- Never use `--force` for cleanup; never close running, thinking, queued, starting, or needs_permission agents.",
+    "- Never close a child agent before its required room evidence is present. If evidence is missing, recover evidence first.",
+    "- Archive/close only child agents for this room. Do not delete agents, close the orchestrator, restart the daemon, or delete branches as cleanup."
+  ];
+}
+
 function latestUnhandledDiagnostic(messages, objective, config) {
   return unhandledMessages(messages, objective)
     .map((message) => ({
@@ -933,8 +971,31 @@ function messageReportsAgent(message, agentId) {
   return fields.agent === agentId || message.author === agentId;
 }
 
-function hasContractSignalFromAgent(messages, agentId, config) {
-  return messages.some((message) => parseSignal(message.body, config) && messageReportsAgent(message, agentId));
+function hasValidContractSignalFromAgent(messages, agentId, snapshot, config) {
+  return messages.some((message) => {
+    const signal = parseSignal(message.body, config);
+    if (!signal || !messageReportsAgent(message, agentId)) {
+      return false;
+    }
+    return !validateDelegationContract({ message, signal }, snapshot, config);
+  });
+}
+
+function closeableChildAgents(snapshot, config) {
+  if (!config.childAgents?.closeOnCompletion) {
+    return [];
+  }
+
+  const finishedStatuses = agentStatusSet(config, "finishedStatuses");
+  return snapshot.childAgents
+    .filter((agent) => finishedStatuses.has(String(agent.status || "").toLowerCase()))
+    .filter((agent) => hasValidContractSignalFromAgent(snapshot.messages, agent.id, snapshot, config))
+    .map((agent) => ({
+      id: agent.id,
+      status: agent.status,
+      role: agent.labels?.role,
+      task: agent.labels?.task
+    }));
 }
 
 function latestChildEvidenceAnomaly(snapshot, objective, config) {
@@ -944,7 +1005,7 @@ function latestChildEvidenceAnomaly(snapshot, objective, config) {
 
   const candidates = snapshot.childAgents
     .filter((agent) => !isRunningAgent(agent, config))
-    .filter((agent) => !hasContractSignalFromAgent(snapshot.messages, agent.id, config))
+    .filter((agent) => !hasValidContractSignalFromAgent(snapshot.messages, agent.id, snapshot, config))
     .filter((agent) => {
       const status = String(agent.status || "").toLowerCase();
       if (failureStatuses.has(status)) {
@@ -981,7 +1042,7 @@ function formatRecoveryContext(recovery) {
   return `recoveryContext=${parts.join(" ")}`;
 }
 
-export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery }) {
+export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery, cleanupAgents }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
     : "lastSignal=none\nlastMessageId=none";
@@ -989,9 +1050,10 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     ? `contractViolation=${violation.violations.join("; ")}`
     : "contractViolation=none";
   const recoveryLine = formatRecoveryContext(recovery);
+  const cleanupLine = formatCleanupAgents(cleanupAgents);
   const protectedActionInstruction = isHandoffMode(config)
-    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, archive/delete agents, or restart the daemon without separate explicit approval."
-    : "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval.";
+    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, or restart the daemon without separate explicit approval."
+    : "9. Do not merge, delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, restart the daemon, or start a new post-merge phase without explicit user approval.";
 
   return [
     "PASEO_AGENT_GUARD_CONTINUATION",
@@ -1004,6 +1066,7 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     signalLine,
     violationLine,
     recoveryLine,
+    cleanupLine,
     "",
     "Instructions:",
     "1. Read the room state and current project evidence before acting.",
@@ -1019,6 +1082,8 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     ...buildChildAgentPromptInstructions(config),
     "",
     ...buildMissingEvidenceInstructions(config),
+    "",
+    ...buildChildAgentCleanupInstructions(config),
     "",
     ...buildAgentPermissionInstructions(config),
     "",
@@ -1066,6 +1131,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
     });
   }
 
+  const cleanupAgents = closeableChildAgents(snapshot, config);
   const signalEntries = unhandledSignals(snapshot.messages, objective, config);
   if (signalEntries.length === 0) {
     const childAnomaly = latestChildEvidenceAnomaly(snapshot, objective, config);
@@ -1110,9 +1176,38 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
           objective,
           config,
           reason: "missing_room_evidence_recovery",
-          recovery
+          recovery,
+          cleanupAgents
         }),
         lastHandledMessageId: recovery.messageId,
+        decidedAt: timestamp
+      });
+    }
+
+    if (cleanupAgents.length > 0) {
+      if (cooldownActive(objective, config, now)) {
+        return decision("wait", "cooldown_active", {
+          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+          decidedAt: timestamp
+        });
+      }
+
+      if (!config.policy?.autoContinue) {
+        return decision("wait", "auto_continue_disabled", {
+          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+          decidedAt: timestamp
+        });
+      }
+
+      return decision("send", "completed_child_cleanup", {
+        orchestratorId: orchestrator.id,
+        cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+        prompt: buildContinuationPrompt({
+          objective,
+          config,
+          reason: "completed_child_cleanup",
+          cleanupAgents
+        }),
         decidedAt: timestamp
       });
     }
@@ -1134,7 +1229,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
           config,
           signalEntry: entry,
           reason: "delegation_contract_violation",
-          violation: contractViolation
+          violation: contractViolation,
+          cleanupAgents
         }),
         nextStatus: STATUS_BLOCKED,
         lastHandledMessageId: entry.message.id,
@@ -1232,7 +1328,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         objective,
         config,
         signalEntry,
-        reason
+        reason,
+        cleanupAgents
       }),
       lastHandledMessageId,
       decidedAt: timestamp
@@ -1275,7 +1372,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
         objective,
         config,
         signalEntry,
-        reason: "recoverable_blocker_nudge"
+        reason: "recoverable_blocker_nudge",
+        cleanupAgents
       }),
       lastHandledMessageId: signalEntry.message.id,
       decidedAt: timestamp
@@ -1314,7 +1412,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
       objective,
       config,
       signalEntry,
-      reason: "safe_signal_continue"
+      reason: "safe_signal_continue",
+      cleanupAgents
     }),
     lastHandledMessageId: signalEntry.message.id,
     decidedAt: timestamp

@@ -103,11 +103,21 @@ When `policy.handoffMode` is true, the config itself grants approval for this PR
 
 - On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
 - On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence. In handoff mode this intentionally takes precedence over `policy.allowNewPhaseAfterMerge`.
-- Allow only exact protected-action entries `merge` and `new project phase`. Branch deletion, agent deletion/archive, and daemon restart remain protected.
+- Allow only exact protected-action entries `merge` and `new project phase`. Archiving completed child agents after required room evidence is allowed by the cleanup contract below. Branch deletion, agent deletion, force-archiving/running-agent closure, and daemon restart remain protected.
 
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.
 
 Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
+
+## Child-Agent Cleanup
+
+Close completed child agents promptly after they have posted valid final room evidence.
+
+- Use `paseo archive <agent-id> --json` or the equivalent Paseo archive/close operation.
+- Never use `--force` for cleanup.
+- Never close a running, thinking, queued, starting, or `needs_permission` child agent.
+- Never close a child agent before its required room evidence exists. Recover missing evidence first.
+- Archive/close only child agents for the current room. Do not delete agents, close the orchestrator, restart the daemon, delete branches, or clean worktrees as part of child-agent cleanup.
 
 ## Missing Evidence Recovery
 

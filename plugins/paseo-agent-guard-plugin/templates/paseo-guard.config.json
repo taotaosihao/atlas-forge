@@ -20,6 +20,7 @@
     "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"],
     "finishedStatuses": ["idle", "complete", "completed", "done"],
     "failureStatuses": ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"],
+    "closeOnCompletion": true,
     "permissionModeDefaults": {
       "codex": "full-access",
       "claude": "bypassPermissions",
@@ -39,6 +40,8 @@
       "branch deletion",
       "delete agent",
       "archive agent",
+      "close agent",
+      "force archive",
       "daemon restart",
       "restart daemon",
       "new project phase"
@@ -86,6 +89,7 @@
     "chatRead": ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     "chatPost": ["chat", "post", "{room}", "{message}", "--json"],
     "send": ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
+    "archive": ["archive", "{agentId}", "--json"],
     "chatWait": ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },
   "chatReadLimit": 50,
