@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const DEFAULT_MARKETPLACE = "atlas-forge";
 const DEFAULT_PLUGIN = "paseo-agent-guard-plugin";
 
-class UpdateError extends Error {
+export class UpdateError extends Error {
   constructor(message, code = "plugin_update_error") {
     super(message);
     this.name = "UpdateError";
@@ -161,6 +161,13 @@ export function repairInstalledPluginCacheManifests(codexHome, plugin) {
   return repaired;
 }
 
+function isMissingPluginJsonCacheError(error) {
+  return error instanceof UpdateError &&
+    error.code === "command_failed" &&
+    /failed to read plugin version/.test(error.message) &&
+    /missing plugin\.json/.test(error.message);
+}
+
 function validateMarketplaceManifest(root, marketplace, plugin) {
   const marketplacePath = join(root, ".agents/plugins/marketplace.json");
   if (!existsSync(marketplacePath)) {
@@ -186,13 +193,23 @@ function validateMarketplaceManifest(root, marketplace, plugin) {
   }
 }
 
-export function updateCodexPlugin(options = buildOptions()) {
+export function updateCodexPlugin(options = buildOptions(), runner = run) {
   const root = repoRoot();
   validatePluginManifest(root, options.plugin);
   validateMarketplaceManifest(root, options.marketplace, options.plugin);
-  const repairedCacheManifests = repairInstalledPluginCacheManifests(options.codexHome, options.plugin);
+  const repairedCacheManifests = new Set(repairInstalledPluginCacheManifests(options.codexHome, options.plugin));
 
-  run("codex", ["plugin", "marketplace", "upgrade", options.marketplace], { cwd: root });
+  try {
+    runner("codex", ["plugin", "marketplace", "upgrade", options.marketplace], { cwd: root });
+  } catch (error) {
+    if (!isMissingPluginJsonCacheError(error)) {
+      throw error;
+    }
+    for (const manifestPath of repairInstalledPluginCacheManifests(options.codexHome, options.plugin)) {
+      repairedCacheManifests.add(manifestPath);
+    }
+    runner("codex", ["plugin", "marketplace", "upgrade", options.marketplace], { cwd: root });
+  }
 
   return {
     status: "updated",
@@ -201,7 +218,7 @@ export function updateCodexPlugin(options = buildOptions()) {
     plugin: options.plugin,
     source: root,
     codexHome: options.codexHome,
-    repairedCacheManifests
+    repairedCacheManifests: [...repairedCacheManifests]
   };
 }
 
