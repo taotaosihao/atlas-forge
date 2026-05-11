@@ -12,6 +12,7 @@ import {
   ensureWatch,
   initObjective,
   normalizeConfig,
+  objectivePathFor,
   parseSignal,
   readObjective,
   reconcile,
@@ -170,6 +171,27 @@ test("lastHandledMessageCreatedAt filters old tail when handled id is outside ch
     }),
     config,
     baseSnapshot(config, [oldSignal, newSignal])
+  );
+  assert.equal(result.action, "send");
+  assert.equal(result.reason, "safe_signal_continue");
+  assert.equal(result.messageId, "m2");
+});
+
+test("lastHandledMessageCreatedAt fallback keeps same-timestamp messages", () => {
+  const config = makeConfig();
+  const sameTimestampSignal = message(
+    "m2",
+    "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
+  );
+  sameTimestampSignal.createdAt = "2026-05-11T00:00:02.000Z";
+
+  const result = decideReconcile(
+    objective(config, {
+      lastHandledMessageId: "missing-from-tail",
+      lastHandledMessageCreatedAt: "2026-05-11T00:00:02.000Z"
+    }),
+    config,
+    baseSnapshot(config, sameTimestampSignal)
   );
   assert.equal(result.action, "send");
   assert.equal(result.reason, "safe_signal_continue");
@@ -870,6 +892,55 @@ test("non-dry-run sends inline prompt instead of prompt file", () => {
   }
 });
 
+test("non-dry-run reconcile upgrades legacy objective with handled message timestamp on wait decision", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root);
+    initObjective(config);
+    const legacyObjective = {
+      ...readObjective(config),
+      lastHandledMessageId: "m1",
+      lastHandledMessageCreatedAt: null
+    };
+    writeFileSync(objectivePathFor(config), `${JSON.stringify(legacyObjective, null, 2)}\n`);
+
+    const handledMessage = message(
+      "m1",
+      "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
+    );
+    handledMessage.createdAt = "2026-05-11T00:00:05.000Z";
+
+    const result = reconcile(config, {
+      runner(command, args) {
+        if (args[0] === "ls" && args.includes("role=orchestrator")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "chat" && args[1] === "read") {
+          return { status: 0, stdout: JSON.stringify([handledMessage]), stderr: "" };
+        }
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
+      }
+    });
+
+    assert.equal(result.decision.action, "wait");
+    assert.equal(result.decision.reason, "no_unhandled_signal");
+    assert.equal(readObjective(config).lastHandledMessageCreatedAt, "2026-05-11T00:00:05.000Z");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("prompt-file send command with no-wait is rejected", () => {
   const root = tempRoot();
   try {
@@ -966,11 +1037,22 @@ test("ensureWatch restarts stale pidfile and does not duplicate a running watche
     const initial = watcherStatus(config);
     mkdirSync(dirname(initial.pidFile), { recursive: true });
     writeFileSync(initial.pidFile, "999999999\n");
-    const stale = watcherStatus(config);
+    const stale = watcherStatus(config, {
+      processInspector() {
+        return { alive: false, command: null };
+      }
+    });
     assert.equal(stale.running, false);
     assert.equal(stale.stale, true);
 
+    const matchingCommand = `${process.execPath} /tmp/paseo-guard-watch.mjs --config ${config.configPath}`;
     const restarted = ensureWatch(config, {
+      processInspector(pid) {
+        if (pid === 999999999) {
+          return { alive: false, command: null };
+        }
+        return { alive: true, command: matchingCommand };
+      },
       launcher(_config, paths) {
         assert.equal(paths.pidFile, initial.pidFile);
         assert.equal(paths.logFile, initial.logFile);
@@ -982,12 +1064,54 @@ test("ensureWatch restarts stale pidfile and does not duplicate a running watche
     assert.equal(restarted.watcherStatus.pid, process.pid);
 
     const alreadyRunning = ensureWatch(config, {
+      processInspector(pid) {
+        assert.equal(pid, process.pid);
+        return { alive: true, command: matchingCommand };
+      },
       launcher() {
         throw new Error("launcher should not be called for live watcher");
       }
     });
     assert.equal(alreadyRunning.action, "already_running");
     assert.equal(alreadyRunning.watcherStatus.pid, process.pid);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ensureWatch treats pid reuse by unrelated process as stale", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root);
+    const initial = watcherStatus(config);
+    mkdirSync(dirname(initial.pidFile), { recursive: true });
+    writeFileSync(initial.pidFile, `${process.pid}\n`);
+
+    const reusedPid = watcherStatus(config, {
+      processInspector() {
+        return { alive: true, command: "node unrelated-script.mjs" };
+      }
+    });
+    assert.equal(reusedPid.processAlive, true);
+    assert.equal(reusedPid.processMatches, false);
+    assert.equal(reusedPid.running, false);
+    assert.equal(reusedPid.stale, true);
+
+    const restarted = ensureWatch(config, {
+      processInspector(pid) {
+        if (pid === process.pid) {
+          return { alive: true, command: "node unrelated-script.mjs" };
+        }
+        return { alive: true, command: `${process.execPath} /tmp/paseo-guard-watch.mjs --config ${config.configPath}` };
+      },
+      launcher() {
+        return { pid: 424242 };
+      }
+    });
+    assert.equal(restarted.action, "restarted");
+    assert.equal(restarted.previousWatcherStatus.processMatches, false);
+    assert.equal(restarted.watcherStatus.pid, 424242);
+    assert.equal(restarted.watcherStatus.running, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

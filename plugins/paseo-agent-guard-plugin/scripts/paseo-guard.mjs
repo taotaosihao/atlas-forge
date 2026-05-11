@@ -439,14 +439,38 @@ function isProcessAlive(pid) {
   }
 }
 
-export function watcherStatus(config) {
+function processInfoForPid(pid) {
+  if (!pid || !isProcessAlive(pid)) {
+    return { alive: false, command: null };
+  }
+  const result = runCommand("ps", ["-p", String(pid), "-o", "command="]);
+  if (result.status !== 0) {
+    return { alive: true, command: null };
+  }
+  return {
+    alive: true,
+    command: result.stdout.trim()
+  };
+}
+
+function commandIsGuardWatcher(command, config) {
+  const text = String(command || "");
+  return text.includes("paseo-guard-watch") && text.includes(config.configPath);
+}
+
+export function watcherStatus(config, { processInspector = processInfoForPid } = {}) {
   const paths = watcherPaths(config);
   const pid = readPidFile(paths.pidFile);
-  const running = isProcessAlive(pid);
+  const processInfo = pid ? processInspector(pid) : { alive: false, command: null };
+  const processMatches = processInfo.alive ? commandIsGuardWatcher(processInfo.command, config) : false;
+  const running = Boolean(processInfo.alive && processMatches);
   return {
     running,
     stale: Boolean(pid && !running),
     pid,
+    processAlive: Boolean(processInfo.alive),
+    processMatches,
+    processCommand: processInfo.command || null,
     pidFile: paths.pidFile,
     logFile: paths.logFile
   };
@@ -468,8 +492,8 @@ function launchWatchProcess(config, paths) {
   }
 }
 
-export function ensureWatch(config, { dryRun = false, launcher = launchWatchProcess } = {}) {
-  const current = watcherStatus(config);
+export function ensureWatch(config, { dryRun = false, launcher = launchWatchProcess, processInspector } = {}) {
+  const current = watcherStatus(config, { processInspector });
   if (current.running) {
     return {
       action: "already_running",
@@ -494,7 +518,7 @@ export function ensureWatch(config, { dryRun = false, launcher = launchWatchProc
   return {
     action: current.stale ? "restarted" : "started",
     previousWatcherStatus: current,
-    watcherStatus: watcherStatus(config)
+    watcherStatus: watcherStatus(config, { processInspector })
   };
 }
 
@@ -788,7 +812,7 @@ function unhandledMessages(messages, objective) {
 
   const handledTime = Date.parse(objective.lastHandledMessageCreatedAt || "");
   if (!Number.isNaN(handledTime)) {
-    return ordered.filter((message) => messageTime(message) > handledTime);
+    return ordered.filter((message) => messageTime(message) >= handledTime);
   }
 
   return ordered;
@@ -1216,6 +1240,12 @@ function messageCreatedAtForId(messages, messageId) {
   return messages.find((message) => message.id === messageId)?.createdAt;
 }
 
+function derivedLastHandledMessageCreatedAt(messages, objective) {
+  return objective?.lastHandledMessageCreatedAt ||
+    messageCreatedAtForId(messages || [], objective?.lastHandledMessageId) ||
+    null;
+}
+
 export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery, cleanupAgents }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
@@ -1609,7 +1639,7 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
   });
 }
 
-function applyDecisionToObjective(objective, decisionResult, now = new Date()) {
+function applyDecisionToObjective(objective, decisionResult, now = new Date(), { derivedHandledCreatedAt = null } = {}) {
   const timestamp = now.toISOString();
   const next = {
     ...objective,
@@ -1624,9 +1654,12 @@ function applyDecisionToObjective(objective, decisionResult, now = new Date()) {
   };
   if (decisionResult.lastHandledMessageId) {
     next.lastHandledMessageId = decisionResult.lastHandledMessageId;
-    if (decisionResult.lastHandledMessageCreatedAt) {
-      next.lastHandledMessageCreatedAt = decisionResult.lastHandledMessageCreatedAt;
+    const handledCreatedAt = decisionResult.lastHandledMessageCreatedAt || derivedHandledCreatedAt;
+    if (handledCreatedAt) {
+      next.lastHandledMessageCreatedAt = handledCreatedAt;
     }
+  } else if (!next.lastHandledMessageCreatedAt && derivedHandledCreatedAt) {
+    next.lastHandledMessageCreatedAt = derivedHandledCreatedAt;
   }
   if (decisionResult.nextStatus) {
     next.status = decisionResult.nextStatus;
@@ -1688,6 +1721,7 @@ function guardRuntimeStatus(config, objective, messages = null, runner = runComm
     effectiveHandoffMode: isHandoffMode(config),
     lastHandledMessageIdFoundInTail: lastHandledMessageIdFoundInTail(tailMessages || [], objective),
     lastHandledMessageCreatedAt: objective?.lastHandledMessageCreatedAt || null,
+    derivedLastHandledMessageCreatedAt: derivedLastHandledMessageCreatedAt(tailMessages || [], objective),
     watcherStatus: watcherStatus(config),
     tailReadError
   };
@@ -1716,6 +1750,7 @@ export function reconcile(config, { dryRun = false, now = new Date(), runner = r
       ? buildSnapshot(config, runner)
       : { orchestrators: [], childAgents: [], allAgents: [], agentById: {}, messages: [] };
   const decisionResult = decideReconcile(objective, config, snapshot, { now });
+  const derivedHandledCreatedAt = derivedLastHandledMessageCreatedAt(snapshot.messages, objective);
   const output = {
     dryRun,
     objectivePath: objectivePathFor(config),
@@ -1748,7 +1783,7 @@ export function reconcile(config, { dryRun = false, now = new Date(), runner = r
     sendPrompt(config, decisionResult.orchestratorId, decisionResult.prompt, runner);
   }
 
-  const nextObjective = applyDecisionToObjective(objective, decisionResult, now);
+  const nextObjective = applyDecisionToObjective(objective, decisionResult, now, { derivedHandledCreatedAt });
   writeJson(objectivePathFor(config), nextObjective);
   return {
     ...output,
