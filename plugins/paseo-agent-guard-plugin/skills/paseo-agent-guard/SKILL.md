@@ -61,9 +61,10 @@ After creating a child agent, immediately run:
 
 ```bash
 paseo inspect <agent-id> --json
+paseo wait <agent-id> --json &
 ```
 
-Verify that `cwd` is the target workspace or target worktree before treating the agent as valid.
+Verify that `cwd` is the target workspace or target worktree before treating the agent as valid. The `paseo wait` must run in the background for every parent-launched child agent until the child becomes idle. It supplements room evidence and the room watcher; it does not replace `SIGNAL` reporting or `paseo chat wait`.
 
 ## Room Evidence
 
@@ -107,7 +108,7 @@ When `policy.handoffMode` is true, the config itself grants approval for this PR
 
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.
 
-Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
+Use background or no-wait mode for child-agent work. For every parent-launched child agent, immediately pair the launch with a background `paseo wait <agent-id> --json` so the parent can resume when the child becomes idle. Post room evidence instead of waiting synchronously; the per-child wait is an idle notification path, not the evidence source.
 
 ## Child-Agent Cleanup
 

@@ -89,6 +89,7 @@
     "chatRead": ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     "chatPost": ["chat", "post", "{room}", "{message}", "--json"],
     "send": ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
+    "agentWait": ["wait", "{agentId}", "--json"],
     "archive": ["archive", "{agentId}", "--json"],
     "chatWait": ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },

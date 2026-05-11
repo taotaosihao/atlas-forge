@@ -616,6 +616,10 @@ test("continuation prompt includes multi-agent review policy", () => {
   assert.match(prompt, /Child-agent prompt contract:/);
   assert.match(prompt, /Every child-agent prompt must explicitly tell the child agent to use these required skill\(s\): paseo-agent-guard\./);
   assert.match(prompt, /do not rely on inherited parent context/);
+  assert.match(prompt, /For every parent-launched child agent, use background\/no-wait mode, inspect cwd\/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle\./);
+  assert.match(prompt, /Child-agent wait contract:/);
+  assert.match(prompt, /immediately start a background wait with `paseo wait <agent-id> --json`/);
+  assert.match(prompt, /does not replace SIGNAL reporting or `paseo chat wait`/);
   assert.match(prompt, /Missing room evidence recovery:/);
   assert.match(prompt, /If a child agent is idle\/complete but did not post room evidence/);
   assert.match(prompt, /relayed=true/);
@@ -907,5 +911,6 @@ test("template and example configs include default multi-agent review policy", (
       "CHECKPOINT"
     ]);
     assert.deepEqual(config.commands.archive, ["archive", "{agentId}", "--json"]);
+    assert.deepEqual(config.commands.agentWait, ["wait", "{agentId}", "--json"]);
   }
 });

@@ -104,6 +104,7 @@ const DEFAULT_CONFIG = {
     chatRead: ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     chatPost: ["chat", "post", "{room}", "{message}", "--json"],
     send: ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
+    agentWait: ["wait", "{agentId}", "--json"],
     archive: ["archive", "{agentId}", "--json"],
     chatWait: ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },
@@ -867,6 +868,19 @@ function buildChildAgentPromptInstructions(config) {
   ];
 }
 
+function buildChildAgentWaitInstructions(config) {
+  const command = (config.commands?.agentWait || ["wait", "{agentId}", "--json"])
+    .join(" ")
+    .replace("{agentId}", "<agent-id>");
+
+  return [
+    "Child-agent wait contract:",
+    `- After every parent-launched child agent is created or sent in background/no-wait mode, immediately start a background wait with \`paseo ${command}\` so the parent can resume when the child becomes idle.`,
+    "- Run the wait as a background process/job; do not block the parent synchronously on the wait.",
+    "- This per-child wait supplements room evidence and the room watcher; it does not replace SIGNAL reporting or `paseo chat wait`."
+  ];
+}
+
 function buildMissingEvidenceInstructions() {
   return [
     "Missing room evidence recovery:",
@@ -1074,12 +1088,14 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "3. Planning and research may run in researchWorkspace.",
     "4. Implementation, fix, validation, audit, and PR child agents must run in targetWorkspace or a linked target worktree.",
     "5. Every child agent must include labels: room, parent, phase, task, role.",
-    "6. Immediately inspect each created child agent and verify its cwd before relying on it.",
+    "6. For every parent-launched child agent, use background/no-wait mode, inspect cwd/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle.",
     "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
-    "8. Use background or no-wait mode for child agents and continue through room evidence.",
+    "8. Continue through room evidence; per-child waits supplement the room watcher and do not replace SIGNAL reporting.",
     protectedActionInstruction,
     "",
     ...buildChildAgentPromptInstructions(config),
+    "",
+    ...buildChildAgentWaitInstructions(config),
     "",
     ...buildMissingEvidenceInstructions(config),
     "",
