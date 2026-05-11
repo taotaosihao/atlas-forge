@@ -1296,5 +1296,7 @@ test("template and example configs include default multi-agent review policy", (
     ]);
     assert.deepEqual(config.commands.archive, ["archive", "{agentId}", "--json"]);
     assert.deepEqual(config.commands.agentWait, ["wait", "{agentId}", "--json"]);
+    assert.equal(config.watch.timeout, "10m");
+    assert.equal(config.watch.agentStatusPollTimeout, "15s");
   }
 });

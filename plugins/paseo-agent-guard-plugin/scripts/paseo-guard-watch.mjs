@@ -11,6 +11,7 @@ import {
 } from "./paseo-guard.mjs";
 
 let stopping = false;
+const AGENT_STATUS_WAIT_REASONS = new Set(["child_agent_running", "orchestrator_not_idle"]);
 
 process.on("SIGINT", () => {
   stopping = true;
@@ -73,8 +74,21 @@ export async function waitForRoomEvent(config, { timeout, runner = runCommand })
   }
 }
 
-export async function watch(config, options = {}) {
+export function needsAgentStatusPoll(objective) {
+  return objective?.status === "active" &&
+    objective?.lastDecision?.action === "wait" &&
+    AGENT_STATUS_WAIT_REASONS.has(objective.lastDecision.reason);
+}
+
+export function selectWatchTimeout(objective, config, options = {}) {
   const timeout = options.timeout || config.watch?.timeout || "10m";
+  if (!needsAgentStatusPoll(objective)) {
+    return timeout;
+  }
+  return options.agentStatusPollTimeout || config.watch?.agentStatusPollTimeout || "15s";
+}
+
+export async function watch(config, options = {}) {
   const maxCycles = Number(options.maxCycles || 0);
   const idleSleepMs = Number(options.idleSleepMs || 5000);
   let cycles = 0;
@@ -95,8 +109,13 @@ export async function watch(config, options = {}) {
       continue;
     }
 
+    const timeout = selectWatchTimeout(objective, config, options);
     const event = await waitForRoomEvent(config, { timeout, runner: options.runner });
-    printEvent(event);
+    printEvent({
+      ...event,
+      watchTimeout: timeout,
+      previousDecisionReason: objective.lastDecision?.reason || null
+    });
     if (event.type === "message" || event.type === "heartbeat") {
       try {
         const result = reconcile(config, { dryRun: Boolean(options.dryRun), runner: options.runner });
@@ -121,7 +140,7 @@ export async function watch(config, options = {}) {
 function usage() {
   return [
     "Usage:",
-    "  paseo-guard-watch --config <config> [--timeout 10m] [--dry-run] [--max-cycles 1]"
+    "  paseo-guard-watch --config <config> [--timeout 10m] [--agent-status-poll-timeout 15s] [--dry-run] [--max-cycles 1]"
   ].join("\n");
 }
 
@@ -134,6 +153,7 @@ export async function main(argv = process.argv.slice(2)) {
   const config = loadConfig(args.config);
   await watch(config, {
     timeout: args.timeout,
+    agentStatusPollTimeout: args["agent-status-poll-timeout"],
     dryRun: Boolean(args["dry-run"]),
     maxCycles: args["max-cycles"]
   });

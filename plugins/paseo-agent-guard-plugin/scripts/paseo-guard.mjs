@@ -112,7 +112,8 @@ const DEFAULT_CONFIG = {
   },
   chatReadLimit: 50,
   watch: {
-    timeout: "10m"
+    timeout: "10m",
+    agentStatusPollTimeout: "15s"
   }
 };
 

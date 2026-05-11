@@ -66,7 +66,7 @@ paseo inspect <agent-id> --json
 paseo wait <agent-id> --json &
 ```
 
-Verify that `cwd` is the target workspace or target worktree before treating the agent as valid. The `paseo wait` must run in the background for every parent-launched child agent until the child becomes idle. It is an auxiliary idle notification and diagnostic path; durable continuation comes from valid `SIGNAL` room evidence plus the guard watcher.
+Verify that `cwd` is the target workspace or target worktree before treating the agent as valid. The `paseo wait` must run in the background for every parent-launched child agent until the child becomes idle. It is an auxiliary idle notification and diagnostic path; durable continuation comes from valid `SIGNAL` room evidence plus the guard watcher. When the guard is waiting on agent status, the watcher rechecks with `watch.agentStatusPollTimeout` instead of sleeping for the full room wait timeout.
 
 ## Room Evidence
 
