@@ -56,6 +56,33 @@ const DEFAULT_CONFIG = {
     allowNewPhaseAfterMerge: false,
     checkGitWorktrees: true
   },
+  reviewPolicy: {
+    reviewers: ["claude", "codex", "gemini", "mimo"],
+    ignoreUnavailableReviewers: true,
+    phases: {
+      prd: {
+        multiAgentReview: true,
+        defaultRounds: 1,
+        humanReviewAfterMultiAgent: true,
+        untilCleanOverride: true
+      },
+      plan: {
+        multiAgentReview: true,
+        defaultRounds: 3,
+        untilCleanOverride: true
+      },
+      feature: {
+        multiAgentReview: true,
+        defaultRounds: 3,
+        untilCleanOverride: true
+      },
+      pr: {
+        multiAgentReview: true,
+        defaultRounds: 3,
+        untilCleanOverride: true
+      }
+    }
+  },
   commands: {
     paseo: "paseo",
     ls: ["ls", "--json"],
@@ -737,6 +764,30 @@ function decision(action, reason, extra = {}) {
   return { action, reason, ...extra };
 }
 
+function buildReviewPolicyInstructions(config) {
+  const policy = config.reviewPolicy || {};
+  const reviewers = Array.isArray(policy.reviewers) && policy.reviewers.length > 0
+    ? policy.reviewers.join(", ")
+    : "none";
+  const phases = policy.phases || {};
+  const threeRoundPhases = ["plan", "feature", "pr"]
+    .filter((phase) => phases[phase]?.multiAgentReview)
+    .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
+  const prdRounds = phases.prd?.defaultRounds || 1;
+
+  return [
+    "Review policy:",
+    `- Required multi-agent reviewers: ${reviewers}.`,
+    policy.ignoreUnavailableReviewers
+      ? "- Try every configured reviewer for each required review gate; if a reviewer/provider is unavailable, record that skip in the room evidence and continue with the available reviewers."
+      : "- Try every configured reviewer for each required review gate; unavailable reviewers are blockers unless the user explicitly overrides.",
+    `- PRD flow: draft or update PRD, run multi-agent review with the available reviewers for ${prdRounds} round(s), fix findings, then stop for human review.`,
+    `- Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: ${threeRoundPhases.join(", ")}.`,
+    "- If the user asks to review until there are no issues, continue review/fix/re-review cycles until all available reviewers report no findings.",
+    "- Do not treat PRD as human-review-ready until the multi-agent review findings are resolved."
+  ];
+}
+
 export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation }) {
   const signalLine = signalEntry
     ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
@@ -765,7 +816,9 @@ export function buildContinuationPrompt({ objective, config, signalEntry, reason
     "6. Immediately inspect each created child agent and verify its cwd before relying on it.",
     "7. Post room evidence in this shape: agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>}.",
     "8. Use background or no-wait mode for child agents and continue through room evidence.",
-    "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval."
+    "9. Do not merge, delete branches, archive/delete agents, restart the daemon, or start a new post-merge phase without explicit user approval.",
+    "",
+    ...buildReviewPolicyInstructions(config)
   ].join("\n");
 }
 

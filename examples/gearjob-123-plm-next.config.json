@@ -41,6 +41,33 @@
     "allowNewPhaseAfterMerge": false,
     "checkGitWorktrees": true
   },
+  "reviewPolicy": {
+    "reviewers": ["claude", "codex", "gemini", "mimo"],
+    "ignoreUnavailableReviewers": true,
+    "phases": {
+      "prd": {
+        "multiAgentReview": true,
+        "defaultRounds": 1,
+        "humanReviewAfterMultiAgent": true,
+        "untilCleanOverride": true
+      },
+      "plan": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      },
+      "feature": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      },
+      "pr": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      }
+    }
+  },
   "commands": {
     "paseo": "paseo",
     "ls": ["ls", "--json"],

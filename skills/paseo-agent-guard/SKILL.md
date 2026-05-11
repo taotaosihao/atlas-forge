@@ -95,6 +95,30 @@ Never auto-run merges, branch deletion, agent deletion or archive, daemon restar
 
 Use background or no-wait mode for child-agent work. Post room evidence instead of waiting synchronously.
 
+## Multi-Agent Review Policy
+
+PRD, plan, feature, and PR gates require multi-agent review before they are treated as ready.
+
+Default reviewers are:
+
+- `claude`
+- `codex`
+- `gemini`
+- `mimo`
+
+For every required review gate, try all configured reviewers. If any reviewer or provider is unavailable, record the skipped reviewer in room evidence and continue with the available reviewers.
+
+PRD order is strict:
+
+1. Draft or update the PRD.
+2. Run multi-agent review.
+3. Fix review findings.
+4. Stop for human review.
+
+Do not send PRD work to human review before multi-agent findings are resolved.
+
+Plan, feature, and PR gates default to 3 review rounds. If the user explicitly asks to review until there are no issues, keep running review/fix/re-review cycles until all available reviewers report no findings.
+
 ## Human Review Artifacts
 
 Use Markdown when the review artifact is pure text.
@@ -104,4 +128,3 @@ Use HTML when the review artifact includes interaction, graphics, complex tables
 For PRD requirements with complex relationships or processes, create an HTML review artifact with diagrams.
 
 For frontend interface requirements, require E2E tester screenshots or recordings and attach the evidence to the HTML review artifact.
-

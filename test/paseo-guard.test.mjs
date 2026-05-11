@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  buildContinuationPrompt,
   decideReconcile,
   initObjective,
   normalizeConfig,
@@ -286,6 +287,26 @@ test("recoverable blocker nudges orchestrator", () => {
   assert.match(result.prompt, /targetWorkspace=/);
 });
 
+test("continuation prompt includes multi-agent review policy", () => {
+  const config = makeConfig();
+  const prompt = buildContinuationPrompt({
+    objective: objective(config),
+    config,
+    reason: "safe_signal_continue",
+    signalEntry: {
+      signal: "PASS",
+      message: message("m-review", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+    }
+  });
+
+  assert.match(prompt, /Required multi-agent reviewers: claude, codex, gemini, mimo\./);
+  assert.match(prompt, /if a reviewer\/provider is unavailable, record that skip in the room evidence and continue/);
+  assert.match(prompt, /PRD flow: draft or update PRD, run multi-agent review .* fix findings, then stop for human review\./);
+  assert.match(prompt, /Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: plan=3, feature=3, pr=3\./);
+  assert.match(prompt, /review until there are no issues, continue review\/fix\/re-review cycles until all available reviewers report no findings/);
+  assert.match(prompt, /Do not treat PRD as human-review-ready until the multi-agent review findings are resolved\./);
+});
+
 test("NEEDS_USER_DECISION and ERROR require human handling", () => {
   const config = makeConfig();
   for (const signal of ["NEEDS_USER_DECISION", "ERROR"]) {
@@ -515,4 +536,20 @@ test("plugin manifest and skill frontmatter are valid", () => {
   const skill = readFileSync(join(repoRoot, "skills/paseo-agent-guard/SKILL.md"), "utf8");
   assert.match(skill, /^---\nname: paseo-agent-guard\n/m);
   assert.match(skill, /description: .+\n---/m);
+});
+
+test("template and example configs include default multi-agent review policy", () => {
+  for (const relativePath of [
+    "templates/paseo-guard.config.json",
+    "examples/gearjob-123-plm-next.config.json"
+  ]) {
+    const config = JSON.parse(readFileSync(join(repoRoot, relativePath), "utf8"));
+    assert.deepEqual(config.reviewPolicy.reviewers, ["claude", "codex", "gemini", "mimo"]);
+    assert.equal(config.reviewPolicy.ignoreUnavailableReviewers, true);
+    assert.equal(config.reviewPolicy.phases.prd.defaultRounds, 1);
+    assert.equal(config.reviewPolicy.phases.prd.humanReviewAfterMultiAgent, true);
+    assert.equal(config.reviewPolicy.phases.plan.defaultRounds, 3);
+    assert.equal(config.reviewPolicy.phases.feature.defaultRounds, 3);
+    assert.equal(config.reviewPolicy.phases.pr.defaultRounds, 3);
+  }
 });
