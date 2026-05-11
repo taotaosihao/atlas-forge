@@ -1,1370 +1,567 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  GuardError,
   buildContinuationPrompt,
+  createObjective,
   decideReconcile,
   ensureWatch,
   initObjective,
-  normalizeConfig,
+  loadWorkflow,
+  main,
   objectivePathFor,
   parseSignal,
   readObjective,
   reconcile,
+  resolveProjectWorkspace,
   setObjectiveStatus,
   validateDelegationContract,
   watcherStatus
 } from "../scripts/paseo-guard.mjs";
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const marketplaceRoot = dirname(dirname(pluginRoot));
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "paseo-guard-test-"));
+  return mkdtempSync(join(tmpdir(), "paseo-guard-v2-test-"));
 }
 
-function makeConfig(root = tempRoot(), overrides = {}) {
-  return normalizeConfig(
-    {
-      objective: "continue approved delivery",
-      projectName: "project-a",
-      room: "room-a",
-      researchWorkspace: join(root, "research"),
-      targetWorkspace: join(root, "target"),
-      objectiveStoreDir: join(root, "state"),
-      orchestratorSelector: { labels: { room: "room-a", role: "orchestrator" } },
-      policy: {
-        autoContinue: true,
-        cooldownSeconds: 0,
-        checkGitWorktrees: false
-      },
-      ...overrides
-    },
-    join(root, "config.json")
-  );
+function writeWorkflow(root, frontMatter, body = "Continue safely.") {
+  const workflowPath = join(root, "WORKFLOW.md");
+  writeFileSync(workflowPath, `---\n${frontMatter.trim()}\n---\n\n${body}\n`, "utf8");
+  return workflowPath;
 }
 
-function makeHandoffConfig(policy = {}) {
-  return makeConfig(tempRoot(), {
-    policy: {
-      autoContinue: true,
-      handoffMode: true,
-      cooldownSeconds: 0,
-      checkGitWorktrees: false,
-      ...policy
-    }
-  });
+function makeWorkflow(root = tempRoot(), overrides = {}) {
+  const research = join(root, "research");
+  const alpha = join(root, "alpha");
+  const beta = join(root, "beta");
+  const objectiveStoreDir = join(root, "state");
+  mkdirSync(research, { recursive: true });
+  mkdirSync(alpha, { recursive: true });
+  mkdirSync(beta, { recursive: true });
+  mkdirSync(objectiveStoreDir, { recursive: true });
+  const workflowPath = writeWorkflow(root, `
+schemaVersion: 2
+projectName: project-a
+room: room-a
+objective: continue approved delivery
+researchWorkspace: ./research
+objectiveStoreDir: ./state
+projects:
+  - key: alpha
+    targetWorkspace: ./alpha
+    allowedImplementationRoots:
+      - ./alpha-worktrees
+  - key: beta
+    targetWorkspace: ./beta
+policy:
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+${overrides.frontMatter || ""}
+  `, overrides.body || "Continue safely.");
+  if (overrides.alphaWorktree !== false) {
+    mkdirSync(join(root, "alpha-worktrees"), { recursive: true });
+  }
+  return loadWorkflow(workflowPath);
 }
 
-function objective(config, overrides = {}) {
+function message(id, body, author = "child-1", createdAt = null) {
   return {
-    objective: config.objective,
-    projectName: config.projectName,
-    room: config.room,
-    researchWorkspace: config.researchWorkspace,
-    targetWorkspace: config.targetWorkspace,
-    orchestratorSelector: config.orchestratorSelector,
-    status: "active",
-    lastHandledMessageId: null,
-    lastDecision: null,
-    createdAt: "2026-05-11T00:00:00.000Z",
-    updatedAt: "2026-05-11T00:00:00.000Z",
+    id,
+    author,
+    body,
+    createdAt: createdAt || `2026-05-12T00:00:0${id.slice(-1)}.000Z`
+  };
+}
+
+function objective(workflow, overrides = {}) {
+  return {
+    ...createObjective(workflow, new Date("2026-05-12T00:00:00.000Z")),
     ...overrides
   };
 }
 
-function baseSnapshot(config, message) {
+function baseSnapshot(workflow, messages = []) {
   return {
     orchestrators: [
       {
         id: "orch-1",
         status: "idle",
-        cwd: config.researchWorkspace,
-        labels: { room: config.room, role: "orchestrator" },
+        cwd: workflow.researchWorkspace,
+        labels: { room: workflow.room, role: "orchestrator" },
+        projectKey: null,
+        projectViolation: null,
         workspaceKind: "research"
       }
     ],
     childAgents: [],
     allAgents: [],
     agentById: {},
-    messages: message ? (Array.isArray(message) ? message : [message]) : []
+    runningChildCounts: Object.fromEntries(workflow.projects.map((project) => [project.key, 0])),
+    messages: Array.isArray(messages) ? messages : [messages]
   };
 }
 
-function message(id, body, author = "orch-1") {
-  return {
-    id,
-    author,
-    body,
-    createdAt: `2026-05-11T00:00:0${id.slice(-1)}.000Z`
-  };
-}
-
-test("objective init, status, pause, resume, and clear", () => {
+test("loadWorkflow applies defaults and canonicalizes workflow v2 paths", () => {
   const root = tempRoot();
   try {
-    const config = makeConfig(root);
-    const created = initObjective(config, { now: new Date("2026-05-11T00:00:00.000Z") });
-    assert.equal(created.objective.status, "active");
-    assert.equal(readObjective(config).room, "room-a");
-
-    assert.equal(setObjectiveStatus(config, "paused").status, "paused");
-    assert.equal(setObjectiveStatus(config, "active").status, "active");
-    assert.equal(setObjectiveStatus(config, "complete").status, "complete");
+    const workflow = makeWorkflow(root);
+    assert.equal(workflow.schemaVersion, 2);
+    assert.equal(workflow.projects.length, 2);
+    assert.equal(workflow.researchWorkspace.endsWith("/research"), true);
+    assert.equal(workflow.projects[0].targetWorkspace.endsWith("/alpha"), true);
+    assert.equal(workflow.projects[0].allowedImplementationRoots[0].endsWith("/alpha-worktrees"), true);
+    assert.equal(workflow.watch.logDir.endsWith("/logs"), true);
+    assert.equal(typeof workflow.workflowDigest, "string");
+    assert.ok(workflow.workflowDigest.length > 10);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("paused objective does not call paseo during reconcile", () => {
-  const root = tempRoot();
-  try {
-    const config = makeConfig(root);
-    initObjective(config);
-    setObjectiveStatus(config, "paused");
-    const result = reconcile(config, {
-      dryRun: true,
-      runner() {
-        throw new Error("runner should not be called");
-      }
-    });
-    assert.equal(result.decision.action, "wait");
-    assert.equal(result.decision.reason, "objective_paused");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("lastHandledMessageId prevents duplicate continuation", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config, { lastHandledMessageId: "m1" }),
-    config,
-    baseSnapshot(config, message("m1", "PASS agent=orch-1 cwd=/tmp branch=x task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "wait");
-  assert.equal(result.reason, "no_unhandled_signal");
-});
-
-test("lastHandledMessageCreatedAt filters old tail when handled id is outside chat tail", () => {
-  const config = makeConfig();
-  const oldSignal = message(
-    "m1",
-    "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
-  );
-  oldSignal.createdAt = "2026-05-11T00:00:01.000Z";
-  const newSignal = message(
-    "m2",
-    "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
-  );
-  newSignal.createdAt = "2026-05-11T00:00:03.000Z";
-
-  const result = decideReconcile(
-    objective(config, {
-      lastHandledMessageId: "missing-from-tail",
-      lastHandledMessageCreatedAt: "2026-05-11T00:00:02.000Z"
-    }),
-    config,
-    baseSnapshot(config, [oldSignal, newSignal])
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.messageId, "m2");
-});
-
-test("lastHandledMessageCreatedAt fallback keeps same-timestamp messages", () => {
-  const config = makeConfig();
-  const sameTimestampSignal = message(
-    "m2",
-    "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
-  );
-  sameTimestampSignal.createdAt = "2026-05-11T00:00:02.000Z";
-
-  const result = decideReconcile(
-    objective(config, {
-      lastHandledMessageId: "missing-from-tail",
-      lastHandledMessageCreatedAt: "2026-05-11T00:00:02.000Z"
-    }),
-    config,
-    baseSnapshot(config, sameTimestampSignal)
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.messageId, "m2");
-});
-
-test("closed orchestrator is skipped when a replacement orchestrator is available", () => {
-  const config = makeConfig();
-  const snapshot = baseSnapshot(
-    config,
-    message("m2", "PASS agent=orch-2 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}", "orch-2")
-  );
-  snapshot.orchestrators = [
-    {
-      id: "orch-1",
-      status: "closed",
-      cwd: config.researchWorkspace,
-      labels: { room: config.room, role: "orchestrator" },
-      workspaceKind: "research"
-    },
-    {
-      id: "orch-2",
-      status: "idle",
-      cwd: config.researchWorkspace,
-      labels: { room: config.room, role: "orchestrator" },
-      workspaceKind: "research"
-    }
-  ];
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.orchestratorId, "orch-2");
-});
-
-test("all closed orchestrators block instead of waiting forever", () => {
-  const config = makeConfig();
-  const snapshot = baseSnapshot(
-    config,
-    message("m2", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
-  );
-  snapshot.orchestrators = [
-    {
-      id: "orch-1",
-      status: "closed",
-      cwd: config.researchWorkspace,
-      labels: { room: config.room, role: "orchestrator" },
-      workspaceKind: "research"
-    }
-  ];
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "orchestrator_unavailable");
-  assert.equal(result.nextStatus, "blocked");
-});
-
-test("parseSignal accepts canonical and legacy child evidence shapes", () => {
-  const config = makeConfig();
-  assert.equal(
-    parseSignal(
-      "FIXED agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=clean",
-      config
-    ),
-    "FIXED"
-  );
-  assert.equal(
-    parseSignal(
-      "SIGNAL signal=FIXED agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=clean",
-      config
-    ),
-    "FIXED"
-  );
-  assert.equal(
-    parseSignal(
-      "SIGNAL agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=FIXED linked before submit",
-      config
-    ),
-    "FIXED"
-  );
-  assert.equal(
-    parseSignal(
-      "SIGNAL agent=child-1 cwd=/tmp/target branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=fix} evidence=START inspecting",
-      config
-    ),
-    null
-  );
-});
-
-test("non-signal room update triggers missing evidence recovery", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m2", "PR_REVIEW_STATUS codex=PASS gemini=result_not_observed mimo=running"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "missing_room_evidence_recovery");
-  assert.equal(result.messageId, "m2");
-  assert.equal(result.lastHandledMessageId, "m2");
-  assert.match(result.prompt, /reason=missing_room_evidence_recovery/);
-  assert.match(result.prompt, /recoveryContext=type=unrecognized_room_update messageId=m2 author=orch-1/);
-  assert.match(result.prompt, /If a child agent failed, hit quota, lost provider access, or needs permission/);
-});
-
-test("failed child without room signal triggers missing evidence recovery", () => {
-  const config = makeConfig();
-  const snapshot = baseSnapshot(config);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "failed",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "missing_room_evidence_recovery");
-  assert.equal(result.childAgentId, "child-1");
-  assert.equal(result.lastHandledMessageId, undefined);
-  assert.match(result.prompt, /recoveryContext=type=child_agent_missing_room_evidence childAgentId=child-1 childAgentStatus=failed/);
-});
-
-test("finished child after checkpoint without room signal triggers recovery", () => {
-  const config = makeConfig();
-  const snapshot = baseSnapshot(config);
-  snapshot.childAgents = [
-    {
-      id: "child-2",
-      status: "done",
-      updatedAt: "2026-05-11T00:00:03.000Z",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t2", role: "audit" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-2"] = snapshot.childAgents[0];
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "missing_room_evidence_recovery");
-  assert.equal(result.childAgentId, "child-2");
-});
-
-test("completed child with valid room evidence triggers cleanup", () => {
-  const config = makeConfig();
-  const childDone = message(
-    "m-clean",
-    `PASS agent=child-1 cwd=${config.targetWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=review,task=t1,role=audit} evidence=clean`,
-    "child-1"
-  );
-  const snapshot = baseSnapshot(config, childDone);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "done",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-
-  const result = decideReconcile(
-    objective(config, { lastHandledMessageId: "m-clean" }),
-    config,
-    snapshot
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "completed_child_cleanup");
-  assert.deepEqual(result.cleanupAgentIds, ["child-1"]);
-  assert.match(result.prompt, /completedChildAgentsReadyToClose=id=child-1,status=done,role=audit,task=t1/);
-  assert.match(result.prompt, /paseo archive <agent-id> --json/);
-  assert.match(result.prompt, /Never use `--force` for cleanup/);
-});
-
-test("completed child cleanup requires valid room evidence", () => {
-  const config = makeConfig();
-  const childDone = message("m-clean", "PASS result=clean", "child-1");
-  const snapshot = baseSnapshot(config, childDone);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "done",
-      updatedAt: "2026-05-11T00:00:03.000Z",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "review", task: "t1", role: "audit" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-
-  const result = decideReconcile(
-    objective(config, { lastHandledMessageId: "m-clean" }),
-    config,
-    snapshot
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "missing_room_evidence_recovery");
-  assert.equal(result.childAgentId, "child-1");
-});
-
-test("ordinary non-signal room chatter does not trigger continuation", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m2", "noted, thanks"))
-  );
-  assert.equal(result.action, "wait");
-  assert.equal(result.reason, "no_unhandled_signal");
-});
-
-test("handled non-signal room update is not repeated", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config, { lastHandledMessageId: "m2" }),
-    config,
-    baseSnapshot(config, message("m2", "PR_REVIEW_STATUS codex=PASS gemini=result_not_observed mimo=running"))
-  );
-  assert.equal(result.action, "wait");
-  assert.equal(result.reason, "no_unhandled_signal");
-});
-
-test("implementation agent in research workspace returns contract violation", () => {
-  const config = makeConfig();
-  const entry = {
-    signal: "DONE",
-    message: message(
-      "m2",
-      "DONE agent=child-1 cwd=/tmp/research branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}",
-      "child-1"
-    )
-  };
-  const snapshot = baseSnapshot(config, entry.message);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.researchWorkspace,
-    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
-    workspaceKind: "research"
-  };
-  const violation = validateDelegationContract(entry, snapshot, config);
-  assert.equal(violation.type, "delegation_contract_violation");
-  assert.match(violation.violations.join("\n"), /must run in targetWorkspace/);
-});
-
-test("implementation cwd inside research is not accepted as target worktree", () => {
+test("loadWorkflow rejects overlapping project roots", () => {
   const root = tempRoot();
   try {
     mkdirSync(join(root, "research"), { recursive: true });
-    mkdirSync(join(root, "target"), { recursive: true });
-    spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
-
-    const config = makeConfig(root, {
-      policy: {
-        autoContinue: true,
-        cooldownSeconds: 0,
-        checkGitWorktrees: true
-      }
-    });
-    const entry = {
-      signal: "DONE",
-      message: message(
-        "m2",
-        `DONE agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
-        "child-1"
-      )
-    };
-    const snapshot = baseSnapshot(config, entry.message);
-    snapshot.agentById["child-1"] = {
-      id: "child-1",
-      cwd: config.researchWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" }
-    };
-    const violation = validateDelegationContract(entry, snapshot, config);
-    assert.equal(violation.type, "delegation_contract_violation");
-    assert.match(violation.violations.join("\n"), /got research:/);
+    mkdirSync(join(root, "mono"), { recursive: true });
+    mkdirSync(join(root, "mono", "sub"), { recursive: true });
+    mkdirSync(join(root, "state"), { recursive: true });
+    const workflowPath = writeWorkflow(root, `
+schemaVersion: 2
+projectName: overlap
+room: room-a
+objective: overlap
+researchWorkspace: ./research
+objectiveStoreDir: ./state
+projects:
+  - key: one
+    targetWorkspace: ./mono
+  - key: two
+    targetWorkspace: ./mono/sub
+policy:
+  checkGitWorktrees: false
+    `);
+    assert.throws(() => loadWorkflow(workflowPath), /workflow_overlapping_project_roots/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("implementation agent in target workspace passes contract", () => {
-  const config = makeConfig();
-  const entry = {
-    signal: "DONE",
-    message: message(
-      "m3",
-      "DONE agent=child-1 cwd=/tmp/target branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}",
-      "child-1"
-    )
-  };
-  const snapshot = baseSnapshot(config, entry.message);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.targetWorkspace,
-    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
-    workspaceKind: "target"
-  };
-  assert.equal(validateDelegationContract(entry, snapshot, config), null);
-});
-
-test("child signal can infer missing agent evidence from room author", () => {
-  const config = makeConfig();
-  const entry = {
-    signal: "PASS",
-    message: message(
-      "m3",
-      `PASS labels={room=room-a,parent=orch-1,phase=pr71-review,task=pr71-review-until-clean,role=reviewer-codex} cwd=${config.targetWorkspace} branch=feat task=pr71-review-until-clean evidence="no findings"`,
-      "child-1"
-    )
-  };
-  const snapshot = baseSnapshot(config, entry.message);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "idle",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "pr71-review", task: "pr71-review-until-clean", role: "reviewer-codex" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-  assert.equal(validateDelegationContract(entry, snapshot, config), null);
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.signal, "PASS");
-  assert.equal(result.messageId, "m3");
-});
-
-test("orchestrator self-reporting implementation work in research workspace is blocked", () => {
-  const config = makeConfig();
-  const entry = {
-    signal: "DONE",
-    message: message(
-      "m4",
-      `DONE agent=orch-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
-      "orch-1"
-    )
-  };
-  const snapshot = baseSnapshot(config, entry.message);
-  snapshot.agentById["orch-1"] = {
-    id: "orch-1",
-    cwd: config.researchWorkspace,
-    labels: { room: config.room, role: "orchestrator" },
-    workspaceKind: "research"
-  };
-  const violation = validateDelegationContract(entry, snapshot, config);
-  assert.equal(violation.type, "delegation_contract_violation");
-  assert.equal(violation.reportedAgentId, "orch-1");
-});
-
-test("missing required child labels returns contract violation", () => {
-  const config = makeConfig();
-  const entry = {
-    signal: "DONE",
-    message: message("m4", "DONE agent=child-1 cwd=/tmp/target branch=feat task=t1 labels={room=room-a,parent=orch-1}", "child-1")
-  };
-  const snapshot = baseSnapshot(config, entry.message);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.targetWorkspace,
-    labels: { room: config.room, parent: "orch-1" },
-    workspaceKind: "target"
-  };
-  const violation = validateDelegationContract(entry, snapshot, config);
-  assert.match(violation.violations.join("\n"), /missing_labels=phase,task,role/);
-});
-
-test("PR_CREATED PASS is a terminal human review gate", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "PR_CREATED PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
+test("main rejects removed --config usage with migration error", () => {
+  assert.throws(
+    () => main(["status", "--config", "guard.json"]),
+    (error) => error instanceof GuardError && error.code === "workflow_migration_required"
   );
-  assert.equal(result.action, "stop");
-  assert.equal(result.reason, "terminal_review_gate");
-  assert.equal(result.nextStatus, "blocked");
 });
 
-test("MERGED terminal signal is not mistaken for protected merge action", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "stop");
-  assert.equal(result.reason, "terminal_signal");
-  assert.equal(result.nextStatus, "complete");
-});
+test("objective init/status/clear use schema v2 and reject legacy objective schema", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const created = initObjective(workflow, { now: new Date("2026-05-12T00:00:00.000Z") });
+    assert.equal(created.objective.schemaVersion, 2);
+    assert.equal(created.objective.workflowPath, workflow.workflowPath);
+    assert.deepEqual(Object.keys(created.objective.perProjectHandledCursor), ["alpha", "beta"]);
+    assert.equal(setObjectiveStatus(workflow, "paused").status, "paused");
+    assert.equal(setObjectiveStatus(workflow, "complete").status, "complete");
 
-test("handoff mode continues PR_CREATED into review until clean", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "PR_CREATED PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "handoff_pr_review_until_clean");
-  assert.match(result.prompt, /Handoff mode is enabled/);
-  assert.match(result.prompt, /PR review gates must continue without human confirmation through review\/fix\/re-review until all available reviewers report no findings, then merge/);
-  assert.match(result.prompt, /do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation/i);
-  assert.match(result.prompt, /Stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker/);
-});
-
-test("handoff mode accepts PR_CREATED child evidence with task inside labels", () => {
-  const config = makeHandoffConfig();
-  const prCreated = message(
-    "m5",
-    `SIGNAL signal=PR_CREATED labels={room=room-a,parent=orch-1,phase=approved-release,task=20260512-001-approved-release,role=implementation} cwd=${config.targetWorkspace} branch=feat/approved-release changed_files=[a.py] commit=abc123 pr=https://example.test/pr/72 validation="PASS tests"`,
-    "child-1"
-  );
-  const snapshot = baseSnapshot(config, prCreated);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "idle",
-      cwd: config.targetWorkspace,
-      labels: {
-        room: config.room,
-        parent: "orch-1",
-        phase: "approved-release",
-        task: "20260512-001-approved-release",
-        role: "implementation"
-      },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-
-  assert.equal(validateDelegationContract({ message: prCreated, signal: "PR_CREATED" }, snapshot, config), null);
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "handoff_pr_review_until_clean");
-  assert.equal(result.signal, "PR_CREATED");
-  assert.equal(result.messageId, "m5");
-});
-
-test("handoff mode continues MERGED into the next phase", () => {
-  const config = makeHandoffConfig();
-  assert.equal(config.policy.allowNewPhaseAfterMerge, false);
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "handoff_next_phase_continue");
-  assert.match(result.prompt, /continue into the next approved project phase/);
-});
-
-test("handoff mode prioritizes terminal signal over later safe signals", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, [
-      message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"),
-      message("m6", "PASS agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
-    ])
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "handoff_next_phase_continue");
-  assert.equal(result.messageId, "m5");
-  assert.equal(result.lastHandledMessageId, "m6");
-});
-
-test("handoff mode respects cooldown before terminal continuation", () => {
-  const now = new Date("2026-05-11T00:01:00.000Z");
-  const config = makeHandoffConfig({ cooldownSeconds: 60 });
-  const result = decideReconcile(
-    objective(config, {
-      lastDecision: {
-        action: "send",
-        reason: "safe_signal_continue",
-        decidedAt: "2026-05-11T00:00:30.000Z"
-      }
-    }),
-    config,
-    baseSnapshot(config, message("m5", "PR_CREATED agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")),
-    { now }
-  );
-  assert.equal(result.action, "wait");
-  assert.equal(result.reason, "cooldown_active");
-});
-
-test("handoff mode respects autoContinue before terminal continuation", () => {
-  const config = makeHandoffConfig({ autoContinue: false });
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "PR_CREATED agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "wait");
-  assert.equal(result.reason, "auto_continue_disabled");
-});
-
-test("handoff mode allows merge and new project phase protected mentions", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR then start new project phase'"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-});
-
-test("handoff mode ignores negated protected actions in terminal evidence", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(
-      config,
-      message(
-        "m5",
-        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"cleanup complete; no merge, branch deletion, daemon restart, or new child launched; next guarded step is PR71 re-review\""
-      )
-    )
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-});
-
-test("negated protected action detection does not cross sentence boundaries", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(
-      config,
-      message(
-        "m5",
-        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"not blocked. delete branch\""
-      )
-    )
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "delete branch");
-});
-
-test("direct negation detection does not treat comma follow-up as negated", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(
-      config,
-      message(
-        "m5",
-        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"not blocked, delete branch\""
-      )
-    )
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "delete branch");
-});
-
-test("list negation requires previous protected action before comma follow-up", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(
-      config,
-      message(
-        "m5",
-        "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=\"no blockers, delete branch\""
-      )
-    )
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "delete branch");
-});
-
-test("handoff mode still blocks destructive protected actions", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR then delete branch'"))
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "delete branch");
-});
-
-test("generic agent close remains protected", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='close agent child-1'"))
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "close agent");
-});
-
-test("completed child archive wording is allowed", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='archive completed child agent child-1 after evidence'"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-});
-
-test("handoff mode blocks destructive protected actions on terminal signals", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "MERGED agent=orch-1 cwd=/tmp branch=main task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='delete branch'"))
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.protectedAction, "delete branch");
-});
-
-test("handoff mode continues latest wrapped FIXED after old merge and recoverable PR fix", () => {
-  const config = makeHandoffConfig();
-  const merged = message(
-    "m1",
-    "MERGED agent=orch-1 cwd=/tmp/research branch=master task=old-task labels={room=room-a,parent=root,phase=old,task=old-task,role=orchestrator} evidence=old_pr_merged"
-  );
-  const needsFix = message(
-    "m2",
-    "NEEDS_FIX agent=orch-1 cwd=/tmp/research branch=master task=fix-task labels={room=room-a,parent=root,phase=pr-review-fix,task=fix-task,role=orchestrator} evidence=review_found_issue"
-  );
-  const fixStarted = message(
-    "m3",
-    "FIX_STARTED agent=orch-1 cwd=/tmp/research branch=master task=fix-task labels={room=room-a,parent=root,phase=pr-review-fix,task=fix-task,role=orchestrator} evidence=child_started"
-  );
-  const fixed = message(
-    "m4",
-    `SIGNAL agent=child-1 cwd=${config.targetWorkspace} branch=feat task=fix-task labels={room=room-a,parent=orch-1,phase=pr-review-fix,task=fix-task,role=fix} evidence=FIXED committed and pushed`,
-    "child-1"
-  );
-  const snapshot = baseSnapshot(config, [merged, needsFix, fixStarted, fixed]);
-  snapshot.childAgents = [
-    {
-      id: "child-1",
-      status: "idle",
-      cwd: config.targetWorkspace,
-      labels: { room: config.room, parent: "orch-1", phase: "pr-review-fix", task: "fix-task", role: "fix" },
-      workspaceKind: "target"
-    }
-  ];
-  snapshot.agentById["child-1"] = snapshot.childAgents[0];
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.signal, "FIXED");
-  assert.equal(result.messageId, "m4");
-  assert.equal(result.lastHandledMessageId, "m4");
-});
-
-test("handoff mode blocks terminal child contract violations", () => {
-  const config = makeHandoffConfig();
-  const childSignal = message(
-    "m5",
-    `PR_CREATED agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t labels={room=room-a,parent=orch-1,phase=p,task=t,role=implementation}`,
-    "child-1"
-  );
-  const snapshot = baseSnapshot(config, childSignal);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.researchWorkspace,
-    labels: { room: config.room, parent: "orch-1", phase: "p", task: "t", role: "implementation" },
-    workspaceKind: "research"
-  };
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "delegation_contract_violation");
-});
-
-test("handoff mode still blocks non-recoverable signals", () => {
-  const config = makeHandoffConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m5", "ERROR agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "human_decision_required");
-});
-
-test("recoverable blocker nudges orchestrator", () => {
-  const config = makeConfig();
-  const result = decideReconcile(
-    objective(config),
-    config,
-    baseSnapshot(config, message("m6", "BLOCKED agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"))
-  );
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "recoverable_blocker_nudge");
-  assert.match(result.prompt, /targetWorkspace=/);
-});
-
-test("continuation prompt includes multi-agent review policy", () => {
-  const config = makeConfig();
-  const prompt = buildContinuationPrompt({
-    objective: objective(config),
-    config,
-    reason: "safe_signal_continue",
-    signalEntry: {
-      signal: "PASS",
-      message: message("m-review", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
-    }
-  });
-
-  assert.match(prompt, /Required multi-agent reviewers: claude, codex, gemini, mimo\./);
-  assert.match(prompt, /Child-agent prompt contract:/);
-  assert.match(prompt, /Every child-agent prompt must explicitly tell the child agent to use these required skill\(s\): paseo-agent-guard\./);
-  assert.match(prompt, /do not rely on inherited parent context/);
-  assert.match(prompt, /For every parent-launched child agent, use background\/no-wait mode, inspect cwd\/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle\./);
-  assert.match(prompt, /SIGNAL signal=<FIXED\|PASS\|DONE\|PLAN_READY\|BLOCKED\|NEEDS_FIX\|PR_CREATED\|MERGED>/);
-  assert.match(prompt, /Child-agent wait contract:/);
-  assert.match(prompt, /immediately start a background wait with `paseo wait <agent-id> --json`/);
-  assert.match(prompt, /durable continuation comes from `paseo-guard-watch` plus valid SIGNAL reporting/);
-  assert.match(prompt, /Missing room evidence recovery:/);
-  assert.match(prompt, /If a child agent is idle\/complete but did not post room evidence/);
-  assert.match(prompt, /relayed=true/);
-  assert.match(prompt, /Child-agent cleanup:/);
-  assert.match(prompt, /After a child agent posts valid final room evidence and is idle\/done, close it promptly/);
-  assert.match(prompt, /delete agents, force-archive\/close running agents, close child agents before room evidence/);
-  assert.match(prompt, /Agent launch defaults:/);
-  assert.match(prompt, /Provider mode defaults: codex=full-access, claude=bypassPermissions, gemini=yolo, mimo=bypassPermissions\./);
-  assert.match(prompt, /Codex uses mode `full-access` as its YOLO-equivalent mode\./);
-  assert.match(prompt, /Claude Code-based providers, including `claude` and `mimo`, use mode `bypassPermissions`\./);
-  assert.match(prompt, /paseo run --mode <mode>/);
-  assert.match(prompt, /if a reviewer\/provider is unavailable, record that skip in the room evidence and continue/);
-  assert.match(prompt, /PRD flow: draft or update PRD, run multi-agent review .* fix findings, then stop for human review\./);
-  assert.match(prompt, /Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: plan=3, feature=3, pr=3\./);
-  assert.match(prompt, /Human confirmation is required at configured terminal gates unless the user explicitly approved continuation\./);
-  assert.match(prompt, /review until there are no issues, continue review\/fix\/re-review cycles until all available reviewers report no findings/);
-  assert.match(prompt, /Do not treat PRD as human-review-ready until the multi-agent review findings are resolved\./);
-});
-
-test("NEEDS_USER_DECISION and ERROR require human handling", () => {
-  const config = makeConfig();
-  for (const signal of ["NEEDS_USER_DECISION", "ERROR"]) {
-    const result = decideReconcile(
-      objective(config),
-      config,
-      baseSnapshot(config, message(`m-${signal}`, `${signal} agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}`))
-    );
-    assert.equal(result.action, "block");
-    assert.equal(result.reason, "human_decision_required");
-    assert.equal(result.nextStatus, "blocked");
+    writeFileSync(objectivePathFor(workflow), `${JSON.stringify({ schemaVersion: 1, room: workflow.room }, null, 2)}\n`);
+    assert.throws(() => readObjective(workflow), /objective_migration_required/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("earlier unhandled child contract violation blocks later safe signal", () => {
-  const config = makeConfig();
-  const badChildSignal = message(
-    "m1",
-    `DONE agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
-    "child-1"
-  );
-  const laterSafeSignal = message(
-    "m2",
-    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
-  );
-  const snapshot = baseSnapshot(config, [badChildSignal, laterSafeSignal]);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.researchWorkspace,
-    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
-    workspaceKind: "research"
-  };
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "delegation_contract_violation");
-  assert.equal(result.messageId, "m1");
-  assert.match(result.violation.violations.join("\n"), /must run in targetWorkspace/);
-});
-
-test("earlier unhandled protected action blocks later safe signal", () => {
-  const config = makeConfig();
-  const protectedSignal = message(
-    "m1",
-    "DONE agent=orch-1 cwd=/tmp branch=feat task=t1 labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} next_action='merge PR'"
-  );
-  const laterSafeSignal = message(
-    "m2",
-    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
-  );
-
-  const result = decideReconcile(objective(config), config, baseSnapshot(config, [protectedSignal, laterSafeSignal]));
-  assert.equal(result.action, "block");
-  assert.equal(result.reason, "protected_action_detected");
-  assert.equal(result.messageId, "m1");
-  assert.equal(result.protectedAction, "merge");
-});
-
-test("valid earlier child signal still allows latest safe signal continuation", () => {
-  const config = makeConfig();
-  const childDone = message(
-    "m1",
-    `DONE agent=child-1 cwd=${config.targetWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
-    "child-1"
-  );
-  const laterSafeSignal = message(
-    "m2",
-    "PASS agent=orch-1 cwd=/tmp branch=feat task=t2 labels={room=room-a,parent=root,phase=p2,task=t2,role=orchestrator}"
-  );
-  const snapshot = baseSnapshot(config, [childDone, laterSafeSignal]);
-  snapshot.agentById["child-1"] = {
-    id: "child-1",
-    cwd: config.targetWorkspace,
-    labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" },
-    workspaceKind: "target"
-  };
-
-  const result = decideReconcile(objective(config), config, snapshot);
-  assert.equal(result.action, "send");
-  assert.equal(result.reason, "safe_signal_continue");
-  assert.equal(result.messageId, "m2");
-});
-
-test("non-dry-run sends inline prompt instead of prompt file", () => {
+test("resolveProjectWorkspace returns exactly one project match", () => {
   const root = tempRoot();
   try {
-    const config = makeConfig(root);
-    initObjective(config);
-    const calls = [];
-    const result = reconcile(config, {
-      runner(command, args) {
-        calls.push([command, args]);
+    const workflow = makeWorkflow(root);
+    assert.deepEqual(resolveProjectWorkspace(join(workflow.projects[0].targetWorkspace, "src"), workflow.projects, { checkGitWorktrees: false }), {
+      projectKey: "alpha",
+      workspaceKind: "target"
+    });
+    assert.deepEqual(resolveProjectWorkspace(join(workflow.projects[0].allowedImplementationRoots[0], "task1"), workflow.projects, { checkGitWorktrees: false }), {
+      projectKey: "alpha",
+      workspaceKind: "allowed-root"
+    });
+    assert.throws(() => resolveProjectWorkspace(join(root, "nowhere"), workflow.projects, { checkGitWorktrees: false }), /delegation_contract_violation/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("parseSignal only accepts canonical SIGNAL envelope", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    assert.equal(
+      parseSignal(
+        "SIGNAL signal=FIXED project=alpha agent=child-1 cwd=/tmp branch=feat task=t labels={room=room-a,project=alpha,parent=orch-1,phase=fix,task=t,role=fix} evidence=clean",
+        workflow
+      ),
+      "FIXED"
+    );
+    assert.equal(
+      parseSignal(
+        "FIXED project=alpha agent=child-1 cwd=/tmp branch=feat task=t labels={room=room-a,project=alpha,parent=orch-1,phase=fix,task=t,role=fix} evidence=clean",
+        workflow
+      ),
+      null
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validateDelegationContract reports separate project, label, role, and evidence violations", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const entry = {
+      message: message(
+        "m1",
+        `SIGNAL signal=DONE project=alpha agent=child-1 cwd=${workflow.researchWorkspace} branch=feat labels={room=room-a,project=beta,parent=orch-1,phase=p1,role=implementation} evidence=done`
+      ),
+      signal: "DONE"
+    };
+    const snapshot = baseSnapshot(workflow, entry.message);
+    snapshot.agentById["child-1"] = {
+      id: "child-1",
+      cwd: workflow.researchWorkspace,
+      labels: { room: workflow.room, project: "beta", parent: "orch-1", phase: "p1", role: "implementation" },
+      projectKey: null,
+      projectViolation: null,
+      workspaceKind: "research"
+    };
+    const violation = validateDelegationContract(entry, snapshot, workflow);
+    assert.equal(violation.type, "delegation_contract_violation");
+    assert.equal(violation.violations.labelProject, "labels.project_mismatch:beta");
+    assert.equal(violation.violations.role, "invalid_workspace_kind:research");
+    assert.equal(violation.violations.evidence.includes("task"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validateDelegationContract infers missing agent and cwd evidence from room author", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const entry = {
+      message: message(
+        "m1",
+        "SIGNAL signal=PASS project=alpha branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=review,task=t-a,role=implementation} evidence=clean",
+        "child-a"
+      ),
+      signal: "PASS",
+      projectKey: "alpha"
+    };
+    const snapshot = baseSnapshot(workflow, entry.message);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "review", task: "t-a", role: "implementation" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    assert.equal(validateDelegationContract(entry, snapshot, workflow), null);
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "safe_signal_continue");
+    assert.equal(result.signal, "PASS");
+    assert.equal(result.messageId, "m1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validateDelegationContract accepts task evidence from labels", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const entry = {
+      message: message(
+        "m1",
+        `SIGNAL signal=DONE project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat labels={room=room-a,project=alpha,parent=orch-1,phase=build,task=t-a,role=implementation} evidence=done`,
+        "child-a"
+      ),
+      signal: "DONE",
+      projectKey: "alpha"
+    };
+    const snapshot = baseSnapshot(workflow, entry.message);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t-a", role: "implementation" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    assert.equal(validateDelegationContract(entry, snapshot, workflow), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("decideReconcile processes oldest actionable signal for one project only", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const snapshot = baseSnapshot(workflow, [
+      message(
+        "m1",
+        `SIGNAL signal=PASS project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat-a task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=build,task=t-a,role=implementation} evidence=alpha clean`,
+        "child-a",
+        "2026-05-12T00:00:01.000Z"
+      ),
+      message(
+        "m2",
+        `SIGNAL signal=PASS project=beta agent=child-b cwd=${workflow.projects[1].targetWorkspace} branch=feat-b task=t-b labels={room=room-a,project=beta,parent=orch-1,phase=build,task=t-b,role=implementation} evidence=beta clean`,
+        "child-b",
+        "2026-05-12T00:00:02.000Z"
+      )
+    ]);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t-a", role: "implementation" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+    snapshot.agentById["child-b"] = {
+      id: "child-b",
+      cwd: workflow.projects[1].targetWorkspace,
+      labels: { room: workflow.room, project: "beta", parent: "orch-1", phase: "build", task: "t-b", role: "implementation" },
+      projectKey: "beta",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "safe_signal_continue");
+    assert.equal(result.projectKey, "alpha");
+    assert.equal(result.messageId, "m1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconcile updates only the handled project cursor and clears that project retry ledger after valid progress", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    initObjective(workflow);
+    const objectiveData = readObjective(workflow);
+    objectiveData.retryLedger = {
+      "alpha:recoverable_blocker_nudge:m-old": {
+        projectKey: "alpha",
+        reason: "recoverable_blocker_nudge",
+        messageId: "m-old",
+        agentId: null,
+        attempt: 1,
+        dueAt: "2026-05-12T00:00:00.000Z",
+        lastError: null,
+        lastPromptAt: "2026-05-12T00:00:00.000Z"
+      },
+      "beta:recoverable_blocker_nudge:m-beta": {
+        projectKey: "beta",
+        reason: "recoverable_blocker_nudge",
+        messageId: "m-beta",
+        agentId: null,
+        attempt: 1,
+        dueAt: "2026-05-12T00:00:00.000Z",
+        lastError: null,
+        lastPromptAt: "2026-05-12T00:00:00.000Z"
+      }
+    };
+    writeFileSync(objectivePathFor(workflow), `${JSON.stringify(objectiveData, null, 2)}\n`);
+
+    reconcile(workflow, {
+      runner(_command, args) {
         if (args[0] === "ls" && args.includes("role=orchestrator")) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
+          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
         }
-        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
+        if (args[0] === "ls" && args.includes(`room=${workflow.room}`)) {
+          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
         }
         if (args[0] === "chat" && args[1] === "read") {
           return {
             status: 0,
             stdout: JSON.stringify([
-              message("m8", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+              {
+                id: "m1",
+                author: "child-a",
+                createdAt: "2026-05-12T00:00:01.000Z",
+                body: `SIGNAL signal=PASS project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat-a task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=build,task=t-a,role=implementation} evidence=alpha clean`
+              }
             ]),
             stderr: ""
           };
         }
         if (args[0] === "send") {
-          assert.equal(args.includes("--prompt"), true);
-          assert.equal(args.includes("--prompt-file"), false);
-          assert.match(args[args.indexOf("--prompt") + 1], /PASEO_AGENT_GUARD_CONTINUATION/);
           return { status: 0, stdout: "{}", stderr: "" };
         }
         throw new Error(`unexpected call: ${args.join(" ")}`);
       }
     });
-    assert.equal(result.decision.action, "send");
-    assert.equal(calls.some(([, args]) => args[0] === "send"), true);
+
+    const next = readObjective(workflow);
+    assert.equal(next.perProjectHandledCursor.alpha.messageId, "m1");
+    assert.equal(next.perProjectHandledCursor.beta.messageId, null);
+    assert.equal(next.retryLedger["beta:recoverable_blocker_nudge:m-beta"] !== undefined, true);
+    assert.equal(next.retryLedger["alpha:recoverable_blocker_nudge:m-old"], undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("non-dry-run reconcile upgrades legacy objective with handled message timestamp on wait decision", () => {
+test("retry ledger is keyed by project and blocks project after max retries", () => {
   const root = tempRoot();
   try {
-    const config = makeConfig(root);
-    initObjective(config);
-    const legacyObjective = {
-      ...readObjective(config),
-      lastHandledMessageId: "m1",
-      lastHandledMessageCreatedAt: null
-    };
-    writeFileSync(objectivePathFor(config), `${JSON.stringify(legacyObjective, null, 2)}\n`);
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  cooldownSeconds: 0
+  maxRetries: 2
+  checkGitWorktrees: false
+      `
+    });
+    const snapshot = baseSnapshot(workflow);
+    const result = decideReconcile(objective(workflow, {
+      retryLedger: {
+        "alpha:missing_room_evidence_recovery:child-1": {
+          projectKey: "alpha",
+          reason: "missing_room_evidence_recovery",
+          messageId: null,
+          agentId: "child-1",
+          attempt: 2,
+          dueAt: "2026-05-12T00:00:00.000Z",
+          lastError: null,
+          lastPromptAt: "2026-05-12T00:00:00.000Z"
+        }
+      }
+    }), workflow, snapshot, { now: new Date("2026-05-12T00:00:10.000Z") });
+    assert.equal(result.action, "block");
+    assert.equal(result.reason, "retry_budget_exhausted");
+    assert.equal(result.projectKey, "alpha");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
-    const handledMessage = message(
+test("completed child cleanup requires valid final evidence for the same project", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const snapshot = baseSnapshot(workflow, message(
       "m1",
-      "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}"
-    );
-    handledMessage.createdAt = "2026-05-11T00:00:05.000Z";
-
-    const result = reconcile(config, {
-      runner(command, args) {
-        if (args[0] === "ls" && args.includes("role=orchestrator")) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
-        }
-        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
-        }
-        if (args[0] === "chat" && args[1] === "read") {
-          return { status: 0, stdout: JSON.stringify([handledMessage]), stderr: "" };
-        }
-        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
+      `SIGNAL signal=PASS project=alpha agent=child-1 cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t1 labels={room=room-a,project=alpha,parent=orch-1,phase=review,task=t1,role=audit} evidence=clean`,
+      "child-1"
+    ));
+    snapshot.childAgents = [
+      {
+        id: "child-1",
+        status: "done",
+        cwd: workflow.projects[0].targetWorkspace,
+        labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "review", task: "t1", role: "audit" },
+        projectKey: "alpha",
+        projectViolation: null,
+        workspaceKind: "target"
       }
-    });
-
-    assert.equal(result.decision.action, "wait");
-    assert.equal(result.decision.reason, "no_unhandled_signal");
-    assert.equal(readObjective(config).lastHandledMessageCreatedAt, "2026-05-11T00:00:05.000Z");
+    ];
+    snapshot.agentById["child-1"] = snapshot.childAgents[0];
+    const result = decideReconcile(objective(workflow, {
+      perProjectHandledCursor: {
+        alpha: { messageId: "m1", lastHandledMessageCreatedAt: "2026-05-12T00:00:01.000Z" },
+        beta: { messageId: null, lastHandledMessageCreatedAt: null }
+      }
+    }), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "completed_child_cleanup");
+    assert.deepEqual(result.cleanupAgentIds, ["child-1"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("prompt-file send command with no-wait is rejected", () => {
+test("ensureWatch uses workflowPath and rejects handoff without trust acknowledgement", () => {
   const root = tempRoot();
   try {
-    const config = makeConfig(root, {
-      commands: {
-        send: ["send", "{agentId}", "--prompt-file", "{promptFile}", "--no-wait", "--json"]
-      }
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: false
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
     });
-    initObjective(config);
-    assert.throws(
-      () =>
-        reconcile(config, {
-          runner(command, args) {
-            if (args[0] === "ls" && args.includes("role=orchestrator")) {
-              return {
-                status: 0,
-                stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-                stderr: ""
-              };
-            }
-            if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
-              return {
-                status: 0,
-                stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-                stderr: ""
-              };
-            }
-            if (args[0] === "chat" && args[1] === "read") {
-              return {
-                status: 0,
-                stdout: JSON.stringify([
-                  message("m9", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
-                ]),
-                stderr: ""
-              };
-            }
-            throw new Error(`unexpected call: ${args.join(" ")}`);
-          }
-        }),
-      /unsafe_prompt_file_command/
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+    assert.throws(() => ensureWatch(workflow, { dryRun: true }), /workflow_trust_acknowledgement_required/);
 
-test("dry-run reports send decision without invoking paseo send", () => {
-  const root = tempRoot();
-  try {
-    const config = makeConfig(root);
-    initObjective(config);
-    const calls = [];
-    const result = reconcile(config, {
-      dryRun: true,
-      runner(command, args) {
-        calls.push([command, args]);
-        if (args[0] === "ls" && args.includes("role=orchestrator")) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
-        }
-        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
-            stderr: ""
-          };
-        }
-        if (args[0] === "chat" && args[1] === "read") {
-          return {
-            status: 0,
-            stdout: JSON.stringify([
-              message("m7", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
-            ]),
-            stderr: ""
-          };
-        }
-        throw new Error(`unexpected call: ${args.join(" ")}`);
-      }
+    const trusted = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: true
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
     });
-    assert.equal(result.decision.action, "send");
-    assert.equal(calls.some(([, args]) => args[0] === "send"), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("ensureWatch restarts stale pidfile and does not duplicate a running watcher", () => {
-  const root = tempRoot();
-  try {
-    const config = makeConfig(root);
-    const initial = watcherStatus(config);
-    mkdirSync(dirname(initial.pidFile), { recursive: true });
-    writeFileSync(initial.pidFile, "999999999\n");
-    const stale = watcherStatus(config, {
+    const pidFile = watcherStatus(trusted).pidFile;
+    mkdirSync(dirname(pidFile), { recursive: true });
+    writeFileSync(pidFile, "123\n");
+    const state = watcherStatus(trusted, {
       processInspector() {
-        return { alive: false, command: null };
+        return {
+          alive: true,
+          command: `${process.execPath} paseo-guard-watch.mjs --workflow ${trusted.workflowPath}`
+        };
       }
     });
-    assert.equal(stale.running, false);
-    assert.equal(stale.stale, true);
-
-    const matchingCommand = `${process.execPath} /tmp/paseo-guard-watch.mjs --config ${config.configPath}`;
-    const restarted = ensureWatch(config, {
-      processInspector(pid) {
-        if (pid === 999999999) {
-          return { alive: false, command: null };
-        }
-        return { alive: true, command: matchingCommand };
-      },
-      launcher(_config, paths) {
-        assert.equal(paths.pidFile, initial.pidFile);
-        assert.equal(paths.logFile, initial.logFile);
-        return { pid: process.pid };
-      }
-    });
-    assert.equal(restarted.action, "restarted");
-    assert.equal(restarted.watcherStatus.running, true);
-    assert.equal(restarted.watcherStatus.pid, process.pid);
-
-    const alreadyRunning = ensureWatch(config, {
-      processInspector(pid) {
-        assert.equal(pid, process.pid);
-        return { alive: true, command: matchingCommand };
-      },
-      launcher() {
-        throw new Error("launcher should not be called for live watcher");
-      }
-    });
-    assert.equal(alreadyRunning.action, "already_running");
-    assert.equal(alreadyRunning.watcherStatus.pid, process.pid);
+    assert.equal(state.processMatches, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("ensureWatch treats pid reuse by unrelated process as stale", () => {
+test("continuation prompt renders strict template variables and includes workflow body", () => {
   const root = tempRoot();
   try {
-    const config = makeConfig(root);
-    const initial = watcherStatus(config);
-    mkdirSync(dirname(initial.pidFile), { recursive: true });
-    writeFileSync(initial.pidFile, `${process.pid}\n`);
-
-    const reusedPid = watcherStatus(config, {
-      processInspector() {
-        return { alive: true, command: "node unrelated-script.mjs" };
-      }
+    const workflow = makeWorkflow(root, { body: "Follow WORKFLOW body text." });
+    const prompt = buildContinuationPrompt({
+      objective: objective(workflow),
+      workflow,
+      currentProject: workflow.projects[0],
+      reason: "safe_signal_continue"
     });
-    assert.equal(reusedPid.processAlive, true);
-    assert.equal(reusedPid.processMatches, false);
-    assert.equal(reusedPid.running, false);
-    assert.equal(reusedPid.stale, true);
-
-    const restarted = ensureWatch(config, {
-      processInspector(pid) {
-        if (pid === process.pid) {
-          return { alive: true, command: "node unrelated-script.mjs" };
-        }
-        return { alive: true, command: `${process.execPath} /tmp/paseo-guard-watch.mjs --config ${config.configPath}` };
-      },
-      launcher() {
-        return { pid: 424242 };
-      }
-    });
-    assert.equal(restarted.action, "restarted");
-    assert.equal(restarted.previousWatcherStatus.processMatches, false);
-    assert.equal(restarted.watcherStatus.pid, 424242);
-    assert.equal(restarted.watcherStatus.running, true);
+    assert.match(prompt, /workflowDigest=/);
+    assert.match(prompt, /currentProject=/);
+    assert.match(prompt, /Follow WORKFLOW body text/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("plugin manifest and skill frontmatter are valid", () => {
-  const plugin = JSON.parse(readFileSync(join(pluginRoot, "plugin.json"), "utf8"));
-  const scaffoldPlugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
-  assert.deepEqual(plugin, scaffoldPlugin);
-  assert.equal(plugin.name, "paseo-agent-guard-plugin");
-  assert.equal(plugin.skills, "./skills/");
-  assert.ok(plugin.interface.displayName);
-
-  const marketplace = JSON.parse(readFileSync(join(marketplaceRoot, ".agents/plugins/marketplace.json"), "utf8"));
-  assert.equal(marketplace.name, "atlas-forge");
-  assert.equal(marketplace.plugins[0].name, "paseo-agent-guard-plugin");
-  assert.equal(marketplace.plugins[0].source.path, "./plugins/paseo-agent-guard-plugin");
-
-  const skill = readFileSync(join(pluginRoot, "skills/paseo-agent-guard/SKILL.md"), "utf8");
-  assert.match(skill, /^---\nname: paseo-agent-guard\n/m);
-  assert.match(skill, /description: .+\n---/m);
-});
-
-test("template and example configs include default multi-agent review policy", () => {
-  for (const relativePath of [
-    "templates/paseo-guard.config.json",
-    "examples/gearjob-123-plm-next.config.json"
-  ]) {
-    const config = JSON.parse(readFileSync(join(pluginRoot, relativePath), "utf8"));
-    assert.deepEqual(config.reviewPolicy.reviewers, ["claude", "codex", "gemini", "mimo"]);
-    assert.equal(config.policy.handoffMode, relativePath.startsWith("examples/"));
-    assert.equal(config.reviewPolicy.ignoreUnavailableReviewers, true);
-    assert.equal(config.reviewPolicy.phases.prd.defaultRounds, 1);
-    assert.equal(config.reviewPolicy.phases.prd.humanReviewAfterMultiAgent, true);
-    assert.equal(config.reviewPolicy.phases.plan.defaultRounds, 3);
-    assert.equal(config.reviewPolicy.phases.feature.defaultRounds, 3);
-    assert.equal(config.reviewPolicy.phases.pr.defaultRounds, 3);
-    assert.deepEqual(config.childAgents.permissionModeDefaults, {
-      codex: "full-access",
-      claude: "bypassPermissions",
-      gemini: "yolo",
-      mimo: "bypassPermissions"
-    });
-    assert.deepEqual(config.childAgents.requiredSkills, ["paseo-agent-guard"]);
-    assert.deepEqual(config.childAgents.finishedStatuses, ["idle", "complete", "completed", "done"]);
-    assert.deepEqual(config.childAgents.failureStatuses, ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"]);
-    assert.equal(config.childAgents.closeOnCompletion, true);
-    assert.equal(config.workflow.protectedActions.includes("close agent"), true);
-    assert.equal(config.workflow.protectedActions.includes("force archive"), true);
-    assert.deepEqual(config.workflow.diagnosticSignals, [
-      "START",
-      "FIX_STARTED",
-      "PR_REVIEW_GATE_STARTED",
-      "PR_REVIEW_STATUS",
-      "REVIEW_STATUS",
-      "AGENT_STATUS",
-      "CHILD_AGENT_STATUS",
-      "PROGRESS",
-      "CHECKPOINT"
-    ]);
-    assert.deepEqual(config.commands.archive, ["archive", "{agentId}", "--json"]);
-    assert.deepEqual(config.commands.agentWait, ["wait", "{agentId}", "--json"]);
-    assert.equal(config.watch.timeout, "10m");
-    assert.equal(config.watch.agentStatusPollTimeout, "15s");
-    assert.equal(config.watch.cooldownPollTimeout, "15s");
+test("readme skill template and examples are updated to workflow v2 assets", () => {
+  const paths = [
+    join(pluginRoot, "templates/WORKFLOW.md"),
+    join(pluginRoot, "examples/single-project.WORKFLOW.md"),
+    join(pluginRoot, "examples/multi-project.WORKFLOW.md"),
+    join(dirname(dirname(pluginRoot)), "README.md"),
+    join(pluginRoot, "skills/paseo-agent-guard/SKILL.md")
+  ];
+  for (const path of paths) {
+    const text = readFileSync(path, "utf8");
+    assert.match(text, /WORKFLOW\.md|schemaVersion: 2|project=/);
   }
 });

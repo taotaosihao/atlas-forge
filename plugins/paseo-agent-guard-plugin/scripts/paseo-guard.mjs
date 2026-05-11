@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
@@ -23,15 +24,38 @@ import {
 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const DEFAULT_CONFIG = {
-  schemaVersion: 1,
+const DEFAULT_WORKFLOW_PATH = "./WORKFLOW.md";
+const STATUS_ACTIVE = "active";
+const STATUS_PAUSED = "paused";
+const STATUS_BLOCKED = "blocked";
+const STATUS_COMPLETE = "complete";
+const OBJECTIVE_SCHEMA_VERSION = 2;
+const HANDOFF_ALLOWED_PROTECTED_ACTIONS = new Set(["merge", "new project phase"]);
+const ALLOWED_TEMPLATE_VARS = new Set([
+  "objective",
+  "room",
+  "researchWorkspace",
+  "projects",
+  "currentProject",
+  "signal",
+  "reason",
+  "violation",
+  "recovery",
+  "cleanupAgents",
+  "policy",
+  "reviewPolicy",
+  "workflowDigest"
+]);
+const ALLOWED_TEMPLATE_FILTERS = new Set(["json"]);
+
+const DEFAULT_WORKFLOW = {
   objectiveStoreDir: "~/.paseo-agent-guard/objectives",
   orchestratorSelector: {
     labels: { role: "orchestrator" }
   },
   childAgents: {
-    requiredLabels: ["room", "parent", "phase", "task", "role"],
-    requiredEvidenceFields: ["agent", "cwd", "branch", "task", "labels"],
+    requiredLabels: ["room", "project", "parent", "phase", "task", "role"],
+    requiredEvidenceFields: ["project", "agent", "cwd", "branch", "task", "labels", "evidence"],
     requiredSkills: ["paseo-agent-guard"],
     implementationRoles: ["implementation", "fix", "validation", "audit", "pr"],
     runningStatuses: ["running", "thinking", "queued", "starting", "needs_permission"],
@@ -67,6 +91,7 @@ const DEFAULT_CONFIG = {
   policy: {
     autoContinue: true,
     handoffMode: false,
+    trustAcknowledged: false,
     cooldownSeconds: 60,
     maxRetries: 3,
     allowNewPhaseAfterMerge: false,
@@ -118,11 +143,36 @@ const DEFAULT_CONFIG = {
   }
 };
 
-const STATUS_ACTIVE = "active";
-const STATUS_PAUSED = "paused";
-const STATUS_BLOCKED = "blocked";
-const STATUS_COMPLETE = "complete";
-const HANDOFF_ALLOWED_PROTECTED_ACTIONS = new Set(["merge", "new project phase"]);
+const CONTINUATION_TEMPLATE = [
+  "PASEO_AGENT_GUARD_CONTINUATION",
+  "objective={{objective}}",
+  "room={{room}}",
+  "researchWorkspace={{researchWorkspace}}",
+  "workflowDigest={{workflowDigest}}",
+  "projects={{json projects}}",
+  "currentProject={{json currentProject}}",
+  "signal={{json signal}}",
+  "reason={{reason}}",
+  "violation={{json violation}}",
+  "recovery={{json recovery}}",
+  "cleanupAgents={{json cleanupAgents}}",
+  "policy={{json policy}}",
+  "reviewPolicy={{json reviewPolicy}}",
+  "",
+  "Instructions:",
+  "1. Read the workflow body and room evidence before acting.",
+  "2. Take exactly one safe next step, then post canonical SIGNAL evidence.",
+  "3. Planning and research may run only in researchWorkspace.",
+  "4. Implementation, fix, validation, audit, and PR child agents must run in the current project's target workspace or allowed worktree roots.",
+  "5. Every child SIGNAL must use: SIGNAL signal=<...> project=<key> agent=<id> cwd=<path> branch=<branch> task=<task> labels={room=<room>,project=<key>,parent=<parent>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>.",
+  "6. Every child agent prompt must name required skills, room, project key, cwd contract, labels, and SIGNAL contract directly.",
+  "7. Keep background per-child `paseo wait <agent-id> --json` as an auxiliary idle notification path; durable continuation comes from the watcher plus room SIGNAL evidence.",
+  "8. Cleanup is allowed only for completed child agents that already posted valid final evidence for their project.",
+  "9. Do not perform protected actions unless policy allows the exact action.",
+  "",
+  "Workflow body:",
+  "{{reason}}"
+].join("\n");
 
 export class GuardError extends Error {
   constructor(message, code = "guard_error") {
@@ -172,6 +222,20 @@ export function expandHome(value) {
   return value;
 }
 
+function expandExactEnv(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+  if (!/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    return value;
+  }
+  const name = value.slice(1);
+  if (!(name in process.env) || !process.env[name]) {
+    throw new GuardError(`workflow_invalid_path_env: ${value}`, "workflow_invalid");
+  }
+  return process.env[name];
+}
+
 function deepMerge(base, override) {
   if (!override || typeof override !== "object" || Array.isArray(override)) {
     return override === undefined ? base : override;
@@ -179,16 +243,16 @@ function deepMerge(base, override) {
 
   const merged = { ...(base || {}) };
   for (const [key, value] of Object.entries(override)) {
-    const baseValue = merged[key];
+    const current = merged[key];
     if (
-      baseValue &&
-      typeof baseValue === "object" &&
-      !Array.isArray(baseValue) &&
+      current &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
       value &&
       typeof value === "object" &&
       !Array.isArray(value)
     ) {
-      merged[key] = deepMerge(baseValue, value);
+      merged[key] = deepMerge(current, value);
     } else {
       merged[key] = value;
     }
@@ -212,43 +276,357 @@ function writeJson(path, data) {
   }
 }
 
-function resolveFromConfigDir(pathValue, configDir) {
-  const expanded = expandHome(pathValue);
-  if (!expanded) {
-    return expanded;
+function canonicalizePath(pathValue, baseDir) {
+  if (typeof pathValue !== "string" || !pathValue.trim()) {
+    throw new GuardError("workflow_invalid_path_value", "workflow_invalid");
   }
-  return isAbsolute(expanded) ? resolve(expanded) : resolve(configDir, expanded);
+  const expanded = expandExactEnv(expandHome(pathValue.trim()));
+  const absolute = isAbsolute(expanded) ? resolve(expanded) : resolve(baseDir, expanded);
+  if (existsSync(absolute)) {
+    try {
+      return realpathSync(absolute);
+    } catch {
+      return absolute;
+    }
+  }
+  return absolute;
 }
 
-export function normalizeConfig(rawConfig, configPath = process.cwd()) {
-  const configDir = dirname(resolve(configPath));
-  const config = deepMerge(DEFAULT_CONFIG, rawConfig);
-  const required = ["objective", "projectName", "room", "researchWorkspace", "targetWorkspace"];
-  const missing = required.filter((key) => !config[key]);
-  if (missing.length > 0) {
-    throw new GuardError(`config_missing_required_fields: ${missing.join(", ")}`, "config_invalid");
-  }
-
-  config.configPath = resolve(configPath);
-  config.objectiveStoreDir = resolveFromConfigDir(config.objectiveStoreDir, configDir);
-  config.researchWorkspace = resolveFromConfigDir(config.researchWorkspace, configDir);
-  config.targetWorkspace = resolveFromConfigDir(config.targetWorkspace, configDir);
-  config.allowedImplementationRoots = (config.allowedImplementationRoots || []).map((entry) =>
-    resolveFromConfigDir(entry, configDir)
-  );
-  config.watch = config.watch || {};
-  config.watch.logDir = config.watch.logDir
-    ? resolveFromConfigDir(config.watch.logDir, configDir)
-    : join(dirname(config.objectiveStoreDir), "logs");
-  return config;
+function sha256(value) {
+  return createHash("sha256").update(String(value)).digest("hex");
 }
 
-export function loadConfig(configPath) {
-  if (!configPath) {
-    throw new GuardError("missing --config <path>", "config_missing");
+function splitFrontMatter(text) {
+  const normalized = String(text || "");
+  if (!normalized.startsWith("---\n") && !normalized.startsWith("---\r\n")) {
+    throw new GuardError("workflow_missing_front_matter", "workflow_invalid");
   }
-  const resolvedPath = resolve(expandHome(configPath));
-  return normalizeConfig(loadJson(resolvedPath), resolvedPath);
+  const lines = normalized.split(/\r?\n/);
+  let endIndex = -1;
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() === "---") {
+      endIndex = index;
+      break;
+    }
+  }
+  if (endIndex === -1) {
+    throw new GuardError("workflow_missing_front_matter_closer", "workflow_invalid");
+  }
+  return {
+    frontMatter: lines.slice(1, endIndex).join("\n"),
+    body: lines.slice(endIndex + 1).join("\n").trim()
+  };
+}
+
+function countIndent(line) {
+  const match = String(line).match(/^ */);
+  if (/\t/.test(line.slice(0, match[0].length + 1))) {
+    throw new GuardError("workflow_tabs_not_supported", "workflow_invalid");
+  }
+  return match[0].length;
+}
+
+function parseScalar(raw) {
+  const value = String(raw).trim();
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  if (value === "null") {
+    return null;
+  }
+  if (/^-?\d+$/.test(value)) {
+    return Number(value);
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function skipBlank(lines, start) {
+  let index = start;
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (trimmed && !trimmed.startsWith("#")) {
+      break;
+    }
+    index += 1;
+  }
+  return index;
+}
+
+function parseYamlBlock(lines, start, indent) {
+  const index = skipBlank(lines, start);
+  if (index >= lines.length) {
+    return { value: undefined, index };
+  }
+  const line = lines[index];
+  const lineIndent = countIndent(line);
+  if (lineIndent < indent) {
+    return { value: undefined, index };
+  }
+  if (lineIndent > indent) {
+    throw new GuardError(`workflow_unexpected_indent: ${line.trim()}`, "workflow_invalid");
+  }
+  if (line.trim().startsWith("- ")) {
+    return parseYamlArray(lines, index, indent);
+  }
+  return parseYamlObject(lines, index, indent);
+}
+
+function parseYamlObjectContinuation(lines, start, indent, initial = {}) {
+  let index = start;
+  const value = { ...initial };
+  while (true) {
+    index = skipBlank(lines, index);
+    if (index >= lines.length) {
+      break;
+    }
+    const line = lines[index];
+    const lineIndent = countIndent(line);
+    if (lineIndent < indent) {
+      break;
+    }
+    if (lineIndent > indent) {
+      throw new GuardError(`workflow_unexpected_indent: ${line.trim()}`, "workflow_invalid");
+    }
+    if (line.trim().startsWith("- ")) {
+      break;
+    }
+    const trimmed = line.trim();
+    const match = trimmed.match(/^([A-Za-z0-9_.-]+):(.*)$/);
+    if (!match) {
+      throw new GuardError(`workflow_invalid_line: ${trimmed}`, "workflow_invalid");
+    }
+    const [, key, remainderRaw] = match;
+    const remainder = remainderRaw.trim();
+    index += 1;
+    if (!remainder) {
+      const child = parseYamlBlock(lines, index, indent + 2);
+      value[key] = child.value === undefined ? {} : child.value;
+      index = child.index;
+      continue;
+    }
+    value[key] = parseScalar(remainder);
+  }
+  return { value, index };
+}
+
+function parseYamlObject(lines, start, indent) {
+  return parseYamlObjectContinuation(lines, start, indent);
+}
+
+function parseYamlArray(lines, start, indent) {
+  let index = start;
+  const value = [];
+  while (true) {
+    index = skipBlank(lines, index);
+    if (index >= lines.length) {
+      break;
+    }
+    const line = lines[index];
+    const lineIndent = countIndent(line);
+    if (lineIndent < indent) {
+      break;
+    }
+    if (lineIndent > indent) {
+      throw new GuardError(`workflow_unexpected_indent: ${line.trim()}`, "workflow_invalid");
+    }
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("- ")) {
+      break;
+    }
+    const remainder = trimmed.slice(2).trim();
+    index += 1;
+    if (!remainder) {
+      const child = parseYamlBlock(lines, index, indent + 2);
+      value.push(child.value === undefined ? null : child.value);
+      index = child.index;
+      continue;
+    }
+    const objectMatch = remainder.match(/^([A-Za-z0-9_.-]+):(.*)$/);
+    if (!objectMatch) {
+      value.push(parseScalar(remainder));
+      continue;
+    }
+    const [, key, remainderRaw] = objectMatch;
+    const item = {};
+    const scalar = remainderRaw.trim();
+    if (!scalar) {
+      const child = parseYamlBlock(lines, index, indent + 2);
+      item[key] = child.value === undefined ? {} : child.value;
+      index = child.index;
+    } else {
+      item[key] = parseScalar(scalar);
+    }
+    const continuation = parseYamlObjectContinuation(lines, index, indent + 2, item);
+    value.push(continuation.value);
+    index = continuation.index;
+  }
+  return { value, index };
+}
+
+function parseYaml(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const parsed = parseYamlBlock(lines, 0, 0);
+  return parsed.value || {};
+}
+
+function assertNoOverlap(projects) {
+  const roots = [];
+  for (const project of projects) {
+    for (const root of [project.targetWorkspace, ...(project.allowedImplementationRoots || [])]) {
+      roots.push({ projectKey: project.key, root });
+    }
+  }
+
+  for (let index = 0; index < roots.length; index += 1) {
+    for (let compare = index + 1; compare < roots.length; compare += 1) {
+      const first = roots[index];
+      const second = roots[compare];
+      if (first.projectKey === second.projectKey) {
+        continue;
+      }
+      if (isPathInside(first.root, second.root) || isPathInside(second.root, first.root)) {
+        throw new GuardError(
+          `workflow_overlapping_project_roots: ${first.projectKey}:${first.root} <-> ${second.projectKey}:${second.root}`,
+          "workflow_invalid"
+        );
+      }
+    }
+  }
+}
+
+function normalizeProjects(projects, baseDir) {
+  if (!Array.isArray(projects) || projects.length === 0) {
+    throw new GuardError("workflow_projects_required", "workflow_invalid");
+  }
+  const seen = new Set();
+  const normalized = projects.map((project, index) => {
+    if (!project || typeof project !== "object") {
+      throw new GuardError(`workflow_project_invalid: index=${index}`, "workflow_invalid");
+    }
+    const key = String(project.key || "").trim();
+    if (!key) {
+      throw new GuardError(`workflow_project_missing_key: index=${index}`, "workflow_invalid");
+    }
+    if (seen.has(key)) {
+      throw new GuardError(`workflow_project_duplicate_key: ${key}`, "workflow_invalid");
+    }
+    seen.add(key);
+    const targetWorkspace = canonicalizePath(project.targetWorkspace, baseDir);
+    const allowedImplementationRoots = Array.isArray(project.allowedImplementationRoots)
+      ? project.allowedImplementationRoots.map((entry) => canonicalizePath(entry, baseDir))
+      : [];
+    return {
+      key,
+      targetWorkspace,
+      allowedImplementationRoots
+    };
+  });
+  assertNoOverlap(normalized);
+  return normalized;
+}
+
+function normalizeWorkflow(rawWorkflow, workflowPath, promptBody, sourceText) {
+  const merged = deepMerge(DEFAULT_WORKFLOW, rawWorkflow);
+  if (merged.schemaVersion !== 2) {
+    throw new GuardError(`workflow_schema_version_invalid: expected 2, got ${merged.schemaVersion}`, "workflow_invalid");
+  }
+  for (const key of ["projectName", "room", "objective", "researchWorkspace"]) {
+    if (!merged[key]) {
+      throw new GuardError(`workflow_missing_required_field: ${key}`, "workflow_invalid");
+    }
+  }
+  const workflowDir = dirname(workflowPath);
+  const researchWorkspace = canonicalizePath(merged.researchWorkspace, workflowDir);
+  const objectiveStoreDir = canonicalizePath(merged.objectiveStoreDir, workflowDir);
+  const projects = normalizeProjects(merged.projects, workflowDir);
+  const watch = {
+    ...(merged.watch || {})
+  };
+  watch.logDir = watch.logDir
+    ? canonicalizePath(watch.logDir, workflowDir)
+    : join(dirname(objectiveStoreDir), "logs");
+  const normalized = {
+    ...merged,
+    workflowPath,
+    workflowDigest: sha256(sourceText),
+    workflowBody: promptBody,
+    researchWorkspace,
+    objectiveStoreDir,
+    projects,
+    watch
+  };
+  return normalized;
+}
+
+export function loadWorkflow(workflowPath = DEFAULT_WORKFLOW_PATH) {
+  const resolvedPath = resolve(expandHome(workflowPath));
+  const sourceText = readFileSync(resolvedPath, "utf8");
+  const { frontMatter, body } = splitFrontMatter(sourceText);
+  const rawWorkflow = parseYaml(frontMatter);
+  return normalizeWorkflow(rawWorkflow, resolvedPath, body, sourceText);
+}
+
+export class WorkflowStore {
+  constructor(workflowPath = DEFAULT_WORKFLOW_PATH, initialWorkflow = null) {
+    this.workflowPath = resolve(expandHome(workflowPath));
+    this.currentWorkflow = initialWorkflow || null;
+    this.workflowLoadError = null;
+  }
+
+  loadInitial() {
+    const workflow = loadWorkflow(this.workflowPath);
+    this.currentWorkflow = workflow;
+    this.workflowLoadError = null;
+    return workflow;
+  }
+
+  reload() {
+    try {
+      const workflow = loadWorkflow(this.workflowPath);
+      this.currentWorkflow = workflow;
+      this.workflowLoadError = null;
+      return workflow;
+    } catch (error) {
+      if (!this.currentWorkflow) {
+        throw error;
+      }
+      this.workflowLoadError = String(error.message || error);
+      this.currentWorkflow = {
+        ...this.currentWorkflow,
+        workflowLoadError: this.workflowLoadError
+      };
+      return this.currentWorkflow;
+    }
+  }
+
+  getWorkflow() {
+    if (!this.currentWorkflow) {
+      return this.loadInitial();
+    }
+    if (this.workflowLoadError) {
+      return {
+        ...this.currentWorkflow,
+        workflowLoadError: this.workflowLoadError
+      };
+    }
+    return this.currentWorkflow;
+  }
+}
+
+function ensureWorkflowArg(args) {
+  if (args.config !== undefined) {
+    throw new GuardError(
+      "config_flag_removed: JSON config support was removed. Rename to WORKFLOW.md and use --workflow <path> instead.",
+      "workflow_migration_required"
+    );
+  }
+  return args.workflow || DEFAULT_WORKFLOW_PATH;
 }
 
 export function sanitizeSegment(value) {
@@ -258,54 +636,95 @@ export function sanitizeSegment(value) {
     .replace(/^-+|-+$/g, "") || "default";
 }
 
-export function objectivePathFor(config) {
+function projectSummary(workflow) {
+  return workflow.projects.map((project) => ({
+    key: project.key,
+    targetWorkspace: project.targetWorkspace,
+    allowedImplementationRoots: [...project.allowedImplementationRoots]
+  }));
+}
+
+export function objectivePathFor(workflow) {
   return join(
-    config.objectiveStoreDir,
-    sanitizeSegment(config.projectName),
-    `${sanitizeSegment(config.room)}.json`
+    workflow.objectiveStoreDir,
+    sanitizeSegment(workflow.projectName),
+    `${sanitizeSegment(workflow.room)}.json`
   );
 }
 
-export function createObjective(config, now = new Date()) {
+export function createObjective(workflow, now = new Date()) {
   const timestamp = now.toISOString();
   return {
-    objective: config.objective,
-    projectName: config.projectName,
-    room: config.room,
-    researchWorkspace: config.researchWorkspace,
-    targetWorkspace: config.targetWorkspace,
-    orchestratorSelector: config.orchestratorSelector,
+    schemaVersion: OBJECTIVE_SCHEMA_VERSION,
+    workflowPath: workflow.workflowPath,
+    workflowDigest: workflow.workflowDigest,
+    objective: workflow.objective,
+    projectName: workflow.projectName,
+    room: workflow.room,
+    researchWorkspace: workflow.researchWorkspace,
+    projects: projectSummary(workflow),
     status: STATUS_ACTIVE,
-    lastHandledMessageId: null,
-    lastHandledMessageCreatedAt: null,
+    projectStatus: Object.fromEntries(workflow.projects.map((project) => [project.key, STATUS_ACTIVE])),
+    perProjectHandledCursor: Object.fromEntries(
+      workflow.projects.map((project) => [project.key, { messageId: null, lastHandledMessageCreatedAt: null }])
+    ),
+    retryLedger: {},
     lastDecision: null,
     createdAt: timestamp,
     updatedAt: timestamp
   };
 }
 
-export function readObjective(config) {
-  const path = objectivePathFor(config);
+function validateObjectiveSchema(objective) {
+  const version = Number(objective?.schemaVersion || 0);
+  if (version === OBJECTIVE_SCHEMA_VERSION) {
+    return;
+  }
+  if (version === 1 || version === 0) {
+    throw new GuardError(
+      "objective_migration_required: existing objective is schema v1. Clear or migrate it before using WORKFLOW.md schema v2.",
+      "objective_migration_required"
+    );
+  }
+  throw new GuardError(`objective_schema_invalid: ${version}`, "objective_invalid");
+}
+
+export function readObjective(workflow) {
+  const path = objectivePathFor(workflow);
   if (!existsSync(path)) {
     return null;
   }
-  return loadJson(path);
+  const objective = loadJson(path);
+  validateObjectiveSchema(objective);
+  return objective;
 }
 
-export function initObjective(config, { now = new Date(), force = false } = {}) {
-  const path = objectivePathFor(config);
-  const existing = !force ? readObjective(config) : null;
+export function initObjective(workflow, { now = new Date(), force = false } = {}) {
+  const path = objectivePathFor(workflow);
+  const existing = !force ? readObjective(workflow) : null;
   const timestamp = now.toISOString();
   const objective = {
-    ...(existing || createObjective(config, now)),
-    objective: config.objective,
-    projectName: config.projectName,
-    room: config.room,
-    researchWorkspace: config.researchWorkspace,
-    targetWorkspace: config.targetWorkspace,
-    orchestratorSelector: config.orchestratorSelector,
+    ...(existing || createObjective(workflow, now)),
+    schemaVersion: OBJECTIVE_SCHEMA_VERSION,
+    workflowPath: workflow.workflowPath,
+    workflowDigest: workflow.workflowDigest,
+    objective: workflow.objective,
+    projectName: workflow.projectName,
+    room: workflow.room,
+    researchWorkspace: workflow.researchWorkspace,
+    projects: projectSummary(workflow),
     status: existing?.status || STATUS_ACTIVE,
-    lastHandledMessageCreatedAt: existing?.lastHandledMessageCreatedAt ?? null,
+    projectStatus: {
+      ...Object.fromEntries(workflow.projects.map((project) => [project.key, STATUS_ACTIVE])),
+      ...(existing?.projectStatus || {})
+    },
+    perProjectHandledCursor: {
+      ...Object.fromEntries(
+        workflow.projects.map((project) => [project.key, { messageId: null, lastHandledMessageCreatedAt: null }])
+      ),
+      ...(existing?.perProjectHandledCursor || {})
+    },
+    retryLedger: existing?.retryLedger || {},
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp
   };
@@ -313,8 +732,8 @@ export function initObjective(config, { now = new Date(), force = false } = {}) 
   return { path, objective };
 }
 
-export function setObjectiveStatus(config, status, { now = new Date() } = {}) {
-  const objective = readObjective(config);
+export function setObjectiveStatus(workflow, status, { now = new Date() } = {}) {
+  const objective = readObjective(workflow);
   if (!objective) {
     throw new GuardError("objective_missing: run init first", "objective_missing");
   }
@@ -329,7 +748,7 @@ export function setObjectiveStatus(config, status, { now = new Date() } = {}) {
     },
     updatedAt: timestamp
   };
-  writeJson(objectivePathFor(config), next);
+  writeJson(objectivePathFor(workflow), next);
   return next;
 }
 
@@ -355,8 +774,8 @@ function templateToken(token, vars) {
   });
 }
 
-export function buildPaseoArgs(config, commandName, vars = {}, extraArgs = []) {
-  const command = config.commands?.[commandName];
+export function buildPaseoArgs(workflow, commandName, vars = {}, extraArgs = []) {
+  const command = workflow.commands?.[commandName];
   if (!command) {
     throw new GuardError(`command_not_configured: ${commandName}`, "command_invalid");
   }
@@ -377,10 +796,14 @@ export function runCommand(command, args, options = {}) {
   };
 }
 
-export function runPaseoCommand(config, commandName, vars = {}, extraArgs = [], runner = runCommand) {
-  const command = config.commands?.paseo || "paseo";
-  const args = buildPaseoArgs(config, commandName, vars, extraArgs);
-  const result = runner(command, args);
+export function runPaseoCommand(workflow, commandName, vars = {}, extraArgs = [], runner = runCommand) {
+  const paseoParts = splitCommandLine(workflow.commands?.paseo || "paseo");
+  if (paseoParts.length === 0) {
+    throw new GuardError("command_invalid: commands.paseo", "command_invalid");
+  }
+  const command = paseoParts[0];
+  const args = [...paseoParts.slice(1), ...buildPaseoArgs(workflow, commandName, vars, extraArgs)];
+  const result = runner(command, args, { cwd: dirname(workflow.workflowPath) });
   if (result.error) {
     throw new GuardError(`paseo_command_error: ${result.error.message}`, "paseo_command_error");
   }
@@ -405,17 +828,17 @@ function parseJsonOutput(result, commandName) {
   }
 }
 
-function watcherPaths(config) {
+function watcherPaths(workflow) {
   return {
     pidFile: join(
-      config.watch.logDir,
-      sanitizeSegment(config.projectName),
-      `${sanitizeSegment(config.room)}.pid`
+      workflow.watch.logDir,
+      sanitizeSegment(workflow.projectName),
+      `${sanitizeSegment(workflow.room)}.pid`
     ),
     logFile: join(
-      config.watch.logDir,
-      sanitizeSegment(config.projectName),
-      `${sanitizeSegment(config.room)}.jsonl`
+      workflow.watch.logDir,
+      sanitizeSegment(workflow.projectName),
+      `${sanitizeSegment(workflow.room)}.jsonl`
     )
   };
 }
@@ -455,16 +878,16 @@ function processInfoForPid(pid) {
   };
 }
 
-function commandIsGuardWatcher(command, config) {
+function commandIsGuardWatcher(command, workflow) {
   const text = String(command || "");
-  return text.includes("paseo-guard-watch") && text.includes(config.configPath);
+  return text.includes("paseo-guard-watch") && text.includes(workflow.workflowPath);
 }
 
-export function watcherStatus(config, { processInspector = processInfoForPid } = {}) {
-  const paths = watcherPaths(config);
+export function watcherStatus(workflow, { processInspector = processInfoForPid } = {}) {
+  const paths = watcherPaths(workflow);
   const pid = readPidFile(paths.pidFile);
   const processInfo = pid ? processInspector(pid) : { alive: false, command: null };
-  const processMatches = processInfo.alive ? commandIsGuardWatcher(processInfo.command, config) : false;
+  const processMatches = processInfo.alive ? commandIsGuardWatcher(processInfo.command, workflow) : false;
   const running = Boolean(processInfo.alive && processMatches);
   return {
     running,
@@ -474,16 +897,17 @@ export function watcherStatus(config, { processInspector = processInfoForPid } =
     processMatches,
     processCommand: processInfo.command || null,
     pidFile: paths.pidFile,
-    logFile: paths.logFile
+    logFile: paths.logFile,
+    workflowPath: workflow.workflowPath
   };
 }
 
-function launchWatchProcess(config, paths) {
+function launchWatchProcess(workflow, paths) {
   mkdirSync(dirname(paths.logFile), { recursive: true });
   const fd = openSync(paths.logFile, "a", 0o600);
   try {
     const script = join(dirname(fileURLToPath(import.meta.url)), "paseo-guard-watch.mjs");
-    const child = spawn(process.execPath, [script, "--config", config.configPath], {
+    const child = spawn(process.execPath, [script, "--workflow", workflow.workflowPath], {
       detached: true,
       stdio: ["ignore", fd, fd]
     });
@@ -494,8 +918,14 @@ function launchWatchProcess(config, paths) {
   }
 }
 
-export function ensureWatch(config, { dryRun = false, launcher = launchWatchProcess, processInspector } = {}) {
-  const current = watcherStatus(config, { processInspector });
+export function ensureWatch(workflow, { dryRun = false, launcher = launchWatchProcess, processInspector } = {}) {
+  if (workflow.policy?.handoffMode && workflow.policy?.trustAcknowledged !== true) {
+    throw new GuardError(
+      "workflow_trust_acknowledgement_required: set policy.trustAcknowledged: true before ensure-watch in handoff mode.",
+      "workflow_invalid"
+    );
+  }
+  const current = watcherStatus(workflow, { processInspector });
   if (current.running) {
     return {
       action: "already_running",
@@ -510,9 +940,9 @@ export function ensureWatch(config, { dryRun = false, launcher = launchWatchProc
     };
   }
 
-  const paths = watcherPaths(config);
+  const paths = watcherPaths(workflow);
   mkdirSync(dirname(paths.pidFile), { recursive: true });
-  const launched = launcher(config, paths);
+  const launched = launcher(workflow, paths);
   if (!launched?.pid) {
     throw new GuardError("watcher_launch_failed: missing child pid", "watcher_launch_failed");
   }
@@ -520,7 +950,7 @@ export function ensureWatch(config, { dryRun = false, launcher = launchWatchProc
   return {
     action: current.stale ? "restarted" : "started",
     previousWatcherStatus: current,
-    watcherStatus: watcherStatus(config, { processInspector })
+    watcherStatus: watcherStatus(workflow, { processInspector })
   };
 }
 
@@ -560,15 +990,14 @@ function labelArgs(labels = {}) {
   return Object.entries(labels).flatMap(([key, value]) => ["--label", `${key}=${value}`]);
 }
 
-function getPaseoHome(config) {
-  return resolve(expandHome(config.paseoHome || process.env.PASEO_HOME || "~/.paseo"));
+function getPaseoHome(workflow) {
+  return resolve(expandHome(workflow.paseoHome || process.env.PASEO_HOME || "~/.paseo"));
 }
 
 function findAgentStateFile(id, root) {
   if (!id || !existsSync(root)) {
     return null;
   }
-
   const stack = [root];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -578,7 +1007,6 @@ function findAgentStateFile(id, root) {
     } catch {
       continue;
     }
-
     for (const entry of entries) {
       const fullPath = join(current, entry.name);
       if (entry.isDirectory()) {
@@ -591,8 +1019,8 @@ function findAgentStateFile(id, root) {
   return null;
 }
 
-function readAgentState(id, config) {
-  const file = findAgentStateFile(id, join(getPaseoHome(config), "agents"));
+function readAgentState(id, workflow) {
+  const file = findAgentStateFile(id, join(getPaseoHome(workflow), "agents"));
   if (!file) {
     return null;
   }
@@ -636,89 +1064,126 @@ export function isPathInside(childPath, parentPath) {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function classifyWorkspace(cwd, config) {
+export function resolveProjectWorkspace(cwd, projects, options = {}) {
   if (!cwd) {
-    return "unknown";
+    throw new GuardError("delegation_contract_violation: missing cwd", "delegation_contract_violation");
   }
   const resolvedCwd = resolve(expandHome(cwd));
-  if (isPathInside(resolvedCwd, config.targetWorkspace)) {
-    return "target";
-  }
-  if (isPathInside(resolvedCwd, config.researchWorkspace)) {
-    return "research";
-  }
-  if (config.policy?.checkGitWorktrees && existsSync(resolvedCwd) && existsSync(config.targetWorkspace)) {
-    try {
-      if (sameGitRepository(resolvedCwd, config.targetWorkspace)) {
-        return "target-worktree";
+  const matches = [];
+  for (const project of projects) {
+    if (isPathInside(resolvedCwd, project.targetWorkspace)) {
+      matches.push({ projectKey: project.key, workspaceKind: "target" });
+      continue;
+    }
+    if ((project.allowedImplementationRoots || []).some((root) => isPathInside(resolvedCwd, root))) {
+      matches.push({ projectKey: project.key, workspaceKind: "allowed-root" });
+      continue;
+    }
+    if (options.checkGitWorktrees && existsSync(resolvedCwd) && existsSync(project.targetWorkspace)) {
+      try {
+        if (sameGitRepository(resolvedCwd, project.targetWorkspace)) {
+          matches.push({ projectKey: project.key, workspaceKind: "target-worktree" });
+        }
+      } catch {
+        // Ignore git resolution failures and continue with explicit root checks.
       }
-    } catch {
-      // Fall through to explicit root checks.
     }
   }
-  if ((config.allowedImplementationRoots || []).some((root) => isPathInside(resolvedCwd, root))) {
-    return "target-worktree";
+  if (matches.length !== 1) {
+    const detail = matches.length === 0
+      ? `none:${resolvedCwd}`
+      : matches.map((match) => `${match.projectKey}:${match.workspaceKind}`).join(",");
+    throw new GuardError(`delegation_contract_violation: project_workspace_resolution=${detail}`, "delegation_contract_violation");
   }
-  return "other";
+  return matches[0];
 }
 
-function enrichAgents(agents, config) {
+function classifyWorkspace(cwd, workflow) {
+  if (!cwd) {
+    return { workspaceKind: "unknown", projectKey: null };
+  }
+  const resolved = resolve(expandHome(cwd));
+  if (isPathInside(resolved, workflow.researchWorkspace)) {
+    return { workspaceKind: "research", projectKey: null };
+  }
+  return resolveProjectWorkspace(resolved, workflow.projects, {
+    checkGitWorktrees: workflow.policy?.checkGitWorktrees
+  });
+}
+
+function enrichAgents(agents, workflow) {
   return agents.map((agent) => {
-    const state = readAgentState(agent.id, config);
+    const state = readAgentState(agent.id, workflow);
     const cwd = agent.cwd || state?.cwd || state?.Cwd;
     const labels = {
       ...(agent.labels || {}),
       ...(state?.labels || state?.Labels || {})
     };
+    let projectKey = null;
+    let projectViolation = null;
+    let workspaceKind = "unknown";
+    try {
+      const resolved = classifyWorkspace(cwd, workflow);
+      projectKey = resolved.projectKey;
+      workspaceKind = resolved.workspaceKind;
+    } catch (error) {
+      projectViolation = String(error.message || error);
+      workspaceKind = "other";
+    }
     return {
       ...agent,
       cwd,
       status: agent.status || String(state?.lastStatus || state?.LastStatus || "").toLowerCase(),
       labels,
       state,
-      workspaceKind: classifyWorkspace(cwd, config)
+      projectKey,
+      projectViolation,
+      workspaceKind
     };
   });
 }
 
-export function buildSnapshot(config, runner = runCommand) {
+export function buildSnapshot(workflow, runner = runCommand) {
   const orchestratorRaw = parseJsonOutput(
-    runPaseoCommand(
-      config,
-      "ls",
-      {},
-      labelArgs(config.orchestratorSelector?.labels || {}),
-      runner
-    ),
+    runPaseoCommand(workflow, "ls", {}, labelArgs(workflow.orchestratorSelector?.labels || {}), runner),
     "ls"
   );
   const roomRaw = parseJsonOutput(
-    runPaseoCommand(config, "ls", {}, labelArgs({ room: config.room }), runner),
+    runPaseoCommand(workflow, "ls", {}, labelArgs({ room: workflow.room }), runner),
     "ls"
   );
   const messagesRaw = parseJsonOutput(
     runPaseoCommand(
-      config,
+      workflow,
       "chatRead",
-      { room: config.room, limit: config.chatReadLimit || 50 },
+      { room: workflow.room, limit: workflow.chatReadLimit || 50 },
       [],
       runner
     ),
     "chatRead"
   );
 
-  const orchestrators = enrichAgents(normalizeAgents(orchestratorRaw), config);
-  const roomAgents = enrichAgents(normalizeAgents(roomRaw), config);
+  const orchestrators = enrichAgents(normalizeAgents(orchestratorRaw), workflow);
+  const roomAgents = enrichAgents(normalizeAgents(roomRaw), workflow);
   const orchestratorIds = new Set(orchestrators.map((agent) => agent.id));
   const childAgents = roomAgents.filter((agent) => !orchestratorIds.has(agent.id));
   const allAgents = [...orchestrators, ...childAgents];
   const agentById = Object.fromEntries(allAgents.map((agent) => [agent.id, agent]));
-
+  const runningChildCounts = {};
+  for (const project of workflow.projects) {
+    runningChildCounts[project.key] = 0;
+  }
+  for (const agent of childAgents) {
+    if (agent.projectKey && isRunningAgent(agent, workflow)) {
+      runningChildCounts[agent.projectKey] += 1;
+    }
+  }
   return {
     orchestrators,
     childAgents,
     allAgents,
     agentById,
+    runningChildCounts,
     messages: normalizeMessages(messagesRaw)
   };
 }
@@ -738,104 +1203,6 @@ export function parseFields(body) {
     fields[match[1]] = value.replace(/[,.]$/, "");
   }
   return fields;
-}
-
-function knownSignalSet(config) {
-  return new Set([
-    ...(config.workflow?.safeSignals || []),
-    ...(config.workflow?.blockedSignals || []),
-    ...(config.workflow?.terminalSignals || [])
-  ]);
-}
-
-function knownDiagnosticSignalSet(config) {
-  return new Set(config.workflow?.diagnosticSignals || []);
-}
-
-function firstSignalToken(value) {
-  const match = String(value || "")
-    .trim()
-    .match(/^([A-Z][A-Z0-9_]+)/);
-  return match ? match[1] : null;
-}
-
-function signalFromSignalEnvelope(body, signalSet) {
-  const fields = parseFields(body);
-  const explicitSignal = firstSignalToken(fields.signal);
-  if (explicitSignal && signalSet.has(explicitSignal)) {
-    return explicitSignal;
-  }
-
-  const evidenceSignal = firstSignalToken(fields.evidence);
-  return evidenceSignal && signalSet.has(evidenceSignal) ? evidenceSignal : null;
-}
-
-export function parseSignal(body, config) {
-  const match = String(body || "").trim().match(/^([A-Z][A-Z0-9_]+)/);
-  if (!match) {
-    return null;
-  }
-  const signal = match[1];
-  const knownSignals = knownSignalSet(config);
-  if (knownSignals.has(signal)) {
-    return signal;
-  }
-
-  return signal === "SIGNAL" ? signalFromSignalEnvelope(body, knownSignals) : null;
-}
-
-function parseDiagnosticSignal(body, config) {
-  const match = String(body || "").trim().match(/^([A-Z][A-Z0-9_]+)/);
-  if (!match) {
-    return null;
-  }
-  const signal = match[1];
-  const diagnosticSignals = knownDiagnosticSignalSet(config);
-  if (diagnosticSignals.has(signal)) {
-    return signal;
-  }
-
-  return signal === "SIGNAL" ? signalFromSignalEnvelope(body, diagnosticSignals) : null;
-}
-
-function messageTime(message) {
-  const time = Date.parse(message.createdAt || "");
-  return Number.isNaN(time) ? 0 : time;
-}
-
-function unhandledMessages(messages, objective) {
-  const ordered = [...messages].sort((left, right) => messageTime(left) - messageTime(right));
-  const handledIndex = objective.lastHandledMessageId
-    ? ordered.findIndex((message) => message.id === objective.lastHandledMessageId)
-    : -1;
-  if (handledIndex >= 0) {
-    return ordered.slice(handledIndex + 1);
-  }
-
-  const handledTime = Date.parse(objective.lastHandledMessageCreatedAt || "");
-  if (!Number.isNaN(handledTime)) {
-    return ordered.filter((message) => messageTime(message) >= handledTime);
-  }
-
-  return ordered;
-}
-
-export function unhandledSignals(messages, objective, config) {
-  return unhandledMessages(messages, objective)
-    .map((message) => ({ message, signal: parseSignal(message.body, config) }))
-    .filter((entry) => entry.signal);
-}
-
-export function latestUnhandledSignal(messages, objective, config) {
-  const signaled = unhandledSignals(messages, objective, config);
-  return signaled.at(-1) || null;
-}
-
-function lastHandledMessageIdFoundInTail(messages, objective) {
-  if (!objective?.lastHandledMessageId) {
-    return null;
-  }
-  return messages.some((message) => message.id === objective.lastHandledMessageId);
 }
 
 function labelsFromMessageFields(fields) {
@@ -866,92 +1233,122 @@ function evidenceFieldValue(key, fields, labels, agent) {
   return fields[key] || labels[key];
 }
 
-export function validateDelegationContract(entry, snapshot, config) {
-  if (!entry?.message) {
+function knownSignalSet(workflow) {
+  return new Set([
+    ...(workflow.workflow?.safeSignals || []),
+    ...(workflow.workflow?.blockedSignals || []),
+    ...(workflow.workflow?.terminalSignals || [])
+  ]);
+}
+
+function knownDiagnosticSignalSet(workflow) {
+  return new Set(workflow.workflow?.diagnosticSignals || []);
+}
+
+export function parseSignal(body, workflow) {
+  const trimmed = String(body || "").trim();
+  if (!trimmed.startsWith("SIGNAL ")) {
     return null;
   }
+  const fields = parseFields(trimmed);
+  const signal = String(fields.signal || "").trim().toUpperCase();
+  return knownSignalSet(workflow).has(signal) ? signal : null;
+}
 
-  const orchestratorIds = new Set(snapshot.orchestrators.map((agent) => agent.id));
-  const author = entry.message.author;
-  if (!author) {
+function parseDiagnosticSignal(body, workflow) {
+  const trimmed = String(body || "").trim();
+  const direct = trimmed.match(/^([A-Z][A-Z0-9_]+)/);
+  if (direct && knownDiagnosticSignalSet(workflow).has(direct[1])) {
+    return direct[1];
+  }
+  if (!trimmed.startsWith("SIGNAL ")) {
     return null;
   }
+  const fields = parseFields(trimmed);
+  const signal = String(fields.signal || "").trim().toUpperCase();
+  return knownDiagnosticSignalSet(workflow).has(signal) ? signal : null;
+}
 
-  const fields = parseFields(entry.message.body);
-  const reportedAgentId = fields.agent || author;
-  const agent = snapshot.agentById[reportedAgentId] || snapshot.agentById[author];
-  const isOrchestratorSelfReport = orchestratorIds.has(author) && reportedAgentId === author;
+function messageTime(message) {
+  const time = Date.parse(message.createdAt || "");
+  return Number.isNaN(time) ? 0 : time;
+}
 
-  if (!agent && !fields.agent) {
+function sortMessages(messages) {
+  return [...messages].sort((left, right) => messageTime(left) - messageTime(right));
+}
+
+function cursorForProject(objective, projectKey) {
+  return objective?.perProjectHandledCursor?.[projectKey] || { messageId: null, lastHandledMessageCreatedAt: null };
+}
+
+function messagesAfterCursor(messages, cursor) {
+  const ordered = sortMessages(messages);
+  const handledIndex = cursor.messageId
+    ? ordered.findIndex((message) => message.id === cursor.messageId)
+    : -1;
+  if (handledIndex >= 0) {
+    return ordered.slice(handledIndex + 1);
+  }
+  const handledTime = Date.parse(cursor.lastHandledMessageCreatedAt || "");
+  if (!Number.isNaN(handledTime)) {
+    return ordered.filter((message) => messageTime(message) >= handledTime);
+  }
+  return ordered;
+}
+
+function parseSignalEntry(message, workflow) {
+  const signal = parseSignal(message.body, workflow);
+  if (!signal) {
     return null;
   }
-
-  const messageLabels = labelsFromMessageFields(fields);
-  const labels = {
-    ...(agent?.labels || {}),
-    ...messageLabels
-  };
-  const role = String(labels.role || fields.role || "").toLowerCase();
-  const implementationRoles = new Set(
-    (config.childAgents?.implementationRoles || []).map((item) => String(item).toLowerCase())
-  );
-  const isImplementationReport = implementationRoles.has(role);
-  const isRoomChild =
-    labels.room === config.room ||
-    fields.room === config.room ||
-    Boolean(labels.parent || fields.parent || (!isOrchestratorSelfReport && agent));
-
-  if (!isRoomChild && !isImplementationReport) {
-    return null;
-  }
-
-  if (isOrchestratorSelfReport && !isImplementationReport) {
-    return null;
-  }
-
-  const missingLabels = (config.childAgents?.requiredLabels || []).filter((key) => !labels[key]);
-  const missingEvidence = (config.childAgents?.requiredEvidenceFields || []).filter(
-    (key) => !evidenceFieldValue(key, fields, messageLabels, agent)
-  );
-
-  const cwd = fields.cwd || agent?.cwd;
-  const workspaceKind = agent?.workspaceKind || classifyWorkspace(cwd, config);
-  const workspaceViolations = [];
-  if (implementationRoles.has(role) && !["target", "target-worktree"].includes(workspaceKind)) {
-    workspaceViolations.push(
-      `role=${role} must run in targetWorkspace or a target worktree, got ${workspaceKind}:${cwd || "unknown"}`
-    );
-  }
-
-  const violations = [];
-  if (missingLabels.length > 0) {
-    violations.push(`missing_labels=${missingLabels.join(",")}`);
-  }
-  if (missingEvidence.length > 0) {
-    violations.push(`missing_evidence=${missingEvidence.join(",")}`);
-  }
-  violations.push(...workspaceViolations);
-
-  if (violations.length === 0) {
-    return null;
-  }
-
+  const fields = parseFields(message.body);
+  const labels = labelsFromMessageFields(fields);
   return {
-    type: "delegation_contract_violation",
-    author,
-    reportedAgentId,
-    signal: entry.signal,
-    messageId: entry.message.id,
-    violations
+    message,
+    signal,
+    fields,
+    labels,
+    projectKey: String(fields.project || labels.project || "").trim() || null
   };
 }
 
-function isHandoffMode(config) {
-  return Boolean(config.policy?.handoffMode);
+function parseDiagnosticEntry(message, workflow) {
+  const diagnosticSignal = parseDiagnosticSignal(message.body, workflow);
+  if (!diagnosticSignal) {
+    return null;
+  }
+  const fields = parseFields(message.body);
+  const labels = labelsFromMessageFields(fields);
+  return {
+    message,
+    diagnosticSignal,
+    fields,
+    labels,
+    projectKey: String(fields.project || labels.project || "").trim() || null
+  };
 }
 
-function isHandoffAllowedProtectedAction(action, config) {
-  return isHandoffMode(config) && HANDOFF_ALLOWED_PROTECTED_ACTIONS.has(String(action || "").toLowerCase());
+function unhandledSignalsForProject(messages, objective, workflow, projectKey) {
+  const cursor = cursorForProject(objective, projectKey);
+  return messagesAfterCursor(messages, cursor)
+    .map((message) => parseSignalEntry(message, workflow))
+    .filter((entry) => entry && entry.projectKey === projectKey);
+}
+
+function unhandledDiagnosticsForProject(messages, objective, workflow, projectKey) {
+  const cursor = cursorForProject(objective, projectKey);
+  return messagesAfterCursor(messages, cursor)
+    .map((message) => parseDiagnosticEntry(message, workflow))
+    .filter((entry) => entry && entry.projectKey === projectKey);
+}
+
+function isHandoffMode(workflow) {
+  return Boolean(workflow.policy?.handoffMode);
+}
+
+function isHandoffAllowedProtectedAction(action, workflow) {
+  return isHandoffMode(workflow) && HANDOFF_ALLOWED_PROTECTED_ACTIONS.has(String(action || "").toLowerCase());
 }
 
 function escapedProtectedAction(action) {
@@ -964,66 +1361,32 @@ function escapedProtectedAction(action) {
 
 function protectedActionRegex(action, flags = "") {
   const escaped = escapedProtectedAction(action);
-  if (!escaped) {
-    return null;
-  }
-  return new RegExp(`(^|[^a-z0-9_])(${escaped})([^a-z0-9_]|$)`, flags);
+  return escaped ? new RegExp(`(^|[^a-z0-9_])(${escaped})([^a-z0-9_]|$)`, flags) : null;
 }
 
-function containsProtectedActionMention(text, protectedActions) {
-  return protectedActions.some((action) => {
-    const pattern = protectedActionRegex(action);
-    return pattern?.test(text);
-  });
-}
-
-function negationPrefixCoversAction(prefix, protectedActions) {
-  if (!/(?:,|\band\b|\bor\b)/.test(prefix)) {
-    return true;
-  }
-  return containsProtectedActionMention(prefix, protectedActions);
-}
-
-function isNegatedProtectedActionMention(lower, actionStart, protectedActions) {
-  const context = lower.slice(Math.max(0, actionStart - 120), actionStart);
-  const currentClause = context.split(/[.!?:;\n\r]/).pop() || "";
-  const normalized = currentClause.replace(/[("'`[\]{}]/g, " ").replace(/\s+/g, " ");
-  const listNegation = normalized.match(/(?:^|[^a-z0-9_])(?:no|without|never)\s+((?:(?:[a-z0-9_#/-]+|,|and|or)\s*){0,12})$/);
-  if (listNegation && negationPrefixCoversAction(listNegation[1] || "", protectedActions)) {
-    return true;
-  }
-
-  const directNegation = normalized.match(/(?:^|[^a-z0-9_])(?:not|did\s+not|do\s+not|does\s+not|didn't|don't|doesn't)\s+((?:(?:[a-z0-9_#/-]+|and|or)\s*){0,8})$/);
-  return Boolean(directNegation && negationPrefixCoversAction(directNegation[1] || "", protectedActions));
-}
-
-function hasUnnegatedProtectedAction(lower, action, protectedActions) {
+function hasUnnegatedProtectedAction(text, action) {
+  const lower = String(text || "").toLowerCase();
   const pattern = protectedActionRegex(action, "g");
   if (!pattern) {
     return false;
   }
-
   for (let match = pattern.exec(lower); match; match = pattern.exec(lower)) {
-    const actionStart = match.index + match[1].length;
-    if (!isNegatedProtectedActionMention(lower, actionStart, protectedActions)) {
+    const prefix = lower.slice(Math.max(0, match.index - 30), match.index);
+    if (!/\b(?:not|no|without|never|did not|do not|does not|didn't|don't|doesn't)\b/.test(prefix)) {
       return true;
     }
   }
   return false;
 }
 
-function protectedActionsInText(text, config) {
-  const lower = String(text || "").toLowerCase();
-  const protectedActions = config.workflow?.protectedActions || [];
-  return protectedActions.filter((action) => hasUnnegatedProtectedAction(lower, action, protectedActions));
+function blockingProtectedAction(text, workflow) {
+  return (workflow.workflow?.protectedActions || []).find((action) => (
+    hasUnnegatedProtectedAction(text, action) && !isHandoffAllowedProtectedAction(action, workflow)
+  )) || null;
 }
 
-function blockingProtectedAction(text, config) {
-  return protectedActionsInText(text, config).find((action) => !isHandoffAllowedProtectedAction(action, config));
-}
-
-function isRunningAgent(agent, config) {
-  return new Set(config.childAgents?.runningStatuses || []).has(String(agent.status || "").toLowerCase());
+function isRunningAgent(agent, workflow) {
+  return new Set(workflow.childAgents?.runningStatuses || []).has(String(agent.status || "").toLowerCase());
 }
 
 function isUnavailableOrchestrator(agent) {
@@ -1040,154 +1403,193 @@ function isOrchestratorIdle(agent) {
   return status === "idle" || status === "complete" || status === "done";
 }
 
-function cooldownActive(objective, config, now) {
+function cooldownActive(objective, workflow, now) {
   const last = objective.lastContinuationAt || objective.lastDecision?.decidedAt;
   if (!last) {
     return false;
   }
   const elapsedMs = now.getTime() - Date.parse(last);
-  return elapsedMs < (config.policy?.cooldownSeconds || 0) * 1000;
+  return elapsedMs < (workflow.policy?.cooldownSeconds || 0) * 1000;
 }
 
 function decision(action, reason, extra = {}) {
   return { action, reason, ...extra };
 }
 
-function buildReviewPolicyInstructions(config) {
-  const policy = config.reviewPolicy || {};
-  const reviewers = Array.isArray(policy.reviewers) && policy.reviewers.length > 0
-    ? policy.reviewers.join(", ")
-    : "none";
-  const phases = policy.phases || {};
-  const threeRoundPhases = ["plan", "feature", "pr"]
-    .filter((phase) => phases[phase]?.multiAgentReview)
-    .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
-  const prePrPhases = ["plan", "feature"]
-    .filter((phase) => phases[phase]?.multiAgentReview)
-    .map((phase) => `${phase}=${phases[phase]?.defaultRounds || 3}`);
-  const prdRounds = phases.prd?.defaultRounds || 1;
-  const reviewRoundsInstruction = isHandoffMode(config)
-    ? `- Plan and feature review gates must run exactly these default review rounds: ${prePrPhases.join(", ")}. PR review gates must continue without human confirmation through review/fix/re-review until all available reviewers report no findings, then merge.`
-    : `- Plan, feature, and PR review gates must run exactly these default review rounds unless the user asks to review until there are no issues: ${threeRoundPhases.join(", ")}.`;
-
-  const instructions = [
-    "Review policy:",
-    `- Required multi-agent reviewers: ${reviewers}.`,
-    policy.ignoreUnavailableReviewers
-      ? "- Try every configured reviewer for each required review gate; if a reviewer/provider is unavailable, record that skip in the room evidence and continue with the available reviewers."
-      : "- Try every configured reviewer for each required review gate; unavailable reviewers are blockers unless the user explicitly overrides.",
-    `- PRD flow: draft or update PRD, run multi-agent review with the available reviewers for ${prdRounds} round(s), fix findings, then stop for human review.`,
-    reviewRoundsInstruction,
-    isHandoffMode(config)
-      ? "- In handoff mode, do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation; stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker that genuinely requires human intervention."
-      : "- Human confirmation is required at configured terminal gates unless the user explicitly approved continuation.",
-    "- If the user asks to review until there are no issues, continue review/fix/re-review cycles until all available reviewers report no findings.",
-    "- Do not treat PRD as human-review-ready until the multi-agent review findings are resolved."
-  ];
-
-  return instructions;
+function renderTemplate(template, vars) {
+  return String(template).replace(/{{\s*([^}]+)\s*}}/g, (_, expression) => {
+    const parts = expression.trim().split(/\s+/);
+    let filter = null;
+    let variable = null;
+    if (parts.length === 1) {
+      [variable] = parts;
+    } else if (parts.length === 2) {
+      [filter, variable] = parts;
+    } else {
+      throw new GuardError(`template_invalid_expression: ${expression}`, "template_invalid");
+    }
+    if (filter && !ALLOWED_TEMPLATE_FILTERS.has(filter)) {
+      throw new GuardError(`template_unknown_filter: ${filter}`, "template_invalid");
+    }
+    if (!ALLOWED_TEMPLATE_VARS.has(variable)) {
+      throw new GuardError(`template_unknown_variable: ${variable}`, "template_invalid");
+    }
+    const value = vars[variable];
+    if (filter === "json") {
+      return JSON.stringify(value ?? null);
+    }
+    if (value === undefined || value === null) {
+      return "";
+    }
+    return typeof value === "string" ? value : JSON.stringify(value);
+  });
 }
 
-function buildAgentPermissionInstructions(config) {
-  const modes = config.childAgents?.permissionModeDefaults || {};
-  const modeEntries = Object.entries(modes)
-    .map(([provider, mode]) => `${provider}=${mode}`)
-    .join(", ");
-  const effectiveModes = modeEntries || "none";
-
-  return [
-    "Agent launch defaults:",
-    `- Use YOLO-equivalent permissions by default for child agents. Provider mode defaults: ${effectiveModes}.`,
-    "- Codex uses mode `full-access` as its YOLO-equivalent mode.",
-    "- Claude Code-based providers, including `claude` and `mimo`, use mode `bypassPermissions`.",
-    "- Pass the provider-specific mode at launch time (`paseo run --mode <mode>` or API `modeId=<mode>`); do not leave child agents on default permission prompts."
-  ];
+export function buildContinuationPrompt({ objective, workflow, currentProject, signalEntry, reason, violation, recovery, cleanupAgents = [] }) {
+  const payload = {
+    objective: objective.objective,
+    room: objective.room,
+    researchWorkspace: workflow.researchWorkspace,
+    projects: workflow.projects.map((project) => ({
+      key: project.key,
+      targetWorkspace: project.targetWorkspace,
+      allowedImplementationRoots: project.allowedImplementationRoots
+    })),
+    currentProject: currentProject || null,
+    signal: signalEntry
+      ? {
+          signal: signalEntry.signal,
+          project: signalEntry.projectKey,
+          messageId: signalEntry.message.id,
+          messageCreatedAt: signalEntry.message.createdAt
+        }
+      : null,
+    reason: `${reason}\n\n${workflow.workflowBody || ""}`.trim(),
+    violation: violation || null,
+    recovery: recovery || null,
+    cleanupAgents,
+    policy: workflow.policy,
+    reviewPolicy: workflow.reviewPolicy,
+    workflowDigest: workflow.workflowDigest
+  };
+  return renderTemplate(CONTINUATION_TEMPLATE, payload);
 }
 
-function buildChildAgentPromptInstructions(config) {
-  const requiredSkills = Array.isArray(config.childAgents?.requiredSkills)
-    ? config.childAgents.requiredSkills.filter(Boolean)
-    : [];
-  const skillsText = requiredSkills.length > 0 ? requiredSkills.join(", ") : "none";
-
-  return [
-    "Child-agent prompt contract:",
-    `- Every child-agent prompt must explicitly tell the child agent to use these required skill(s): ${skillsText}.`,
-    "- Put the room, workspace, label, permission-mode, and evidence requirements directly in each child-agent prompt; do not rely on inherited parent context.",
-    "- If the child task has a domain-specific skill, name that skill explicitly in the child-agent prompt together with the guard skill."
-  ];
-}
-
-function buildChildAgentWaitInstructions(config) {
-  const command = (config.commands?.agentWait || ["wait", "{agentId}", "--json"])
-    .join(" ")
-    .replace("{agentId}", "<agent-id>");
-
-  return [
-    "Child-agent wait contract:",
-    `- After every parent-launched child agent is created or sent in background/no-wait mode, immediately start a background wait with \`paseo ${command}\` as an auxiliary idle notification path.`,
-    "- Run the wait as a background process/job; do not block the parent synchronously on the wait.",
-    "- This per-child wait supplements room evidence and the guard watcher; durable continuation comes from `paseo-guard-watch` plus valid SIGNAL reporting."
-  ];
-}
-
-function buildMissingEvidenceInstructions() {
-  return [
-    "Missing room evidence recovery:",
-    "- If a time check or room read does not show the expected child-agent signal, inspect the child agent status, state, and latest log/error before waiting.",
-    "- If a child agent failed, hit quota, lost provider access, or needs permission, record that as room evidence and retry with an available provider or mark the reviewer unavailable according to the review policy.",
-    "- If a child agent is idle/complete but did not post room evidence, send it a follow-up asking it to post the required SIGNAL line. If it cannot respond, post a relayed status marked relayed=true and do not count it as reviewer PASS unless the underlying result was observed.",
-    "- If the latest room item is only a status summary, read a larger room tail and reconcile against contract signals before concluding there is no work to continue."
-  ];
-}
-
-function formatCleanupAgents(cleanupAgents = []) {
-  if (!cleanupAgents.length) {
-    return "completedChildAgentsReadyToClose=none";
+function messageReportsAgent(message, agentId) {
+  if (!agentId) {
+    return false;
   }
-  const summary = cleanupAgents
-    .map((agent) => {
-      const parts = [`id=${agent.id}`, `status=${agent.status || "unknown"}`];
-      if (agent.role) {
-        parts.push(`role=${agent.role}`);
+  const fields = parseFields(message.body);
+  return fields.agent === agentId || message.author === agentId;
+}
+
+export function validateDelegationContract(entry, snapshot, workflow) {
+  if (!entry?.message) {
+    return null;
+  }
+  const fields = entry.fields || parseFields(entry.message.body);
+  const labels = entry.labels || labelsFromMessageFields(fields);
+  const topLevelProject = String(fields.project || "").trim();
+  const labelProject = String(labels.project || "").trim();
+  const role = String(labels.role || fields.role || "").trim().toLowerCase();
+  const requiredLabels = workflow.childAgents?.requiredLabels || [];
+  const requiredEvidenceFields = workflow.childAgents?.requiredEvidenceFields || [];
+  const author = entry.message.author;
+  const reportedAgentId = fields.agent || author || null;
+  const agent = (fields.agent && snapshot.agentById[fields.agent]) || (author && snapshot.agentById[author]) || null;
+  const effectiveCwd = fields.cwd || agent?.cwd;
+  const violations = {
+    topLevelProject: null,
+    labelProject: null,
+    agentProject: null,
+    role: null,
+    requiredLabels: [],
+    evidence: []
+  };
+
+  if (!topLevelProject) {
+    violations.topLevelProject = "missing_project";
+  } else if (!workflow.projects.some((project) => project.key === topLevelProject)) {
+    violations.topLevelProject = `unknown_project:${topLevelProject}`;
+  }
+
+  if (!labelProject) {
+    violations.labelProject = "missing_labels.project";
+  } else if (topLevelProject && labelProject !== topLevelProject) {
+    violations.labelProject = `labels.project_mismatch:${labelProject}`;
+  }
+
+  for (const key of requiredLabels) {
+    if (!labels[key]) {
+      violations.requiredLabels.push(key);
+    }
+  }
+
+  for (const field of requiredEvidenceFields) {
+    if (!evidenceFieldValue(field, fields, labels, agent)) {
+      violations.evidence.push(field);
+    }
+  }
+
+  if (!role) {
+    violations.role = "missing_role";
+  }
+
+  let cwdResolved = null;
+  if (effectiveCwd) {
+    try {
+      cwdResolved = resolveProjectWorkspace(effectiveCwd, workflow.projects, {
+        checkGitWorktrees: workflow.policy?.checkGitWorktrees
+      });
+    } catch (error) {
+      violations.agentProject = String(error.message || error);
+    }
+  }
+
+  if (!violations.agentProject && cwdResolved && topLevelProject && cwdResolved.projectKey !== topLevelProject) {
+    violations.agentProject = `cwd_project_mismatch:${cwdResolved.projectKey}`;
+  }
+
+  if (!violations.agentProject && agent?.projectViolation) {
+    violations.agentProject = agent.projectViolation;
+  } else if (!violations.agentProject && agent?.projectKey && topLevelProject && agent.projectKey !== topLevelProject) {
+    violations.agentProject = `agent_project_mismatch:${agent.projectKey}`;
+  }
+
+  const implementationRoles = new Set(
+    (workflow.childAgents?.implementationRoles || []).map((item) => String(item).toLowerCase())
+  );
+  if (role && implementationRoles.has(role)) {
+    if (!cwdResolved && !agent?.projectKey) {
+      violations.role = violations.role || "implementation_role_missing_project";
+    }
+    if (effectiveCwd) {
+      const cwdWorkspaceKind = cwdResolved?.workspaceKind || agent?.workspaceKind || "other";
+      if (!["target", "target-worktree", "allowed-root"].includes(cwdWorkspaceKind)) {
+        violations.role = `invalid_workspace_kind:${cwdWorkspaceKind}`;
       }
-      if (agent.task) {
-        parts.push(`task=${agent.task}`);
-      }
-      return parts.join(",");
-    })
-    .join(";");
-  return `completedChildAgentsReadyToClose=${summary}`;
-}
+    }
+  }
 
-function buildChildAgentCleanupInstructions(config) {
-  const command = (config.commands?.archive || ["archive", "{agentId}", "--json"])
-    .join(" ")
-    .replace("{agentId}", "<agent-id>");
-  return [
-    "Child-agent cleanup:",
-    config.childAgents?.closeOnCompletion
-      ? `- After a child agent posts valid final room evidence and is idle/done, close it promptly with \`paseo ${command}\`.`
-      : "- Child-agent auto-close is disabled in config; leave completed child agents active unless the user explicitly asks.",
-    "- Never use `--force` for cleanup; never close running, thinking, queued, starting, or needs_permission agents.",
-    "- Never close a child agent before its required room evidence is present. If evidence is missing, recover evidence first.",
-    "- Archive/close only child agents for this room. Do not delete agents, close the orchestrator, restart the daemon, or delete branches as cleanup."
-  ];
-}
+  if (!labels.room || labels.room !== workflow.room) {
+    violations.requiredLabels = [...new Set([...violations.requiredLabels, "room"])];
+  }
 
-function latestUnhandledDiagnostic(messages, objective, config) {
-  return unhandledMessages(messages, objective)
-    .map((message) => ({
-      message,
-      signal: parseSignal(message.body, config),
-      diagnosticSignal: parseDiagnosticSignal(message.body, config)
-    }))
-    .filter((entry) => !entry.signal && entry.diagnosticSignal)
-    .at(-1) || null;
-}
-
-function agentStatusSet(config, key) {
-  return new Set((config.childAgents?.[key] || []).map((item) => String(item).toLowerCase()));
+  const hasViolation = Object.values(violations).some((value) => (
+    Array.isArray(value) ? value.length > 0 : Boolean(value)
+  ));
+  if (!hasViolation) {
+    return null;
+  }
+  return {
+    type: "delegation_contract_violation",
+    author,
+    reportedAgentId,
+    signal: entry.signal,
+    messageId: entry.message.id,
+    projectKey: topLevelProject || null,
+    violations
+  };
 }
 
 function agentTimestamp(agent) {
@@ -1215,162 +1617,152 @@ function agentTimestamp(agent) {
   return times.length > 0 ? Math.max(...times) : 0;
 }
 
-function objectiveCheckpointTime(objective) {
-  const candidates = [
-    objective.lastContinuationAt,
-    objective.lastDecision?.decidedAt,
-    objective.createdAt
-  ];
-  const times = candidates
-    .map((value) => Date.parse(value || ""))
-    .filter((value) => !Number.isNaN(value));
-  return times.length > 0 ? Math.max(...times) : 0;
-}
-
-function messageReportsAgent(message, agentId) {
-  if (!agentId) {
-    return false;
-  }
-  const fields = parseFields(message.body);
-  return fields.agent === agentId || message.author === agentId;
-}
-
-function hasValidContractSignalFromAgent(messages, agentId, snapshot, config) {
+function hasValidSignalForAgent(messages, agent, snapshot, workflow) {
   return messages.some((message) => {
-    const signal = parseSignal(message.body, config);
-    if (!signal || !messageReportsAgent(message, agentId)) {
+    const entry = parseSignalEntry(message, workflow);
+    if (!entry || !messageReportsAgent(message, agent.id)) {
       return false;
     }
-    return !validateDelegationContract({ message, signal }, snapshot, config);
+    if (entry.projectKey !== agent.projectKey) {
+      return false;
+    }
+    return !validateDelegationContract(entry, snapshot, workflow);
   });
 }
 
-function closeableChildAgents(snapshot, config) {
-  if (!config.childAgents?.closeOnCompletion) {
+function closeableChildAgents(snapshot, workflow, projectKey) {
+  if (!workflow.childAgents?.closeOnCompletion) {
     return [];
   }
-
-  const finishedStatuses = agentStatusSet(config, "finishedStatuses");
+  const finishedStatuses = new Set((workflow.childAgents?.finishedStatuses || []).map((item) => String(item).toLowerCase()));
   return snapshot.childAgents
+    .filter((agent) => agent.projectKey === projectKey)
     .filter((agent) => finishedStatuses.has(String(agent.status || "").toLowerCase()))
-    .filter((agent) => hasValidContractSignalFromAgent(snapshot.messages, agent.id, snapshot, config))
+    .filter((agent) => hasValidSignalForAgent(snapshot.messages, agent, snapshot, workflow))
     .map((agent) => ({
       id: agent.id,
       status: agent.status,
-      role: agent.labels?.role,
-      task: agent.labels?.task
+      role: agent.labels?.role || null,
+      task: agent.labels?.task || null,
+      projectKey: agent.projectKey
     }));
 }
 
-function latestChildEvidenceAnomaly(snapshot, objective, config) {
-  const failureStatuses = agentStatusSet(config, "failureStatuses");
-  const finishedStatuses = agentStatusSet(config, "finishedStatuses");
-  const checkpoint = objectiveCheckpointTime(objective);
-
+function latestChildEvidenceAnomaly(snapshot, workflow, projectKey) {
+  const failureStatuses = new Set((workflow.childAgents?.failureStatuses || []).map((item) => String(item).toLowerCase()));
+  const finishedStatuses = new Set((workflow.childAgents?.finishedStatuses || []).map((item) => String(item).toLowerCase()));
   const candidates = snapshot.childAgents
-    .filter((agent) => !isRunningAgent(agent, config))
-    .filter((agent) => !hasValidContractSignalFromAgent(snapshot.messages, agent.id, snapshot, config))
+    .filter((agent) => agent.projectKey === projectKey)
+    .filter((agent) => !isRunningAgent(agent, workflow))
+    .filter((agent) => !hasValidSignalForAgent(snapshot.messages, agent, snapshot, workflow))
     .filter((agent) => {
       const status = String(agent.status || "").toLowerCase();
-      if (failureStatuses.has(status)) {
-        return true;
-      }
-      if (!finishedStatuses.has(status)) {
-        return false;
-      }
-      const timestamp = agentTimestamp(agent);
-      return timestamp > 0 && (checkpoint === 0 || timestamp >= checkpoint);
+      return failureStatuses.has(status) || finishedStatuses.has(status);
     })
     .sort((left, right) => agentTimestamp(left) - agentTimestamp(right));
-
-  return candidates.at(-1) || null;
+  return candidates[0] || null;
 }
 
-function formatRecoveryContext(recovery) {
-  if (!recovery) {
-    return "recoveryContext=none";
-  }
-  const parts = [`type=${recovery.type}`];
-  if (recovery.messageId) {
-    parts.push(`messageId=${recovery.messageId}`);
-  }
-  if (recovery.author) {
-    parts.push(`author=${recovery.author}`);
-  }
-  if (recovery.childAgentId) {
-    parts.push(`childAgentId=${recovery.childAgentId}`);
-  }
-  if (recovery.childAgentStatus) {
-    parts.push(`childAgentStatus=${recovery.childAgentStatus}`);
-  }
-  return `recoveryContext=${parts.join(" ")}`;
+function retryKey(projectKey, reason, messageOrAgentId) {
+  return `${projectKey}:${reason}:${messageOrAgentId || "none"}`;
 }
 
-function messageCreatedAtForId(messages, messageId) {
-  if (!messageId) {
-    return undefined;
+function clearRetryLedgerForProject(retryLedger, projectKey) {
+  const next = {};
+  for (const [key, value] of Object.entries(retryLedger || {})) {
+    if (value.projectKey !== projectKey) {
+      next[key] = value;
+    }
   }
-  return messages.find((message) => message.id === messageId)?.createdAt;
+  return next;
 }
 
-function derivedLastHandledMessageCreatedAt(messages, objective) {
-  return objective?.lastHandledMessageCreatedAt ||
-    messageCreatedAtForId(messages || [], objective?.lastHandledMessageId) ||
-    null;
+function clearRetryLedgerByKeys(retryLedger, keys) {
+  const remove = new Set(keys || []);
+  const next = {};
+  for (const [key, value] of Object.entries(retryLedger || {})) {
+    if (!remove.has(key)) {
+      next[key] = value;
+    }
+  }
+  return next;
 }
 
-export function buildContinuationPrompt({ objective, config, signalEntry, reason, violation, recovery, cleanupAgents }) {
-  const signalLine = signalEntry
-    ? `lastSignal=${signalEntry.signal}\nlastMessageId=${signalEntry.message.id}`
-    : "lastSignal=none\nlastMessageId=none";
-  const violationLine = violation
-    ? `contractViolation=${violation.violations.join("; ")}`
-    : "contractViolation=none";
-  const recoveryLine = formatRecoveryContext(recovery);
-  const cleanupLine = formatCleanupAgents(cleanupAgents);
-  const protectedActionInstruction = isHandoffMode(config)
-    ? "9. Handoff mode is enabled: config grants explicit approval to complete PR review-until-clean without human confirmation, merge the reviewed PR, post MERGED evidence, and continue into the next approved project phase. Stop only for PRD human review after resolved multi-agent findings or an unrecoverable blocker that genuinely requires human intervention. The guard does not run git or GitHub commands directly; the orchestrator must perform that work through the existing Paseo flow. Do not delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, or restart the daemon without separate explicit approval."
-    : "9. Do not merge, delete branches, delete agents, force-archive/close running agents, close child agents before room evidence, restart the daemon, or start a new post-merge phase without explicit user approval.";
-
-  return [
-    "PASEO_AGENT_GUARD_CONTINUATION",
-    `objective=${objective.objective}`,
-    `project=${objective.projectName}`,
-    `room=${objective.room}`,
-    `researchWorkspace=${config.researchWorkspace}`,
-    `targetWorkspace=${config.targetWorkspace}`,
-    `reason=${reason}`,
-    signalLine,
-    violationLine,
-    recoveryLine,
-    cleanupLine,
-    "",
-    "Instructions:",
-    "1. Read the room state and current project evidence before acting.",
-    "2. Take exactly one safe next step, then report back to the room.",
-    "3. Planning and research may run in researchWorkspace.",
-    "4. Implementation, fix, validation, audit, and PR child agents must run in targetWorkspace or a linked target worktree.",
-    "5. Every child agent must include labels: room, parent, phase, task, role.",
-    "6. For every parent-launched child agent, use background/no-wait mode, inspect cwd/labels, then start a background `paseo wait <agent-id> --json` until it becomes idle.",
-    "7. Post room evidence in this shape: SIGNAL signal=<FIXED|PASS|DONE|PLAN_READY|BLOCKED|NEEDS_FIX|PR_CREATED|MERGED> agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<id>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>.",
-    "8. Continue through room evidence; per-child waits supplement the guard watcher and do not replace SIGNAL reporting.",
-    protectedActionInstruction,
-    "",
-    ...buildChildAgentPromptInstructions(config),
-    "",
-    ...buildChildAgentWaitInstructions(config),
-    "",
-    ...buildMissingEvidenceInstructions(config),
-    "",
-    ...buildChildAgentCleanupInstructions(config),
-    "",
-    ...buildAgentPermissionInstructions(config),
-    "",
-    ...buildReviewPolicyInstructions(config)
-  ].join("\n");
+function messageOrLabelProject(message) {
+  const fields = parseFields(message.body);
+  const labels = labelsFromMessageFields(fields);
+  return String(fields.project || labels.project || "").trim() || null;
 }
 
-export function decideReconcile(objective, config, snapshot, { now = new Date() } = {}) {
+function progressAfterRetry(messages, ledgerEntry) {
+  const lastPromptAt = Date.parse(ledgerEntry.lastPromptAt || "");
+  if (Number.isNaN(lastPromptAt)) {
+    return false;
+  }
+  return messages.some((message) => {
+    const createdAt = Date.parse(message.createdAt || "");
+    if (Number.isNaN(createdAt) || createdAt <= lastPromptAt) {
+      return false;
+    }
+    return messageOrLabelProject(message) === ledgerEntry.projectKey;
+  });
+}
+
+function earliestUnhandledSignal(snapshot, objective, workflow) {
+  const entries = [];
+  for (const project of workflow.projects) {
+    const projectSignals = unhandledSignalsForProject(snapshot.messages, objective, workflow, project.key);
+    if (projectSignals.length > 0 && objective.projectStatus?.[project.key] !== STATUS_BLOCKED) {
+      entries.push(...projectSignals);
+    }
+  }
+  return sortMessages(entries.map((entry) => entry.message))
+    .map((message) => entries.find((entry) => entry.message.id === message.id))
+    .find(Boolean) || null;
+}
+
+function dueRetryEntry(snapshot, objective, workflow, now) {
+  const entries = Object.entries(objective.retryLedger || {})
+    .map(([key, value]) => ({ key, ...value }))
+    .filter((entry) => objective.projectStatus?.[entry.projectKey] !== STATUS_BLOCKED)
+    .filter((entry) => !progressAfterRetry(snapshot.messages, entry))
+    .filter((entry) => {
+      const dueAt = Date.parse(entry.dueAt || "");
+      return !Number.isNaN(dueAt) && dueAt <= now.getTime();
+    })
+    .sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt));
+  return entries[0] || null;
+}
+
+function ledgerUpdateForRetry(objective, workflow, projectKey, reason, id, now, lastError = null, attemptOverride = null) {
+  const key = retryKey(projectKey, reason, id);
+  const existing = objective.retryLedger?.[key];
+  const attempt = attemptOverride ?? ((existing?.attempt || 0) + 1);
+  const dueAt = new Date(now.getTime() + (workflow.policy?.cooldownSeconds || 0) * 1000).toISOString();
+  return {
+    key,
+    value: {
+      projectKey,
+      reason,
+      messageId: reason.includes("signal") || reason.includes("blocker") ? id : null,
+      agentId: reason.includes("evidence") ? id : null,
+      attempt,
+      dueAt,
+      lastError,
+      lastPromptAt: now.toISOString()
+    }
+  };
+}
+
+function blockProjectDecision(projectKey, reason, extra = {}) {
+  return decision("block", reason, {
+    projectKey,
+    projectStatus: STATUS_BLOCKED,
+    ...extra
+  });
+}
+
+export function decideReconcile(objective, workflow, snapshot, { now = new Date() } = {}) {
   const timestamp = now.toISOString();
   if (!objective) {
     return decision("block", "objective_missing", {
@@ -1387,13 +1779,8 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
 
   const orchestrator = selectOrchestrator(snapshot.orchestrators);
   if (!orchestrator) {
-    const closedOrchestrators = snapshot.orchestrators.map((agent) => ({
-      id: agent.id,
-      status: agent.status
-    }));
     return decision("block", snapshot.orchestrators.length > 0 ? "orchestrator_unavailable" : "orchestrator_not_found", {
       nextStatus: STATUS_BLOCKED,
-      closedOrchestrators,
       decidedAt: timestamp
     });
   }
@@ -1406,338 +1793,383 @@ export function decideReconcile(objective, config, snapshot, { now = new Date() 
     });
   }
 
-  const runningChild = snapshot.childAgents.find((agent) => isRunningAgent(agent, config));
+  const runningChild = snapshot.childAgents.find((agent) => isRunningAgent(agent, workflow));
   if (runningChild) {
     return decision("wait", "child_agent_running", {
+      projectKey: runningChild.projectKey,
       childAgentId: runningChild.id,
       childAgentStatus: runningChild.status,
       decidedAt: timestamp
     });
   }
 
-  const cleanupAgents = closeableChildAgents(snapshot, config);
-  const signalEntries = unhandledSignals(snapshot.messages, objective, config);
-  if (signalEntries.length === 0) {
-    const childAnomaly = latestChildEvidenceAnomaly(snapshot, objective, config);
-    const diagnosticEntry = latestUnhandledDiagnostic(snapshot.messages, objective, config);
-    const recovery = childAnomaly
-      ? {
-          type: "child_agent_missing_room_evidence",
-          childAgentId: childAnomaly.id,
-          childAgentStatus: childAnomaly.status
-        }
-      : diagnosticEntry
-        ? {
-            type: "unrecognized_room_update",
-            messageId: diagnosticEntry.message.id,
-            author: diagnosticEntry.message.author,
-            messageCreatedAt: diagnosticEntry.message.createdAt
-          }
-        : null;
+  const retryEntry = dueRetryEntry(snapshot, objective, workflow, now);
+  const oldestSignal = earliestUnhandledSignal(snapshot, objective, workflow);
+  if (retryEntry && !oldestSignal) {
+    if (retryEntry.attempt >= (workflow.policy?.maxRetries || 1)) {
+      return blockProjectDecision(retryEntry.projectKey, "retry_budget_exhausted", {
+        retryKey: retryEntry.key,
+        retryAttempt: retryEntry.attempt,
+        decidedAt: timestamp
+      });
+    }
+    if (cooldownActive(objective, workflow, now)) {
+      return decision("wait", "cooldown_active", {
+        projectKey: retryEntry.projectKey,
+        retryKey: retryEntry.key,
+        decidedAt: timestamp
+      });
+    }
+    if (!workflow.policy?.autoContinue) {
+      return decision("wait", "auto_continue_disabled", {
+        projectKey: retryEntry.projectKey,
+        retryKey: retryEntry.key,
+        decidedAt: timestamp
+      });
+    }
+    const currentProject = workflow.projects.find((project) => project.key === retryEntry.projectKey);
+    return decision("send", retryEntry.reason, {
+      projectKey: retryEntry.projectKey,
+      retryKey: retryEntry.key,
+      retryAttempt: retryEntry.attempt + 1,
+      orchestratorId: orchestrator.id,
+      prompt: buildContinuationPrompt({
+        objective,
+        workflow,
+        currentProject,
+        reason: retryEntry.reason,
+        recovery: retryEntry
+      }),
+      ledgerUpdate: ledgerUpdateForRetry(
+        objective,
+        workflow,
+        retryEntry.projectKey,
+        retryEntry.reason,
+        retryEntry.messageId || retryEntry.agentId,
+        now,
+        retryEntry.lastError,
+        retryEntry.attempt + 1
+      ),
+      decidedAt: timestamp
+    });
+  }
 
-    if (recovery) {
-      if (cooldownActive(objective, config, now)) {
-        return decision("wait", "cooldown_active", {
-          messageId: recovery.messageId,
-          childAgentId: recovery.childAgentId,
-          decidedAt: timestamp
-        });
-      }
-
-      if (!config.policy?.autoContinue) {
-        return decision("wait", "auto_continue_disabled", {
-          messageId: recovery.messageId,
-          childAgentId: recovery.childAgentId,
-          decidedAt: timestamp
-        });
-      }
-
-      return decision("send", "missing_room_evidence_recovery", {
-        messageId: recovery.messageId,
-        childAgentId: recovery.childAgentId,
-        orchestratorId: orchestrator.id,
-        recovery,
-        prompt: buildContinuationPrompt({
-          objective,
-          config,
-          reason: "missing_room_evidence_recovery",
-          recovery,
-          cleanupAgents
-        }),
-        lastHandledMessageId: recovery.messageId,
-        lastHandledMessageCreatedAt: recovery.messageCreatedAt,
+  if (oldestSignal) {
+    const projectKey = oldestSignal.projectKey;
+    const currentProject = workflow.projects.find((project) => project.key === projectKey);
+    const contractViolation = validateDelegationContract(oldestSignal, snapshot, workflow);
+    if (contractViolation) {
+      return decision("block", "delegation_contract_violation", {
+        projectKey,
+        violation: contractViolation,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
         decidedAt: timestamp
       });
     }
 
-    if (cleanupAgents.length > 0) {
-      if (cooldownActive(objective, config, now)) {
-        return decision("wait", "cooldown_active", {
-          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
-          decidedAt: timestamp
-        });
-      }
+    const protectedAction = blockingProtectedAction(oldestSignal.message.body, workflow);
+    if (protectedAction) {
+      return decision("block", "protected_action_detected", {
+        projectKey,
+        protectedAction,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        decidedAt: timestamp
+      });
+    }
 
-      if (!config.policy?.autoContinue) {
-        return decision("wait", "auto_continue_disabled", {
-          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
-          decidedAt: timestamp
-        });
-      }
+    const terminalSignals = new Set(workflow.workflow?.terminalSignals || []);
+    const blockedSignals = new Set(workflow.workflow?.blockedSignals || []);
+    const recoverableSignals = new Set(workflow.workflow?.recoverableBlockedSignals || []);
+    const safeSignals = new Set(workflow.workflow?.safeSignals || []);
 
-      return decision("send", "completed_child_cleanup", {
+    if (terminalSignals.has(oldestSignal.signal) && !isHandoffMode(workflow)) {
+      return decision("stop", oldestSignal.signal === "PR_CREATED" ? "terminal_review_gate" : "terminal_signal", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        nextStatus: oldestSignal.signal === "MERGED" && !workflow.policy?.allowNewPhaseAfterMerge
+          ? STATUS_COMPLETE
+          : STATUS_BLOCKED,
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        decidedAt: timestamp
+      });
+    }
+
+    if (blockedSignals.has(oldestSignal.signal) && !recoverableSignals.has(oldestSignal.signal)) {
+      return decision("block", "human_decision_required", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        nextStatus: STATUS_BLOCKED,
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        decidedAt: timestamp
+      });
+    }
+
+    if (cooldownActive(objective, workflow, now)) {
+      return decision("wait", "cooldown_active", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    if (!workflow.policy?.autoContinue) {
+      return decision("wait", "auto_continue_disabled", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        decidedAt: timestamp
+      });
+    }
+
+    if (terminalSignals.has(oldestSignal.signal) && isHandoffMode(workflow)) {
+      return decision("send", oldestSignal.signal === "MERGED" ? "handoff_next_phase_continue" : "handoff_pr_review_until_clean", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
         orchestratorId: orchestrator.id,
-        cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
         prompt: buildContinuationPrompt({
           objective,
-          config,
+          workflow,
+          currentProject,
+          signalEntry: oldestSignal,
+          reason: oldestSignal.signal === "MERGED" ? "handoff_next_phase_continue" : "handoff_pr_review_until_clean"
+        }),
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        clearProjectRetryLedger: projectKey,
+        decidedAt: timestamp
+      });
+    }
+
+    if (blockedSignals.has(oldestSignal.signal)) {
+      return decision("send", "recoverable_blocker_nudge", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        orchestratorId: orchestrator.id,
+        prompt: buildContinuationPrompt({
+          objective,
+          workflow,
+          currentProject,
+          signalEntry: oldestSignal,
+          reason: "recoverable_blocker_nudge"
+        }),
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        ledgerUpdate: ledgerUpdateForRetry(objective, workflow, projectKey, "recoverable_blocker_nudge", oldestSignal.message.id, now),
+        decidedAt: timestamp
+      });
+    }
+
+    if (safeSignals.has(oldestSignal.signal)) {
+      return decision("send", "safe_signal_continue", {
+        projectKey,
+        signal: oldestSignal.signal,
+        messageId: oldestSignal.message.id,
+        orchestratorId: orchestrator.id,
+        prompt: buildContinuationPrompt({
+          objective,
+          workflow,
+          currentProject,
+          signalEntry: oldestSignal,
+          reason: "safe_signal_continue"
+        }),
+        projectCursor: {
+          projectKey,
+          messageId: oldestSignal.message.id,
+          lastHandledMessageCreatedAt: oldestSignal.message.createdAt
+        },
+        clearProjectRetryLedger: projectKey,
+        decidedAt: timestamp
+      });
+    }
+  }
+
+  for (const project of workflow.projects) {
+    if (objective.projectStatus?.[project.key] === STATUS_BLOCKED) {
+      continue;
+    }
+    const anomaly = latestChildEvidenceAnomaly(snapshot, workflow, project.key);
+    if (anomaly) {
+      if (cooldownActive(objective, workflow, now)) {
+        return decision("wait", "cooldown_active", {
+          projectKey: project.key,
+          childAgentId: anomaly.id,
+          decidedAt: timestamp
+        });
+      }
+      if (!workflow.policy?.autoContinue) {
+        return decision("wait", "auto_continue_disabled", {
+          projectKey: project.key,
+          childAgentId: anomaly.id,
+          decidedAt: timestamp
+        });
+      }
+      return decision("send", "missing_room_evidence_recovery", {
+        projectKey: project.key,
+        childAgentId: anomaly.id,
+        orchestratorId: orchestrator.id,
+        prompt: buildContinuationPrompt({
+          objective,
+          workflow,
+          currentProject: project,
+          reason: "missing_room_evidence_recovery",
+          recovery: {
+            type: "child_agent_missing_room_evidence",
+            childAgentId: anomaly.id,
+            childAgentStatus: anomaly.status,
+            projectKey: project.key
+          }
+        }),
+        ledgerUpdate: ledgerUpdateForRetry(objective, workflow, project.key, "missing_room_evidence_recovery", anomaly.id, now),
+        decidedAt: timestamp
+      });
+    }
+
+    const diagnostics = unhandledDiagnosticsForProject(snapshot.messages, objective, workflow, project.key);
+    if (diagnostics.length > 0) {
+      const diagnostic = diagnostics[0];
+      if (cooldownActive(objective, workflow, now)) {
+        return decision("wait", "cooldown_active", {
+          projectKey: project.key,
+          messageId: diagnostic.message.id,
+          decidedAt: timestamp
+        });
+      }
+      if (!workflow.policy?.autoContinue) {
+        return decision("wait", "auto_continue_disabled", {
+          projectKey: project.key,
+          messageId: diagnostic.message.id,
+          decidedAt: timestamp
+        });
+      }
+      return decision("send", "missing_room_evidence_recovery", {
+        projectKey: project.key,
+        messageId: diagnostic.message.id,
+        orchestratorId: orchestrator.id,
+        prompt: buildContinuationPrompt({
+          objective,
+          workflow,
+          currentProject: project,
+          reason: "missing_room_evidence_recovery",
+          recovery: {
+            type: "unrecognized_room_update",
+            messageId: diagnostic.message.id,
+            author: diagnostic.message.author,
+            projectKey: project.key
+          }
+        }),
+        ledgerUpdate: ledgerUpdateForRetry(objective, workflow, project.key, "missing_room_evidence_recovery", diagnostic.message.id, now),
+        decidedAt: timestamp
+      });
+    }
+
+    const cleanupAgents = closeableChildAgents(snapshot, workflow, project.key);
+    if (cleanupAgents.length > 0) {
+      if (cooldownActive(objective, workflow, now)) {
+        return decision("wait", "cooldown_active", {
+          projectKey: project.key,
+          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+          decidedAt: timestamp
+        });
+      }
+      if (!workflow.policy?.autoContinue) {
+        return decision("wait", "auto_continue_disabled", {
+          projectKey: project.key,
+          cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+          decidedAt: timestamp
+        });
+      }
+      return decision("send", "completed_child_cleanup", {
+        projectKey: project.key,
+        cleanupAgentIds: cleanupAgents.map((agent) => agent.id),
+        orchestratorId: orchestrator.id,
+        prompt: buildContinuationPrompt({
+          objective,
+          workflow,
+          currentProject: project,
           reason: "completed_child_cleanup",
           cleanupAgents
         }),
         decidedAt: timestamp
       });
     }
-
-    return decision("wait", "no_unhandled_signal", {
-      decidedAt: timestamp
-    });
   }
 
-  for (const entry of signalEntries) {
-    const contractViolation = validateDelegationContract(entry, snapshot, config);
-    if (contractViolation) {
-      return decision("block", "delegation_contract_violation", {
-        signal: entry.signal,
-        messageId: entry.message.id,
-        violation: contractViolation,
-        prompt: buildContinuationPrompt({
-          objective,
-          config,
-          signalEntry: entry,
-          reason: "delegation_contract_violation",
-          violation: contractViolation,
-          cleanupAgents
-        }),
-        nextStatus: STATUS_BLOCKED,
-        lastHandledMessageId: entry.message.id,
-        lastHandledMessageCreatedAt: entry.message.createdAt,
-        decidedAt: timestamp
-      });
-    }
-
-    const isTerminalSignal = (config.workflow?.terminalSignals || []).includes(entry.signal);
-    if (isTerminalSignal && !isHandoffMode(config)) {
-      const nextStatus =
-        entry.signal === "MERGED" && !config.policy?.allowNewPhaseAfterMerge
-          ? STATUS_COMPLETE
-          : STATUS_BLOCKED;
-      return decision("stop", entry.signal === "PR_CREATED" ? "terminal_review_gate" : "terminal_signal", {
-        signal: entry.signal,
-        messageId: entry.message.id,
-        nextStatus,
-        lastHandledMessageId: entry.message.id,
-        lastHandledMessageCreatedAt: entry.message.createdAt,
-        decidedAt: timestamp
-      });
-    }
-
-    const protectedAction = blockingProtectedAction(entry.message.body, config);
-    if (protectedAction) {
-      return decision("block", "protected_action_detected", {
-        signal: entry.signal,
-        messageId: entry.message.id,
-        protectedAction,
-        nextStatus: STATUS_BLOCKED,
-        lastHandledMessageId: entry.message.id,
-        lastHandledMessageCreatedAt: entry.message.createdAt,
-        decidedAt: timestamp
-      });
-    }
-
-    if ((config.workflow?.blockedSignals || []).includes(entry.signal)) {
-      const recoverable = (config.workflow?.recoverableBlockedSignals || []).includes(entry.signal);
-      if (!recoverable) {
-        return decision("block", "human_decision_required", {
-          signal: entry.signal,
-          messageId: entry.message.id,
-          nextStatus: STATUS_BLOCKED,
-          lastHandledMessageId: entry.message.id,
-          lastHandledMessageCreatedAt: entry.message.createdAt,
-          decidedAt: timestamp
-        });
-      }
-    }
-  }
-
-  let signalEntry = signalEntries.at(-1);
-  let lastHandledMessageId = signalEntry.message.id;
-  if (isHandoffMode(config)) {
-    const terminalSignals = new Set(config.workflow?.terminalSignals || []);
-    const safeSignals = new Set(config.workflow?.safeSignals || []);
-    for (let index = signalEntries.length - 1; index >= 0; index -= 1) {
-      const candidate = signalEntries[index];
-      if (!terminalSignals.has(candidate.signal)) {
-        continue;
-      }
-
-      const laterSignalsAreSafe = signalEntries
-        .slice(index + 1)
-        .every((entry) => safeSignals.has(entry.signal));
-      if (laterSignalsAreSafe) {
-        signalEntry = candidate;
-      }
-      break;
-    }
-  }
-
-  if (isHandoffMode(config) && (config.workflow?.terminalSignals || []).includes(signalEntry.signal)) {
-    if (cooldownActive(objective, config, now)) {
-      return decision("wait", "cooldown_active", {
-        signal: signalEntry.signal,
-        messageId: signalEntry.message.id,
-        decidedAt: timestamp
-      });
-    }
-
-    if (!config.policy?.autoContinue) {
-      return decision("wait", "auto_continue_disabled", {
-        signal: signalEntry.signal,
-        messageId: signalEntry.message.id,
-        decidedAt: timestamp
-      });
-    }
-
-    const reason = signalEntry.signal === "MERGED"
-      ? "handoff_next_phase_continue"
-      : "handoff_pr_review_until_clean";
-    return decision("send", reason, {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      orchestratorId: orchestrator.id,
-      prompt: buildContinuationPrompt({
-        objective,
-        config,
-        signalEntry,
-        reason,
-        cleanupAgents
-      }),
-      lastHandledMessageId,
-      lastHandledMessageCreatedAt: messageCreatedAtForId(
-        signalEntries.map((entry) => entry.message),
-        lastHandledMessageId
-      ),
-      decidedAt: timestamp
-    });
-  }
-
-  if ((config.workflow?.blockedSignals || []).includes(signalEntry.signal)) {
-    const recoverable = (config.workflow?.recoverableBlockedSignals || []).includes(signalEntry.signal);
-    if (!recoverable) {
-      return decision("block", "human_decision_required", {
-        signal: signalEntry.signal,
-        messageId: signalEntry.message.id,
-        nextStatus: STATUS_BLOCKED,
-        lastHandledMessageId: signalEntry.message.id,
-        lastHandledMessageCreatedAt: signalEntry.message.createdAt,
-        decidedAt: timestamp
-      });
-    }
-
-    if (cooldownActive(objective, config, now)) {
-      return decision("wait", "cooldown_active", {
-        signal: signalEntry.signal,
-        messageId: signalEntry.message.id,
-        decidedAt: timestamp
-      });
-    }
-
-    if (!config.policy?.autoContinue) {
-      return decision("wait", "auto_continue_disabled", {
-        signal: signalEntry.signal,
-        messageId: signalEntry.message.id,
-        decidedAt: timestamp
-      });
-    }
-
-    return decision("send", "recoverable_blocker_nudge", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      orchestratorId: orchestrator.id,
-      prompt: buildContinuationPrompt({
-        objective,
-        config,
-        signalEntry,
-        reason: "recoverable_blocker_nudge",
-        cleanupAgents
-      }),
-      lastHandledMessageId: signalEntry.message.id,
-      lastHandledMessageCreatedAt: signalEntry.message.createdAt,
-      decidedAt: timestamp
-    });
-  }
-
-  if (!(config.workflow?.safeSignals || []).includes(signalEntry.signal)) {
-    return decision("wait", "signal_not_safe", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
-  }
-
-  if (cooldownActive(objective, config, now)) {
-    return decision("wait", "cooldown_active", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
-  }
-
-  if (!config.policy?.autoContinue) {
-    return decision("wait", "auto_continue_disabled", {
-      signal: signalEntry.signal,
-      messageId: signalEntry.message.id,
-      decidedAt: timestamp
-    });
-  }
-
-  return decision("send", "safe_signal_continue", {
-    signal: signalEntry.signal,
-    messageId: signalEntry.message.id,
-    orchestratorId: orchestrator.id,
-    prompt: buildContinuationPrompt({
-      objective,
-      config,
-      signalEntry,
-      reason: "safe_signal_continue",
-      cleanupAgents
-    }),
-    lastHandledMessageId: signalEntry.message.id,
-    lastHandledMessageCreatedAt: signalEntry.message.createdAt,
+  return decision("wait", "no_actionable_project", {
     decidedAt: timestamp
   });
 }
 
-function applyDecisionToObjective(objective, decisionResult, now = new Date(), { derivedHandledCreatedAt = null } = {}) {
+function applyDecisionToObjective(objective, decisionResult, now = new Date()) {
   const timestamp = now.toISOString();
+  let retryLedger = { ...(objective.retryLedger || {}) };
+  if (decisionResult.clearProjectRetryLedger) {
+    retryLedger = clearRetryLedgerForProject(retryLedger, decisionResult.clearProjectRetryLedger);
+  }
+  if (decisionResult.retryKey) {
+    retryLedger = clearRetryLedgerByKeys(retryLedger, [decisionResult.retryKey]);
+  }
+  if (decisionResult.ledgerUpdate) {
+    retryLedger[decisionResult.ledgerUpdate.key] = decisionResult.ledgerUpdate.value;
+  }
   const next = {
     ...objective,
+    retryLedger,
     lastDecision: {
       action: decisionResult.action,
       reason: decisionResult.reason,
-      signal: decisionResult.signal,
-      messageId: decisionResult.messageId,
+      projectKey: decisionResult.projectKey || null,
+      signal: decisionResult.signal || null,
+      messageId: decisionResult.messageId || null,
+      retryAttempt: decisionResult.retryAttempt || null,
       decidedAt: decisionResult.decidedAt || timestamp
     },
     updatedAt: timestamp
   };
-  if (decisionResult.lastHandledMessageId) {
-    next.lastHandledMessageId = decisionResult.lastHandledMessageId;
-    const handledCreatedAt = decisionResult.lastHandledMessageCreatedAt || derivedHandledCreatedAt;
-    if (handledCreatedAt) {
-      next.lastHandledMessageCreatedAt = handledCreatedAt;
-    }
-  } else if (!next.lastHandledMessageCreatedAt && derivedHandledCreatedAt) {
-    next.lastHandledMessageCreatedAt = derivedHandledCreatedAt;
+  if (decisionResult.projectCursor?.projectKey) {
+    next.perProjectHandledCursor = {
+      ...(objective.perProjectHandledCursor || {}),
+      [decisionResult.projectCursor.projectKey]: {
+        messageId: decisionResult.projectCursor.messageId || null,
+        lastHandledMessageCreatedAt: decisionResult.projectCursor.lastHandledMessageCreatedAt || null
+      }
+    };
+  }
+  if (decisionResult.projectStatus && decisionResult.projectKey) {
+    next.projectStatus = {
+      ...(objective.projectStatus || {}),
+      [decisionResult.projectKey]: decisionResult.projectStatus
+    };
   }
   if (decisionResult.nextStatus) {
     next.status = decisionResult.nextStatus;
@@ -1748,12 +2180,12 @@ function applyDecisionToObjective(objective, decisionResult, now = new Date(), {
   return next;
 }
 
-function sendPrompt(config, agentId, prompt, runner = runCommand) {
-  const sendCommand = config.commands?.send || [];
+function sendPrompt(workflow, agentId, prompt, runner = runCommand) {
+  const sendCommand = workflow.commands?.send || [];
   const sendParts = splitCommandLine(sendCommand);
   const usesPromptFile = sendParts.some((part) => String(part).includes("{promptFile}"));
   if (!usesPromptFile) {
-    return runPaseoCommand(config, "send", { agentId, prompt }, [], runner);
+    return runPaseoCommand(workflow, "send", { agentId, prompt }, [], runner);
   }
 
   if (sendParts.includes("--no-wait")) {
@@ -1767,79 +2199,68 @@ function sendPrompt(config, agentId, prompt, runner = runCommand) {
   const promptFile = join(tempDir, "prompt.txt");
   try {
     writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
-    return runPaseoCommand(config, "send", { agentId, promptFile }, [], runner);
+    return runPaseoCommand(workflow, "send", { agentId, promptFile }, [], runner);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
-function guardRuntimeStatus(config, objective, messages = null, runner = runCommand) {
-  let tailMessages = messages;
-  let tailReadError = null;
-  if (!tailMessages && objective?.status === STATUS_ACTIVE) {
+function guardRuntimeStatus(workflow, objective, snapshot = null) {
+  return {
+    workflowPath: workflow.workflowPath,
+    workflowDigest: workflow.workflowDigest,
+    workflowLoadError: workflow.workflowLoadError || null,
+    perProjectHandledCursor: objective?.perProjectHandledCursor || {},
+    runningChildCounts: snapshot?.runningChildCounts || Object.fromEntries(workflow.projects.map((project) => [project.key, 0])),
+    retryLedger: objective?.retryLedger || {},
+    watcherStatus: watcherStatus(workflow),
+    lastDecision: objective?.lastDecision || null
+  };
+}
+
+export function status(workflow) {
+  const objective = readObjective(workflow);
+  if (!objective) {
+    throw new GuardError("objective_missing: run init first", "objective_missing");
+  }
+  let snapshot = null;
+  if (objective.status === STATUS_ACTIVE) {
     try {
-      const raw = parseJsonOutput(
-        runPaseoCommand(
-          config,
-          "chatRead",
-          { room: config.room, limit: config.chatReadLimit || 50 },
-          [],
-          runner
-        ),
-        "chatRead"
-      );
-      tailMessages = normalizeMessages(raw);
-    } catch (error) {
-      tailReadError = String(error.message || error).slice(0, 500);
-      tailMessages = [];
+      snapshot = buildSnapshot(workflow);
+    } catch {
+      snapshot = null;
     }
   }
-
   return {
-    effectiveHandoffMode: isHandoffMode(config),
-    lastHandledMessageIdFoundInTail: lastHandledMessageIdFoundInTail(tailMessages || [], objective),
-    lastHandledMessageCreatedAt: objective?.lastHandledMessageCreatedAt || null,
-    derivedLastHandledMessageCreatedAt: derivedLastHandledMessageCreatedAt(tailMessages || [], objective),
-    watcherStatus: watcherStatus(config),
-    tailReadError
-  };
-}
-
-export function status(config, { runner = runCommand } = {}) {
-  const objective = readObjective(config);
-  if (!objective) {
-    throw new GuardError("objective_missing: run init first", "objective_missing");
-  }
-  return {
-    path: objectivePathFor(config),
+    path: objectivePathFor(workflow),
     objective,
-    guard: guardRuntimeStatus(config, objective, null, runner)
+    guard: guardRuntimeStatus(workflow, objective, snapshot)
   };
 }
 
-export function reconcile(config, { dryRun = false, now = new Date(), runner = runCommand } = {}) {
-  const objective = readObjective(config);
+export function reconcile(workflow, { dryRun = false, now = new Date(), runner = runCommand } = {}) {
+  const objective = readObjective(workflow);
   if (!objective) {
     throw new GuardError("objective_missing: run init first", "objective_missing");
   }
 
-  const snapshot =
-    objective.status === STATUS_ACTIVE
-      ? buildSnapshot(config, runner)
-      : { orchestrators: [], childAgents: [], allAgents: [], agentById: {}, messages: [] };
-  const decisionResult = decideReconcile(objective, config, snapshot, { now });
-  const derivedHandledCreatedAt = derivedLastHandledMessageCreatedAt(snapshot.messages, objective);
+  const snapshot = objective.status === STATUS_ACTIVE
+    ? buildSnapshot(workflow, runner)
+    : { orchestrators: [], childAgents: [], allAgents: [], agentById: {}, runningChildCounts: {}, messages: [] };
+  const decisionResult = decideReconcile(objective, workflow, snapshot, { now });
   const output = {
     dryRun,
-    objectivePath: objectivePathFor(config),
+    objectivePath: objectivePathFor(workflow),
     decision: decisionResult,
-    guard: guardRuntimeStatus(config, objective, snapshot.messages, runner),
+    guard: guardRuntimeStatus(workflow, objective, snapshot),
     observed: {
       orchestrators: snapshot.orchestrators.map((agent) => ({
         id: agent.id,
         status: agent.status,
         cwd: agent.cwd,
         labels: agent.labels,
+        projectKey: agent.projectKey,
+        projectViolation: agent.projectViolation,
         workspaceKind: agent.workspaceKind
       })),
       childAgents: snapshot.childAgents.map((agent) => ({
@@ -1847,9 +2268,12 @@ export function reconcile(config, { dryRun = false, now = new Date(), runner = r
         status: agent.status,
         cwd: agent.cwd,
         labels: agent.labels,
+        projectKey: agent.projectKey,
+        projectViolation: agent.projectViolation,
         workspaceKind: agent.workspaceKind
       })),
-      messages: snapshot.messages.length
+      messages: snapshot.messages.length,
+      runningChildCounts: snapshot.runningChildCounts
     }
   };
 
@@ -1858,11 +2282,11 @@ export function reconcile(config, { dryRun = false, now = new Date(), runner = r
   }
 
   if (decisionResult.action === "send") {
-    sendPrompt(config, decisionResult.orchestratorId, decisionResult.prompt, runner);
+    sendPrompt(workflow, decisionResult.orchestratorId, decisionResult.prompt, runner);
   }
 
-  const nextObjective = applyDecisionToObjective(objective, decisionResult, now, { derivedHandledCreatedAt });
-  writeJson(objectivePathFor(config), nextObjective);
+  const nextObjective = applyDecisionToObjective(objective, decisionResult, now);
+  writeJson(objectivePathFor(workflow), nextObjective);
   return {
     ...output,
     objective: nextObjective
@@ -1876,14 +2300,14 @@ function printJson(value) {
 function usage() {
   return [
     "Usage:",
-    "  paseo-guard init --config <config>",
-    "  paseo-guard status --config <config>",
-    "  paseo-guard watch-status --config <config>",
-    "  paseo-guard ensure-watch --config <config> [--dry-run]",
-    "  paseo-guard pause --config <config>",
-    "  paseo-guard resume --config <config>",
-    "  paseo-guard clear --config <config>",
-    "  paseo-guard reconcile --config <config> [--dry-run]"
+    "  paseo-guard init [--workflow <path>]",
+    "  paseo-guard status [--workflow <path>]",
+    "  paseo-guard watch-status [--workflow <path>]",
+    "  paseo-guard ensure-watch [--workflow <path>] [--dry-run]",
+    "  paseo-guard pause [--workflow <path>]",
+    "  paseo-guard resume [--workflow <path>]",
+    "  paseo-guard clear [--workflow <path>]",
+    "  paseo-guard reconcile [--workflow <path>] [--dry-run]"
   ].join("\n");
 }
 
@@ -1895,44 +2319,46 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  const config = loadConfig(args.config);
+  const workflowPath = ensureWorkflowArg(args);
+  const workflow = loadWorkflow(workflowPath);
+
   if (command === "init") {
-    printJson(initObjective(config, { force: Boolean(args.force) }));
+    printJson(initObjective(workflow, { force: Boolean(args.force) }));
     return 0;
   }
 
   if (command === "status") {
-    printJson(status(config));
+    printJson(status(workflow));
     return 0;
   }
 
   if (command === "watch-status") {
-    printJson(watcherStatus(config));
+    printJson(watcherStatus(workflow));
     return 0;
   }
 
   if (command === "ensure-watch") {
-    printJson(ensureWatch(config, { dryRun: Boolean(args["dry-run"]) }));
+    printJson(ensureWatch(workflow, { dryRun: Boolean(args["dry-run"]) }));
     return 0;
   }
 
   if (command === "pause") {
-    printJson(setObjectiveStatus(config, STATUS_PAUSED));
+    printJson(setObjectiveStatus(workflow, STATUS_PAUSED));
     return 0;
   }
 
   if (command === "resume") {
-    printJson(setObjectiveStatus(config, STATUS_ACTIVE));
+    printJson(setObjectiveStatus(workflow, STATUS_ACTIVE));
     return 0;
   }
 
   if (command === "clear") {
-    printJson(setObjectiveStatus(config, STATUS_COMPLETE));
+    printJson(setObjectiveStatus(workflow, STATUS_COMPLETE));
     return 0;
   }
 
   if (command === "reconcile") {
-    printJson(reconcile(config, { dryRun: Boolean(args["dry-run"]) }));
+    printJson(reconcile(workflow, { dryRun: Boolean(args["dry-run"]) }));
     return 0;
   }
 

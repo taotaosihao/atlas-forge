@@ -2,7 +2,7 @@
 import { pathToFileURL } from "node:url";
 import {
   GuardError,
-  loadConfig,
+  WorkflowStore,
   parseCliArgs,
   readObjective,
   reconcile,
@@ -58,9 +58,9 @@ function printEvent(event) {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`);
 }
 
-export async function waitForRoomEvent(config, { timeout, runner = runCommand }) {
+export async function waitForRoomEvent(workflow, { timeout, runner = runCommand }) {
   try {
-    const result = runPaseoCommand(config, "chatWait", { room: config.room, timeout }, [], runner);
+    const result = runPaseoCommand(workflow, "chatWait", { room: workflow.room, timeout }, [], runner);
     const messages = parseWaitMessages(result.stdout);
     if (messages.length === 0) {
       return { type: "heartbeat", reason: "timeout_or_empty_wait" };
@@ -87,31 +87,46 @@ export function needsCooldownPoll(objective) {
     COOLDOWN_WAIT_REASONS.has(objective.lastDecision.reason);
 }
 
-export function selectWatchTimeout(objective, config, options = {}) {
-  const timeout = options.timeout || config.watch?.timeout || "10m";
+export function selectWatchTimeout(objective, workflow, options = {}) {
+  const timeout = options.timeout || workflow.watch?.timeout || "10m";
   if (needsAgentStatusPoll(objective)) {
-    return options.agentStatusPollTimeout || config.watch?.agentStatusPollTimeout || "15s";
+    return options.agentStatusPollTimeout || workflow.watch?.agentStatusPollTimeout || "15s";
   }
   if (needsCooldownPoll(objective)) {
-    return options.cooldownPollTimeout || config.watch?.cooldownPollTimeout || "15s";
+    return options.cooldownPollTimeout || workflow.watch?.cooldownPollTimeout || "15s";
   }
   return timeout;
 }
 
-export async function watch(config, options = {}) {
+function eventEnvelope(workflow, objective, event = {}) {
+  return {
+    room: workflow.room,
+    workflowDigest: workflow.workflowDigest,
+    workflowPath: workflow.workflowPath,
+    workflowLoadError: workflow.workflowLoadError || null,
+    watcherStatus: objective?.status || null,
+    ...event
+  };
+}
+
+export async function watch(workflowStore, options = {}) {
   const maxCycles = Number(options.maxCycles || 0);
   const idleSleepMs = Number(options.idleSleepMs || 5000);
   let cycles = 0;
 
   while (!stopping) {
     cycles += 1;
-    const objective = readObjective(config);
+    const workflow = workflowStore.reload();
+    const objective = readObjective(workflow);
     if (!objective) {
       throw new GuardError("objective_missing: run init first", "objective_missing");
     }
 
     if (objective.status !== "active") {
-      printEvent({ type: "heartbeat", reason: `objective_${objective.status}` });
+      printEvent(eventEnvelope(workflow, objective, {
+        type: "heartbeat",
+        reason: `objective_${objective.status}`
+      }));
       if (maxCycles && cycles >= maxCycles) {
         break;
       }
@@ -119,24 +134,33 @@ export async function watch(config, options = {}) {
       continue;
     }
 
-    const timeout = selectWatchTimeout(objective, config, options);
-    const event = await waitForRoomEvent(config, { timeout, runner: options.runner });
-    printEvent({
+    const timeout = selectWatchTimeout(objective, workflow, options);
+    const event = await waitForRoomEvent(workflow, { timeout, runner: options.runner });
+    printEvent(eventEnvelope(workflow, objective, {
       ...event,
       watchTimeout: timeout,
       previousDecisionReason: objective.lastDecision?.reason || null
-    });
-    if (event.type === "message" || event.type === "heartbeat") {
-      try {
-        const result = reconcile(config, { dryRun: Boolean(options.dryRun), runner: options.runner });
-        printEvent({ type: "reconcile", decision: result.decision });
-      } catch (error) {
-        printEvent({
-          type: "heartbeat",
-          reason: "reconcile_error",
-          error: String(error.message || error).slice(0, 500)
-        });
-      }
+    }));
+    try {
+      const result = reconcile(workflow, {
+        dryRun: Boolean(options.dryRun),
+        runner: options.runner
+      });
+      printEvent(eventEnvelope(workflow, objective, {
+        type: "reconcile",
+        projectKey: result.decision.projectKey || null,
+        decision: result.decision.action,
+        reason: result.decision.reason,
+        signal: result.decision.signal || null,
+        messageId: result.decision.messageId || null,
+        retryAttempt: result.decision.retryAttempt || null
+      }));
+    } catch (error) {
+      printEvent(eventEnvelope(workflow, objective, {
+        type: "heartbeat",
+        reason: "reconcile_error",
+        error: String(error.message || error).slice(0, 500)
+      }));
     }
 
     if (maxCycles && cycles >= maxCycles) {
@@ -144,24 +168,33 @@ export async function watch(config, options = {}) {
     }
   }
 
-  printEvent({ type: "stopped" });
+  const workflow = workflowStore.getWorkflow();
+  const objective = readObjective(workflow);
+  printEvent(eventEnvelope(workflow, objective, { type: "stopped" }));
 }
 
 function usage() {
   return [
     "Usage:",
-    "  paseo-guard-watch --config <config> [--timeout 10m] [--agent-status-poll-timeout 15s] [--cooldown-poll-timeout 15s] [--dry-run] [--max-cycles 1]"
+    "  paseo-guard-watch [--workflow <path>] [--timeout 10m] [--agent-status-poll-timeout 15s] [--cooldown-poll-timeout 15s] [--dry-run] [--max-cycles 1]"
   ].join("\n");
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const args = parseCliArgs(argv);
-  if (args.help || !args.config) {
+  if (args.config !== undefined) {
+    throw new GuardError(
+      "config_flag_removed: JSON config support was removed. Rename to WORKFLOW.md and use --workflow <path> instead.",
+      "workflow_migration_required"
+    );
+  }
+  if (args.help) {
     process.stdout.write(`${usage()}\n`);
     return 0;
   }
-  const config = loadConfig(args.config);
-  await watch(config, {
+  const workflowStore = new WorkflowStore(args.workflow || "./WORKFLOW.md");
+  workflowStore.loadInitial();
+  await watch(workflowStore, {
     timeout: args.timeout,
     agentStatusPollTimeout: args["agent-status-poll-timeout"],
     cooldownPollTimeout: args["cooldown-poll-timeout"],

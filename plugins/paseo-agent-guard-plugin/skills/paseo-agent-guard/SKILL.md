@@ -1,6 +1,6 @@
 ---
 name: paseo-agent-guard
-description: Use when creating or continuing Paseo orchestrator workflows, PRD delivery, blocker fixes, validation, audit, PR handoff, or any Paseo child-agent work that must be constrained by researchWorkspace and targetWorkspace contracts.
+description: Use when creating or continuing Paseo orchestrator workflows, PRD delivery, blocker fixes, validation, audit, PR handoff, or any Paseo child-agent work that must be constrained by WORKFLOW.md v2 researchWorkspace and per-project implementation contracts.
 ---
 
 # Paseo Agent Guard
@@ -9,26 +9,26 @@ Use this skill whenever a task creates, continues, or reconciles Paseo agents fo
 
 ## Required Inputs
 
-Before creating or continuing agents, establish these values explicitly:
+Before creating or continuing agents, establish these values explicitly from `WORKFLOW.md`:
 
 - `room`: Paseo room used as the coordination log.
 - `researchWorkspace`: repository or folder where planning, research, PRD synthesis, and orchestration context live.
-- `targetWorkspace`: actual project repository where implementation, fixes, validation, audit, and PR work must happen.
+- `projects[]`: one or more implementation projects. Each project requires `key`, `targetWorkspace`, and optional `allowedImplementationRoots`.
 - `objective`: durable project-room goal.
 
-If any value is missing and cannot be discovered from an existing guard config, ask the user before launching agents.
+If any required value is missing and cannot be discovered from an existing `WORKFLOW.md`, ask the user before launching agents.
 
 ## Durable Objective
 
-Use the plugin CLI instead of relying on a single conversation turn:
+Use the plugin CLI instead of relying on a single conversation turn. JSON config is removed; `--config` must fail.
 
 ```bash
-node scripts/paseo-guard.mjs init --config <config>
-node scripts/paseo-guard.mjs status --config <config>
-node scripts/paseo-guard.mjs watch-status --config <config>
-node scripts/paseo-guard.mjs ensure-watch --config <config>
-node scripts/paseo-guard.mjs reconcile --config <config> --dry-run
-node scripts/paseo-guard-watch.mjs --config <config>
+node scripts/paseo-guard.mjs init --workflow <path>
+node scripts/paseo-guard.mjs status --workflow <path>
+node scripts/paseo-guard.mjs watch-status --workflow <path>
+node scripts/paseo-guard.mjs ensure-watch --workflow <path>
+node scripts/paseo-guard.mjs reconcile --workflow <path> --dry-run
+node scripts/paseo-guard-watch.mjs --workflow <path>
 ```
 
 The objective is bound to `projectName + room` and stored under:
@@ -37,17 +37,20 @@ The objective is bound to `projectName + room` and stored under:
 ~/.paseo-agent-guard/objectives/<project-name>/<room>.json
 ```
 
+The objective schema is v2 and persists `workflowPath`, `workflowDigest`, project summaries, `perProjectHandledCursor`, `retryLedger`, `lastDecision`, and `status`. If an existing objective is schema v1, stop and migrate or clear it; the guard must refuse compatibility mode.
+
 `pause`, `resume`, and `clear` change only the objective state. They do not archive agents, restart Paseo, delete branches, or modify project files.
 
 ## Workspace Contract
 
 Planner and orchestrator agents may run in `researchWorkspace`.
 
-Child agents with roles `implementation`, `fix`, `validation`, `audit`, or `pr` must run in `targetWorkspace` or a linked worktree for the target repo. Do not create implementation agents in the research workspace.
+Child agents with roles `implementation`, `fix`, `validation`, `audit`, or `pr` must run in exactly one declared project workspace. Use the matching project's `targetWorkspace` or one of its `allowedImplementationRoots`. Do not create implementation agents in the research workspace.
 
 Every child agent must include these labels:
 
 - `room`
+- `project`
 - `parent`
 - `phase`
 - `task`
@@ -66,17 +69,17 @@ paseo inspect <agent-id> --json
 paseo wait <agent-id> --json &
 ```
 
-Verify that `cwd` is the target workspace or target worktree before treating the agent as valid. The `paseo wait` must run in the background for every parent-launched child agent until the child becomes idle. It is an auxiliary idle notification and diagnostic path; durable continuation comes from valid `SIGNAL` room evidence plus the guard watcher. When the guard is waiting on agent status, the watcher rechecks with `watch.agentStatusPollTimeout` instead of sleeping for the full room wait timeout.
+Verify that `cwd` resolves to exactly one project before treating the agent as valid. No project match or multiple matches is a `delegation_contract_violation`. The `paseo wait` must run in the background for every parent-launched child agent until the child becomes idle. It is an auxiliary idle notification and diagnostic path; durable continuation comes from valid `SIGNAL` room evidence plus the guard watcher. When the guard is waiting on agent status, the watcher rechecks with `watch.agentStatusPollTimeout` instead of sleeping for the full room wait timeout.
 
 ## Room Evidence
 
 Every child agent must report to the room using this evidence shape:
 
 ```text
-SIGNAL signal=<PLAN_READY|DONE|FIXED|PASS|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|ERROR|PR_CREATED|MERGED> agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,parent=<parent-id>,phase=<phase>,task=<task-id>,role=<role>} evidence=<summary>
+SIGNAL signal=<PLAN_READY|DONE|FIXED|PASS|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|ERROR|PR_CREATED|MERGED> project=<key> agent=<id> cwd=<path> branch=<branch> task=<task-id> labels={room=<room>,project=<key>,parent=<parent-id>,phase=<phase>,task=<task-id>,role=<role>} evidence=<summary>
 ```
 
-Legacy top-level signal lines such as `FIXED agent=...` are accepted for compatibility, but new child prompts should require the canonical `SIGNAL signal=<family> ...` shape.
+Legacy top-level signal lines are no longer accepted. Require the canonical `SIGNAL signal=<family> ...` shape.
 
 Valid signal families:
 
@@ -85,7 +88,7 @@ Valid signal families:
 - Human gate: `NEEDS_USER_DECISION`, `ERROR`.
 - Terminal review gate: `PR_CREATED`, `MERGED`.
 
-If the child agent omits required labels, omits evidence fields, or runs in the wrong workspace, treat it as:
+Validate these separately: top-level `project`, `labels.project`, agent cwd-derived project, role, required labels, and evidence fields. If any part fails, treat it as:
 
 ```text
 block / delegation_contract_violation
@@ -98,13 +101,13 @@ When reconciling, continue only if all are true:
 - Durable objective status is `active`.
 - Orchestrator is idle.
 - No child agent is running.
-- Latest unhandled signal is safe or configured recoverable.
+- The oldest unhandled project signal or due retry is actionable.
 - Cooldown has passed.
 - The next action is not protected, unless `policy.handoffMode` explicitly allows that protected action.
 
 Default mode remains conservative: `PR_CREATED` stops for human review, `MERGED` completes the objective, and merge or new-phase actions are protected unless the user explicitly approves them.
 
-When `policy.handoffMode` is true, the config itself grants approval for this PR handoff flow:
+When `policy.handoffMode` is true, the workflow itself grants approval for this PR handoff flow only if `policy.trustAcknowledged` is explicitly `true`:
 
 - On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
 - On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence. In handoff mode this intentionally takes precedence over `policy.allowNewPhaseAfterMerge`.
@@ -133,7 +136,7 @@ If a timed check or room read does not show the expected child-agent room eviden
 - Treat diagnostic status lines such as `PR_REVIEW_STATUS`, `REVIEW_STATUS`, `AGENT_STATUS`, `CHILD_AGENT_STATUS`, `PROGRESS`, and `CHECKPOINT` as prompts to inspect missing evidence, not as final PASS/DONE evidence.
 - Inspect each relevant child agent by id, including status, cwd, labels, and latest log/error.
 - If a child errored, hit quota, lost provider access, or needs permission, record that as room evidence and retry with an available provider or mark the reviewer unavailable according to review policy.
-- If a child is idle/complete but did not post room evidence, send it a follow-up asking it to post the required `SIGNAL agent=...` line.
+- If a child is idle/complete but did not post room evidence, send it a follow-up asking it to post the required canonical `SIGNAL signal=... project=...` line.
 - If the child cannot respond, the parent may post a relayed status marked `relayed=true`, but relayed review text does not count as reviewer `PASS` unless the underlying result was observed.
 
 ## Agent Permission Defaults
@@ -172,6 +175,14 @@ PRD order is strict:
 Do not send PRD work to human review before multi-agent findings are resolved.
 
 Plan, feature, and PR gates default to 3 review rounds. If the user explicitly asks to review until there are no issues, keep running review/fix/re-review cycles until all available reviewers report no findings.
+
+## Watcher Behavior
+
+The watcher loads `WORKFLOW.md` through `WorkflowStore` every cycle.
+
+- Invalid workflow at startup must fail immediately.
+- Invalid workflow during watcher reload must keep the last-known-good workflow and expose `workflowLoadError`.
+- Watch logs must be JSONL and include `room`, `workflowDigest`, `projectKey`, `decision`, `reason`, `signal`, `messageId`, and `retryAttempt`.
 
 ## Human Review Artifacts
 

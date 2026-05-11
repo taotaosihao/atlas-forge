@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -50,7 +50,8 @@ test("updateCodexPlugin retries once after missing plugin cache manifest failure
         calls += 1;
         assert.equal(command, "codex");
         assert.deepEqual(args, ["plugin", "marketplace", "upgrade", "atlas-forge"]);
-        assert.match(options.cwd, /atlas-forge$/);
+        assert.equal(options.cwd, process.cwd());
+        assert.notEqual(basename(options.cwd), "");
         if (calls === 1) {
           throw new UpdateError(
             "codex_failed: failed to read plugin version for paseo-agent-guard-plugin@atlas-forge: missing plugin.json",
