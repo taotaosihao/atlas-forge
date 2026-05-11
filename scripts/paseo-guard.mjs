@@ -2,12 +2,13 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
-  statSync,
   writeFileSync
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -61,7 +62,7 @@ const DEFAULT_CONFIG = {
     inspect: ["inspect", "{agentId}", "--json"],
     chatRead: ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     chatPost: ["chat", "post", "{room}", "{message}", "--json"],
-    send: ["send", "{agentId}", "--prompt-file", "{promptFile}", "--no-wait", "--json"],
+    send: ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
     chatWait: ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },
   chatReadLimit: 50,
@@ -153,7 +154,14 @@ function loadJson(path) {
 
 function writeJson(path, data) {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  const tempPath = join(dirname(path), `.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    renameSync(tempPath, path);
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
 }
 
 function resolveFromConfigDir(pathValue, configDir) {
@@ -463,6 +471,9 @@ function classifyWorkspace(cwd, config) {
   if (isPathInside(resolvedCwd, config.targetWorkspace)) {
     return "target";
   }
+  if (isPathInside(resolvedCwd, config.researchWorkspace)) {
+    return "research";
+  }
   if (config.policy?.checkGitWorktrees && existsSync(resolvedCwd) && existsSync(config.targetWorkspace)) {
     try {
       if (sameGitRepository(resolvedCwd, config.targetWorkspace)) {
@@ -474,9 +485,6 @@ function classifyWorkspace(cwd, config) {
   }
   if ((config.allowedImplementationRoots || []).some((root) => isPathInside(resolvedCwd, root))) {
     return "target-worktree";
-  }
-  if (isPathInside(resolvedCwd, config.researchWorkspace)) {
-    return "research";
   }
   return "other";
 }
@@ -612,27 +620,39 @@ export function validateDelegationContract(entry, snapshot, config) {
 
   const orchestratorIds = new Set(snapshot.orchestrators.map((agent) => agent.id));
   const author = entry.message.author;
-  if (!author || orchestratorIds.has(author)) {
+  if (!author) {
     return null;
   }
 
-  const agent = snapshot.agentById[author];
   const fields = parseFields(entry.message.body);
+  const reportedAgentId = fields.agent || author;
+  const agent = snapshot.agentById[reportedAgentId] || snapshot.agentById[author];
+  const isOrchestratorSelfReport = orchestratorIds.has(author) && reportedAgentId === author;
+
   if (!agent && !fields.agent) {
     return null;
   }
 
   const messageLabels = labelsFromMessageFields(fields);
   const labels = {
-    ...messageLabels,
-    ...(agent?.labels || {})
+    ...(agent?.labels || {}),
+    ...messageLabels
   };
+  const role = String(labels.role || fields.role || "").toLowerCase();
+  const implementationRoles = new Set(
+    (config.childAgents?.implementationRoles || []).map((item) => String(item).toLowerCase())
+  );
+  const isImplementationReport = implementationRoles.has(role);
   const isRoomChild =
     labels.room === config.room ||
     fields.room === config.room ||
-    Boolean(labels.parent || fields.parent || agent);
+    Boolean(labels.parent || fields.parent || (!isOrchestratorSelfReport && agent));
 
-  if (!isRoomChild) {
+  if (!isRoomChild && !isImplementationReport) {
+    return null;
+  }
+
+  if (isOrchestratorSelfReport && !isImplementationReport) {
     return null;
   }
 
@@ -645,11 +665,7 @@ export function validateDelegationContract(entry, snapshot, config) {
   });
 
   const cwd = fields.cwd || agent?.cwd;
-  const role = String(labels.role || fields.role || "").toLowerCase();
   const workspaceKind = agent?.workspaceKind || classifyWorkspace(cwd, config);
-  const implementationRoles = new Set(
-    (config.childAgents?.implementationRoles || []).map((item) => String(item).toLowerCase())
-  );
   const workspaceViolations = [];
   if (implementationRoles.has(role) && !["target", "target-worktree"].includes(workspaceKind)) {
     workspaceViolations.push(
@@ -673,6 +689,7 @@ export function validateDelegationContract(entry, snapshot, config) {
   return {
     type: "delegation_contract_violation",
     author,
+    reportedAgentId,
     signal: entry.signal,
     messageId: entry.message.id,
     violations
@@ -938,11 +955,24 @@ function applyDecisionToObjective(objective, decisionResult, now = new Date()) {
 }
 
 function sendPrompt(config, agentId, prompt, runner = runCommand) {
-  const tempDir = join(tmpdir(), `paseo-guard-${process.pid}-${Date.now()}`);
-  mkdirSync(tempDir, { recursive: true });
+  const sendCommand = config.commands?.send || [];
+  const sendParts = splitCommandLine(sendCommand);
+  const usesPromptFile = sendParts.some((part) => String(part).includes("{promptFile}"));
+  if (!usesPromptFile) {
+    return runPaseoCommand(config, "send", { agentId, prompt }, [], runner);
+  }
+
+  if (sendParts.includes("--no-wait")) {
+    throw new GuardError(
+      "unsafe_prompt_file_command: use --prompt with --no-wait, or remove --no-wait from the prompt-file send command",
+      "unsafe_prompt_file_command"
+    );
+  }
+
+  const tempDir = mkdtempSync(join(tmpdir(), "paseo-guard-"));
   const promptFile = join(tempDir, "prompt.txt");
   try {
-    writeFileSync(promptFile, prompt, "utf8");
+    writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
     return runPaseoCommand(config, "send", { agentId, promptFile }, [], runner);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });

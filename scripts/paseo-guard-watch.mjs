@@ -24,7 +24,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseWaitMessages(stdout) {
+export function parseWaitMessages(stdout) {
   const text = String(stdout || "").trim();
   if (!text) {
     return [];
@@ -34,7 +34,19 @@ function parseWaitMessages(stdout) {
     if (Array.isArray(json)) {
       return json;
     }
-    return json.messages || json.Messages || json.message ? [json.message || json.Message || json] : [];
+    if (Array.isArray(json.messages)) {
+      return json.messages;
+    }
+    if (Array.isArray(json.Messages)) {
+      return json.Messages;
+    }
+    if (json.message) {
+      return [json.message];
+    }
+    if (json.Message) {
+      return [json.Message];
+    }
+    return [];
   } catch {
     return [];
   }
@@ -44,7 +56,7 @@ function printEvent(event) {
   process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`);
 }
 
-async function waitForRoomEvent(config, { timeout, runner = runCommand }) {
+export async function waitForRoomEvent(config, { timeout, runner = runCommand }) {
   try {
     const result = runPaseoCommand(config, "chatWait", { room: config.room, timeout }, [], runner);
     const messages = parseWaitMessages(result.stdout);
@@ -53,11 +65,11 @@ async function waitForRoomEvent(config, { timeout, runner = runCommand }) {
     }
     return { type: "message", messages };
   } catch (error) {
-    const message = String(error.message || "");
-    if (message.toLowerCase().includes("timeout")) {
-      return { type: "heartbeat", reason: "timeout" };
-    }
-    throw error;
+    return {
+      type: "heartbeat",
+      reason: "chat_wait_error",
+      error: String(error.message || error).slice(0, 500)
+    };
   }
 }
 
@@ -83,11 +95,19 @@ export async function watch(config, options = {}) {
       continue;
     }
 
-    const event = await waitForRoomEvent(config, { timeout });
+    const event = await waitForRoomEvent(config, { timeout, runner: options.runner });
     printEvent(event);
     if (event.type === "message") {
-      const result = reconcile(config, { dryRun: Boolean(options.dryRun) });
-      printEvent({ type: "reconcile", decision: result.decision });
+      try {
+        const result = reconcile(config, { dryRun: Boolean(options.dryRun), runner: options.runner });
+        printEvent({ type: "reconcile", decision: result.decision });
+      } catch (error) {
+        printEvent({
+          type: "heartbeat",
+          reason: "reconcile_error",
+          error: String(error.message || error).slice(0, 500)
+        });
+      }
     }
 
     if (maxCycles && cycles >= maxCycles) {
@@ -129,4 +149,3 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     process.exitCode = 1;
   }
 }
-

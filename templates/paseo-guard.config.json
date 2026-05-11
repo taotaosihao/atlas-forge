@@ -47,7 +47,7 @@
     "inspect": ["inspect", "{agentId}", "--json"],
     "chatRead": ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
     "chatPost": ["chat", "post", "{room}", "{message}", "--json"],
-    "send": ["send", "{agentId}", "--prompt-file", "{promptFile}", "--no-wait", "--json"],
+    "send": ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
     "chatWait": ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
   },
   "chatReadLimit": 50,
@@ -55,4 +55,3 @@
     "timeout": "10m"
   }
 }
-

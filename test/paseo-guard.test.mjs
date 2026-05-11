@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,6 +155,42 @@ test("implementation agent in research workspace returns contract violation", ()
   assert.match(violation.violations.join("\n"), /must run in targetWorkspace/);
 });
 
+test("implementation cwd inside research is not accepted as target worktree", () => {
+  const root = tempRoot();
+  try {
+    mkdirSync(join(root, "research"), { recursive: true });
+    mkdirSync(join(root, "target"), { recursive: true });
+    spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
+
+    const config = makeConfig(root, {
+      policy: {
+        autoContinue: true,
+        cooldownSeconds: 0,
+        checkGitWorktrees: true
+      }
+    });
+    const entry = {
+      signal: "DONE",
+      message: message(
+        "m2",
+        `DONE agent=child-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
+        "child-1"
+      )
+    };
+    const snapshot = baseSnapshot(config, entry.message);
+    snapshot.agentById["child-1"] = {
+      id: "child-1",
+      cwd: config.researchWorkspace,
+      labels: { room: config.room, parent: "orch-1", phase: "p1", task: "t1", role: "implementation" }
+    };
+    const violation = validateDelegationContract(entry, snapshot, config);
+    assert.equal(violation.type, "delegation_contract_violation");
+    assert.match(violation.violations.join("\n"), /got research:/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("implementation agent in target workspace passes contract", () => {
   const config = makeConfig();
   const entry = {
@@ -172,6 +209,28 @@ test("implementation agent in target workspace passes contract", () => {
     workspaceKind: "target"
   };
   assert.equal(validateDelegationContract(entry, snapshot, config), null);
+});
+
+test("orchestrator self-reporting implementation work in research workspace is blocked", () => {
+  const config = makeConfig();
+  const entry = {
+    signal: "DONE",
+    message: message(
+      "m4",
+      `DONE agent=orch-1 cwd=${config.researchWorkspace} branch=feat task=t1 labels={room=room-a,parent=orch-1,phase=p1,task=t1,role=implementation}`,
+      "orch-1"
+    )
+  };
+  const snapshot = baseSnapshot(config, entry.message);
+  snapshot.agentById["orch-1"] = {
+    id: "orch-1",
+    cwd: config.researchWorkspace,
+    labels: { room: config.room, role: "orchestrator" },
+    workspaceKind: "research"
+  };
+  const violation = validateDelegationContract(entry, snapshot, config);
+  assert.equal(violation.type, "delegation_contract_violation");
+  assert.equal(violation.reportedAgentId, "orch-1");
 });
 
 test("missing required child labels returns contract violation", () => {
@@ -229,6 +288,100 @@ test("NEEDS_USER_DECISION and ERROR require human handling", () => {
   }
 });
 
+test("non-dry-run sends inline prompt instead of prompt file", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root);
+    initObjective(config);
+    const calls = [];
+    const result = reconcile(config, {
+      runner(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "ls" && args.includes("role=orchestrator")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "chat" && args[1] === "read") {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              message("m8", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "send") {
+          assert.equal(args.includes("--prompt"), true);
+          assert.equal(args.includes("--prompt-file"), false);
+          assert.match(args[args.indexOf("--prompt") + 1], /PASEO_AGENT_GUARD_CONTINUATION/);
+          return { status: 0, stdout: "{}", stderr: "" };
+        }
+        throw new Error(`unexpected call: ${args.join(" ")}`);
+      }
+    });
+    assert.equal(result.decision.action, "send");
+    assert.equal(calls.some(([, args]) => args[0] === "send"), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt-file send command with no-wait is rejected", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root, {
+      commands: {
+        send: ["send", "{agentId}", "--prompt-file", "{promptFile}", "--no-wait", "--json"]
+      }
+    });
+    initObjective(config);
+    assert.throws(
+      () =>
+        reconcile(config, {
+          runner(command, args) {
+            if (args[0] === "ls" && args.includes("role=orchestrator")) {
+              return {
+                status: 0,
+                stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+                stderr: ""
+              };
+            }
+            if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+              return {
+                status: 0,
+                stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+                stderr: ""
+              };
+            }
+            if (args[0] === "chat" && args[1] === "read") {
+              return {
+                status: 0,
+                stdout: JSON.stringify([
+                  message("m9", "PASS agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator}")
+                ]),
+                stderr: ""
+              };
+            }
+            throw new Error(`unexpected call: ${args.join(" ")}`);
+          }
+        }),
+      /unsafe_prompt_file_command/
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("dry-run reports send decision without invoking paseo send", () => {
   const root = tempRoot();
   try {
@@ -282,4 +435,3 @@ test("plugin manifest and skill frontmatter are valid", () => {
   assert.match(skill, /^---\nname: paseo-agent-guard\n/m);
   assert.match(skill, /description: .+\n---/m);
 });
-
