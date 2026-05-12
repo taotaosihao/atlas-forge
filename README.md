@@ -90,6 +90,8 @@ SIGNAL signal=<PASS|DONE|FIXED|PLAN_READY|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|
 
 The guard validates top-level `project`, `labels.project`, the agent cwd-derived project, role, required labels, and evidence fields separately.
 
+In `policy.handoffMode`, blocked signals are treated as obstacles to clear toward the approved objective unless they explicitly mark a preserved stop gate with `handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker>`. The guard still stops for those marked gates and for protected actions outside the handoff allowance.
+
 Completed child agents are part of the guard lifecycle: once a child agent has posted valid final room evidence and is idle/done, the orchestrator is instructed to soft-close it with `paseo archive <agent-id> --json`. Running agents, agents without required evidence, and the orchestrator itself are not closed by cleanup.
 
 The watcher is event-driven:

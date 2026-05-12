@@ -31,6 +31,27 @@ const STATUS_BLOCKED = "blocked";
 const STATUS_COMPLETE = "complete";
 const OBJECTIVE_SCHEMA_VERSION = 2;
 const HANDOFF_ALLOWED_PROTECTED_ACTIONS = new Set(["merge", "new project phase"]);
+const HANDOFF_STOP_REASONS = new Set([
+  "prd_human_review",
+  "scope_decision",
+  "provider_tooling_blocker",
+  "final_acceptance",
+  "unrecoverable_blocker"
+]);
+const HANDOFF_STOP_REASON_ALIASES = new Map([
+  ["prd_review", "prd_human_review"],
+  ["prd_gate", "prd_human_review"],
+  ["human_review", "prd_human_review"],
+  ["outside_scope", "scope_decision"],
+  ["approved_scope", "scope_decision"],
+  ["product_decision", "scope_decision"],
+  ["provider_blocker", "provider_tooling_blocker"],
+  ["tooling_blocker", "provider_tooling_blocker"],
+  ["review_provider_blocker", "provider_tooling_blocker"],
+  ["human_acceptance", "final_acceptance"],
+  ["uat_acceptance", "final_acceptance"],
+  ["unrecoverable", "unrecoverable_blocker"]
+]);
 const ALLOWED_TEMPLATE_VARS = new Set([
   "objective",
   "room",
@@ -169,6 +190,7 @@ const CONTINUATION_TEMPLATE = [
   "7. Keep background per-child `paseo wait <agent-id> --json` as an auxiliary idle notification path; durable continuation comes from the watcher plus room SIGNAL evidence.",
   "8. Cleanup is allowed only for completed child agents that already posted valid final evidence for their project.",
   "9. Do not perform protected actions unless policy allows the exact action.",
+  "10. In handoff mode, clear ordinary blockers that prevent the objective. Stop only when the blocker is explicitly tagged with handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker> or is clearly one of those gates.",
   "",
   "Workflow body:",
   "{{reason}}"
@@ -1347,6 +1369,51 @@ function isHandoffMode(workflow) {
   return Boolean(workflow.policy?.handoffMode);
 }
 
+function normalizeHandoffStopReason(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  const aliased = HANDOFF_STOP_REASON_ALIASES.get(normalized) || normalized;
+  return HANDOFF_STOP_REASONS.has(aliased) ? aliased : null;
+}
+
+function inferredHandoffStopReason(text) {
+  const lower = String(text || "").toLowerCase();
+  if (/\bprd\b/.test(lower) && /\bhuman review\b|\breview gate\b/.test(lower)) {
+    return "prd_human_review";
+  }
+  if (/\boutside (?:the )?approved (?:prd|scope)\b|\bproduct decision\b|\bscope decision\b/.test(lower)) {
+    return "scope_decision";
+  }
+  if (/\bprovider\/tooling blocker\b|\bprovider blocker\b|\btooling blocker\b|\brequired review\b.*\b(?:unavailable|blocked|impossible)\b/.test(lower)) {
+    return "provider_tooling_blocker";
+  }
+  if (/\bfinal (?:human )?acceptance\b|\bhuman acceptance\b|\buat acceptance\b/.test(lower)) {
+    return "final_acceptance";
+  }
+  if (/\bunrecoverable blocker\b|\bcannot continue without human\b|\bunable to continue without human\b/.test(lower)) {
+    return "unrecoverable_blocker";
+  }
+  return null;
+}
+
+function handoffStopReason(signalEntry) {
+  if (!signalEntry) {
+    return null;
+  }
+  const fields = signalEntry.fields || parseFields(signalEntry.message?.body || "");
+  return normalizeHandoffStopReason(
+    fields.handoffStop ||
+    fields.handoff_stop ||
+    fields.humanGate ||
+    fields.human_gate ||
+    fields.stopReason ||
+    fields.stop_reason
+  ) || inferredHandoffStopReason(signalEntry.message?.body || "");
+}
+
 function isHandoffAllowedProtectedAction(action, workflow) {
   return isHandoffMode(workflow) && HANDOFF_ALLOWED_PROTECTED_ACTIONS.has(String(action || "").toLowerCase());
 }
@@ -1896,6 +1963,9 @@ export function decideReconcile(objective, workflow, snapshot, { now = new Date(
     const blockedSignals = new Set(workflow.workflow?.blockedSignals || []);
     const recoverableSignals = new Set(workflow.workflow?.recoverableBlockedSignals || []);
     const safeSignals = new Set(workflow.workflow?.safeSignals || []);
+    const handoffBlockedStopReason = isHandoffMode(workflow) && blockedSignals.has(oldestSignal.signal)
+      ? handoffStopReason(oldestSignal)
+      : null;
 
     if (terminalSignals.has(oldestSignal.signal) && !isHandoffMode(workflow)) {
       return decision("stop", oldestSignal.signal === "PR_CREATED" ? "terminal_review_gate" : "terminal_signal", {
@@ -1914,10 +1984,15 @@ export function decideReconcile(objective, workflow, snapshot, { now = new Date(
       });
     }
 
-    if (blockedSignals.has(oldestSignal.signal) && !recoverableSignals.has(oldestSignal.signal)) {
-      return decision("block", "human_decision_required", {
+    if (
+      blockedSignals.has(oldestSignal.signal) &&
+      (!recoverableSignals.has(oldestSignal.signal) || handoffBlockedStopReason) &&
+      (!isHandoffMode(workflow) || handoffBlockedStopReason)
+    ) {
+      return decision("block", handoffBlockedStopReason ? "handoff_human_intervention_required" : "human_decision_required", {
         projectKey,
         signal: oldestSignal.signal,
+        handoffStopReason: handoffBlockedStopReason || undefined,
         messageId: oldestSignal.message.id,
         nextStatus: STATUS_BLOCKED,
         projectCursor: {
@@ -1971,7 +2046,8 @@ export function decideReconcile(objective, workflow, snapshot, { now = new Date(
     }
 
     if (blockedSignals.has(oldestSignal.signal)) {
-      return decision("send", "recoverable_blocker_nudge", {
+      const blockerReason = isHandoffMode(workflow) ? "handoff_blocker_clearing" : "recoverable_blocker_nudge";
+      return decision("send", blockerReason, {
         projectKey,
         signal: oldestSignal.signal,
         messageId: oldestSignal.message.id,
@@ -1981,14 +2057,14 @@ export function decideReconcile(objective, workflow, snapshot, { now = new Date(
           workflow,
           currentProject,
           signalEntry: oldestSignal,
-          reason: "recoverable_blocker_nudge"
+          reason: blockerReason
         }),
         projectCursor: {
           projectKey,
           messageId: oldestSignal.message.id,
           lastHandledMessageCreatedAt: oldestSignal.message.createdAt
         },
-        ledgerUpdate: ledgerUpdateForRetry(objective, workflow, projectKey, "recoverable_blocker_nudge", oldestSignal.message.id, now),
+        ledgerUpdate: ledgerUpdateForRetry(objective, workflow, projectKey, blockerReason, oldestSignal.message.id, now),
         decidedAt: timestamp
       });
     }

@@ -88,6 +88,12 @@ Valid signal families:
 - Human gate: `NEEDS_USER_DECISION`, `ERROR`.
 - Terminal review gate: `PR_CREATED`, `MERGED`.
 
+In handoff mode, `NEEDS_USER_DECISION` and `ERROR` do not stop the guard by default. They are treated as blockers to clear unless the room evidence explicitly marks one of the preserved stop gates with:
+
+```text
+handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker>
+```
+
 Validate these separately: top-level `project`, `labels.project`, agent cwd-derived project, role, required labels, and evidence fields. If any part fails, treat it as:
 
 ```text
@@ -111,7 +117,8 @@ When `policy.handoffMode` is true, the workflow itself grants approval for this 
 
 - On `PR_CREATED`, continue the orchestrator through PR review/fix/re-review cycles until all available reviewers report no findings, then merge.
 - On `MERGED`, keep the objective active and continue into the next approved project phase from room/project evidence. In handoff mode this intentionally takes precedence over `policy.allowNewPhaseAfterMerge`.
-- Do not stop for human confirmation during PR review, PR re-review, PR merge, or approved post-merge continuation. Stop only for PRD human review after resolved multi-agent findings, or for an unrecoverable blocker that genuinely cannot continue without human input.
+- Clear ordinary blockers that prevent the approved objective, including generic `BLOCKED`, `NEEDS_FIX`, `NEEDS_USER_DECISION`, or `ERROR` reports. Do not stop for human confirmation during PR review, PR re-review, PR merge, approved post-merge continuation, or fixable delivery obstacles.
+- Stop only for a preserved gate explicitly tagged by `handoffStop`: PRD human review after resolved multi-agent findings, product/scope decisions outside the approved PRD, provider/tooling blockers that prevent required review, final acceptance, or an unrecoverable blocker that genuinely cannot continue without human input.
 - Allow only exact protected-action entries `merge` and `new project phase`. Archiving completed child agents after required room evidence is allowed by the cleanup contract below. Branch deletion, agent deletion, force-archiving/running-agent closure, and daemon restart remain protected.
 
 The guard never directly runs git or GitHub merge commands in handoff mode. It sends policy-bound continuation prompts; the orchestrator performs merge and next-phase work through the existing Paseo flow.

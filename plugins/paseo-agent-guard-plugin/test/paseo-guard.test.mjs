@@ -598,6 +598,80 @@ policy:
   }
 });
 
+test("handoff mode clears untagged blocker signals instead of stopping", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: true
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
+    });
+    const signal = message(
+      "m1",
+      `SIGNAL signal=NEEDS_USER_DECISION project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=fix,task=t-a,role=fix} evidence=dependency_failed`,
+      "child-a"
+    );
+    const snapshot = baseSnapshot(workflow, signal);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "fix", task: "t-a", role: "fix" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "handoff_blocker_clearing");
+    assert.equal(result.signal, "NEEDS_USER_DECISION");
+    assert.match(result.prompt, /clear ordinary blockers/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("handoff mode stops for explicitly preserved human gates", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: true
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
+    });
+    const signal = message(
+      "m1",
+      `SIGNAL signal=ERROR project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t-a handoffStop=scope_decision labels={room=room-a,project=alpha,parent=orch-1,phase=fix,task=t-a,role=fix} evidence=outside_approved_prd`,
+      "child-a"
+    );
+    const snapshot = baseSnapshot(workflow, signal);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "fix", task: "t-a", role: "fix" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "block");
+    assert.equal(result.reason, "handoff_human_intervention_required");
+    assert.equal(result.handoffStopReason, "scope_decision");
+    assert.equal(result.nextStatus, "blocked");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("continuation prompt renders strict template variables and includes workflow body", () => {
   const root = tempRoot();
   try {

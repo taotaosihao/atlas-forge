@@ -37,3 +37,5 @@ Every child agent prompt must include:
 Every child room report must use:
 
 `SIGNAL signal=<PASS|DONE|FIXED|PLAN_READY|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|ERROR|PR_CREATED|MERGED> project=app agent=<id> cwd=<path> branch=<branch> task=<task> labels={room=<room>,project=app,parent=<parent>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>`
+
+When handoff mode is enabled, clear ordinary blockers toward the approved objective. Only mark a true stop gate with `handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker>`.
