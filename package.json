@@ -15,7 +15,7 @@
     "guard:status": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs status --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md",
     "guard:dry-run": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs reconcile --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md --dry-run",
     "guard:watch-status": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs watch-status --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md",
-    "guard:ensure-watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs ensure-watch --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md --dry-run",
-    "guard:watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md --dry-run --max-cycles 1"
+    "guard:ensure-watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard.mjs ensure-watch --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md",
+    "guard:watch": "node plugins/paseo-agent-guard-plugin/scripts/paseo-guard-watch.mjs --workflow plugins/paseo-agent-guard-plugin/examples/single-project.WORKFLOW.md"
   }
 }

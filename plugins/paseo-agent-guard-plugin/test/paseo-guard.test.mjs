@@ -459,6 +459,70 @@ policy:
   }
 });
 
+test("plain project messages do not suppress due retry entries", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const snapshot = baseSnapshot(
+      workflow,
+      message("m2", "status update project=alpha still investigating", "orch-1", "2026-05-12T00:00:05.000Z")
+    );
+    const result = decideReconcile(objective(workflow, {
+      retryLedger: {
+        "alpha:recoverable_blocker_nudge:m-old": {
+          projectKey: "alpha",
+          reason: "recoverable_blocker_nudge",
+          messageId: "m-old",
+          agentId: null,
+          attempt: 1,
+          dueAt: "2026-05-12T00:00:00.000Z",
+          lastError: null,
+          lastPromptAt: "2026-05-12T00:00:01.000Z"
+        }
+      }
+    }), workflow, snapshot, { now: new Date("2026-05-12T00:00:10.000Z") });
+
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "recoverable_blocker_nudge");
+    assert.equal(result.projectKey, "alpha");
+    assert.equal(result.retryAttempt, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("diagnostic project evidence suppresses retry and is handled as recovery", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const snapshot = baseSnapshot(
+      workflow,
+      message("m2", "PROGRESS project=alpha agent=child-a cwd=/tmp evidence=still_running", "child-a", "2026-05-12T00:00:05.000Z")
+    );
+    const result = decideReconcile(objective(workflow, {
+      retryLedger: {
+        "alpha:recoverable_blocker_nudge:m-old": {
+          projectKey: "alpha",
+          reason: "recoverable_blocker_nudge",
+          messageId: "m-old",
+          agentId: null,
+          attempt: 1,
+          dueAt: "2026-05-12T00:00:00.000Z",
+          lastError: null,
+          lastPromptAt: "2026-05-12T00:00:01.000Z"
+        }
+      }
+    }), workflow, snapshot, { now: new Date("2026-05-12T00:00:10.000Z") });
+
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "missing_room_evidence_recovery");
+    assert.equal(result.projectKey, "alpha");
+    assert.equal(result.messageId, "m2");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("completed child cleanup requires valid final evidence for the same project", () => {
   const root = tempRoot();
   try {
@@ -564,4 +628,12 @@ test("readme skill template and examples are updated to workflow v2 assets", () 
     const text = readFileSync(path, "utf8");
     assert.match(text, /WORKFLOW\.md|schemaVersion: 2|project=/);
   }
+});
+
+test("guard watcher package scripts are operational by default", () => {
+  const packageJson = JSON.parse(readFileSync(join(dirname(dirname(pluginRoot)), "package.json"), "utf8"));
+  assert.doesNotMatch(packageJson.scripts["guard:ensure-watch"], /--dry-run/);
+  assert.doesNotMatch(packageJson.scripts["guard:watch"], /--dry-run|--max-cycles/);
+  assert.match(packageJson.scripts["guard:ensure-watch"], /ensure-watch --workflow/);
+  assert.match(packageJson.scripts["guard:watch"], /paseo-guard-watch\.mjs --workflow/);
 });

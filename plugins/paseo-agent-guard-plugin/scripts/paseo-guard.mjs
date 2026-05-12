@@ -1688,13 +1688,16 @@ function clearRetryLedgerByKeys(retryLedger, keys) {
   return next;
 }
 
-function messageOrLabelProject(message) {
-  const fields = parseFields(message.body);
-  const labels = labelsFromMessageFields(fields);
-  return String(fields.project || labels.project || "").trim() || null;
+function isActionableProjectEvidence(message, ledgerEntry, workflow) {
+  const signalEntry = parseSignalEntry(message, workflow);
+  if (signalEntry?.projectKey === ledgerEntry.projectKey) {
+    return true;
+  }
+  const diagnosticEntry = parseDiagnosticEntry(message, workflow);
+  return diagnosticEntry?.projectKey === ledgerEntry.projectKey;
 }
 
-function progressAfterRetry(messages, ledgerEntry) {
+function progressAfterRetry(messages, ledgerEntry, workflow) {
   const lastPromptAt = Date.parse(ledgerEntry.lastPromptAt || "");
   if (Number.isNaN(lastPromptAt)) {
     return false;
@@ -1704,7 +1707,7 @@ function progressAfterRetry(messages, ledgerEntry) {
     if (Number.isNaN(createdAt) || createdAt <= lastPromptAt) {
       return false;
     }
-    return messageOrLabelProject(message) === ledgerEntry.projectKey;
+    return isActionableProjectEvidence(message, ledgerEntry, workflow);
   });
 }
 
@@ -1725,7 +1728,7 @@ function dueRetryEntry(snapshot, objective, workflow, now) {
   const entries = Object.entries(objective.retryLedger || {})
     .map(([key, value]) => ({ key, ...value }))
     .filter((entry) => objective.projectStatus?.[entry.projectKey] !== STATUS_BLOCKED)
-    .filter((entry) => !progressAfterRetry(snapshot.messages, entry))
+    .filter((entry) => !progressAfterRetry(snapshot.messages, entry, workflow))
     .filter((entry) => {
       const dueAt = Date.parse(entry.dueAt || "");
       return !Number.isNaN(dueAt) && dueAt <= now.getTime();
