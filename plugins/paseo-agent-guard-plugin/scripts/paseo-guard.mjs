@@ -182,7 +182,7 @@ const CONTINUATION_TEMPLATE = [
   "",
   "Instructions:",
   "1. Read the workflow body and room evidence before acting.",
-  "2. Take exactly one safe next step, then post canonical SIGNAL evidence.",
+  "2. As the orchestrator, delegate execution to child agents or advance orchestration only. Do not perform implementation, fix, validation, audit, review, PR, merge, or other project execution work yourself.",
   "3. Planning and research may run only in researchWorkspace.",
   "4. Implementation, fix, validation, audit, and PR child agents must run in the current project's target workspace or allowed worktree roots.",
   "5. Every child SIGNAL must use: SIGNAL signal=<...> project=<key> agent=<id> cwd=<path> branch=<branch> task=<task> labels={room=<room>,project=<key>,parent=<parent>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>.",
@@ -190,7 +190,8 @@ const CONTINUATION_TEMPLATE = [
   "7. Keep background per-child `paseo wait <agent-id> --json` as an auxiliary idle notification path; durable continuation comes from the watcher plus room SIGNAL evidence.",
   "8. Cleanup is allowed only for completed child agents that already posted valid final evidence for their project.",
   "9. Do not perform protected actions unless policy allows the exact action.",
-  "10. In handoff mode, clear ordinary blockers that prevent the objective. Stop only when the blocker is explicitly tagged with handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker> or is clearly one of those gates.",
+  "10. Orchestrator messages may use diagnostic/progress/recovery updates, but canonical project SIGNAL evidence must come from child agents.",
+  "11. In handoff mode, clear ordinary blockers that prevent the objective. Stop only when the blocker is explicitly tagged with handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker> or is clearly one of those gates.",
   "",
   "Workflow body:",
   "{{reason}}"
@@ -1550,6 +1551,13 @@ function messageReportsAgent(message, agentId) {
   return fields.agent === agentId || message.author === agentId;
 }
 
+function isOrchestratorAuthor(message, snapshot) {
+  if (!message?.author) {
+    return false;
+  }
+  return (snapshot.orchestrators || []).some((agent) => agent.id === message.author);
+}
+
 export function validateDelegationContract(entry, snapshot, workflow) {
   if (!entry?.message) {
     return null;
@@ -1566,6 +1574,7 @@ export function validateDelegationContract(entry, snapshot, workflow) {
   const agent = (fields.agent && snapshot.agentById[fields.agent]) || (author && snapshot.agentById[author]) || null;
   const effectiveCwd = fields.cwd || agent?.cwd;
   const violations = {
+    author: null,
     topLevelProject: null,
     labelProject: null,
     agentProject: null,
@@ -1573,6 +1582,10 @@ export function validateDelegationContract(entry, snapshot, workflow) {
     requiredLabels: [],
     evidence: []
   };
+
+  if (isOrchestratorAuthor(entry.message, snapshot)) {
+    violations.author = "orchestrator_cannot_emit_project_signal";
+  }
 
   if (!topLevelProject) {
     violations.topLevelProject = "missing_project";

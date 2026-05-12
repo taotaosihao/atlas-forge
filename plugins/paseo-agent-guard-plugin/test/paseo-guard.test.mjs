@@ -283,6 +283,154 @@ test("validateDelegationContract infers missing agent and cwd evidence from room
   }
 });
 
+test("validateDelegationContract rejects orchestrator-authored project signals", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const entry = {
+      message: message(
+        "m1",
+        `SIGNAL signal=PASS project=alpha agent=orch-1 cwd=${workflow.researchWorkspace} branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=review,task=t-a,role=implementation} evidence=clean`,
+        "orch-1"
+      ),
+      signal: "PASS",
+      projectKey: "alpha"
+    };
+    const snapshot = baseSnapshot(workflow, entry.message);
+    snapshot.agentById["orch-1"] = snapshot.orchestrators[0];
+
+    const violation = validateDelegationContract(entry, snapshot, workflow);
+    assert.equal(violation.type, "delegation_contract_violation");
+    assert.equal(violation.violations.author, "orchestrator_cannot_emit_project_signal");
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "block");
+    assert.equal(result.reason, "delegation_contract_violation");
+    assert.equal(result.violation.violations.author, "orchestrator_cannot_emit_project_signal");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validateDelegationContract rejects orchestrator project signal even with spoofed child agent", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const entry = {
+      message: message(
+        "m1",
+        `SIGNAL signal=PASS project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=review,task=t-a,role=audit} evidence=clean`,
+        "orch-1"
+      ),
+      signal: "PASS",
+      projectKey: "alpha"
+    };
+    const snapshot = baseSnapshot(workflow, entry.message);
+    snapshot.agentById["orch-1"] = snapshot.orchestrators[0];
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "review", task: "t-a", role: "audit" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    const violation = validateDelegationContract(entry, snapshot, workflow);
+    assert.equal(violation.type, "delegation_contract_violation");
+    assert.equal(violation.violations.author, "orchestrator_cannot_emit_project_signal");
+    assert.equal(violation.reportedAgentId, "child-a");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("handoff terminal project signals must be child-authored", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: true
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
+    });
+    const signal = message(
+      "m1",
+      `SIGNAL signal=PR_CREATED project=alpha agent=orch-1 cwd=${workflow.researchWorkspace} branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=pr,task=t-a,role=pr} evidence=pr_created`,
+      "orch-1"
+    );
+    const snapshot = baseSnapshot(workflow, signal);
+    snapshot.agentById["orch-1"] = snapshot.orchestrators[0];
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "block");
+    assert.equal(result.reason, "delegation_contract_violation");
+    assert.equal(result.signal, "PR_CREATED");
+    assert.equal(result.violation.violations.author, "orchestrator_cannot_emit_project_signal");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("handoff child-authored terminal project signals still advance", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root, {
+      frontMatter: `
+policy:
+  handoffMode: true
+  trustAcknowledged: true
+  cooldownSeconds: 0
+  checkGitWorktrees: false
+      `
+    });
+    const signal = message(
+      "m1",
+      `SIGNAL signal=PR_CREATED project=alpha agent=child-a cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t-a labels={room=room-a,project=alpha,parent=orch-1,phase=pr,task=t-a,role=pr} evidence=pr_created`,
+      "child-a"
+    );
+    const snapshot = baseSnapshot(workflow, signal);
+    snapshot.agentById["child-a"] = {
+      id: "child-a",
+      cwd: workflow.projects[0].targetWorkspace,
+      labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "pr", task: "t-a", role: "pr" },
+      projectKey: "alpha",
+      projectViolation: null,
+      workspaceKind: "target"
+    };
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "handoff_pr_review_until_clean");
+    assert.equal(result.signal, "PR_CREATED");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("orchestrator diagnostic project updates remain allowed for recovery", () => {
+  const root = tempRoot();
+  try {
+    const workflow = makeWorkflow(root);
+    const snapshot = baseSnapshot(
+      workflow,
+      message("m2", "PROGRESS project=alpha agent=orch-1 cwd=/tmp evidence=delegated_child_missing_signal", "orch-1", "2026-05-12T00:00:05.000Z")
+    );
+    snapshot.agentById["orch-1"] = snapshot.orchestrators[0];
+
+    const result = decideReconcile(objective(workflow), workflow, snapshot);
+    assert.equal(result.action, "send");
+    assert.equal(result.reason, "missing_room_evidence_recovery");
+    assert.equal(result.projectKey, "alpha");
+    assert.equal(result.messageId, "m2");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("validateDelegationContract accepts task evidence from labels", () => {
   const root = tempRoot();
   try {
@@ -684,6 +832,9 @@ test("continuation prompt renders strict template variables and includes workflo
     });
     assert.match(prompt, /workflowDigest=/);
     assert.match(prompt, /currentProject=/);
+    assert.match(prompt, /delegate execution to child agents/i);
+    assert.match(prompt, /canonical project SIGNAL evidence must come from child agents/i);
+    assert.doesNotMatch(prompt, /Take exactly one safe next step/);
     assert.match(prompt, /Follow WORKFLOW body text/);
   } finally {
     rmSync(root, { recursive: true, force: true });

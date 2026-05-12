@@ -43,7 +43,7 @@ The objective schema is v2 and persists `workflowPath`, `workflowDigest`, projec
 
 ## Workspace Contract
 
-Planner and orchestrator agents may run in `researchWorkspace`.
+Planner and orchestrator agents may run in `researchWorkspace`. Orchestrator agents coordinate only: they read room state, launch or wake child agents, recover missing evidence, close completed child agents after valid evidence, and post diagnostic/progress/recovery updates. They must not perform implementation, fix, validation, audit, review, PR, merge, or other project execution work themselves.
 
 Child agents with roles `implementation`, `fix`, `validation`, `audit`, or `pr` must run in exactly one declared project workspace. Use the matching project's `targetWorkspace` or one of its `allowedImplementationRoots`. Do not create implementation agents in the research workspace.
 
@@ -80,6 +80,7 @@ SIGNAL signal=<PLAN_READY|DONE|FIXED|PASS|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|
 ```
 
 Legacy top-level signal lines are no longer accepted. Require the canonical `SIGNAL signal=<family> ...` shape.
+Canonical project `SIGNAL` evidence must be authored by child agents, not the orchestrator. The guard treats orchestrator-authored canonical project `SIGNAL` lines as `delegation_contract_violation`, even if the line reports `agent=<child-id>` or `relayed=true`. Orchestrator status should use diagnostic messages such as `PROGRESS`, `CHECKPOINT`, `AGENT_STATUS`, or `CHILD_AGENT_STATUS` instead.
 
 Valid signal families:
 
@@ -144,7 +145,7 @@ If a timed check or room read does not show the expected child-agent room eviden
 - Inspect each relevant child agent by id, including status, cwd, labels, and latest log/error.
 - If a child errored, hit quota, lost provider access, or needs permission, record that as room evidence and retry with an available provider or mark the reviewer unavailable according to review policy.
 - If a child is idle/complete but did not post room evidence, send it a follow-up asking it to post the required canonical `SIGNAL signal=... project=...` line.
-- If the child cannot respond, the parent may post a relayed status marked `relayed=true`, but relayed review text does not count as reviewer `PASS` unless the underlying result was observed.
+- If the child cannot respond, the parent may post a diagnostic relayed status marked `relayed=true`, but it must not use canonical project `SIGNAL` evidence and it does not count as reviewer `PASS`, terminal PR evidence, or cleanup evidence.
 
 ## Agent Permission Defaults
 
