@@ -40,5 +40,6 @@ Required room evidence:
 
 `SIGNAL signal=<PASS|DONE|FIXED|PLAN_READY|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|ERROR|PR_CREATED|MERGED> project=gearjob agent=<id> cwd=<path> branch=<branch> task=<task> labels={room=gearjob-123-plm-next,project=gearjob,parent=<parent>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>`
 
-Only child agents may author canonical project SIGNAL evidence. Orchestrator updates must use
-diagnostic/progress/recovery messages, not child result SIGNALs.
+Only the reported child agent may author canonical project SIGNAL evidence: room message author
+must match `agent=<child-id>`. Orchestrator updates must use diagnostic/progress/recovery
+messages, not child result SIGNALs.

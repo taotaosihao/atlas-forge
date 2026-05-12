@@ -46,6 +46,7 @@ Canonical room evidence:
 
 `SIGNAL signal=<PASS|DONE|FIXED|PLAN_READY|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|ERROR|PR_CREATED|MERGED> project=<key> agent=<id> cwd=<path> branch=<branch> task=<task> labels={room=atlas-forge-delivery,project=<key>,parent=<parent>,phase=<phase>,task=<task>,role=<role>} evidence=<summary>`
 
-Only child agents may author canonical project SIGNAL evidence.
+Only the reported child agent may author canonical project SIGNAL evidence: room message author
+must match `agent=<child-id>`.
 
 Because this workflow enables handoff mode, clear ordinary blockers that prevent the approved objective. Only stop by tagging a preserved gate with `handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker>`.

@@ -116,7 +116,14 @@ test("watch reload keeps last-known-good workflow and exposes workflowLoadError"
           return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
         }
         if (args[0] === "ls" && args.includes(`room=${workflow.room}`)) {
-          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } },
+              { id: "child-1", status: "done", cwd: workflow.projects[0].targetWorkspace, labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t1", role: "implementation" } }
+            ]),
+            stderr: ""
+          };
         }
         if (args[0] === "chat" && args[1] === "read") {
           return { status: 0, stdout: "[]", stderr: "" };
@@ -168,7 +175,14 @@ test("watch emits project-aware reconcile events", async () => {
           return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
         }
         if (args[0] === "ls" && args.includes(`room=${workflow.room}`)) {
-          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } },
+              { id: "child-1", status: "done", cwd: workflow.projects[0].targetWorkspace, labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t1", role: "implementation" } }
+            ]),
+            stderr: ""
+          };
         }
         if (args[0] === "chat" && args[1] === "read") {
           return {

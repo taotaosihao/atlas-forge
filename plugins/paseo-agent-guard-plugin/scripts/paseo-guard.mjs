@@ -190,7 +190,7 @@ const CONTINUATION_TEMPLATE = [
   "7. Keep background per-child `paseo wait <agent-id> --json` as an auxiliary idle notification path; durable continuation comes from the watcher plus room SIGNAL evidence.",
   "8. Cleanup is allowed only for completed child agents that already posted valid final evidence for their project.",
   "9. Do not perform protected actions unless policy allows the exact action.",
-  "10. Orchestrator messages may use diagnostic/progress/recovery updates, but canonical project SIGNAL evidence must come from child agents.",
+  "10. Orchestrator messages may use diagnostic/progress/recovery updates, but canonical project SIGNAL evidence must come from the reported child agent: room message author must match agent=<child-id>.",
   "11. In handoff mode, clear ordinary blockers that prevent the objective. Stop only when the blocker is explicitly tagged with handoffStop=<prd_human_review|scope_decision|provider_tooling_blocker|final_acceptance|unrecoverable_blocker> or is clearly one of those gates.",
   "",
   "Workflow body:",
@@ -1547,8 +1547,7 @@ function messageReportsAgent(message, agentId) {
   if (!agentId) {
     return false;
   }
-  const fields = parseFields(message.body);
-  return fields.agent === agentId || message.author === agentId;
+  return message.author === agentId;
 }
 
 function isOrchestratorAuthor(message, snapshot) {
@@ -1585,6 +1584,12 @@ export function validateDelegationContract(entry, snapshot, workflow) {
 
   if (isOrchestratorAuthor(entry.message, snapshot)) {
     violations.author = "orchestrator_cannot_emit_project_signal";
+  } else if (!author) {
+    violations.author = "missing_author";
+  } else if (reportedAgentId !== author) {
+    violations.author = `author_agent_mismatch:${author}:${reportedAgentId}`;
+  } else if (!snapshot.agentById[author]) {
+    violations.author = `author_not_known_agent:${author}`;
   }
 
   if (!topLevelProject) {

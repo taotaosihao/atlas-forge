@@ -80,7 +80,7 @@ SIGNAL signal=<PLAN_READY|DONE|FIXED|PASS|BLOCKED|NEEDS_FIX|NEEDS_USER_DECISION|
 ```
 
 Legacy top-level signal lines are no longer accepted. Require the canonical `SIGNAL signal=<family> ...` shape.
-Canonical project `SIGNAL` evidence must be authored by child agents, not the orchestrator. The guard treats orchestrator-authored canonical project `SIGNAL` lines as `delegation_contract_violation`, even if the line reports `agent=<child-id>` or `relayed=true`. Orchestrator status should use diagnostic messages such as `PROGRESS`, `CHECKPOINT`, `AGENT_STATUS`, or `CHILD_AGENT_STATUS` instead.
+Canonical project `SIGNAL` evidence must be authored by the reported child agent: `message.author` must match `agent=<child-id>`. The guard treats orchestrator-authored, unknown-author, or mismatched-author canonical project `SIGNAL` lines as `delegation_contract_violation`, even if the line reports `agent=<child-id>` or `relayed=true`. Orchestrator status should use diagnostic messages such as `PROGRESS`, `CHECKPOINT`, `AGENT_STATUS`, or `CHILD_AGENT_STATUS` instead.
 
 Valid signal families:
 

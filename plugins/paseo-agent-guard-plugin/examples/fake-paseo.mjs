@@ -30,6 +30,19 @@ if (args[0] === "ls") {
       status: "idle",
       cwd: researchWorkspace,
       labels: { room: "gearjob-123-plm-next", role: "orchestrator" }
+    },
+    {
+      id: "child-1",
+      status: "done",
+      cwd: targetWorkspace,
+      labels: {
+        room: "gearjob-123-plm-next",
+        project: "gearjob",
+        parent: "orch-1",
+        phase: "build",
+        task: "smoke-task",
+        role: "implementation"
+      }
     }
   ]);
   process.exit(0);
