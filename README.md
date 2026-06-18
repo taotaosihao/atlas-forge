@@ -1,23 +1,33 @@
-# Codex Local Plugins
+# Atlas Forge
 
-Git-managed source root for the local Codex plugin marketplace.
+Atlas Forge is a Git-backed Codex plugin marketplace for local workflow tools.
+It packages the Atlas workflow skills, the MemPalace Codex wrapper, and the
+Atlas workflow helper scripts behind one installable marketplace.
 
-This repository mirrors the local marketplace root that used to live directly
-under `/home/gewu/.codex`:
+Codex should install plugins from the Git marketplace snapshot, not directly
+from a local checkout. The local checkout is the source for editing, reviewing,
+committing, and publishing changes.
 
-- `.agents/plugins/marketplace.json`: local marketplace manifest.
-- `plugins/atlas-workflow`: Atlas workflow plugin source.
-- `plugins/mempalace-codex-plugin`: MemPalace local wrapper plugin source.
-- `workflow/`: Atlas workflow helper source files that the Atlas plugin skills
-  call through `~/.codex/workflow/bin/...`.
+## Included Plugins
 
-Live task state, artifacts, caches, Codex sessions, auth, and logs are not kept
-in this repository.
+| Plugin | Purpose |
+| --- | --- |
+| `atlas-workflow` | Atlas skills for task routing, planning, workflow gates, design review, team handoff, and bounded local work. |
+| `mempalace` | MemPalace wrapper plugin for local memory search and related commands. |
 
-## Install On Another Device
+The repository also stores the Atlas workflow helper source under `workflow/`.
+Those helpers are synced into `~/.codex/workflow` when workflow runtime files
+change.
 
-All devices use the same SSH Git marketplace source. Configure GitHub SSH
-access on the device first.
+## Requirements
+
+- Codex CLI with `codex plugin` support.
+- Git.
+- GitHub SSH access to `git@github.com:taotaosihao/atlas-forge.git`.
+
+## Install
+
+All devices use the same SSH Git marketplace source.
 
 ```bash
 codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git \
@@ -34,7 +44,7 @@ codex plugin marketplace remove atlas-forge
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
-To update an already installed device:
+## Update An Installed Device
 
 ```bash
 codex plugin marketplace upgrade atlas-forge \
@@ -42,45 +52,74 @@ codex plugin marketplace upgrade atlas-forge \
   && codex plugin add mempalace@atlas-forge
 ```
 
-## Update Flow
+Start a new Codex thread after updating. Plugin skills are loaded when a thread
+starts.
+
+## Development Workflow
 
 1. Edit plugin or workflow source in this repository.
-2. If plugin content changed, bump the plugin manifest cachebuster before
-   committing:
+2. If plugin content changed, bump the plugin manifest cachebuster:
 
 ```bash
 scripts/bump-plugin-cachebuster.sh atlas-workflow
 scripts/bump-plugin-cachebuster.sh mempalace
 ```
 
-3. Commit and push the repository. Codex updates from the Git marketplace
-   snapshot, not directly from this local checkout:
+3. Run the local checks:
 
 ```bash
+python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
+python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/atlas-workflow
+python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mempalace-codex-plugin
+bash -n scripts/bump-plugin-cachebuster.sh
+bash -n scripts/codex-plugin-update.sh
+```
+
+4. Commit and push:
+
+```bash
+git add -A
+git commit -m "type(scope): summary"
 git push origin main
 ```
 
-4. Refresh the configured Git marketplace snapshot and reinstall the changed
-   plugin:
+5. Refresh Codex from the Git marketplace snapshot:
 
 ```bash
 scripts/codex-plugin-update.sh atlas-workflow
 scripts/codex-plugin-update.sh mempalace
 ```
 
-5. For workflow helper changes, sync source files to the live Codex workflow
-   path after the git-backed plugin update:
+6. If workflow helper files changed, sync them to the live Codex workflow path:
 
 ```bash
 scripts/sync-live-workflow.sh
 ```
 
-6. Start a new Codex thread to load updated skills/tools.
+7. Start a new Codex thread before relying on changed skills.
 
-## Marketplace
+## Repository Layout
 
-The marketplace name is `atlas-forge`. The intended Codex config source is the
-Git remote:
+```text
+atlas-forge/
+  .agents/plugins/marketplace.json
+  plugins/
+    atlas-workflow/
+    mempalace-codex-plugin/
+  scripts/
+    bump-plugin-cachebuster.sh
+    codex-plugin-update.sh
+    sync-live-workflow.sh
+  workflow/
+    bin/
+    hooks/
+    templates/
+    tests/
+```
+
+## Marketplace Configuration
+
+The configured marketplace name is `atlas-forge`.
 
 ```toml
 [marketplaces.atlas-forge]
@@ -89,6 +128,55 @@ source = "git@github.com:taotaosihao/atlas-forge.git"
 ref = "main"
 ```
 
-After this source is configured, `codex plugin marketplace upgrade atlas-forge`
-refreshes the remote snapshot, and `codex plugin add <plugin>@atlas-forge`
-installs from that git-managed snapshot.
+`codex plugin marketplace upgrade atlas-forge` refreshes the Git snapshot.
+`codex plugin add <plugin>@atlas-forge` installs from that snapshot.
+
+## Runtime State
+
+This repository intentionally does not store live Codex state:
+
+- task artifacts
+- session logs
+- auth files
+- installed plugin caches
+- temporary marketplace snapshots
+
+Those files belong under the local Codex home, such as `~/.codex/workflow` and
+`~/.codex/plugins/cache`.
+
+## Troubleshooting
+
+### `Permission denied (publickey)`
+
+The device cannot access the GitHub repository through SSH. Configure the
+device's GitHub SSH key and verify:
+
+```bash
+git ls-remote git@github.com:taotaosihao/atlas-forge.git HEAD
+```
+
+### Marketplace source changed or points to a local path
+
+Remove and re-add the marketplace:
+
+```bash
+codex plugin marketplace remove atlas-forge
+codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git
+```
+
+Then reinstall the plugins:
+
+```bash
+codex plugin add atlas-workflow@atlas-forge
+codex plugin add mempalace@atlas-forge
+```
+
+### Updated skills are not visible
+
+Run the marketplace update command and start a new Codex thread:
+
+```bash
+codex plugin marketplace upgrade atlas-forge \
+  && codex plugin add atlas-workflow@atlas-forge \
+  && codex plugin add mempalace@atlas-forge
+```
