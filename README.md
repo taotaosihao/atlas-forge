@@ -14,6 +14,41 @@ under `/home/gewu/.codex`:
 Live task state, artifacts, caches, Codex sessions, auth, and logs are not kept
 in this repository.
 
+## Install On Another Device
+
+Use the SSH URL when the device already has GitHub SSH access:
+
+```bash
+codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git \
+  && codex plugin add atlas-workflow@atlas-forge \
+  && codex plugin add mempalace@atlas-forge
+```
+
+Use the HTTPS URL when SSH keys are not configured:
+
+```bash
+codex plugin marketplace add --ref main https://github.com/taotaosihao/atlas-forge.git \
+  && codex plugin add atlas-workflow@atlas-forge \
+  && codex plugin add mempalace@atlas-forge
+```
+
+If the device already has an older local `atlas-forge` marketplace configured,
+remove it first:
+
+```bash
+codex plugin marketplace remove atlas-forge
+```
+
+After installation, start a new Codex thread so the updated skills are loaded.
+
+To update an already installed device:
+
+```bash
+codex plugin marketplace upgrade atlas-forge \
+  && codex plugin add atlas-workflow@atlas-forge \
+  && codex plugin add mempalace@atlas-forge
+```
+
 ## Update Flow
 
 1. Edit plugin or workflow source in this repository.
