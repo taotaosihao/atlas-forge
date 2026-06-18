@@ -42,3 +42,4 @@ fi
 
 codex plugin marketplace upgrade "$MARKETPLACE"
 codex plugin add "$PLUGIN_NAME@$MARKETPLACE"
+"$REPO_ROOT/scripts/sync-live-workflow.sh"

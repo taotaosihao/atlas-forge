@@ -30,26 +30,32 @@ change.
 All devices use the same SSH Git marketplace source.
 
 ```bash
-codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git \
-  && codex plugin add atlas-workflow@atlas-forge \
-  && codex plugin add mempalace@atlas-forge
+bash -lc 'set -euo pipefail
+tmp="$(mktemp -d)"
+trap "rm -rf \"$tmp\"" EXIT
+git clone --depth 1 --branch main git@github.com:taotaosihao/atlas-forge.git "$tmp/atlas-forge"
+"$tmp/atlas-forge/scripts/install-atlas-forge.sh"'
 ```
 
 If the device already has an older local `atlas-forge` marketplace configured,
-remove it first:
+the installer replaces it with the SSH Git marketplace source.
+
+If the repository is already checked out locally, run:
 
 ```bash
-codex plugin marketplace remove atlas-forge
+scripts/install-atlas-forge.sh
 ```
+
+The installer registers the marketplace, installs `atlas-workflow` and
+`mempalace`, syncs the Atlas workflow helpers, and refreshes command shims in
+`~/.local/bin`.
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
 ## Update An Installed Device
 
 ```bash
-codex plugin marketplace upgrade atlas-forge \
-  && codex plugin add atlas-workflow@atlas-forge \
-  && codex plugin add mempalace@atlas-forge
+~/.codex/.tmp/marketplaces/atlas-forge/scripts/install-atlas-forge.sh
 ```
 
 Start a new Codex thread after updating. Plugin skills are loaded when a thread
@@ -73,6 +79,7 @@ python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.
 python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mempalace-codex-plugin
 bash -n scripts/bump-plugin-cachebuster.sh
 bash -n scripts/codex-plugin-update.sh
+bash -n scripts/install-atlas-forge.sh
 ```
 
 4. Commit and push:
@@ -112,6 +119,7 @@ atlas-forge/
   scripts/
     bump-plugin-cachebuster.sh
     codex-plugin-update.sh
+    install-atlas-forge.sh
     sync-live-workflow.sh
   workflow/
     bin/
@@ -170,8 +178,7 @@ codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.g
 Then reinstall the plugins:
 
 ```bash
-codex plugin add atlas-workflow@atlas-forge
-codex plugin add mempalace@atlas-forge
+~/.codex/.tmp/marketplaces/atlas-forge/scripts/install-atlas-forge.sh
 ```
 
 ### Updated skills are not visible
@@ -179,7 +186,5 @@ codex plugin add mempalace@atlas-forge
 Run the marketplace update command and start a new Codex thread:
 
 ```bash
-codex plugin marketplace upgrade atlas-forge \
-  && codex plugin add atlas-workflow@atlas-forge \
-  && codex plugin add mempalace@atlas-forge
+~/.codex/.tmp/marketplaces/atlas-forge/scripts/install-atlas-forge.sh
 ```
