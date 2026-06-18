@@ -17,32 +17,50 @@ in this repository.
 ## Update Flow
 
 1. Edit plugin or workflow source in this repository.
-2. For workflow helper changes, sync source files to the live Codex workflow
-   path:
+2. If plugin content changed, bump the plugin manifest cachebuster before
+   committing:
 
 ```bash
-scripts/sync-live-workflow.sh
+scripts/bump-plugin-cachebuster.sh atlas-workflow
+scripts/bump-plugin-cachebuster.sh mempalace
 ```
 
-3. Reinstall a changed plugin through Codex:
+3. Commit and push the repository. Codex updates from the Git marketplace
+   snapshot, not directly from this local checkout:
+
+```bash
+git push origin main
+```
+
+4. Refresh the configured Git marketplace snapshot and reinstall the changed
+   plugin:
 
 ```bash
 scripts/codex-plugin-update.sh atlas-workflow
 scripts/codex-plugin-update.sh mempalace
 ```
 
-4. Start a new Codex thread to load updated skills/tools.
+5. For workflow helper changes, sync source files to the live Codex workflow
+   path after the git-backed plugin update:
+
+```bash
+scripts/sync-live-workflow.sh
+```
+
+6. Start a new Codex thread to load updated skills/tools.
 
 ## Marketplace
 
-The marketplace name is `atlas-forge`. The intended Codex config source is this
-repository root:
+The marketplace name is `atlas-forge`. The intended Codex config source is the
+Git remote:
 
 ```toml
 [marketplaces.atlas-forge]
-source_type = "local"
-source = "/home/gewu/work/atlas-forge"
+source_type = "git"
+source = "git@github.com:taotaosihao/atlas-forge.git"
+ref = "main"
 ```
 
-After this source is configured, `codex plugin add <plugin>@atlas-forge` installs
-from this git-managed repo.
+After this source is configured, `codex plugin marketplace upgrade atlas-forge`
+refreshes the remote snapshot, and `codex plugin add <plugin>@atlas-forge`
+installs from that git-managed snapshot.

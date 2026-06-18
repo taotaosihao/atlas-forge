@@ -9,14 +9,13 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MARKETPLACE="atlas-forge"
+REF="${ATLAS_FORGE_REF:-main}"
 
 case "$PLUGIN_SELECTOR" in
   atlas-workflow)
-    PLUGIN_PATH="$REPO_ROOT/plugins/atlas-workflow"
     PLUGIN_NAME="atlas-workflow"
     ;;
   mempalace|mempalace-codex-plugin)
-    PLUGIN_PATH="$REPO_ROOT/plugins/mempalace-codex-plugin"
     PLUGIN_NAME="mempalace"
     ;;
   *)
@@ -25,22 +24,21 @@ case "$PLUGIN_SELECTOR" in
     ;;
 esac
 
-python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py "$PLUGIN_PATH"
-python3 - "$PLUGIN_PATH" <<'PY'
-import json
-import sys
-from pathlib import Path
+if [[ -n "$(git -C "$REPO_ROOT" status --short)" ]]; then
+  echo "atlas-forge has uncommitted changes." >&2
+  echo "Commit and push them before updating Codex from the git marketplace." >&2
+  exit 1
+fi
 
-plugin_path = Path(sys.argv[1])
-runtime_manifest = plugin_path / ".codex-plugin" / "plugin.json"
-legacy_manifest = plugin_path / "plugin.json"
+git -C "$REPO_ROOT" fetch origin "$REF" >/dev/null
 
-if runtime_manifest.exists() and legacy_manifest.exists():
-    runtime = json.loads(runtime_manifest.read_text())
-    legacy = json.loads(legacy_manifest.read_text())
-    version = runtime.get("version")
-    if version and legacy.get("version") != version:
-        legacy["version"] = version
-        legacy_manifest.write_text(json.dumps(legacy, indent=2, ensure_ascii=False) + "\n")
-PY
+local_head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+remote_head="$(git -C "$REPO_ROOT" rev-parse "origin/$REF")"
+if [[ "$local_head" != "$remote_head" ]]; then
+  echo "atlas-forge local HEAD is not origin/$REF." >&2
+  echo "Push or pull the repository before updating Codex from the git marketplace." >&2
+  exit 1
+fi
+
+codex plugin marketplace upgrade "$MARKETPLACE"
 codex plugin add "$PLUGIN_NAME@$MARKETPLACE"
