@@ -16,15 +16,7 @@ in this repository.
 
 ## Install On Another Device
 
-Use the SSH URL when the device already has GitHub SSH access:
-
-```bash
-codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git \
-  && codex plugin add atlas-workflow@atlas-forge \
-  && codex plugin add mempalace@atlas-forge
-```
-
-Use the HTTPS URL when SSH keys are not configured:
+All devices use the same HTTPS Git marketplace source:
 
 ```bash
 codex plugin marketplace add --ref main https://github.com/taotaosihao/atlas-forge.git \
@@ -92,7 +84,7 @@ Git remote:
 ```toml
 [marketplaces.atlas-forge]
 source_type = "git"
-source = "git@github.com:taotaosihao/atlas-forge.git"
+source = "https://github.com/taotaosihao/atlas-forge.git"
 ref = "main"
 ```
 
