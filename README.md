@@ -16,10 +16,11 @@ in this repository.
 
 ## Install On Another Device
 
-All devices use the same HTTPS Git marketplace source:
+All devices use the same SSH Git marketplace source. Configure GitHub SSH
+access on the device first.
 
 ```bash
-codex plugin marketplace add --ref main https://github.com/taotaosihao/atlas-forge.git \
+codex plugin marketplace add --ref main git@github.com:taotaosihao/atlas-forge.git \
   && codex plugin add atlas-workflow@atlas-forge \
   && codex plugin add mempalace@atlas-forge
 ```
@@ -84,7 +85,7 @@ Git remote:
 ```toml
 [marketplaces.atlas-forge]
 source_type = "git"
-source = "https://github.com/taotaosihao/atlas-forge.git"
+source = "git@github.com:taotaosihao/atlas-forge.git"
 ref = "main"
 ```
 
