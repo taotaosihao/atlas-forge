@@ -96,6 +96,9 @@ scripts/codex-plugin-update.sh mempalace
 scripts/sync-live-workflow.sh
 ```
 
+The sync script also refreshes command shims in `~/.local/bin` for
+`codex-workflow`, `codex-design-review`, and `codex-refresh-local-plugin`.
+
 7. Start a new Codex thread before relying on changed skills.
 
 ## Repository Layout
