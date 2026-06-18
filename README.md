@@ -8,7 +8,6 @@ under `/home/gewu/.codex`:
 - `.agents/plugins/marketplace.json`: local marketplace manifest.
 - `plugins/atlas-workflow`: Atlas workflow plugin source.
 - `plugins/mempalace-codex-plugin`: MemPalace local wrapper plugin source.
-- `plugins/paseo-agent-guard-plugin`: Paseo Agent Guard plugin source.
 - `workflow/`: Atlas workflow helper source files that the Atlas plugin skills
   call through `~/.codex/workflow/bin/...`.
 
@@ -30,7 +29,6 @@ scripts/sync-live-workflow.sh
 ```bash
 scripts/codex-plugin-update.sh atlas-workflow
 scripts/codex-plugin-update.sh mempalace
-scripts/codex-plugin-update.sh paseo-agent-guard-plugin
 ```
 
 4. Start a new Codex thread to load updated skills/tools.

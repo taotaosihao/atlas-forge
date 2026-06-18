@@ -3,7 +3,7 @@ set -euo pipefail
 
 PLUGIN_SELECTOR="${1:-}"
 if [[ -z "$PLUGIN_SELECTOR" ]]; then
-  echo "usage: scripts/codex-plugin-update.sh <atlas-workflow|mempalace|paseo-agent-guard-plugin>" >&2
+  echo "usage: scripts/codex-plugin-update.sh <atlas-workflow|mempalace>" >&2
   exit 1
 fi
 
@@ -18,10 +18,6 @@ case "$PLUGIN_SELECTOR" in
   mempalace|mempalace-codex-plugin)
     PLUGIN_PATH="$REPO_ROOT/plugins/mempalace-codex-plugin"
     PLUGIN_NAME="mempalace"
-    ;;
-  paseo-agent-guard-plugin)
-    PLUGIN_PATH="$REPO_ROOT/plugins/paseo-agent-guard-plugin"
-    PLUGIN_NAME="paseo-agent-guard-plugin"
     ;;
   *)
     echo "unknown plugin: $PLUGIN_SELECTOR" >&2
