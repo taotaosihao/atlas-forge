@@ -4,44 +4,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { WorkflowStore, initObjective, loadWorkflow, objectivePathFor } from "../scripts/paseo-guard.mjs";
+import { initObjective, normalizeConfig, objectivePathFor } from "../scripts/paseo-guard.mjs";
 import { parseWaitMessages, selectWatchTimeout, waitForRoomEvent, watch } from "../scripts/paseo-guard-watch.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "paseo-guard-watch-v2-test-"));
+  return mkdtempSync(join(tmpdir(), "paseo-guard-watch-test-"));
 }
 
-function writeWorkflow(root, body = "Continue safely.", extraPolicy = "") {
-  const path = join(root, "WORKFLOW.md");
-  writeFileSync(path, `---
-schemaVersion: 2
-projectName: watch-project
-room: room-a
-objective: keep watching
-researchWorkspace: ./research
-objectiveStoreDir: ./state
-projects:
-  - key: alpha
-    targetWorkspace: ./alpha
-policy:
-  cooldownSeconds: 0
-  checkGitWorktrees: false
-${extraPolicy}
----
-
-${body}
-`, "utf8");
-  return path;
+function makeConfig(root = tempRoot()) {
+  return normalizeConfig(
+    {
+      objective: "watch room",
+      projectName: "project-a",
+      room: "room-a",
+      researchWorkspace: join(root, "research"),
+      targetWorkspace: join(root, "target"),
+      objectiveStoreDir: join(root, "state"),
+      policy: {
+        autoContinue: true,
+        cooldownSeconds: 0,
+        checkGitWorktrees: false
+      }
+    },
+    join(root, "config.json")
+  );
 }
 
-function makeWorkflow(root = tempRoot(), options = {}) {
-  writeFileSync(join(root, ".keep"), "", "utf8");
-  writeWorkflow(root, options.body, options.extraPolicy || "");
-  return loadWorkflow(join(root, "WORKFLOW.md"));
-}
-
-function updateObjective(workflow, patch) {
-  const path = objectivePathFor(workflow);
+function updateObjective(config, patch) {
+  const path = objectivePathFor(config);
   const current = JSON.parse(readFileSync(path, "utf8"));
   writeFileSync(path, `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`);
 }
@@ -49,137 +39,194 @@ function updateObjective(workflow, patch) {
 test("parseWaitMessages preserves message envelopes and empty waits", () => {
   assert.deepEqual(parseWaitMessages("[]"), []);
   assert.deepEqual(parseWaitMessages('{"messages":[]}'), []);
+  assert.deepEqual(parseWaitMessages('{"Messages":[]}'), []);
   assert.deepEqual(parseWaitMessages('[{"id":"m1"}]'), [{ id: "m1" }]);
+  assert.deepEqual(parseWaitMessages('{"messages":[{"id":"m1"},{"id":"m2"}]}'), [
+    { id: "m1" },
+    { id: "m2" }
+  ]);
   assert.deepEqual(parseWaitMessages('{"message":{"id":"m3"}}'), [{ id: "m3" }]);
 });
 
-test("waitForRoomEvent treats empty wait as heartbeat", async () => {
+test("waitForRoomEvent treats empty chat wait as heartbeat", async () => {
   const root = tempRoot();
   try {
-    const workflow = makeWorkflow(root);
-    const event = await waitForRoomEvent(workflow, {
+    const config = makeConfig(root);
+    const calls = [];
+    const event = await waitForRoomEvent(config, {
       timeout: "1s",
-      runner(_command, args) {
-        assert.deepEqual(args, ["chat", "wait", "room-a", "--timeout", "1s", "--json"]);
+      runner(command, args) {
+        calls.push([command, args]);
         return { status: 0, stdout: '{"messages":[]}', stderr: "" };
       }
     });
     assert.equal(event.type, "heartbeat");
     assert.equal(event.reason, "timeout_or_empty_wait");
+    assert.deepEqual(calls[0][1], ["chat", "wait", "room-a", "--timeout", "1s", "--json"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("selectWatchTimeout shortens waits after agent status or cooldown decisions", () => {
+test("waitForRoomEvent survives non-timeout chat wait failures", async () => {
   const root = tempRoot();
   try {
-    const workflow = makeWorkflow(root);
-    workflow.watch.agentStatusPollTimeout = "2s";
-    workflow.watch.cooldownPollTimeout = "3s";
-    assert.equal(selectWatchTimeout({ status: "active", lastDecision: null }, workflow), "10m");
+    const config = makeConfig(root);
+    const event = await waitForRoomEvent(config, {
+      timeout: "1s",
+      runner() {
+        return { status: 1, stdout: "", stderr: "deadline exceeded" };
+      }
+    });
+    assert.equal(event.type, "heartbeat");
+    assert.equal(event.reason, "chat_wait_error");
+    assert.match(event.error, /deadline exceeded/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("selectWatchTimeout shortens waits after agent status dependent decisions", () => {
+  const root = tempRoot();
+  try {
+    const config = makeConfig(root);
+    config.watch.agentStatusPollTimeout = "2s";
+    config.watch.cooldownPollTimeout = "3s";
+    assert.equal(selectWatchTimeout({ status: "active", lastDecision: null }, config), "10m");
     assert.equal(
-      selectWatchTimeout({ status: "active", lastDecision: { action: "wait", reason: "child_agent_running" } }, workflow),
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "child_agent_running" } },
+        config
+      ),
       "2s"
     );
     assert.equal(
-      selectWatchTimeout({ status: "active", lastDecision: { action: "wait", reason: "cooldown_active" } }, workflow),
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "orchestrator_not_idle" } },
+        config,
+        { agentStatusPollTimeout: "1s" }
+      ),
+      "1s"
+    );
+    assert.equal(
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "cooldown_active" } },
+        config
+      ),
       "3s"
+    );
+    assert.equal(
+      selectWatchTimeout(
+        { status: "active", lastDecision: { action: "wait", reason: "cooldown_active" } },
+        config,
+        { cooldownPollTimeout: "4s" }
+      ),
+      "4s"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("watch reload keeps last-known-good workflow and exposes workflowLoadError", async () => {
+test("watch reconciles on heartbeat so missing room evidence can be recovered", async () => {
   const root = tempRoot();
   const originalWrite = process.stdout.write;
   const writes = [];
   try {
-    const workflow = makeWorkflow(root);
-    initObjective(workflow);
-    const store = new WorkflowStore(workflow.workflowPath);
-    store.loadInitial();
-    writeFileSync(workflow.workflowPath, "---\nschemaVersion: 2\nprojectName: broken\n---\n");
+    const config = makeConfig(root);
+    initObjective(config);
     process.stdout.write = (chunk) => {
       writes.push(String(chunk));
       return true;
     };
-    await watch(store, {
+    await watch(config, {
+      timeout: "1s",
       maxCycles: 1,
       dryRun: true,
-      runner(_command, args) {
+      runner(command, args) {
         if (args[0] === "chat" && args[1] === "wait") {
           return { status: 0, stdout: '{"messages":[]}', stderr: "" };
         }
         if (args[0] === "ls" && args.includes("role=orchestrator")) {
-          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
-        }
-        if (args[0] === "ls" && args.includes(`room=${workflow.room}`)) {
           return {
             status: 0,
-            stdout: JSON.stringify([
-              { id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } },
-              { id: "child-1", status: "done", cwd: workflow.projects[0].targetWorkspace, labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t1", role: "implementation" } }
-            ]),
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: config.researchWorkspace }]),
             stderr: ""
           };
         }
         if (args[0] === "chat" && args[1] === "read") {
           return { status: 0, stdout: "[]", stderr: "" };
         }
-        throw new Error(`unexpected call: ${args.join(" ")}`);
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
       }
     });
-    const combined = writes.join("");
-    assert.match(combined, /workflowLoadError/);
-    assert.match(combined, /workflow_missing_required_field/);
+
+    assert.equal(writes.some((line) => line.includes('"type":"heartbeat"')), true);
+    assert.equal(writes.some((line) => line.includes('"type":"reconcile"')), true);
+    assert.equal(writes.some((line) => line.includes('"reason":"no_unhandled_signal"')), true);
   } finally {
     process.stdout.write = originalWrite;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("watch emits project-aware reconcile events", async () => {
+test("watch rechecks quickly after child_agent_running and continues when child becomes idle", async () => {
   const root = tempRoot();
   const originalWrite = process.stdout.write;
   const writes = [];
+  const calls = [];
   try {
-    const workflow = makeWorkflow(root);
-    initObjective(workflow);
-    updateObjective(workflow, {
+    const config = makeConfig(root);
+    config.watch.agentStatusPollTimeout = "2s";
+    initObjective(config);
+    updateObjective(config, {
       lastDecision: {
         action: "wait",
-        reason: "cooldown_active",
-        projectKey: "alpha",
-        signal: "DONE",
-        messageId: "m1",
-        decidedAt: "2000-01-01T00:00:00.000Z"
+        reason: "child_agent_running",
+        childAgentId: "child-1",
+        decidedAt: "2026-05-11T00:00:00.000Z"
       }
     });
-    const store = new WorkflowStore(workflow.workflowPath);
-    store.loadInitial();
+
     process.stdout.write = (chunk) => {
       writes.push(String(chunk));
       return true;
     };
-    await watch(store, {
+    await watch(config, {
       maxCycles: 1,
       dryRun: true,
-      cooldownPollTimeout: "2s",
-      runner(_command, args) {
+      runner(command, args) {
+        calls.push([command, args]);
         if (args[0] === "chat" && args[1] === "wait") {
           return { status: 0, stdout: '{"messages":[]}', stderr: "" };
         }
         if (args[0] === "ls" && args.includes("role=orchestrator")) {
-          return { status: 0, stdout: JSON.stringify([{ id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } }]), stderr: "" };
-        }
-        if (args[0] === "ls" && args.includes(`room=${workflow.room}`)) {
           return {
             status: 0,
             stdout: JSON.stringify([
-              { id: "orch-1", status: "idle", cwd: workflow.researchWorkspace, labels: { room: workflow.room, role: "orchestrator" } },
-              { id: "child-1", status: "done", cwd: workflow.projects[0].targetWorkspace, labels: { room: workflow.room, project: "alpha", parent: "orch-1", phase: "build", task: "t1", role: "implementation" } }
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } }
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } },
+              {
+                id: "child-1",
+                status: "idle",
+                cwd: config.targetWorkspace,
+                labels: { room: config.room, parent: "orch-1", phase: "fix", task: "fix-task", role: "fix" }
+              }
             ]),
             stderr: ""
           };
@@ -189,22 +236,103 @@ test("watch emits project-aware reconcile events", async () => {
             status: 0,
             stdout: JSON.stringify([
               {
-                id: "m2",
+                id: "m-fixed",
                 author: "child-1",
-                createdAt: "2026-05-12T00:00:02.000Z",
-                body: `SIGNAL signal=PASS project=alpha agent=child-1 cwd=${workflow.projects[0].targetWorkspace} branch=feat task=t1 labels={room=room-a,project=alpha,parent=orch-1,phase=build,task=t1,role=implementation} evidence=done`
+                createdAt: "2026-05-11T00:00:05.000Z",
+                body: `SIGNAL signal=FIXED agent=child-1 cwd=${config.targetWorkspace} branch=feat task=fix-task labels={room=room-a,parent=orch-1,phase=fix,task=fix-task,role=fix} evidence=retry fixed`
               }
             ]),
             stderr: ""
           };
         }
-        throw new Error(`unexpected call: ${args.join(" ")}`);
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
       }
     });
-    const combined = writes.join("");
-    assert.match(combined, /"projectKey":"alpha"/);
-    assert.match(combined, /"decision":"send"/);
-    assert.match(combined, /"reason":"safe_signal_continue"/);
+
+    const chatWaitCall = calls.find(([, args]) => args[0] === "chat" && args[1] === "wait");
+    assert.deepEqual(chatWaitCall[1], ["chat", "wait", "room-a", "--timeout", "2s", "--json"]);
+    assert.equal(writes.some((line) => line.includes('"previousDecisionReason":"child_agent_running"')), true);
+    assert.equal(writes.some((line) => line.includes('"reason":"safe_signal_continue"')), true);
+    assert.equal(writes.some((line) => line.includes('"messageId":"m-fixed"')), true);
+  } finally {
+    process.stdout.write = originalWrite;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("watch rechecks quickly after cooldown_active and continues when cooldown has expired", async () => {
+  const root = tempRoot();
+  const originalWrite = process.stdout.write;
+  const writes = [];
+  const calls = [];
+  try {
+    const config = makeConfig(root);
+    config.watch.cooldownPollTimeout = "2s";
+    initObjective(config);
+    updateObjective(config, {
+      lastDecision: {
+        action: "wait",
+        reason: "cooldown_active",
+        signal: "DONE",
+        messageId: "m-done",
+        decidedAt: "2000-01-01T00:00:01.000Z"
+      },
+      lastContinuationAt: "2000-01-01T00:00:00.000Z"
+    });
+
+    process.stdout.write = (chunk) => {
+      writes.push(String(chunk));
+      return true;
+    };
+    await watch(config, {
+      maxCycles: 1,
+      dryRun: true,
+      runner(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "chat" && args[1] === "wait") {
+          return { status: 0, stdout: '{"messages":[]}', stderr: "" };
+        }
+        if (args[0] === "ls" && args.includes("role=orchestrator")) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } }
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "ls" && args.includes(`room=${config.room}`)) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: "orch-1", status: "idle", cwd: config.researchWorkspace, labels: { room: config.room, role: "orchestrator" } }
+            ]),
+            stderr: ""
+          };
+        }
+        if (args[0] === "chat" && args[1] === "read") {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              {
+                id: "m-done",
+                author: "orch-1",
+                createdAt: "2026-05-11T00:00:05.000Z",
+                body: "SIGNAL signal=DONE agent=orch-1 cwd=/tmp branch=feat task=t labels={room=room-a,parent=root,phase=p,task=t,role=orchestrator} evidence=continue"
+              }
+            ]),
+            stderr: ""
+          };
+        }
+        throw new Error(`unexpected call: ${command} ${args.join(" ")}`);
+      }
+    });
+
+    const chatWaitCall = calls.find(([, args]) => args[0] === "chat" && args[1] === "wait");
+    assert.deepEqual(chatWaitCall[1], ["chat", "wait", "room-a", "--timeout", "2s", "--json"]);
+    assert.equal(writes.some((line) => line.includes('"previousDecisionReason":"cooldown_active"')), true);
+    assert.equal(writes.some((line) => line.includes('"reason":"safe_signal_continue"')), true);
+    assert.equal(writes.some((line) => line.includes('"messageId":"m-done"')), true);
   } finally {
     process.stdout.write = originalWrite;
     rmSync(root, { recursive: true, force: true });

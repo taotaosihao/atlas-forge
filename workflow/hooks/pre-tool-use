@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKFLOW_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PAYLOAD=""
+
+if [[ ! -t 0 ]]; then
+  PAYLOAD="$(cat || true)"
+fi
+
+python3 - "$WORKFLOW_ROOT" "$PAYLOAD" <<'PY'
+from pathlib import Path
+import json
+import os
+import re
+import sys
+
+workflow_root = Path(sys.argv[1])
+payload_text = sys.argv[2]
+current_task_path = workflow_root / "state" / "current-task.json"
+
+
+def recursive_strings(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield str(key)
+            yield from recursive_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from recursive_strings(child)
+    elif isinstance(value, str):
+        yield value
+
+
+payload = {}
+if payload_text.strip():
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        payload = {}
+
+task_id = ""
+if current_task_path.exists():
+    try:
+        task_id = json.loads(current_task_path.read_text(encoding="utf-8")).get("task_id", "")
+    except json.JSONDecodeError:
+        task_id = ""
+
+env_candidates = [
+    os.environ.get("CODEX_TOOL_COMMAND", ""),
+    os.environ.get("TOOL_COMMAND", ""),
+    os.environ.get("CODEX_TOOL_INPUT", ""),
+    os.environ.get("TOOL_INPUT", ""),
+]
+payload_candidates = list(recursive_strings(payload))
+all_candidates = [item for item in env_candidates + payload_candidates if item]
+
+command_text = ""
+for candidate in all_candidates:
+    lowered = candidate.lower()
+    if any(token in lowered for token in ("git ", "rm ", "docker ", "compose ", "bash", "sh ")):
+        command_text = candidate
+        break
+
+patterns = [
+    r"git\s+reset\s+--hard",
+    r"git\s+checkout\s+--",
+    r"rm\s+-rf",
+    r"git\s+push\s+.*--force(?:-with-lease)?",
+    r"docker\s+compose\s+down\s+-v",
+    r"docker\s+compose\s+rm\s+-s?-?f",
+    r"docker\s+system\s+prune",
+]
+
+if command_text and any(re.search(pattern, command_text, re.IGNORECASE) for pattern in patterns):
+    runtime_file = workflow_root / "artifacts" / task_id / "runtime.jsonl" if task_id else None
+    if runtime_file is not None:
+      runtime_file.parent.mkdir(parents=True, exist_ok=True)
+      with runtime_file.open("a", encoding="utf-8") as fh:
+          fh.write(json.dumps({
+              "kind": "pre-tool-risk",
+              "task_id": task_id,
+              "command": command_text,
+          }, ensure_ascii=False) + "\n")
+    prefix = f"[workflow] high-risk bash command for task {task_id}" if task_id else "[workflow] high-risk bash command"
+    print(f"{prefix}: {command_text}")
+    print("[workflow] capture evidence and confirm the real target before execution.")
+PY

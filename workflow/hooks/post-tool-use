@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKFLOW_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PAYLOAD=""
+
+if [[ ! -t 0 ]]; then
+  PAYLOAD="$(cat || true)"
+fi
+
+python3 - "$WORKFLOW_ROOT" "$PAYLOAD" <<'PY'
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+import os
+import re
+import sys
+
+workflow_root = Path(sys.argv[1])
+payload_text = sys.argv[2]
+current_task_path = workflow_root / "state" / "current-task.json"
+
+
+def recursive_values(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield str(key), child
+            yield from recursive_values(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from recursive_values(child)
+
+
+def recursive_strings(value):
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from recursive_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from recursive_strings(child)
+    elif isinstance(value, str):
+        yield value
+
+
+payload = {}
+if payload_text.strip():
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        payload = {}
+
+task_id = ""
+if current_task_path.exists():
+    try:
+        task_id = json.loads(current_task_path.read_text(encoding="utf-8")).get("task_id", "")
+    except json.JSONDecodeError:
+        task_id = ""
+
+if not task_id:
+    raise SystemExit(0)
+
+state_path = workflow_root / "artifacts" / task_id / "state.json"
+team_mode = ""
+if state_path.exists():
+    try:
+        team_mode = json.loads(state_path.read_text(encoding="utf-8")).get("active_team", {}).get("mode", "")
+    except json.JSONDecodeError:
+        team_mode = ""
+
+exit_code = os.environ.get("CODEX_TOOL_EXIT_CODE") or os.environ.get("TOOL_EXIT_CODE") or ""
+success = os.environ.get("CODEX_TOOL_SUCCESS") or os.environ.get("TOOL_SUCCESS") or ""
+stdout = os.environ.get("CODEX_TOOL_STDOUT") or os.environ.get("TOOL_STDOUT") or ""
+stderr = os.environ.get("CODEX_TOOL_STDERR") or os.environ.get("TOOL_STDERR") or ""
+command_text = os.environ.get("CODEX_TOOL_COMMAND") or os.environ.get("TOOL_COMMAND") or ""
+
+for key, value in recursive_values(payload):
+    lowered = str(key).lower()
+    if not exit_code and "exit" in lowered and isinstance(value, (str, int, float)):
+        exit_code = str(value)
+    if not success and lowered.endswith("success") and isinstance(value, (str, bool)):
+        success = str(value)
+
+for candidate in recursive_strings(payload):
+    lowered = candidate.lower()
+    if not command_text and any(token in lowered for token in ("git ", "rm ", "docker ", "bash", "sh ")):
+        command_text = candidate
+    if not stdout and ("stdout" in lowered or "output" in lowered):
+        stdout = candidate
+    if not stderr and ("stderr" in lowered or "error" in lowered):
+        stderr = candidate
+
+failed = False
+try:
+    failed = int(exit_code) != 0
+except ValueError:
+    if success:
+        failed = success.lower() not in {"1", "true", "yes"}
+
+if not failed:
+    raise SystemExit(0)
+
+timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+failure_dir = workflow_root / "artifacts" / task_id / "hook-failures"
+failure_dir.mkdir(parents=True, exist_ok=True)
+failure_file = failure_dir / f"{timestamp}.json"
+
+def trim(value: str) -> str:
+    value = value or ""
+    value = value[:6000]
+    return value
+
+record = {
+    "task_id": task_id,
+    "team_mode": team_mode,
+    "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "command": command_text,
+    "exit_code": exit_code,
+    "stdout": trim(stdout),
+    "stderr": trim(stderr),
+}
+failure_file.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+runtime_file = workflow_root / "artifacts" / task_id / "runtime.jsonl"
+runtime_file.parent.mkdir(parents=True, exist_ok=True)
+with runtime_file.open("a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"kind": "post-tool-failure", "path": str(failure_file), "team_mode": team_mode}, ensure_ascii=False) + "\n")
+
+print(f"[workflow] bash failure recorded: {failure_file}")
+PY

@@ -1,5 +1,19 @@
-node_modules/
+# Runtime/editor noise
 .DS_Store
-.paseo-agent-guard/
-coverage/
+*.swp
+*.tmp
 
+# Do not store live Codex state in this source repo.
+workflow/artifacts/
+workflow/state/
+workflow/tasks/
+workflow/hook-failures/
+workflow/runtime/
+
+# Plugin/runtime caches belong under ~/.codex/plugins/cache, not source.
+plugins/cache/
+cache/
+
+# Local scratch
+.tmp/
+tmp/

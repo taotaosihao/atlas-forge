@@ -1,0 +1,56 @@
+{
+  "name": "atlas-workflow",
+  "version": "0.1.0+codex.20260618035257",
+  "description": "Atlas workflow plugin for bounded local Codex work.",
+  "author": {
+    "name": "Local Atlas",
+    "email": "local-atlas@example.invalid",
+    "url": "https://example.invalid/local-atlas"
+  },
+  "homepage": "https://example.invalid/local-atlas",
+  "repository": "https://example.invalid/local-atlas",
+  "license": "UNLICENSED",
+  "keywords": [
+    "atlas",
+    "workflow",
+    "codex",
+    "cw",
+    "office-hours",
+    "brainstorm",
+    "analyze",
+    "clarify",
+    "spec",
+    "product",
+    "team",
+    "finish",
+    "worktree",
+    "design-review",
+    "design"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Atlas Workflow",
+    "shortDescription": "Atlas entry plugin for $atlas-workflow:cw, $atlas-workflow:task, $atlas-workflow:office-hours, $atlas-workflow:brainstorm, $atlas-workflow:analyze, $atlas-workflow:clarify, $atlas-workflow:team, $atlas-workflow:learn, $atlas-workflow:design-review, $atlas-workflow:worktree, and $atlas-workflow:finish",
+    "longDescription": "Adds Atlas workflow, task, office-hours, brainstorm, analyze, clarify, team, learning, design-review, worktree, and finish entrypoints as local plugin skills so `$atlas-workflow:cw`, `$atlas-workflow:task`, `$atlas-workflow:office-hours`, `$atlas-workflow:brainstorm`, `$atlas-workflow:analyze`, `$atlas-workflow:clarify`, `$atlas-workflow:team`, `$atlas-workflow:learn`, `$atlas-workflow:design-review`, `$atlas-workflow:worktree`, and `$atlas-workflow:finish` stay available even when custom slash prompts are unavailable.",
+    "developerName": "Local Atlas",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use $atlas-workflow:cw to start Atlas workflow for this request",
+      "Use $atlas-workflow:task to create or continue a bounded Atlas task",
+      "Use $atlas-workflow:office-hours to pressure-test early product, startup, side-project, or open-source ideas before design work",
+      "Use $atlas-workflow:brainstorm to turn rough ideas into design options, tradeoffs, and a recommended direction",
+      "Use $atlas-workflow:analyze for read-only cross-file evidence synthesis into analysis.md",
+      "Use $atlas-workflow:clarify to turn a chosen direction into context.md, decision.md, and spec.md with explicit execution boundaries",
+      "Use $atlas-workflow:team for multi-agent discussion, staffing, and promotion decisions",
+      "Use $atlas-workflow:learn to save a reusable Atlas lesson",
+      "Use $atlas-workflow:design-review to verify whether an implementation matches its design",
+      "Use $atlas-workflow:worktree when a task needs an isolated git worktree and a separate Compose test stack",
+      "Use $atlas-workflow:finish to verify completed branch work and wait for user confirmation before merge or cleanup"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

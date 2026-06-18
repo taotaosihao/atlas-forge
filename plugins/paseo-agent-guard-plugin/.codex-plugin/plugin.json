@@ -1,14 +1,14 @@
 {
   "name": "paseo-agent-guard-plugin",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260618035257",
   "description": "Durable objective guardrails and event-driven reconciliation for Paseo agent workflows.",
   "author": {
     "name": "Local Codex",
-    "email": "",
-    "url": ""
+    "email": "local-codex@example.invalid",
+    "url": "https://example.invalid/local-codex"
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://example.invalid/local-codex",
+  "repository": "https://example.invalid/local-codex",
   "license": "UNLICENSED",
   "keywords": [
     "paseo",
@@ -37,4 +37,3 @@
     "brandColor": "#0F766E"
   }
 }
-

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "objective": "continue approved PLM delivery",
+  "projectName": "gearjob-123-plm-next",
+  "room": "gearjob-123-plm-next",
+  "researchWorkspace": "/Users/sihao/work/ai-saas-cloner-template",
+  "targetWorkspace": "/Users/sihao/work/gearjob",
+  "objectiveStoreDir": "~/.paseo-agent-guard/objectives",
+  "orchestratorSelector": {
+    "labels": {
+      "room": "gearjob-123-plm-next",
+      "role": "orchestrator"
+    }
+  },
+  "childAgents": {
+    "requiredLabels": ["room", "parent", "phase", "task", "role"],
+    "requiredEvidenceFields": ["agent", "cwd", "branch", "task", "labels"],
+    "requiredSkills": ["paseo-agent-guard"],
+    "implementationRoles": ["implementation", "fix", "validation", "audit", "pr"],
+    "runningStatuses": ["running", "thinking", "queued", "starting", "needs_permission"],
+    "finishedStatuses": ["idle", "complete", "completed", "done"],
+    "failureStatuses": ["failed", "error", "crashed", "cancelled", "canceled", "timed_out", "timeout"],
+    "closeOnCompletion": true,
+    "permissionModeDefaults": {
+      "codex": "full-access",
+      "claude": "bypassPermissions",
+      "gemini": "yolo",
+      "mimo": "bypassPermissions"
+    }
+  },
+  "workflow": {
+    "safeSignals": ["PLAN_READY", "DONE", "FIXED", "PASS"],
+    "blockedSignals": ["BLOCKED", "NEEDS_FIX", "NEEDS_USER_DECISION", "ERROR"],
+    "recoverableBlockedSignals": ["BLOCKED", "NEEDS_FIX"],
+    "terminalSignals": ["PR_CREATED", "MERGED"],
+    "diagnosticSignals": ["START", "FIX_STARTED", "PR_REVIEW_GATE_STARTED", "PR_REVIEW_STATUS", "REVIEW_STATUS", "AGENT_STATUS", "CHILD_AGENT_STATUS", "PROGRESS", "CHECKPOINT"],
+    "protectedActions": [
+      "merge",
+      "delete branch",
+      "branch deletion",
+      "delete agent",
+      "archive agent",
+      "close agent",
+      "force archive",
+      "daemon restart",
+      "restart daemon",
+      "new project phase"
+    ]
+  },
+  "policy": {
+    "autoContinue": true,
+    "handoffMode": true,
+    "cooldownSeconds": 60,
+    "maxRetries": 3,
+    "allowNewPhaseAfterMerge": false,
+    "checkGitWorktrees": true
+  },
+  "reviewPolicy": {
+    "reviewers": ["claude", "codex", "gemini", "mimo"],
+    "ignoreUnavailableReviewers": true,
+    "phases": {
+      "prd": {
+        "multiAgentReview": true,
+        "defaultRounds": 1,
+        "humanReviewAfterMultiAgent": true,
+        "untilCleanOverride": true
+      },
+      "plan": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      },
+      "feature": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      },
+      "pr": {
+        "multiAgentReview": true,
+        "defaultRounds": 3,
+        "untilCleanOverride": true
+      }
+    }
+  },
+  "commands": {
+    "paseo": "paseo",
+    "ls": ["ls", "--json"],
+    "inspect": ["inspect", "{agentId}", "--json"],
+    "chatRead": ["chat", "read", "{room}", "--limit", "{limit}", "--json"],
+    "chatPost": ["chat", "post", "{room}", "{message}", "--json"],
+    "send": ["send", "{agentId}", "--prompt", "{prompt}", "--no-wait", "--json"],
+    "agentWait": ["wait", "{agentId}", "--json"],
+    "archive": ["archive", "{agentId}", "--json"],
+    "chatWait": ["chat", "wait", "{room}", "--timeout", "{timeout}", "--json"]
+  },
+  "chatReadLimit": 50,
+  "watch": {
+    "timeout": "10m",
+    "agentStatusPollTimeout": "15s",
+    "cooldownPollTimeout": "15s"
+  }
+}

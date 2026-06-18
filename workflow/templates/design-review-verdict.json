@@ -1,0 +1,21 @@
+{
+  "task_id": {{TASK_ID_JSON}},
+  "title": {{TITLE_JSON}},
+  "page": {{PAGE_JSON}},
+  "design_source": {{DESIGN_SOURCE_JSON}},
+  "created": {{CREATED_JSON}},
+  "status": "blocked",
+  "severity": "unknown",
+  "summary": "",
+  "hard_failures": [],
+  "soft_findings": [],
+  "evidence": {
+    "viewports_covered": [],
+    "states_covered": [],
+    "artifacts": {
+      "contract": "contract.md",
+      "report": "report.md"
+    }
+  },
+  "next_actions": []
+}

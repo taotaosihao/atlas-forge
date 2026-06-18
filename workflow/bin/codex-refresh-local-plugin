@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CODEX_HOME_ROOT="${CODEX_HOME_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+MARKETPLACE_FILE="${CODEX_PLUGIN_MARKETPLACE_FILE:-$CODEX_HOME_ROOT/.agents/plugins/marketplace.json}"
+CACHE_ROOT="${CODEX_PLUGIN_CACHE_ROOT:-$CODEX_HOME_ROOT/plugins/cache}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ~/.codex/workflow/bin/codex-refresh-local-plugin <plugin-name>
+
+Example:
+  ~/.codex/workflow/bin/codex-refresh-local-plugin atlas-workflow
+EOF
+}
+
+if [[ $# -ne 1 ]]; then
+  usage >&2
+  exit 1
+fi
+
+PLUGIN_NAME="$1"
+
+python3 - "$MARKETPLACE_FILE" "$CODEX_HOME_ROOT" "$CACHE_ROOT" "$PLUGIN_NAME" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+marketplace_file, codex_home_root, cache_root, plugin_name = sys.argv[1:5]
+marketplace_path = Path(marketplace_file)
+if not marketplace_path.exists():
+    raise SystemExit(f"missing marketplace file: {marketplace_path}")
+
+data = json.loads(marketplace_path.read_text(encoding="utf-8"))
+marketplace_name = data.get("name")
+plugins = data.get("plugins", [])
+plugin = next((item for item in plugins if item.get("name") == plugin_name), None)
+if plugin is None:
+    raise SystemExit(f"plugin not found in marketplace: {plugin_name}")
+
+source = plugin.get("source", {})
+if source.get("source") != "local":
+    raise SystemExit(f"plugin is not a local source plugin: {plugin_name}")
+
+source_path = source.get("path")
+if not isinstance(source_path, str) or not source_path:
+    raise SystemExit(f"plugin source path missing for: {plugin_name}")
+
+source_dir = (Path(codex_home_root) / source_path).resolve()
+if not source_dir.exists():
+    raise SystemExit(f"plugin source directory missing: {source_dir}")
+
+cache_dir = (Path(cache_root) / marketplace_name / plugin_name / "local").resolve()
+cache_dir.parent.mkdir(parents=True, exist_ok=True)
+if cache_dir.exists():
+    shutil.rmtree(cache_dir)
+shutil.copytree(source_dir, cache_dir)
+
+print(f"marketplace: {marketplace_name}")
+print(f"source: {source_dir}")
+print(f"installed_copy: {cache_dir}")
+PY

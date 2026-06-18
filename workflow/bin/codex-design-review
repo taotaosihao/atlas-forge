@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKFLOW_ROOT="${CODEX_WORKFLOW_ROOT:-${HOME}/.codex/workflow}"
+TEMPLATE_DIR="${CODEX_WORKFLOW_TEMPLATE_DIR:-$SCRIPT_DIR/../templates}"
+TASK_HELPER="$SCRIPT_DIR/codex-workflow"
+REVIEWS_DIR="$WORKFLOW_ROOT/design-reviews"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ~/.codex/workflow/bin/codex-design-review init "<title>" "<page url or route>" "<design source>"
+  ~/.codex/workflow/bin/codex-design-review paths <task-id>
+
+Commands:
+  init   Create and start a bounded design-review task and scaffold contract/report/verdict artifacts.
+  paths  Print the artifact paths for an existing design-review task.
+EOF
+}
+
+today() {
+  date +%F
+}
+
+ensure_template() {
+  local name="$1"
+  local path="$TEMPLATE_DIR/$name"
+  if [[ ! -f "$path" ]]; then
+    echo "missing template: $path" >&2
+    exit 1
+  fi
+}
+
+validate_single_line() {
+  local label="$1"
+  local value="$2"
+  if [[ -z "$value" || "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" =~ ^[[:space:]]*$ ]]; then
+    echo "unsafe $label: must be a single non-empty line" >&2
+    exit 1
+  fi
+}
+
+render_template() {
+  local template="$1"
+  local output="$2"
+  python3 - "$template" "$output" "$TASK_ID" "$TITLE" "$PAGE" "$DESIGN_SOURCE" "$CREATED" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+template_path, output_path, task_id, title, page, design_source, created = sys.argv[1:8]
+content = Path(template_path).read_text(encoding="utf-8")
+values = {
+    "TASK_ID": task_id,
+    "TITLE": title,
+    "PAGE": page,
+    "DESIGN_SOURCE": design_source,
+    "CREATED": created,
+}
+for key, value in values.items():
+    content = content.replace(f"{{{{{key}}}}}", value)
+    content = content.replace(f"{{{{{key}_JSON}}}}", json.dumps(value, ensure_ascii=False))
+Path(output_path).write_text(content, encoding="utf-8")
+PY
+}
+
+review_dir_for() {
+  printf '%s/%s\n' "$REVIEWS_DIR" "$1"
+}
+
+print_paths() {
+  local task_id="$1"
+  local review_dir
+  review_dir="$(review_dir_for "$task_id")"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'contract: %s/contract.md\n' "$review_dir"
+  printf 'report: %s/report.md\n' "$review_dir"
+  printf 'verdict: %s/verdict.json\n' "$review_dir"
+}
+
+init_review() {
+  if [[ $# -ne 3 ]]; then
+    usage >&2
+    exit 1
+  fi
+
+  local title="$1"
+  local page="$2"
+  local design_source="$3"
+  local task_title success_criteria task_id review_dir
+
+  validate_single_line "title" "$title"
+  validate_single_line "page" "$page"
+  validate_single_line "design source" "$design_source"
+
+  ensure_template "design-review-contract.md"
+  ensure_template "design-review-report.md"
+  ensure_template "design-review-verdict.json"
+
+  task_title="design-review: $title"
+  success_criteria="完成设计还原验收：生成 contract/report/verdict，覆盖结构、视觉、交互、桌面和手机，并给出通过、不通过或阻塞结论。"
+
+  task_id="$("$TASK_HELPER" init-task "$task_title" "$success_criteria")"
+  "$TASK_HELPER" start "$task_id" >/dev/null
+
+  review_dir="$(review_dir_for "$task_id")"
+  mkdir -p "$review_dir"
+
+  TASK_ID="$task_id"
+  TITLE="$title"
+  PAGE="$page"
+  DESIGN_SOURCE="$design_source"
+  CREATED="$(today)"
+
+  render_template "$TEMPLATE_DIR/design-review-contract.md" "$review_dir/contract.md"
+  render_template "$TEMPLATE_DIR/design-review-report.md" "$review_dir/report.md"
+  render_template "$TEMPLATE_DIR/design-review-verdict.json" "$review_dir/verdict.json"
+
+  print_paths "$task_id"
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    init)
+      shift
+      init_review "$@"
+      ;;
+    paths)
+      shift
+      if [[ $# -ne 1 ]]; then
+        usage >&2
+        exit 1
+      fi
+      print_paths "$1"
+      ;;
+    ""|-h|--help|help)
+      usage
+      ;;
+    *)
+      echo "unknown command: $cmd" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
