@@ -3849,14 +3849,15 @@ PY
 doctor_report() {
   local current_task_id="${1:-}"
   local output_format="${2:-text}"
-  local codex_path login_output codex_hooks_value network_summary paseo_path paseo_summary
+  local codex_path login_output hooks_value legacy_hooks_value network_summary paseo_path paseo_summary
   codex_path="$(command -v "$CODEX_BIN" 2>/dev/null || true)"
   if [[ -n "$codex_path" ]]; then
     login_output="$("$CODEX_BIN" login status 2>&1 || true)"
   else
     login_output="missing codex executable"
   fi
-  codex_hooks_value="$(config_feature_value codex_hooks)"
+  hooks_value="$(config_feature_value hooks)"
+  legacy_hooks_value="$(config_feature_value codex_hooks)"
   network_summary="$(config_network_summary)"
   paseo_path="$(command -v "$PASEO_BIN" 2>/dev/null || true)"
   if [[ -n "$paseo_path" ]]; then
@@ -3865,7 +3866,7 @@ doctor_report() {
     paseo_summary=""
   fi
 
-  python3 - "$output_format" "$current_task_id" "$(timestamp_utc)" "$WORKFLOW_ROOT" "$CODEX_HOME_ROOT" "$TASKS_DIR" "$STATE_DIR" "$ARTIFACTS_DIR" "$HOOKS_DIR" "$SOURCE_HOOKS_DIR" "$CODEX_CONFIG_FILE" "$CODEX_HOOKS_FILE" "$ATLAS_SOURCE_SKILLS_DIR" "$ATLAS_CACHE_SKILLS_DIR" "$CURRENT_TASK_FILE" "${codex_path:-missing}" "${login_output:-unknown}" "${codex_hooks_value:-unset}" "${network_summary:-none}" "${paseo_path:-missing}" "$paseo_summary" <<'PY'
+  python3 - "$output_format" "$current_task_id" "$(timestamp_utc)" "$WORKFLOW_ROOT" "$CODEX_HOME_ROOT" "$TASKS_DIR" "$STATE_DIR" "$ARTIFACTS_DIR" "$HOOKS_DIR" "$SOURCE_HOOKS_DIR" "$CODEX_CONFIG_FILE" "$CODEX_HOOKS_FILE" "$ATLAS_SOURCE_SKILLS_DIR" "$ATLAS_CACHE_SKILLS_DIR" "$CURRENT_TASK_FILE" "${codex_path:-missing}" "${login_output:-unknown}" "${hooks_value:-unset}" "${legacy_hooks_value:-unset}" "${network_summary:-none}" "${paseo_path:-missing}" "$paseo_summary" <<'PY'
 from pathlib import Path
 import json
 import sys
@@ -3887,10 +3888,11 @@ cache_skills_dir = Path(sys.argv[14])
 current_task_file = Path(sys.argv[15])
 codex_path = sys.argv[16]
 login_output = sys.argv[17]
-codex_hooks_value = sys.argv[18]
-network_summary = sys.argv[19]
-paseo_path = sys.argv[20]
-paseo_summary = sys.argv[21]
+hooks_value = sys.argv[18]
+legacy_hooks_value = sys.argv[19]
+network_summary = sys.argv[20]
+paseo_path = sys.argv[21]
+paseo_summary = sys.argv[22]
 
 
 def path_info(path: Path) -> dict:
@@ -4015,7 +4017,7 @@ def build_hooks_config() -> dict:
     target_hooks_exist = target_pre.exists() and target_post.exists()
     source_hooks_exist = source_pre.exists() and source_post.exists()
     commands_configured = any("pre-tool-use" in item for item in commands) and any("post-tool-use" in item for item in commands)
-    enabled = codex_hooks_value.lower() == "true"
+    enabled = hooks_value.lower() == "true" or legacy_hooks_value.lower() == "true"
     if enabled and hooks_file.exists() and target_hooks_exist and commands_configured:
         status = "ok"
     elif enabled or hooks_file.exists() or target_hooks_exist or commands_configured:
@@ -4024,7 +4026,8 @@ def build_hooks_config() -> dict:
         status = "missing"
     return {
         "status": status,
-        "features.codex_hooks": codex_hooks_value,
+        "features.hooks": hooks_value,
+        "features.codex_hooks": legacy_hooks_value,
         "hooks_json": path_info(hooks_file),
         "target_pre_hook": path_info(target_pre),
         "target_post_hook": path_info(target_post),
@@ -4803,11 +4806,15 @@ cmd_result_ingest() {
   printf 'lesson_candidates: %s\n' "$lesson_count"
 }
 
+route_decision_usage() {
+  echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2
+}
+
 cmd_route_decision() {
   local task_id="$1"
   shift
   local intent risk route_action reason next_step consensus_requested consensus_source recorded_at metadata
-  local route_path consensus_path route_rel consensus_value assumption_count
+  local route_path consensus_path route_rel consensus_value assumption_count task_file
   local assumptions=()
   intent=""
   risk=""
@@ -4820,7 +4827,7 @@ cmd_route_decision() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --intent)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         intent="$2"
         shift 2
         ;;
@@ -4828,8 +4835,17 @@ cmd_route_decision() {
         intent="${1#--intent=}"
         shift
         ;;
+      --layer)
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
+        intent="$2"
+        shift 2
+        ;;
+      --layer=*)
+        intent="${1#--layer=}"
+        shift
+        ;;
       --risk)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         risk="$2"
         shift 2
         ;;
@@ -4838,7 +4854,7 @@ cmd_route_decision() {
         shift
         ;;
       --decision)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         route_action="$2"
         shift 2
         ;;
@@ -4847,7 +4863,7 @@ cmd_route_decision() {
         shift
         ;;
       --reason)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         reason="$2"
         shift 2
         ;;
@@ -4856,7 +4872,7 @@ cmd_route_decision() {
         shift
         ;;
       --next)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         next_step="$2"
         shift 2
         ;;
@@ -4865,7 +4881,7 @@ cmd_route_decision() {
         shift
         ;;
       --assumption)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         assumptions+=("$2")
         shift 2
         ;;
@@ -4878,7 +4894,7 @@ cmd_route_decision() {
         shift
         ;;
       --consensus-source)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+        [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
         consensus_source="$2"
         shift 2
         ;;
@@ -4887,7 +4903,7 @@ cmd_route_decision() {
         shift
         ;;
       *)
-        echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2
+        route_decision_usage
         exit 1
         ;;
     esac
@@ -4902,7 +4918,13 @@ cmd_route_decision() {
     exit 1
   fi
 
-  require_task "$task_id" >/dev/null
+  task_file="$(task_file "$task_id")"
+  if [[ ! -f "$task_file" ]]; then
+    echo "unknown route-decision task id: $task_id" >&2
+    echo "route-decision records against an Atlas workflow task, not an external issue key or temporary handoff name." >&2
+    echo "create one first with: codex-workflow init-task \"<title>\" \"<done condition>\" && codex-workflow start <task-id>" >&2
+    exit 1
+  fi
   sync_task_runtime "$task_id"
   recorded_at="$(timestamp_utc)"
   metadata="$(write_route_decision "$task_id" "$intent" "$risk" "$route_action" "$reason" "$next_step" "$consensus_requested" "$consensus_source" "$recorded_at" "${#assumptions[@]}" "${assumptions[@]}")"
@@ -5642,7 +5664,7 @@ cmd_smoke() {
     verdict="passed"
   fi
   record_file="$(task_verification_dir "$task_id")/$(timestamp_token)-smoke.md"
-  write_verification_record "$record_file" "smoke" "$task_id" "$CODEX_BIN exec --skip-git-repo-check -C $PWD --output-last-message <tmp> \"Reply with exactly CODEX-SMOKE-OK\"" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file"
+  write_verification_record "$record_file" "smoke" "$task_id" "$CODEX_BIN exec --skip-git-repo-check -C $PWD --output-last-message <tmp> \"Reply with exactly CODEX-SMOKE-OK\"" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$(timestamp_utc)" "$verdict" "smoke-only" "local-command" "" 0
   verified_at="$(timestamp_utc)"
   upsert_task_fields "$(require_task "$task_id")" "last_verified_at=$verified_at"
   write_task_state_json "$task_id"
@@ -5786,7 +5808,7 @@ cmd_install_hooks() {
   local pre_hook post_hook current_task_id
   pre_hook="$(install_workflow_hook_script pre-tool-use)"
   post_hook="$(install_workflow_hook_script post-tool-use)"
-  set_config_feature "$CODEX_CONFIG_FILE" codex_hooks true
+  set_config_feature "$CODEX_CONFIG_FILE" hooks true
   merge_workflow_hooks_json "$CODEX_HOOKS_FILE" "$pre_hook" "$post_hook"
   current_task_id="$(read_current_task_id || true)"
   if [[ -n "$current_task_id" ]]; then

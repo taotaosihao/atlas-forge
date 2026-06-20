@@ -102,7 +102,16 @@ $BIN route-decision "$route_id" \
   --assumption "PRD approved" \
   --consensus >/dev/null
 test -f "$CODEX_WORKFLOW_ROOT/artifacts/$route_id/consensus-plan.md"
+$BIN route-decision "$route_id" \
+  --layer task \
+  --risk medium \
+  --decision skip \
+  --reason "legacy layer alias remains accepted" >/dev/null
+grep -q "route_intent: task" "$CODEX_WORKFLOW_ROOT/tasks/$route_id.md"
 expect_fail "invalid route intent" "$BIN" route-decision "$route_id" --intent unknown --risk low --decision use --reason bad
+expect_fail "route external issue key" "$BIN" route-decision GEW-30 --intent multica-handoff --risk high --decision use --reason handoff
+grep -q "unknown route-decision task id: GEW-30" "$TMP_ROOT/expect-fail.err"
+grep -q "not an external issue key" "$TMP_ROOT/expect-fail.err"
 pass "route decision"
 
 packet_id="$($BIN init-task "contract packet" "packet")"
@@ -152,9 +161,11 @@ grep -q "feedback-cycle" "$TMP_ROOT/gate-report.md"
 expect_fail "invalid gate metric" "$BIN" gate-metric "$p2_id" --gate unknown --action used --reason bad
 pass "p2 commands"
 
+$BIN install-hooks >/dev/null
 $BIN doctor --json > "$TMP_ROOT/doctor.json"
 python3 -m json.tool "$TMP_ROOT/doctor.json" >/dev/null
 python3 -c "import json,sys; data=json.load(open(sys.argv[1], encoding=\"utf-8\")); required={\"install\",\"source_cache\",\"hooks_config\",\"hooks_runtime\",\"smoke\"}; assert required <= set(data)" "$TMP_ROOT/doctor.json"
+python3 -c "import json,sys; data=json.load(open(sys.argv[1], encoding=\"utf-8\")); assert data[\"hooks_config\"][\"status\"] == \"ok\"; assert data[\"hooks_config\"][\"features.hooks\"] == \"true\"" "$TMP_ROOT/doctor.json"
 pass "doctor json"
 
 source_skills_root="${ATLAS_SOURCE_SKILLS_DIR:-$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills}"
