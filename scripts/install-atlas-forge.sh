@@ -80,6 +80,7 @@ marketplace_root="$(printf '%s' "$add_output" | marketplace_root_from_json)"
 codex plugin marketplace upgrade "$MARKETPLACE"
 codex plugin add atlas-workflow@"$MARKETPLACE"
 codex plugin add mempalace@"$MARKETPLACE"
+codex plugin add multica-sdlc@"$MARKETPLACE"
 
 if [[ -n "$marketplace_root" && -x "$marketplace_root/scripts/sync-live-workflow.sh" ]]; then
   "$marketplace_root/scripts/sync-live-workflow.sh"

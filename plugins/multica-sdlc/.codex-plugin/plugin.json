@@ -1,0 +1,40 @@
+{
+  "name": "multica-sdlc",
+  "version": "0.1.0",
+  "description": "Reusable Multica SDLC orchestration skills, dynamic workflow templates, and next-role routing helpers.",
+  "author": {
+    "name": "Local Atlas",
+    "email": "local-atlas@example.invalid",
+    "url": "https://example.invalid/local-atlas"
+  },
+  "homepage": "https://example.invalid/local-atlas/multica-sdlc",
+  "repository": "https://example.invalid/local-atlas",
+  "license": "UNLICENSED",
+  "keywords": [
+    "multica",
+    "sdlc",
+    "workflow",
+    "routing",
+    "codex",
+    "agents"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Multica SDLC",
+    "shortDescription": "Template-driven Multica SDLC planning, submission, and next-role routing.",
+    "longDescription": "Adds reusable Multica SDLC skills, role instruction assets, dynamic workflow templates, and a deterministic next-role router for join gates, validation, repair, and clean-gate handoffs.",
+    "developerName": "Local Atlas",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Plan a Multica squad for this PRD",
+      "Submit this approved PRD to Multica",
+      "Route the next Multica role from a template"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

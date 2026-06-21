@@ -1,0 +1,16 @@
+{
+  "issue_id": "MULTICA-1",
+  "phase": "repair",
+  "source_role": "coder",
+  "source_comment_id": "comment-repair-1",
+  "run_id": "run-repair-1",
+  "commit_sha": "def5678",
+  "artifact_type": "commit",
+  "result": "DONE",
+  "completed_roles": {
+    "coder": {
+      "result": "DONE",
+      "commit_sha": "def5678"
+    }
+  }
+}

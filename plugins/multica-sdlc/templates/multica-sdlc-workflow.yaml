@@ -1,0 +1,155 @@
+version: 1
+workflow:
+  name: multica-sdlc-template
+  description: Template-driven Multica SDLC routing example. Roles and gates are data, not router code.
+  result_sets:
+    success: ["DONE", "PASS", "CLEAN", "READY"]
+    failure: ["FAIL", "FAILED", "BLOCKED", "ERROR"]
+    blocker: ["BLOCKER", "MISROUTED_ROLE"]
+  role_groups:
+    leader: ["leader"]
+    planner: ["planner"]
+    coder: ["coder"]
+    reviewer: ["reviewer"]
+    e2e: ["e2e"]
+    qa: ["qa", "evidence-qa"]
+    docs: ["docs-summary", "documentation-editor"]
+  phases:
+    - phase: implementation
+      artifact_type: commit
+      required_roles: ["coder"]
+      optional_roles: []
+      join_policy: all_required
+      repair_owner: coder
+      blocker_owner: leader
+      clean_gate_owner: leader
+      next_phase: validation
+      next_roles: ["reviewer", "e2e", "qa"]
+      commit_sha_required: true
+      done_criteria: "A coding-capable role reports DONE with a commit SHA or explicit working tree status artifact."
+      timeout_action:
+        action: dispatch
+        phase: implementation
+        roles: ["leader"]
+        reason: "Implementation timed out; leader must decide whether to reassign, narrow, or block."
+      on_join_complete:
+        action: dispatch
+        phase: validation
+        roles: ["reviewer", "e2e", "qa"]
+        reason: "Implementation artifact is ready for validation."
+      on_failure:
+        action: dispatch
+        phase: repair
+        roles_from: repair_owner
+        reason: "Implementation reported a failed coding pass."
+      on_blocker:
+        action: dispatch
+        phase: implementation
+        roles_from: blocker_owner
+        reason: "Implementation reported a blocker or no repair owner is knowable."
+
+    - phase: validation
+      artifact_type: validation-report
+      required_roles: ["reviewer", "e2e"]
+      optional_roles: ["qa"]
+      join_policy: all_required
+      repair_owner: coder
+      blocker_owner: leader
+      clean_gate_owner: leader
+      next_phase: clean-gate
+      next_roles: ["leader"]
+      commit_sha_required: true
+      success_results:
+        reviewer: ["CLEAN"]
+        e2e: ["PASS"]
+        qa: ["PASS", "CLEAN", "READY"]
+      done_criteria: "Required review and E2E roles pass on the same commit SHA; optional QA may be absent but cannot report FAIL/BLOCKER."
+      timeout_action:
+        action: dispatch
+        phase: validation
+        roles: ["leader"]
+        reason: "Validation join timed out; leader must decide wait, retry, or block."
+      on_join_wait:
+        action: wait
+        reason: "Validation join is incomplete; wait for missing required roles."
+      on_join_complete:
+        action: dispatch
+        phase: clean-gate
+        roles_from: clean_gate_owner
+        reason: "All required validation passed; leader owns clean-gate decision."
+      on_failure:
+        action: dispatch
+        phase: repair
+        roles_from: repair_owner
+        reason: "Validation failed; repair owner should fix the implementation or evidence defect."
+      on_blocker:
+        action: dispatch
+        phase: validation
+        roles_from: blocker_owner
+        reason: "Validation produced a blocker or the repair owner cannot be determined."
+
+    - phase: repair
+      artifact_type: commit
+      required_roles: ["coder"]
+      optional_roles: []
+      join_policy: all_required
+      repair_owner: coder
+      blocker_owner: leader
+      clean_gate_owner: leader
+      next_phase: validation
+      next_roles: ["reviewer", "e2e", "qa"]
+      commit_sha_required: true
+      done_criteria: "Repair owner reports DONE with the repaired commit SHA and changed acceptance/evidence rows."
+      timeout_action:
+        action: dispatch
+        phase: repair
+        roles: ["leader"]
+        reason: "Repair timed out; leader must reroute, narrow repair, or block."
+      on_join_complete:
+        action: dispatch
+        phase: validation
+        roles: ["reviewer", "e2e", "qa"]
+        reason: "Repair commit is ready for validation."
+      on_failure:
+        action: dispatch
+        phase: repair
+        roles_from: repair_owner
+        reason: "Repair failed and should stay with the repair owner unless blocked."
+      on_blocker:
+        action: dispatch
+        phase: repair
+        roles_from: blocker_owner
+        reason: "Repair produced a blocker or no repair owner is knowable."
+
+    - phase: clean-gate
+      artifact_type: gate-decision
+      required_roles: ["leader"]
+      optional_roles: []
+      join_policy: all_required
+      repair_owner: coder
+      blocker_owner: leader
+      clean_gate_owner: leader
+      next_phase: pr-ready-gate
+      next_roles: ["leader"]
+      commit_sha_required: true
+      done_criteria: "Leader verifies final evidence, stale artifact cleanup, and clean validation lineage."
+      timeout_action:
+        action: dispatch
+        phase: clean-gate
+        roles: ["leader"]
+        reason: "Clean gate timed out; leader remains owner."
+      on_join_complete:
+        action: dispatch
+        phase: pr-ready-gate
+        roles: ["leader"]
+        reason: "Clean gate passed; leader owns PR-ready gate."
+      on_failure:
+        action: dispatch
+        phase: repair
+        roles_from: repair_owner
+        reason: "Clean gate found a repairable defect."
+      on_blocker:
+        action: dispatch
+        phase: clean-gate
+        roles_from: blocker_owner
+        reason: "Clean gate found a blocker."

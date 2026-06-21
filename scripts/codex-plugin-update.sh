@@ -3,7 +3,7 @@ set -euo pipefail
 
 PLUGIN_SELECTOR="${1:-}"
 if [[ -z "$PLUGIN_SELECTOR" ]]; then
-  echo "usage: scripts/codex-plugin-update.sh <atlas-workflow|mempalace>" >&2
+  echo "usage: scripts/codex-plugin-update.sh <atlas-workflow|mempalace|multica-sdlc>" >&2
   exit 1
 fi
 
@@ -17,6 +17,9 @@ case "$PLUGIN_SELECTOR" in
     ;;
   mempalace|mempalace-codex-plugin)
     PLUGIN_NAME="mempalace"
+    ;;
+  multica-sdlc)
+    PLUGIN_NAME="multica-sdlc"
     ;;
   *)
     echo "unknown plugin: $PLUGIN_SELECTOR" >&2

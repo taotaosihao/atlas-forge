@@ -1,0 +1,20 @@
+{
+  "issue_id": "MULTICA-1",
+  "phase": "validation",
+  "source_role": "e2e",
+  "source_comment_id": "comment-validation-stale-1",
+  "run_id": "run-validation-stale-1",
+  "commit_sha": "def5678",
+  "artifact_type": "e2e-report",
+  "result": "PASS",
+  "completed_roles": {
+    "reviewer": {
+      "result": "CLEAN",
+      "commit_sha": "abc1234"
+    },
+    "e2e": {
+      "result": "PASS",
+      "commit_sha": "def5678"
+    }
+  }
+}

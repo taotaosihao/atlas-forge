@@ -1,0 +1,20 @@
+{
+  "issue_id": "MULTICA-1",
+  "phase": "validation",
+  "source_role": "e2e",
+  "source_comment_id": "comment-e2e-fail-1",
+  "run_id": "run-e2e-fail-1",
+  "commit_sha": "abc1234",
+  "artifact_type": "e2e-report",
+  "result": "FAIL",
+  "completed_roles": {
+    "reviewer": {
+      "result": "CLEAN",
+      "commit_sha": "abc1234"
+    },
+    "e2e": {
+      "result": "FAIL",
+      "commit_sha": "abc1234"
+    }
+  }
+}

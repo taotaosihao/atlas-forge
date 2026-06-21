@@ -16,6 +16,7 @@ committing, and publishing changes.
 | --- | --- |
 | `atlas-workflow` | Atlas skills for task routing, planning, workflow gates, design review, team handoff, and bounded local work. |
 | `mempalace` | MemPalace wrapper plugin for local memory search and related commands. |
+| `multica-sdlc` | Multica SDLC skills, role instruction assets, dynamic workflow templates, and deterministic next-role routing helpers. |
 
 The repository also stores the Atlas workflow helper source under `workflow/`.
 Those helpers are synced into `~/.codex/workflow` when workflow runtime files
@@ -57,9 +58,10 @@ If the repository is already checked out locally, run:
 scripts/install-atlas-forge.sh
 ```
 
-The installer registers the marketplace, installs `atlas-workflow` and
-`mempalace`, syncs the Atlas workflow helpers, syncs Multica agent assets into
-`~/.agents`, and refreshes command shims in `~/.local/bin`.
+The installer registers the marketplace, installs `atlas-workflow`,
+`mempalace`, and `multica-sdlc`, syncs the Atlas workflow helpers, syncs
+Multica agent assets into `~/.agents`, and refreshes command shims in
+`~/.local/bin`.
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
@@ -80,6 +82,7 @@ starts.
 ```bash
 scripts/bump-plugin-cachebuster.sh atlas-workflow
 scripts/bump-plugin-cachebuster.sh mempalace
+scripts/bump-plugin-cachebuster.sh multica-sdlc
 ```
 
 3. Run the local checks:
@@ -88,11 +91,13 @@ scripts/bump-plugin-cachebuster.sh mempalace
 python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
 python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/atlas-workflow
 python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mempalace-codex-plugin
+python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/multica-sdlc
 bash -n scripts/bump-plugin-cachebuster.sh
 bash -n scripts/codex-plugin-update.sh
 bash -n scripts/install-atlas-forge.sh
 bash -n scripts/sync-live-agents.sh
 bash -n scripts/sync-live-workflow.sh
+plugins/multica-sdlc/scripts/self-test-router.sh
 ```
 
 4. Commit and push:
@@ -108,6 +113,7 @@ git push origin main
 ```bash
 scripts/codex-plugin-update.sh atlas-workflow
 scripts/codex-plugin-update.sh mempalace
+scripts/codex-plugin-update.sh multica-sdlc
 ```
 
 6. If workflow helper files or Multica agent assets changed, sync them to the
@@ -135,6 +141,7 @@ atlas-forge/
   plugins/
     atlas-workflow/
     mempalace-codex-plugin/
+    multica-sdlc/
   scripts/
     bump-plugin-cachebuster.sh
     codex-plugin-update.sh
