@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MULTICA_BIN="${MULTICA_BIN:-}"
+if [ -z "$MULTICA_BIN" ]; then
+  if command -v multica >/dev/null 2>&1; then
+    MULTICA_BIN="$(command -v multica)"
+  elif [ -x /home/linuxbrew/.linuxbrew/Cellar/multica/0.3.6/bin/multica ]; then
+    MULTICA_BIN="/home/linuxbrew/.linuxbrew/Cellar/multica/0.3.6/bin/multica"
+  else
+    echo "multica not found. Set MULTICA_BIN=/path/to/multica." >&2
+    exit 1
+  fi
+fi
+
+ASSIGNEE="${MULTICA_ASSIGNEE:-SDLC Autopilot DeepSeek}"
+ASSIGNEE_ID="${MULTICA_ASSIGNEE_ID:-}"
+NO_ASSIGNEE=0
+PRIORITY="${MULTICA_PRIORITY:-high}"
+STATUS="${MULTICA_STATUS:-todo}"
+REPO=""
+TITLE=""
+STAFFING_PLAN=""
+EXTRA_ATTACHMENTS=()
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  multica-prd-submit [--repo PATH] [--title TITLE] [--assignee NAME|--assignee-id UUID|--no-assignee] [--priority P] [--staffing-plan PATH] [--attachment PATH ...] <prd.md|prd.html>
+
+Creates a Multica issue assigned to the configured Multica leader/squad.
+The PRD/task packet is the canonical source of truth. Markdown and HTML are both supported.
+An approved --staffing-plan file is the canonical agent configuration when provided.
+Extra --attachment files are attached alongside the PRD, for source PDFs or reference artifacts.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      REPO="${2:-}"; shift 2 ;;
+    --repo=*)
+      REPO="${1#--repo=}"; shift ;;
+    --title)
+      TITLE="${2:-}"; shift 2 ;;
+    --title=*)
+      TITLE="${1#--title=}"; shift ;;
+    --assignee)
+      ASSIGNEE="${2:-}"; shift 2 ;;
+    --assignee=*)
+      ASSIGNEE="${1#--assignee=}"; shift ;;
+    --assignee-id)
+      ASSIGNEE_ID="${2:-}"; shift 2 ;;
+    --assignee-id=*)
+      ASSIGNEE_ID="${1#--assignee-id=}"; shift ;;
+    --no-assignee)
+      NO_ASSIGNEE=1; shift ;;
+    --priority)
+      PRIORITY="${2:-}"; shift 2 ;;
+    --priority=*)
+      PRIORITY="${1#--priority=}"; shift ;;
+    --staffing-plan)
+      STAFFING_PLAN="${2:-}"; shift 2 ;;
+    --staffing-plan=*)
+      STAFFING_PLAN="${1#--staffing-plan=}"; shift ;;
+    --attachment)
+      EXTRA_ATTACHMENTS+=("${2:-}"); shift 2 ;;
+    --attachment=*)
+      EXTRA_ATTACHMENTS+=("${1#--attachment=}"); shift ;;
+    -h|--help)
+      usage; exit 0 ;;
+    --*)
+      echo "Unknown flag: $1" >&2; usage; exit 1 ;;
+    *)
+      PRD="${1:-}"; shift ;;
+  esac
+done
+
+if [ -z "${PRD:-}" ]; then
+  usage
+  exit 1
+fi
+
+if [ ! -f "$PRD" ]; then
+  echo "PRD file not found: $PRD" >&2
+  exit 1
+fi
+
+case "$PRD" in
+  *.md|*.markdown) PRD_FORMAT="markdown" ;;
+  *.html|*.htm) PRD_FORMAT="html" ;;
+  *)
+    echo "Unsupported PRD format. Use .md, .markdown, .html, or .htm: $PRD" >&2
+    exit 1
+    ;;
+esac
+
+PRD_ABS="$(cd "$(dirname "$PRD")" && pwd)/$(basename "$PRD")"
+if [ -z "$REPO" ]; then
+  if git -C "$(dirname "$PRD_ABS")" rev-parse --show-toplevel >/dev/null 2>&1; then
+    REPO="$(git -C "$(dirname "$PRD_ABS")" rev-parse --show-toplevel)"
+  elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+    REPO="$(git rev-parse --show-toplevel)"
+  else
+    REPO="$(pwd)"
+  fi
+fi
+REPO_ABS="$(cd "$REPO" && pwd)"
+
+if git -C "$REPO_ABS" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  REPO_NAME="$(basename "$(git -C "$REPO_ABS" rev-parse --show-toplevel)")"
+  BASE_BRANCH="$(git -C "$REPO_ABS" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  [ -z "$BASE_BRANCH" ] && BASE_BRANCH="$(git -C "$REPO_ABS" branch --show-current 2>/dev/null || echo main)"
+  CURRENT_SHA="$(git -C "$REPO_ABS" rev-parse HEAD 2>/dev/null || echo unknown)"
+  REL_PRD="$(realpath --relative-to="$REPO_ABS" "$PRD_ABS" 2>/dev/null || echo "$PRD_ABS")"
+else
+  REPO_NAME="$(basename "$REPO_ABS")"
+  BASE_BRANCH="unknown"
+  CURRENT_SHA="unknown"
+  REL_PRD="$PRD_ABS"
+fi
+
+CHECKSUM="$(sha256sum "$PRD_ABS" | awk '{print $1}')"
+if [ -z "$TITLE" ]; then
+  STEM="$(basename "$PRD_ABS")"
+  STEM="${STEM%.*}"
+  TITLE="Run task packet: $STEM"
+fi
+
+STAFFING_PLAN_BLOCK="- Staffing plan: not attached. The assignee must not treat this submission envelope as the staffing plan. If agent configuration is required before execution, record a preflight staffing gap or blocker."
+STAFFING_PLAN_ABS=""
+if [ -n "$STAFFING_PLAN" ]; then
+  if [ ! -f "$STAFFING_PLAN" ]; then
+    echo "Staffing plan file not found: $STAFFING_PLAN" >&2
+    exit 1
+  fi
+  STAFFING_PLAN_ABS="$(cd "$(dirname "$STAFFING_PLAN")" && pwd)/$(basename "$STAFFING_PLAN")"
+  STAFFING_PLAN_REL="$(realpath --relative-to="$REPO_ABS" "$STAFFING_PLAN_ABS" 2>/dev/null || echo "$STAFFING_PLAN_ABS")"
+  STAFFING_PLAN_CHECKSUM="$(sha256sum "$STAFFING_PLAN_ABS" | awk '{print $1}')"
+  STAFFING_PLAN_BLOCK="- Staffing plan path: $STAFFING_PLAN_REL
+- Staffing plan absolute path on submitter machine: $STAFFING_PLAN_ABS
+- Staffing plan SHA256: $STAFFING_PLAN_CHECKSUM
+- Staffing plan status: attached and canonical. Use it as the source of truth for active roles, omitted roles, model/tool/MCP assignment, phase ownership, validation gates, and handoff/closure responsibilities. Do not re-plan staffing unless the attached plan is unreadable or self-contradictory; report that as a preflight blocker."
+fi
+
+ATTACHMENT_ARGS=(--attachment "$PRD_ABS")
+if [ -n "$STAFFING_PLAN_ABS" ]; then
+  ATTACHMENT_ARGS+=(--attachment "$STAFFING_PLAN_ABS")
+fi
+if [ "${#EXTRA_ATTACHMENTS[@]}" -gt 0 ]; then
+  for attachment in "${EXTRA_ATTACHMENTS[@]}"; do
+    if [ ! -f "$attachment" ]; then
+      echo "Attachment file not found: $attachment" >&2
+      exit 1
+    fi
+    attachment_abs="$(cd "$(dirname "$attachment")" && pwd)/$(basename "$attachment")"
+    ATTACHMENT_ARGS+=(--attachment "$attachment_abs")
+  done
+fi
+
+DESC_FILE="$(mktemp /tmp/multica-prd-issue-XXXXXX.md)"
+trap 'rm -f "$DESC_FILE"' EXIT
+
+cat >"$DESC_FILE" <<EOF
+# Multica Task Submission
+
+This issue is assigned to the configured Multica leader/squad for execution of the attached canonical task packet. This submission envelope records source files, repository context, and optional approved staffing plan. It is not a substitute for the PRD or staffing plan.
+
+## Canonical PRD
+
+- Format: $PRD_FORMAT
+- Repository: $REPO_NAME
+- Repo path on submitter machine: $REPO_ABS
+- PRD path: $REL_PRD
+- PRD absolute path on submitter machine: $PRD_ABS
+- PRD SHA256: $CHECKSUM
+- Base branch: $BASE_BRANCH
+- Submitter commit SHA: $CURRENT_SHA
+
+The PRD/task packet file is the source of truth. If the PRD is HTML, the HTML document is the full PRD. Do not replace it with a Markdown summary. If any extracted brief or issue summary conflicts with the canonical PRD, stop and report a PRD fidelity blocker before implementation or final artifact production.
+
+## Canonical Staffing Plan
+
+$STAFFING_PLAN_BLOCK
+
+## Known Local Repositories
+
+Prefer these local repositories before using \`multica repo checkout\` or cloning:
+
+| Project | Local path | Primary remote | Default base branch |
+| --- | --- | --- | --- |
+| gearjob | \`/home/gewu/work/gearjob\` | \`git@github.com:taotaosihao/gearjob.git\` | \`develop\` |
+| beezer | \`/home/gewu/work/beezer\` | \`https://cnb.cool/gewu-data/beezer\` | \`main\` |
+| hive | \`/home/gewu/work/hive\` | \`git@github.com:taotaosihao/hive.git\` | \`develop\` |
+
+Use the matching local path when it exists and is a git work tree. Use \`multica repo checkout <url>\` only when the local path is missing, unreadable, explicitly stale, or this issue requires a clean remote checkout.
+
+For implementation work only, estimate the code delta as \`<=100 lines\`, \`>100 lines\`, or \`unknown\`. If the estimate is \`>100 lines\` or \`unknown\`, create and use a dedicated git worktree and branch from the configured base branch. Do not implement >100-line estimated changes directly in the main local checkout.
+
+If a dedicated worktree is used, keep it while the draft PR is open or under review. After PR review is complete and the PR is confirmed merged into the configured base branch, clean up the dedicated worktree and delete the merged local worktree branch when safe. Do not remove the worktree before merge.
+
+For \`gearjob\`, \`beezer\`, and \`hive\` implementation tasks, completion requires local deployment/runtime startup before draft PR. Frontend/UI changes require screenshot evidence and GIF/MP4 evidence when interaction, animation, responsive behavior, or a multi-step flow changed. Backend/API/worker/data changes require local runtime log evidence such as command output, request/response, server log, job log, migration log, or database assertion.
+
+## Required Flow
+
+1. PREFLIGHT: confirm the PRD/task packet and staffing plan are readable. If a staffing plan is attached, follow it. If staffing is required but no approved plan is attached, record a staffing gap or blocker instead of silently inventing one from this envelope.
+2. PLAN: produce only the mode-appropriate execution plan required by the canonical PRD and approved staffing plan.
+3. EXECUTE: perform the requested research, review, investigation, or implementation according to the canonical PRD and approved staffing plan.
+4. VALIDATE: collect evidence appropriate to the task type. UI/UX work requires screenshots and, when interactions or responsive behavior changed, GIF/MP4 evidence. API/CLI/backend/data/library work requires runtime command output, request/response, logs, or data assertions.
+5. REPAIR: for implementation work, fix high-priority findings or failed required validation. There is no fixed repair cap while any high-priority bug remains.
+6. CLEAN-GATE: required acceptance rows may not be skipped. Unresolved gaps must be explicit and tied to evidence or blockers.
+7. DRAFT-PR: for implementation work only, open a draft PR after clean gate and PR-ready gate pass. Do not merge or deploy.
+8. POST-MERGE-CLEANUP: only after PR review completes and the PR is confirmed merged into the configured base branch, remove any dedicated worktree and delete the merged local worktree branch when safe.
+9. FAILURE: if required evidence cannot be collected because of a real blocker, or if a preflight/PRD fidelity/staffing blocker occurs, produce a blocker report.
+
+## Exit Policy
+
+- High-priority repair policy: P0/P1, HIGH/CRITICAL severity, BLOCKING review findings, failed required validation, missing required evidence, data-loss/security bugs, and PRD acceptance regressions must be repaired until cleared. This loop has no fixed round cap.
+- Post-high-priority policy: after all high-priority bugs are cleared, run at most two additional review/repair cycles. If a high-priority bug reappears during those cycles, return to the uncapped high-priority repair loop and reset the post-high-priority budget after it is cleared again.
+- Clean requirement: the latest validation round before draft PR must have no high-priority bugs and must satisfy the PR-ready gate. Remaining non-blocking issues may be documented as residual risks instead of extending repair indefinitely.
+- Required validation: real runtime execution appropriate to the task type; no skipped required acceptance checks.
+- For gearjob/beezer/hive: local deployment/runtime evidence required; frontend visual artifacts and backend log evidence required according to changed surface.
+- Research/review/investigation output: final artifacts or blocker report.
+- Implementation output: draft PR or blocker report.
+- Forbidden: merge, deploy, production changes
+EOF
+
+ASSIGNEE_ARGS=()
+if [ "$NO_ASSIGNEE" -eq 0 ] && [ -n "$ASSIGNEE_ID" ]; then
+  ASSIGNEE_ARGS=(--assignee-id "$ASSIGNEE_ID")
+elif [ "$NO_ASSIGNEE" -eq 0 ]; then
+  ASSIGNEE_ARGS=(--assignee "$ASSIGNEE")
+fi
+
+"$MULTICA_BIN" issue create \
+  --title "$TITLE" \
+  --description-file "$DESC_FILE" \
+  "${ATTACHMENT_ARGS[@]}" \
+  "${ASSIGNEE_ARGS[@]}" \
+  --status "$STATUS" \
+  --priority "$PRIORITY" \
+  --output json

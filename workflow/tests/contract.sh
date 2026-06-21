@@ -3,6 +3,7 @@ set -euo pipefail
 
 BIN="${CODEX_WORKFLOW_BIN:-/home/gewu/.codex/workflow/bin/codex-workflow}"
 REAL_CODEX_HOME="${CODEX_HOME_REAL:-/home/gewu/.codex}"
+REAL_AGENTS_HOME="${AGENTS_HOME_REAL:-$HOME/.agents}"
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-/home/gewu/work/atlas-forge}"
 TMP_ROOT="$(mktemp -d)"
 export CODEX_WORKFLOW_ROOT="$TMP_ROOT/workflow"
@@ -182,10 +183,17 @@ for skill in analyze office-hours brainstorm intake clarify team task; do
 done
 rg -q "route-decision" "$REAL_CODEX_HOME/AGENTS.md"
 rg -q "atlas-workflow:intake" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "handoff-envelope" /home/gewu/.agents/skills/multica-prd-submit/SKILL.md
-rg -q "Evidence Manifest Contract" /home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md
-rg -q "evidence manifest" /home/gewu/.agents/multica-sdlc/instructions/leader.md
-rg -q "evidence manifest" /home/gewu/.agents/multica-sdlc/generated/leader-source-instructions.txt
+rg -q "handoff-envelope" "$REAL_AGENTS_HOME/skills/multica-prd-submit/SKILL.md"
+rg -q "name: multica-agent-plan" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"
+rg -q "Agent / Skill Inventory" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"
+rg -q "inventory-first and reuse-first" "$REAL_AGENTS_HOME/multica-sdlc/instructions/leader.md"
+rg -q "multica agent tasks <agent-id> --output json" "$REAL_AGENTS_HOME/multica-sdlc/instructions/planner.md"
+cmp -s "$REAL_AGENTS_HOME/multica-sdlc/instructions/leader.md" "$REAL_AGENTS_HOME/multica-sdlc/generated/leader-source-instructions.txt"
+cmp -s "$REAL_AGENTS_HOME/multica-sdlc/instructions/planner.md" "$REAL_AGENTS_HOME/multica-sdlc/generated/planner-source-instructions.txt"
+rg -q -- "--staffing-plan" "$REAL_AGENTS_HOME/bin/multica-prd-submit"
+rg -q "Evidence Manifest Contract" "$REAL_AGENTS_HOME/multica-sdlc/instructions/evidence-manifest.md"
+rg -q "evidence manifest" "$REAL_AGENTS_HOME/multica-sdlc/instructions/leader.md"
+rg -q "evidence manifest" "$REAL_AGENTS_HOME/multica-sdlc/generated/leader-source-instructions.txt"
 pass "skill adoption"
 
 printf 'contract tests passed\n'

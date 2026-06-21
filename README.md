@@ -2,7 +2,9 @@
 
 Atlas Forge is a Git-backed Codex plugin marketplace for local workflow tools.
 It packages the Atlas workflow skills, the MemPalace Codex wrapper, and the
-Atlas workflow helper scripts behind one installable marketplace.
+Atlas workflow helper scripts behind one installable marketplace. It also
+stores the reusable Multica SDLC agent skills and instruction sources that are
+synced into `~/.agents`.
 
 Codex should install plugins from the Git marketplace snapshot, not directly
 from a local checkout. The local checkout is the source for editing, reviewing,
@@ -18,6 +20,15 @@ committing, and publishing changes.
 The repository also stores the Atlas workflow helper source under `workflow/`.
 Those helpers are synced into `~/.codex/workflow` when workflow runtime files
 change.
+
+The repository also stores non-secret Multica agent assets under `.agents/`:
+
+| Asset | Purpose |
+| --- | --- |
+| `.agents/skills/multica-agent-plan` | Plans task-specific Multica agent staffing from current agents and skills before submission. |
+| `.agents/skills/multica-prd-submit` | Submits approved PRD/task packets and optional approved staffing plans to Multica. |
+| `.agents/bin/multica-prd-submit` | Wrapper that creates the Multica issue and attaches the canonical task packet/staffing plan. |
+| `.agents/multica-sdlc` | Multica SDLC protocol, leader/planner/specialist instructions, generated instruction sources, and evidence scorecard schema. |
 
 ## Requirements
 
@@ -47,8 +58,8 @@ scripts/install-atlas-forge.sh
 ```
 
 The installer registers the marketplace, installs `atlas-workflow` and
-`mempalace`, syncs the Atlas workflow helpers, and refreshes command shims in
-`~/.local/bin`.
+`mempalace`, syncs the Atlas workflow helpers, syncs Multica agent assets into
+`~/.agents`, and refreshes command shims in `~/.local/bin`.
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
@@ -80,6 +91,8 @@ python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.
 bash -n scripts/bump-plugin-cachebuster.sh
 bash -n scripts/codex-plugin-update.sh
 bash -n scripts/install-atlas-forge.sh
+bash -n scripts/sync-live-agents.sh
+bash -n scripts/sync-live-workflow.sh
 ```
 
 4. Commit and push:
@@ -97,14 +110,16 @@ scripts/codex-plugin-update.sh atlas-workflow
 scripts/codex-plugin-update.sh mempalace
 ```
 
-6. If workflow helper files changed, sync them to the live Codex workflow path:
+6. If workflow helper files or Multica agent assets changed, sync them to the
+   live local paths:
 
 ```bash
+scripts/sync-live-agents.sh
 scripts/sync-live-workflow.sh
 ```
 
-The sync script also refreshes command shims in `~/.local/bin` for
-`codex-workflow`, `codex-design-review`, and `codex-refresh-local-plugin`.
+The sync scripts refresh command shims in `~/.local/bin` for `codex-workflow`,
+`codex-design-review`, `codex-refresh-local-plugin`, and `multica-prd-submit`.
 
 7. Start a new Codex thread before relying on changed skills.
 
@@ -113,6 +128,10 @@ The sync script also refreshes command shims in `~/.local/bin` for
 ```text
 atlas-forge/
   .agents/plugins/marketplace.json
+  .agents/
+    bin/
+    skills/
+    multica-sdlc/
   plugins/
     atlas-workflow/
     mempalace-codex-plugin/
@@ -151,9 +170,12 @@ This repository intentionally does not store live Codex state:
 - auth files
 - installed plugin caches
 - temporary marketplace snapshots
+- Multica auth tokens, provider env/settings JSON, live tasks, scorecard JSONL,
+  or lock files
 
 Those files belong under the local Codex home, such as `~/.codex/workflow` and
-`~/.codex/plugins/cache`.
+`~/.codex/plugins/cache`, or under local agent runtime paths such as
+`~/.agents/multica-sdlc`.
 
 ## Troubleshooting
 

@@ -17,6 +17,10 @@ cp -a "$REPO_ROOT/workflow/README.md" "$LIVE_WORKFLOW_ROOT/README.md"
 
 chmod +x "$LIVE_WORKFLOW_ROOT/bin/"* "$LIVE_WORKFLOW_ROOT/hooks/"* "$LIVE_WORKFLOW_ROOT/tests/contract.sh"
 
+if [[ -x "$REPO_ROOT/scripts/sync-live-agents.sh" ]]; then
+  "$REPO_ROOT/scripts/sync-live-agents.sh"
+fi
+
 for command_name in codex-workflow codex-design-review codex-refresh-local-plugin; do
   shim_path="$LOCAL_BIN_ROOT/$command_name"
   target_path="$LIVE_WORKFLOW_ROOT/bin/$command_name"

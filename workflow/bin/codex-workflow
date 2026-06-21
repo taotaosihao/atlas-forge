@@ -28,7 +28,10 @@ CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME_ROOT/config.toml}"
 CODEX_HOOKS_FILE="${CODEX_HOOKS_FILE:-$CODEX_HOME_ROOT/hooks.json}"
 PASEO_CONFIG_FILE="${PASEO_CONFIG_FILE:-$HOME/.paseo/config.json}"
 ATLAS_SOURCE_SKILLS_DIR="${ATLAS_SOURCE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/atlas-workflow/skills}"
-ATLAS_CACHE_SKILLS_DIR="${ATLAS_CACHE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills}"
+if [[ -z "${ATLAS_CACHE_SKILLS_DIR:-}" ]]; then
+  ATLAS_CACHE_SKILLS_DIR="$(find "$CODEX_HOME_ROOT/plugins/cache/atlas-forge/atlas-workflow" -mindepth 2 -maxdepth 2 -type d -name skills 2>/dev/null | sort -V | tail -1 || true)"
+  ATLAS_CACHE_SKILLS_DIR="${ATLAS_CACHE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills}"
+fi
 CODEX_BIN="${CODEX_BIN:-codex}"
 PASEO_BIN="${PASEO_BIN:-paseo}"
 if [[ -n "${CODEX_LEARNINGS_DIR:-}" ]]; then
@@ -760,7 +763,7 @@ The curated packet is advisory context only. It must not contain raw transcripts
 
 ## Multica Execution Contract
 
-1. PREFLIGHT: repo, base branch, runtimes, permissions, readable PRD, and PRD fidelity.
+1. PREFLIGHT: repo, base branch, runtimes, permissions, readable PRD, PRD fidelity, and approved staffing plan when one is required.
 2. PLAN: implementation plan from PRD acceptance criteria, including code delta estimate and worktree decision.
 3. IMPLEMENT: scoped changes only; use a dedicated worktree for `>100 lines` or `unknown` estimates.
 4. VALIDATE: review and E2E against the current commit SHA.
@@ -772,8 +775,10 @@ Forbidden actions: do not merge, deploy, perform production changes, or clean up
 
 ## Suggested Submit Command
 
+If an approved Multica agent/staffing plan exists, attach it with `--staffing-plan`. If staffing is still unclear, use `multica-agent-plan` before submitting.
+
 ```bash
-/home/gewu/.agents/bin/multica-prd-submit --repo {str(repo_path)!r} --title {title!r} {str(prd_path)!r}
+~/.agents/bin/multica-prd-submit --repo {str(repo_path)!r} --title {title!r} {str(prd_path)!r}
 ```
 """
 envelope_file.write_text(envelope, encoding="utf-8")

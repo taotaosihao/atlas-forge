@@ -17,3 +17,10 @@ cache/
 # Local scratch
 .tmp/
 tmp/
+
+# Multica local runtime/secrets are copied into ~/.agents locally, not stored.
+.agents/multica-sdlc/*-env.json
+.agents/multica-sdlc/*-settings.json
+.agents/multica-sdlc/agent-scorecards.jsonl
+.agents/multica-sdlc/agent-scorecards.lock
+.agents/multica-sdlc/tasks/
