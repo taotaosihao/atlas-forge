@@ -22,6 +22,12 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
+## 输出语言
+
+使用本插件生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
+命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
+如果用户明确要求其他语言，以用户当前要求为准。
+
 ## Upstream Design Flow
 
 Use the upstream entries as separate layers, not one merged process:

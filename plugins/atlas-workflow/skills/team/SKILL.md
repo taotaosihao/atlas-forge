@@ -5,6 +5,12 @@ description: Use the Atlas team flow for multi-agent discussion, review, staffin
 
 Use the Atlas team flow for this request.
 
+## 输出语言
+
+- 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
+- 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
+- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+
 Follow this loop:
 
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
