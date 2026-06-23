@@ -73,6 +73,7 @@ description: Plan a task-specific Multica squad and agent configuration before s
    - Active Roles 中必须区分 `reuse-existing`、`edit-existing`、`create-new`，并写明依据。
 7. 分配模型和工具：
    - 根据用户约束选择 GPT 或 DeepSeek V4 Pro。
+   - 除非用户另有明确覆盖，`gpt-5.4` 只允许作为 coder 或 E2E 角色的 fallback；不得用于 leader、planner、reviewer、Evidence QA、docs summary、clean-gate 或 PR-ready-gate owner。
    - 需要视觉理解、截图审查、UI 对比、网页状态判断时，为对应角色配置 vision。
    - DeepSeek 角色需要 vision 时，优先配置 agy bridge MCP。
    - 需要浏览器实操、网络面板、DOM、控制台、登录态或有头浏览器时，配置 chrome-devtools/browser/Playwright 能力。
@@ -157,6 +158,7 @@ description: Plan a task-specific Multica squad and agent configuration before s
 - 不要把 `coder -> reviewer/e2e -> leader` 写死为唯一流程；普通下一跳必须来自模板字段，leader 只负责 clean-gate、PR-ready/final closure、blocker 或模板显式要求的决策。
 - 动态规划必须先读取当前已有 agent 及对应 skill；能满足任务的现有 agent 必须优先直接复用。
 - 重新编辑已有 agent 前必须确认该 agent 当前没有未完成 issue/task；不能确认时不得改造，应新增 agent、选择其他 agent，或标记为需要人工批准的阻塞项。
+- `gpt-5.4` 只允许规划为 coder 或 E2E fallback；不要把 `gpt-5.4` 规划给 leader、planner、reviewer、Evidence QA、docs summary、clean-gate 或 PR-ready-gate owner。
 - 对高风险、跨模块、UI/后端/API/权限/数据流任务，主动配置 reviewer 和 QA，而不是只靠 coder 自测。
 - 对存在阻塞项的任务，规划负责解阻的 agent、工具、证据和 fallback，而不是简单停止。
 - 只有方案经用户批准后，才使用 `multica-prd-submit` 提交。
