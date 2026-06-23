@@ -37,19 +37,24 @@ Follow this loop:
    - Acceptance Criteria
    - Verification Plan
 10. Make acceptance criteria command-verifiable or user-visible.
-11. Self-review artifacts before reporting:
+11. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
+   - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
+   - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
+   - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
+   - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
+12. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
-   - no contradictions between context, decision, and spec
+   - no contradictions between context, decision, spec, and the project doc
    - assumptions are labelled
    - acceptance criteria match the verification plan
-12. Before claiming the artifacts are execution-ready, run:
+13. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
-13. Use `$atlas-workflow:team` when the task should go through discussion or promotion before execution.
-14. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, readiness result, locked assumptions, and verification plan.
+14. Use `$atlas-workflow:team` when the task should go through discussion or promotion before execution.
+15. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
 
 Hard rules:
 
 - Do not re-open product strategy or design exploration unless execution safety depends on it.
 - Do not implement code from this skill unless the user explicitly changes the request to implementation after the spec is locked.
-- Keep artifacts in `workflow/artifacts/<task-id>/` unless the user explicitly asks for repo docs.
+- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; execution-ready specs must also be mirrored into project docs as described above.

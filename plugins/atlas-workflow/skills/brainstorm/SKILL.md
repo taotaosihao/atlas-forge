@@ -51,17 +51,22 @@ Follow this loop:
 11. If the user approves the direction, either:
    - write `workflow/artifacts/<task-id>/spec.md` directly when the scope is simple and the facts are stable, or
    - switch to `$atlas-workflow:clarify` when explicit non-goals, decision boundaries, and acceptance criteria still need to be locked.
-12. Self-review artifacts before reporting:
+12. When the discussion has become actionable enough for clarify, team, task, or Multica handoff, also write a concise project doc:
+    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
+    - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
+    - include the chosen direction, rejected alternatives, assumptions, acceptance shape, verification strategy, and next execution step.
+    - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
+13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
-   - no contradictions between context, decision, and spec
+   - no contradictions between context, decision, spec, and any project doc
    - assumptions are labelled
    - scope is small enough for the next execution step
-13. Before claiming the recommendation or spec is ready for clarify, team, task, or Multica handoff, run:
+14. Before claiming the recommendation or spec is ready for clarify, team, task, or Multica handoff, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,decision`
     - include `spec` in `--require` when this skill wrote an execution spec directly.
-14. For pure option exploration, do not run readiness; report the open decisions instead.
-15. Do not implement code from this skill unless the user explicitly changes the request to implementation after approving the direction.
-16. In the final reply, include the task id, artifact paths, recommendation, readiness result if run, open decisions, and the recommended next Atlas skill.
+15. For pure option exploration, do not run readiness and do not write project docs; report the open decisions instead.
+16. Do not implement code from this skill unless the user explicitly changes the request to implementation after approving the direction.
+17. In the final reply, include the task id, artifact paths, project doc path if written, recommendation, readiness result if run, open decisions, and the recommended next Atlas skill.
 
 Hard rules:
 
@@ -69,4 +74,4 @@ Hard rules:
 - Do not over-question clear engineering fixes. If the user already gave a precise implementation request, use `$atlas-workflow:task` or `$atlas-workflow:clarify` instead.
 - Keep confirmed facts separate from inferences and assumptions.
 - Do not make routing evidence a ceremony for tiny explicit fixes; route only when a planning layer choice was meaningful.
-- Keep artifacts in `workflow/artifacts/<task-id>/` unless the user explicitly asks for repo docs.
+- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; once a solution is actionable, mirror the durable handoff into project docs as described above.
