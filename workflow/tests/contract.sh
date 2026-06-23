@@ -109,6 +109,13 @@ $BIN route-decision "$route_id" \
   --decision skip \
   --reason "legacy layer alias remains accepted" >/dev/null
 grep -q "route_intent: task" "$CODEX_WORKFLOW_ROOT/tasks/$route_id.md"
+$BIN route-decision --help >/dev/null
+$BIN route-decision "$route_id" \
+  --intent analyze \
+  --risk low \
+  --decision use \
+  --reason "read-only synthesis is the selected route" >/dev/null
+grep -q "route_intent: analyze" "$CODEX_WORKFLOW_ROOT/tasks/$route_id.md"
 expect_fail "invalid route intent" "$BIN" route-decision "$route_id" --intent unknown --risk low --decision use --reason bad
 expect_fail "route external issue key" "$BIN" route-decision GEW-30 --intent multica-handoff --risk high --decision use --reason handoff
 grep -q "unknown route-decision task id: GEW-30" "$TMP_ROOT/expect-fail.err"

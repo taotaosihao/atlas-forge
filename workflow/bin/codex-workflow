@@ -983,6 +983,7 @@ VALID_INTENTS = {
     "office-hours",
     "brainstorm",
     "intake",
+    "analyze",
     "clarify",
     "task",
     "team",
@@ -4812,11 +4813,15 @@ cmd_result_ingest() {
 }
 
 route_decision_usage() {
-  echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2
+  echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|analyze|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2
 }
 
 cmd_route_decision() {
   local task_id="$1"
+  if [[ "$task_id" == "-h" || "$task_id" == "--help" || "$task_id" == "help" ]]; then
+    route_decision_usage
+    return 0
+  fi
   shift
   local intent risk route_action reason next_step consensus_requested consensus_source recorded_at metadata
   local route_path consensus_path route_rel consensus_value assumption_count task_file
@@ -6226,7 +6231,7 @@ main() {
       cmd_result_ingest "$@"
       ;;
     route-decision)
-      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow route-decision <task-id> --intent <office-hours|brainstorm|intake|clarify|task|team|multica-handoff> --risk <low|medium|high> --decision <use|skip> --reason "<reason>" [--next <skill-or-command>] [--assumption "<assumption>"]... [--consensus] [--consensus-source <file>]' >&2; exit 1; }
+      [[ $# -ge 2 ]] || { route_decision_usage; exit 1; }
       shift
       cmd_route_decision "$@"
       ;;
