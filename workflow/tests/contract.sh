@@ -65,6 +65,20 @@ printf '%s\n' '# Team Decision' '' 'Substantive decision.' > "$CODEX_WORKFLOW_RO
 $BIN ready "$ready_id" --require context,spec,analysis,decision >/dev/null
 pass "readiness gate"
 
+team_id="$($BIN init-task "contract team observability" "team observability")"
+$BIN start "$team_id"
+write_ready_artifacts "$team_id"
+expect_fail "team failed lanes" "$BIN" team-start "$team_id" "contract objective" --agents 1
+$BIN team-status "$team_id" > "$TMP_ROOT/team-status.out"
+grep -q "team_status: failed" "$TMP_ROOT/team-status.out"
+grep -q "team_roles: architect" "$TMP_ROOT/team-status.out"
+grep -q "team_round: " "$TMP_ROOT/team-status.out"
+grep -q "team_temp_dir: " "$TMP_ROOT/team-status.out"
+team_round="$(awk -F': ' '/^team_round:/ {print $2}' "$TMP_ROOT/team-status.out")"
+grep -q "# Team Round" "$team_round"
+grep -q "Team round failed. Inspect the round file" "$CODEX_WORKFLOW_ROOT/artifacts/$team_id/team/decision.md"
+pass "team observability"
+
 repo="$TMP_ROOT/repo"
 setup_repo "$repo"
 

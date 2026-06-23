@@ -5891,6 +5891,7 @@ cmd_team_start() {
 
   local task_file title artifact_dir team_dir decision_file staffing_file round_file decision_rel staffing_rel round_rel
   local context_text spec_text analysis_text tmpdir role prompt status_any_fail="0"
+  local roles_display team_interrupted="0" wait_status
   local -a roles=()
   local -a pids=()
   declare -A lane_message_files lane_stdout_files lane_stderr_files lane_statuses
@@ -5928,6 +5929,33 @@ cmd_team_start() {
   append_task_runtime_event "$task_id" "team-start" "$mode / $objective"
   mapfile -t roles < <(team_role_names "$mode" "$agents")
   tmpdir="$(mktemp -d)"
+  roles_display="$(IFS=,; printf '%s' "${roles[*]}")"
+  {
+    printf '# Team Round\n\n'
+    printf 'Pending lane completion.\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- mode: %s\n' "$mode"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- roles: %s\n' "$roles_display"
+    printf -- '- temp_dir: %s\n' "$tmpdir"
+  } > "$round_file"
+  set_task_state_fields "$task_id" \
+    "active_team.round_file=$round_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.temp_dir=$tmpdir" \
+    "active_team.roles=$roles_display"
+  append_task_runtime_event "$task_id" "team-lanes-started" "roles=$roles_display temp_dir=$tmpdir round=$round_rel"
+
+  team_start_interrupt() {
+    team_interrupted="1"
+    status_any_fail="1"
+    local pid
+    for pid in "${pids[@]}"; do
+      kill -INT "$pid" 2>/dev/null || true
+    done
+  }
+  trap team_start_interrupt INT TERM
 
   for role in "${roles[@]}"; do
     lane_message_files["$role"]="$tmpdir/$role.message"
@@ -5968,13 +5996,16 @@ EOF
   for role in "${roles[@]}"; do
     set +e
     wait "${pids[$idx]}"
-    lane_statuses["$role"]="$?"
+    wait_status="$?"
+    lane_statuses["$role"]="$wait_status"
     set -e
     if [[ "${lane_statuses[$role]}" -ne 0 ]]; then
       status_any_fail="1"
     fi
     idx=$((idx + 1))
   done
+  trap 'release_all_locks; exit 130' INT
+  trap 'release_all_locks; exit 143' TERM
 
   {
     printf '# Team Round\n\n'
@@ -5982,10 +6013,13 @@ EOF
     printf -- '- mode: %s\n' "$mode"
     printf -- '- objective: %s\n' "$objective"
     printf -- '- agents: %s\n' "$agents"
+    printf -- '- roles: %s\n' "$roles_display"
+    printf -- '- temp_dir: %s\n' "$tmpdir"
+    printf -- '- interrupted: %s\n' "$team_interrupted"
     printf -- '- created_at: %s\n\n' "$(timestamp_utc)"
     for role in "${roles[@]}"; do
       printf '## %s\n\n' "$role"
-      printf -- '- exit_code: %s\n\n' "${lane_statuses[$role]}"
+      printf -- '- exit_code: %s\n\n' "${lane_statuses[$role]:-not-collected}"
       printf '### Message\n\n```markdown\n'
       trimmed_preview "${lane_message_files[$role]}"
       printf '\n```\n\n'
@@ -6031,11 +6065,18 @@ EOF
     printf -- '- objective: %s\n' "$objective"
     printf -- '- agents: %s\n' "$agents"
     printf -- '- round_file: %s\n' "$round_rel"
+    if [[ "$team_interrupted" == "1" ]]; then
+      printf -- '- status: interrupted\n'
+    fi
     if [[ "$claude_review" == "1" ]]; then
       printf -- '- claude_review: %s\n' "$(path_relative_to_codex_home "$(task_team_claude_review_file "$task_id")")"
     fi
     printf '\n## Primary Decision\n\n'
-    if [[ "$mode" == "discuss" ]]; then
+    if [[ "$team_interrupted" == "1" ]]; then
+      printf 'Team round was interrupted before every lane completed. Inspect the partial round file and rerun `codex-workflow team-start %s "<objective>"` if a complete decision is required.\n\n' "$task_id"
+    elif [[ "$status_any_fail" == "1" ]]; then
+      printf 'Team round failed. Inspect the round file before using this decision for promotion.\n\n'
+    elif [[ "$mode" == "discuss" ]]; then
       printf 'Use `codex-workflow team-promote %s --to execute` when the discussion outcome is ready for implementation.\n\n' "$task_id"
     else
       printf 'Use `codex-workflow team-promote %s --to worktree` for higher-risk execution, or `--to finish` when the implementation is ready for final acceptance.\n\n' "$task_id"
@@ -6071,13 +6112,34 @@ EOF
     done
   } > "$staffing_file"
 
+  if [[ "$team_interrupted" == "1" ]]; then
+    upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=interrupted" "active_team_decision=$decision_rel"
+    write_task_state_json "$task_id"
+    set_task_state_fields "$task_id" \
+      "active_team.status=interrupted" \
+      "active_team.round_file=$round_rel" \
+      "active_team.staffing=$staffing_rel" \
+      "active_team.temp_dir=$tmpdir"
+    append_task_runtime_event "$task_id" "team-complete" "interrupted"
+    echo "team round interrupted: partial output in $round_file" >&2
+    printf 'task_id: %s\n' "$task_id"
+    printf 'mode: %s\n' "$mode"
+    printf 'status: interrupted\n'
+    printf 'decision: %s\n' "$decision_file"
+    printf 'staffing: %s\n' "$staffing_file"
+    printf 'round: %s\n' "$round_file"
+    printf 'temp_dir: %s\n' "$tmpdir"
+    exit 130
+  fi
+
   if [[ "$status_any_fail" == "1" ]]; then
     upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=failed" "active_team_decision=$decision_rel"
     write_task_state_json "$task_id"
     set_task_state_fields "$task_id" \
       "active_team.status=failed" \
       "active_team.round_file=$round_rel" \
-      "active_team.staffing=$staffing_rel"
+      "active_team.staffing=$staffing_rel" \
+      "active_team.temp_dir=$tmpdir"
     append_task_runtime_event "$task_id" "team-complete" "failed"
     echo "team round failed: inspect $round_file" >&2
     exit 1
@@ -6117,6 +6179,10 @@ print(f"team_status: {team.get('status', '')}")
 print(f"team_decision: {team.get('decision', '')}")
 print(f"team_objective: {team.get('objective', '')}")
 print(f"team_agents: {team.get('agents', '')}")
+print(f"team_roles: {team.get('roles', '')}")
+print(f"team_round: {team.get('round_file', '')}")
+print(f"team_staffing: {team.get('staffing', '')}")
+print(f"team_temp_dir: {team.get('temp_dir', '')}")
 print(f"team_promoted_to: {team.get('promoted_to', '')}")
 PY
 }

@@ -29,11 +29,12 @@ Follow this loop:
 12. Check status or stop the active round with:
    - `~/.codex/workflow/bin/codex-workflow team-status <task-id>`
    - `~/.codex/workflow/bin/codex-workflow team-stop <task-id>`
-13. Before promoting to execution, worktree, finish, or Multica handoff, run:
+13. While `team-status` reports `team_status: running`, inspect the reported `team_round` and `team_temp_dir` paths before deciding the round is stalled. Parent command stdout may stay empty until all lanes finish; do not treat `Pending discussion.` or empty stdout alone as proof that no lane discussion exists.
+14. Before promoting to execution, worktree, finish, or Multica handoff, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec,analysis,decision`
     - use a narrower `--require` list only when the missing artifact is intentionally out of scope and explain why.
-14. Promote explicitly with:
+15. Promote explicitly with:
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to execute`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to worktree`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to finish`
-15. In the final reply, include the task id, `decision.md` path, staffing path if produced, project doc path if written, readiness result if run, promotion state, and any open decision.
+16. In the final reply, include the task id, `decision.md` path, staffing path if produced, project doc path if written, readiness result if run, promotion state, and any open decision.
