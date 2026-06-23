@@ -65,6 +65,44 @@ Multica agent assets into `~/.agents`, and refreshes command shims in
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
+## Agent Install
+
+The full installer also installs the reusable Multica agent assets. It syncs:
+
+- `.agents/skills/*` to `~/.agents/skills/`
+- `.agents/bin/*` to `~/.agents/bin/`
+- `.agents/multica-sdlc/*` to `~/.agents/multica-sdlc/`
+- the `multica-prd-submit` shim to `~/.local/bin/multica-prd-submit`
+
+To install or refresh only the agent assets from a local checkout, run:
+
+```bash
+scripts/sync-live-agents.sh
+```
+
+Use `AGENTS_HOME` and `LOCAL_BIN_ROOT` when installing into non-default
+locations:
+
+```bash
+AGENTS_HOME="$HOME/.agents" LOCAL_BIN_ROOT="$HOME/.local/bin" \
+  scripts/sync-live-agents.sh
+```
+
+Verify the agent install:
+
+```bash
+test -d ~/.agents/skills/multica-agent-plan
+test -d ~/.agents/skills/multica-prd-submit
+test -f ~/.agents/multica-sdlc/instructions/leader.md
+test -x ~/.agents/bin/multica-prd-submit
+command -v multica-prd-submit
+```
+
+If agent instructions or skills changed, rerun `scripts/sync-live-agents.sh`
+after pulling the latest repository changes. Existing live task state, auth
+tokens, runtime settings, scorecard JSONL, and lock files remain local runtime
+state and are not stored in this repository.
+
 ## Update An Installed Device
 
 ```bash
