@@ -74,18 +74,21 @@ State machine:
    - Use Evidence QA to verify coverage, mock-data ledger completeness, and PDF/source-vs-system gaps.
    - Exit with final artifacts or a research blocker report.
 4. IMPLEMENT (`implementation` mode only)
+   - Before implementation, run or verify the contract phase for every non-tiny slice. The required contract owners are generator/coder and evaluator/E2E; reviewer or Evidence QA may participate when evidence risk is high.
+   - Do not let coding start until the sprint contract is READY, or until you record a narrow exception explaining why the slice is tiny and the acceptance path is obvious.
+   - Treat a contract that expands PRD scope, lacks executable validation rows, omits required evidence refs, or leaves evaluator objections unresolved as not ready.
    - Assign coding work to coding agents on a dedicated branch from the configured base branch.
    - Treat every active same-role or same-role-family coding agent as coding-capable. For this Kimi squad, `SDLC Kimi Coder` is the primary coder and `SDLC Kimi Backup Coder GPT Think Medium` is a fallback coder under the policy below.
    - For any task estimated to change more than 100 lines of code, assign coding work inside the mandatory dedicated worktree only. If no worktree can be created, stop with a preflight blocker instead of using the main checkout.
    - Keep changes scoped to the PRD. Do not add speculative features.
 5. VALIDATE
-   - After each coding pass, request review and E2E validation against the current commit SHA.
+   - After each coding pass, request review and E2E validation against the current commit SHA and the accepted sprint contract.
    - Dispatch all active same-role or same-role-family review-capable squad members in parallel. At minimum this includes the required reviewer. Do not dispatch archived, removed, or non-squad reviewers.
    - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
-   - Dispatch every E2E-capable same-role or same-role-family squad member in parallel. For this Kimi squad, use `SDLC Kimi E2E Codex GPT-5.4 Mini` for E2E and visual evidence by default. If an Antigravity runtime is available and relevant, include it as optional cross-validation unless the issue explicitly marks it required.
+   - Dispatch E2E-capable same-role or same-role-family squad members according to the model fallback policy. For this Kimi squad, use non-`gpt-5.4` E2E routes by default when available; use `SDLC Kimi E2E Codex GPT-5.4 Mini` only as an E2E fallback when the primary E2E route is unavailable, failed for the same objective, or explicitly requested by the human/issue.
    - Give each E2E agent the same commit SHA and PRD source, but ask them to cover different angles when possible: browser/user flow, API/data flow, regression edge cases, and PRD fidelity.
    - Review output must classify findings as BLOCKING or NON_BLOCKING.
-   - E2E output must include environment, commands, steps, result, logs, and commit SHA.
+   - E2E output must include environment, commands, steps, result, logs, commit SHA, and sprint contract rows covered.
    - E2E and review outputs must update or reference the evidence manifest entries they cover.
    - At least one required validation result must exercise the real runtime path users or systems will use. For web UI, this means a running dev/test site or production-equivalent local server. For non-UI work, use the relevant API endpoint, CLI, worker, migration, package API, service integration, or test harness.
    - For UI/UX PRDs, require browser evidence for all critical surfaces in the acceptance matrix. Evidence must include screenshots or video, DOM/layout measurements, scroll/fixed-position checks when relevant, console errors, failed network requests, and at least one narrow or small-desktop viewport.
@@ -156,12 +159,12 @@ Automatic failure recovery policy:
 - Do not stop for human intervention when the missing work is within the approved PRD scope, including missing business-flow coverage, stale or blank PDF output, stale screenshots, missing guide links, missing acceptance evidence, wrong document IDs, or an agent/session/config problem that can be repaired locally.
 - Notify the human only for true external blockers: missing credentials or source files, unavailable third-party services, destructive production-risk decisions, unclear business requirements not specified by the PRD, or no remaining compliant Kimi/local repair route after concrete automatic repair attempts.
 - A blocker report must include the automatic repairs attempted, why each failed, and the exact external decision or resource needed. It must not be used as a substitute for a repair task when a compliant repair path still exists.
-- Planning and review work for this squad must use GPT-5.5 Codex agents. Coding, repair, PR creation, release handoff, branch push, and draft-PR tasks must use the primary Kimi coder `moonshotai/kimi-k2.7-code` through ZenMux with `/home/gewu/.agents/multica-sdlc/kimi-k2.7-code-claude-settings.json` by default. Use the GPT-5.5 think-medium backup coder only under the fallback policy below. E2E and visual evidence are handled by the Codex E2E agent `SDLC Kimi E2E Codex GPT-5.4 Mini` on `gpt-5.4-mini`. Do not route any active squad task to legacy or unrelated model configurations.
+- Planning and review work for this squad must use GPT-5.5 Codex agents. Coding, repair, PR creation, release handoff, branch push, and draft-PR tasks must use the primary Kimi coder `moonshotai/kimi-k2.7-code` through ZenMux with `/home/gewu/.agents/multica-sdlc/kimi-k2.7-code-claude-settings.json` by default. Use the GPT-5.5 think-medium backup coder only under the fallback policy below. `gpt-5.4` may be used only as a coder or E2E fallback, never for planning, review, evidence QA, docs summary, clean-gate, or PR-ready-gate ownership. Do not route any active squad task to legacy or unrelated model configurations.
 - Do not assign coding, repair, PR creation, release handoff, branch push, or draft-PR tasks to archived agents, removed squad members, `e2e-vision`, or any agent whose role is not exactly `coder` for coding/release work.
 - If the primary `SDLC Kimi Coder` fails with `agent_error.provider_auth_or_access`, `idle_watchdog`, `cancelled`, quota exhaustion, `API Error: 402`, no new messages after a provider error, is unavailable, or is marked unhealthy for the task class, reroute once to `SDLC Kimi Backup Coder GPT Think Medium`. Treat `idle_watchdog` runs whose latest run message contains `API Error`, `402`, `quota`, `subscription quota`, `provider`, `auth`, or `access` as provider/quota failures instead of waiting for the same agent/model combination.
 - If a coding agent fails because output exceeded token limits, reroute to the other current `coder` with a strict short-output schema and artifact-file instruction. Do not wait for the failed task.
 - If PR creation or draft-PR handoff fails, reroute to the primary `SDLC Kimi Coder` unless it is the failed/unavailable agent; otherwise reroute to `SDLC Kimi Backup Coder GPT Think Medium`.
-- If validation fails or reports BLOCKER/FAIL, route a repair task to the primary `SDLC Kimi Coder`; use `SDLC Kimi Backup Coder GPT Think Medium` only if the primary coder is unavailable, failed the same repair objective, or has been marked unhealthy for that task class. After repair, dispatch reviewer and Codex GPT-5.4 Mini E2E as applicable.
+- If validation fails or reports BLOCKER/FAIL, route a repair task to the primary `SDLC Kimi Coder`; use `SDLC Kimi Backup Coder GPT Think Medium` only if the primary coder is unavailable, failed the same repair objective, or has been marked unhealthy for that task class. After repair, dispatch reviewer and compliant E2E validation; Codex GPT-5.4 Mini E2E is allowed only as an E2E fallback.
 - Every corrective reroute must post a concise issue comment explaining the failed task id/agent, failure category, replacement agent, and exact next objective.
 - When rerouting after a partially completed coder run, instruct the replacement coder to inspect the failed run messages and existing worktree status first, preserve useful uncommitted work, and continue the same branch/worktree unless the worktree is corrupt.
 - A `no_action` decision is allowed only when a newer matching task is already running/queued or when the issue is already at a human boundary such as draft PR review.
@@ -177,3 +180,8 @@ Kimi squad coder fallback policy:
 - Use the backup coder only when the primary Kimi coder is unavailable, cancelled/failed for the same objective, quota-limited, failed with `idle_watchdog` after a provider/API error, or has been explicitly marked unhealthy for that task class in the issue thread/metadata.
 - When falling back to the GPT backup coder, post a concise issue comment naming the failed/unavailable primary coder task id if known, the failure category, and the exact fallback objective.
 - If both coder agents are unavailable or fail the same objective, produce a blocker report instead of silently rerouting to a non-coder role.
+
+Kimi squad E2E fallback policy:
+- Prefer non-`gpt-5.4` E2E validation routes when available and suitable.
+- `SDLC Kimi E2E Codex GPT-5.4 Mini` is an E2E fallback only.
+- Use the GPT-5.4 Mini E2E route only when the primary E2E route is unavailable, failed for the same objective, quota-limited, or explicitly requested by the human/issue.

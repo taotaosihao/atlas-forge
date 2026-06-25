@@ -21,12 +21,17 @@ Follow this loop:
 4. Treat `~/.codex/workflow/bin/codex-workflow recall "<task title or topic>"` as a legacy fallback only when MemPalace is unavailable.
 5. Use `$atlas-workflow:analyze` for read-only cross-file evidence synthesis when the next step is still diagnosis.
 6. Use `$atlas-workflow:clarify` when brownfield facts need to become `context.md` and `spec.md`.
-7. Use `$atlas-workflow:team` when the task needs discussion, staffing, or promotion before execution.
-8. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
-9. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.
-10. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need to inspect the task file.
-11. Before reporting success, verify the work with real commands.
-12. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
-13. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
-14. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
-15. In the final reply, include the task id, changed files or artifact paths, verification commands and results, and any blockers or unverified assumptions.
+7. Default to `$atlas-workflow:team` for non-tiny bounded work before execution:
+   - Use team for behavior changes, multi-file work, meaningful implementation choices, evaluator/reviewer judgment, or contract formation.
+   - Tiny precise fixes may stay in direct local flow when scope and verification are obvious.
+   - Explicit user requests to avoid multi-agent or directly perform a tiny fix override the default when safe.
+   - If the default team round is interrupted or stalls, follow `$atlas-workflow:team` fallback: inspect partial lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct local execution only when no unresolved blocking issue remains.
+8. Use `$atlas-workflow:team` when the task needs discussion, staffing, review, contract formation, or promotion before execution.
+9. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
+10. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.
+11. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need to inspect the task file.
+12. Before reporting success, verify the work with real commands.
+13. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
+14. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
+15. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
+16. In the final reply, include the task id, changed files or artifact paths, verification commands and results, and any blockers or unverified assumptions.

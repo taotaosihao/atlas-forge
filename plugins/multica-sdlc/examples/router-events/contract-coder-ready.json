@@ -1,0 +1,14 @@
+{
+  "issue_id": "MULTICA-1",
+  "phase": "contract",
+  "source_role": "coder",
+  "source_comment_id": "comment-contract-coder-ready-1",
+  "run_id": "run-contract-coder-ready-1",
+  "artifact_type": "sprint-contract",
+  "result": "READY",
+  "completed_roles": {
+    "coder": {
+      "result": "READY"
+    }
+  }
+}

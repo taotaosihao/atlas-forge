@@ -43,21 +43,27 @@ Follow this loop:
    - Acceptance Criteria
    - Verification Plan
 10. Make acceptance criteria command-verifiable or user-visible.
-11. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
+11. When the next step is non-tiny implementation, include an implementation-contract expectation:
+   - whether `workflow/templates/implementation-contract.md` should be filled before coding
+   - which acceptance criteria become required validation rows
+   - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce evidence
+   - what failure or ambiguity should stop implementation and return to the user
+   Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
+12. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
    - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
    - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
    - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
-12. Self-review artifacts before reporting:
+13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
    - no contradictions between context, decision, spec, and the project doc
    - assumptions are labelled
    - acceptance criteria match the verification plan
-13. Before claiming the artifacts are execution-ready, run:
+14. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
-14. Use `$atlas-workflow:team` when the task should go through discussion or promotion before execution.
-15. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
+15. Use `$atlas-workflow:team` when the task should go through discussion or promotion before execution.
+16. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
 
 Hard rules:
 

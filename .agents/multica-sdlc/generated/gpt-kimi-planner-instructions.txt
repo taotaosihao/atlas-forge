@@ -10,7 +10,8 @@ Required output:
 - Local repository path selected, or the reason no local path can be used.
 - Acceptance criteria copied or normalized from the PRD.
 - Non-goals and explicit out-of-scope items.
-- For `implementation`: code delta estimate, worktree requirement, implementation tasks, test plan, acceptance matrix, evidence manifest, docs impact, and draft PR gate.
+- For `implementation`: code delta estimate, worktree requirement, implementation tasks, sprint contract plan, test plan, acceptance matrix, evidence manifest, docs impact, and draft PR gate.
+- Sprint contract plan for every implementation slice: generator/coder owner, evaluator/E2E owner, optional reviewer or Evidence QA owner, contract artifact path, acceptance rows covered, real runtime targets, evidence refs, and stop conditions.
 - For `product-research-prd`: research phases, page/route coverage plan, mock scenario plan, data/API/entity mapping plan, evidence artifact plan, PRD synthesis plan, and research clean gate.
 - Acceptance matrix: one row per required PRD/research criterion, with concrete validation evidence required before the final output. Include command or browser action, runtime target, environment, input/payload/viewport if relevant, selector/API/CLI/job/database/package target if relevant, expected observable result, and artifact/log path.
 - Evidence manifest plan: path, task-type profile, required/advisory split, row IDs, and expected evidence record fields using `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md`.
@@ -30,6 +31,7 @@ Rules:
 - Treat unknown code delta as larger than 100 lines for isolation. Do not let uncertainty bypass the worktree requirement.
 - If code delta is estimated above 100 lines, include dedicated git worktree creation as a non-skippable pre-implementation step.
 - Make test commands concrete where the repo makes them discoverable.
+- Require the contract phase before coding unless the slice is explicitly tiny with obvious acceptance. The contract must produce generator proposal, evaluator challenge, accepted contract rows, evidence refs, and human escalation criteria without expanding PRD scope.
 - Mark required acceptance checks as non-skippable. If the repository cannot support a required real validation target, mark it as a BLOCKER instead of downgrading to static review.
 - Each required row must be representable in the evidence manifest. If the row cannot name a command, runtime target, observed result, and artifact/log path, refine the row or mark a planning blocker.
 - Choose validation targets by task type. Examples: browser route and viewport for UI; HTTP endpoint and payload for API; CLI command and stdout/stderr/exit code for CLI; worker/job invocation and queue/log result for background jobs; migration command and schema/data assertion for database work; package import/API call and unit/integration test for libraries.
@@ -39,4 +41,4 @@ Rules:
 
 
 Model/role note:
-- You are the GPT-5.5 planner for the dynamic Multica Kimi squad. Produce mode-aware plans. For product-research PRD tasks, plan research artifacts and staffing only; for implementation tasks, use the same acceptance-matrix and worktree-aware SDLC gates, routing implementation to the Kimi coder and E2E validation to Codex `gpt-5.4-mini`.
+- You are the GPT-5.5 planner for the dynamic Multica Kimi squad. Produce mode-aware plans. For product-research PRD tasks, plan research artifacts and staffing only; for implementation tasks, use the same acceptance-matrix and worktree-aware SDLC gates, routing implementation to the Kimi coder and E2E validation to a compliant E2E route. Codex `gpt-5.4-mini` may be planned only as an E2E fallback, never as the default validation route.

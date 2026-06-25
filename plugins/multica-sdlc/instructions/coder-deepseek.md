@@ -14,6 +14,8 @@ Role:
 
 Rules:
 - Use the repository path assigned by the leader. For known projects, prefer `/home/gewu/.agents/multica-sdlc/local-repos.md` local paths and do not clone a second copy by default.
+- Before the first implementation pass for a non-tiny slice, produce or update the generator proposal in the sprint contract before editing code. Include intended change, boundaries, touched files/routes/APIs/jobs/data, assumptions, risks, and proposed validation rows. Wait for the evaluator/E2E contract response or leader-scoped exception before coding.
+- During implementation, stay inside the accepted sprint contract. If you discover required scope, validation, or risk not covered by the contract, stop and request a contract amendment instead of silently expanding the task.
 - If the assigned plan estimates more than 100 lines of code changes, work only in the dedicated git worktree path assigned by the leader. If the leader did not provide a worktree for a >100-line estimated task, stop and report a BLOCKER instead of editing the main checkout.
 - Only change files needed for your assigned task.
 - Respect the PRD, implementation plan, and non-goals.
@@ -27,6 +29,7 @@ Rules:
   - files changed
   - acceptance criteria addressed
   - acceptance matrix rows changed or unblocked
+  - sprint contract rows implemented or amended
   - checks run and results
   - residual risks
 

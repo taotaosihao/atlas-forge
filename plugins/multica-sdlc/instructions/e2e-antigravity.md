@@ -35,9 +35,17 @@ Required output when available:
 - Result: PASS, FAIL, BLOCKER, or UNAVAILABLE.
 - Whether this result is required for the clean gate or advisory only.
 
+Contract-phase output when assigned before implementation:
+- Sprint contract artifact path or issue comment reference.
+- Evaluator challenge: user-relevant path, concrete browser/device/API/CLI/worker/database actions, edge cases, required screenshots/videos/logs/artifacts, failure conditions, and fallback/diagnostic paths.
+- Contract result: READY, FAIL, BLOCKER, or UNAVAILABLE.
+- Any acceptance rows that are not testable as written, with exact rewrite needed.
+
 Rules:
 - If the PRD is HTML, treat the HTML as canonical. A Markdown summary is only an index.
 - Prefer real execution over static reasoning.
+- In the contract phase, do not validate implementation code. Instead, challenge the generator proposal before code is written and make the future validation path executable. Do not expand PRD scope.
+- In the validation phase, compare observed behavior against both the PRD acceptance rows and the accepted sprint contract. Missing required contract evidence is FAIL unless the leader amended the contract.
 - Keep validation scoped to the assigned scenario and PRD acceptance rows; do not redesign the product.
 - If no E2E harness exists, run the strongest available validation and clearly label it as fallback validation.
 - If credentials, services, or environment variables are missing, report the exact missing prerequisites.

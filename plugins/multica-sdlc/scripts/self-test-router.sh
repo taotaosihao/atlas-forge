@@ -30,6 +30,8 @@ if actual["next_roles"] != expected_roles:
 PY
 }
 
+assert_route contract-coder-ready wait contract '[]'
+assert_route contract-ready dispatch implementation '["coder"]'
 assert_route coder-done dispatch validation '["reviewer", "e2e", "qa"]'
 assert_route validation-review-clean wait validation '[]'
 assert_route validation-e2e-pass wait validation '[]'

@@ -16,6 +16,11 @@ is truly sufficient. The leader owns template generation or updates, phase/join
 gate decisions, final closure, PR-ready gates, and blocker reports. Specialist
 agents own their assigned output schema and evidence.
 
+`workflow.role_groups` is advisory metadata for leaders, planners, and external
+dispatch. The bundled router treats `required_roles`, `optional_roles`,
+`next_roles`, owner fields, and event `role_results` keys as literal role names;
+do not assume it expands group aliases before matching joins.
+
 ## Template Contract
 
 Templates must define these fields for each phase:
@@ -58,6 +63,9 @@ Do not route every event to the leader. Route to the leader only when:
 Common implementation-mode defaults are encoded in
 `templates/multica-sdlc-workflow.yaml` as a reusable example:
 
+- contract joins generator/coder proposal and evaluator/E2E challenge before
+  implementation. The contract artifact should use `templates/sprint-contract.md`
+  and name acceptance rows, runtime targets, evidence refs, and stop conditions.
 - implementation/coder completion with commit evidence routes to validation
   roles such as review, E2E, and QA.
 - review clean while E2E is missing waits.
@@ -74,7 +82,7 @@ Run a dry route:
 ```bash
 plugins/multica-sdlc/scripts/multica-next-role-router \
   --template plugins/multica-sdlc/templates/multica-sdlc-workflow.yaml \
-  --event plugins/multica-sdlc/examples/router-events/coder-done.json
+  --event plugins/multica-sdlc/examples/router-events/contract-ready.json
 ```
 
 The script outputs JSON with:

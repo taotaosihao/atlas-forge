@@ -10,6 +10,7 @@ description: Plan a task-specific Multica squad and agent configuration before s
 本 plugin 还提供可复用动态流程资产：
 
 - `templates/multica-sdlc-workflow.yaml`：默认模板示例，包含 phase、required/optional roles、join policy、repair/blocker/clean-gate owner、next phase、done criteria 和 timeout action。
+- `templates/sprint-contract.md`：implementation 模式下的完整 Planner / Generator / Evaluator 合同模板，用于编码前确认 generator proposal、evaluator challenge、accepted contract rows 和证据路径。
 - `scripts/multica-next-role-router`：事实型 next-role router，只解释模板和事件 JSON，不做大模型业务判断。
 - `instructions/` 与 `generated/`：Multica SDLC 角色说明来源，可用于 agent instruction 配置或审计。
 
@@ -79,6 +80,7 @@ description: Plan a task-specific Multica squad and agent configuration before s
    - 需要浏览器实操、网络面板、DOM、控制台、登录态或有头浏览器时，配置 chrome-devtools/browser/Playwright 能力。
 8. 设计门禁：
    - 规划门禁：任务边界、假设、角色矩阵、依赖、阻塞项。
+   - 合同门禁：implementation slice 在编码前完成 sprint contract，至少包含 generator/coder proposal、evaluator/E2E challenge、accepted contract rows、真实 runtime target、evidence refs、stop conditions；tiny slice 可由 leader 明确豁免。
    - 开发门禁：worktree、实现分工、代码审查、E2E、修复循环。
    - 证据门禁：截图、录屏、API 请求/响应、日志、测试命令、数据断言。
    - 交付门禁：最终产物、阻塞报告、PR 或无需 PR 的说明。

@@ -18,6 +18,7 @@ Required output:
 - Missing tests or verification gaps.
 - Verification evidence reviewed: acceptance matrix rows, commands, runtime targets, inputs/payloads where relevant, screenshots/artifacts where relevant, metrics/logs, and commit SHA alignment.
 - Evidence manifest reviewed: required/advisory row status, evidence refs, runtime targets, missing_evidence, fallback_only, wrong_commit, and commit SHA alignment.
+- Sprint contract reviewed: generator proposal, evaluator challenge, accepted contract rows, scope fit, testability, evidence refs, amendments, and whether implementation stayed inside the accepted contract.
 - Scope drift, if implementation adds behavior not in the PRD.
 - Scorecards for every agent-produced artifact you reviewed, including plans, code/repair output, tests/E2E reports, docs summaries, or PR bodies.
 
@@ -28,6 +29,7 @@ Rules:
 - If the PRD is HTML, verify the implementation against the HTML PRD, not only the issue summary.
 - Review docs changes if docs were modified.
 - Treat missing validation evidence as a product risk, not a paperwork issue. If a required PRD acceptance row lacks real evidence on the final commit SHA, mark BLOCKING.
+- Treat missing, stale, or unapproved sprint contract evidence as BLOCKING for non-tiny implementation slices. If implementation started without a required contract or diverged from the accepted contract without leader approval, mark BLOCKING.
 - Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` as the evidence contract. If the evidence manifest is missing, stale, fallback-only, static-only for UI, or tied to the wrong commit for a required row, mark BLOCKING.
 - For UI/UX PRDs, do not mark CLEAN without real rendered-screen evidence: screenshots or video, DOM/layout metrics, console/network checks, responsive coverage, and critical interaction checks from the acceptance matrix.
 - If an E2E report skipped a required check, used only static reasoning, used a static design artifact as the target, or only proved that assets loaded, mark BLOCKING unless the PRD explicitly made that row optional.

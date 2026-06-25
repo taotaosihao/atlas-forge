@@ -107,6 +107,17 @@ Scaffold a design-fidelity review task plus contract/report/verdict artifacts:
 ~/.codex/workflow/bin/codex-design-review init "<title>" "<page url or route>" "<design source>"
 ```
 
+Lightweight implementation contracts:
+
+- Use `workflow/templates/implementation-contract.md` before non-tiny local
+  implementation work when the task changes user-visible behavior, touches
+  multiple files, changes UI/API/CLI/background-job behavior, or has meaningful
+  edge cases.
+- Tiny precise fixes may skip the contract when the acceptance path is obvious.
+- The contract records goal, non-goals, acceptance criteria, real validation
+  steps, evidence paths, and stop conditions. It is the Atlas workflow
+  lightweight counterpart to the full Multica sprint contract.
+
 Refresh the installed local plugin copy after changing a plugin source directory:
 
 ```bash

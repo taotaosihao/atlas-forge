@@ -19,12 +19,25 @@ Each `workflow.phases[]` entry is a routing unit. A phase must define:
 | `done_criteria` | Human-readable completion evidence expectation. |
 | `timeout_action` | Routing action when the phase/join times out. |
 
+`workflow.role_groups` is advisory metadata for leaders, planners, and external
+dispatch systems. The bundled router does not expand group aliases today; it
+treats `required_roles`, `optional_roles`, `next_roles`, owner fields, and event
+`role_results` keys as literal role names. If a template needs multiple concrete
+agents in a join, name the concrete role keys directly in the phase or have the
+leader/external dispatcher map the group before calling the router.
+
 Optional routing blocks override the defaults:
 
 - `on_join_wait`
 - `on_join_complete`
 - `on_failure`
 - `on_blocker`
+
+The default SDLC template includes a `contract` phase before implementation.
+That phase uses `artifact_type: sprint-contract` and joins the generator/coder
+proposal with the evaluator/E2E challenge before code is written. Optional
+reviewer or Evidence QA output may tighten the contract; available failures or
+blockers still route through the template failure/blocker owners.
 
 Each routing block may define:
 

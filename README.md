@@ -136,6 +136,13 @@ bash -n scripts/install-atlas-forge.sh
 bash -n scripts/sync-live-agents.sh
 bash -n scripts/sync-live-workflow.sh
 plugins/multica-sdlc/scripts/self-test-router.sh
+latest_atlas_cache="$(find ~/.codex/plugins/cache/atlas-forge/atlas-workflow -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+latest_multica_cache="$(find ~/.codex/plugins/cache/atlas-forge/multica-sdlc -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+cmp plugins/atlas-workflow/skills/task/SKILL.md "$latest_atlas_cache/skills/task/SKILL.md"
+cmp plugins/atlas-workflow/skills/team/SKILL.md "$latest_atlas_cache/skills/team/SKILL.md"
+cmp plugins/multica-sdlc/.codex-plugin/plugin.json "$latest_multica_cache/.codex-plugin/plugin.json"
+cmp plugins/multica-sdlc/templates/multica-sdlc-workflow.yaml "$latest_multica_cache/templates/multica-sdlc-workflow.yaml"
+cmp plugins/multica-sdlc/templates/sprint-contract.md "$latest_multica_cache/templates/sprint-contract.md"
 ```
 
 4. Commit and push:

@@ -11,6 +11,13 @@ This plugin packages reusable Multica SDLC orchestration assets for Codex:
 See `docs/workflow-template-schema.md` for the template field contract and
 `docs/hook-integration.md` for Claude/Codex hook boundaries.
 
+The default SDLC workflow includes a full Planner / Generator / Evaluator
+contract flow for implementation tasks. Planner assigns contract owners,
+generator/coder proposes the slice before writing code, evaluator/E2E challenges
+the proposal with real validation paths, and optional reviewer/Evidence QA
+checks scope and evidence readiness. The canonical template lives at
+`templates/sprint-contract.md`.
+
 The router is intentionally not an LLM judge. It reads a workflow template and
 facts from a Multica issue/run/comment event, then returns the next role group,
 wait state, repair owner, blocker owner, or clean-gate owner defined by the

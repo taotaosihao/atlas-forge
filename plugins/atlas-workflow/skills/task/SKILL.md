@@ -20,17 +20,30 @@ Follow this loop:
    - then `~/.codex/workflow/bin/codex-workflow start <task-id>`
 4. Use `$atlas-workflow:analyze` when the task still needs read-only evidence synthesis across multiple files.
 5. Use `$atlas-workflow:clarify` when the task needs explicit non-goals, decision boundaries, and acceptance criteria before execution.
-6. Use `$atlas-workflow:team` when discussion, staffing, or promotion should happen before code changes.
-7. For nontrivial direct execution that intentionally bypasses earlier planning layers, record:
+6. Default to `$atlas-workflow:team` for non-tiny bounded work before code changes:
+   - Use team when the task changes behavior, touches multiple files, has meaningful implementation choices, benefits from reviewer/evaluator judgment, or needs a lightweight implementation contract.
+   - Tiny precise fixes may stay in direct task flow when scope and verification are obvious.
+   - Explicit user requests such as "directly implement", "no multi-agent", or "tiny fix" override this default when safe.
+   - When team is skipped for a non-tiny task, record why direct execution is still appropriate.
+   - If the default team round is interrupted or stalls, follow `$atlas-workflow:team` fallback: inspect partial lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct task execution only when no unresolved blocking issue remains.
+7. Use `$atlas-workflow:team` specifically for discussion, staffing, review, contract formation, or promotion before code changes.
+8. For nontrivial direct execution that intentionally bypasses earlier planning layers or the default team flow, record:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent task --risk <low|medium|high> --decision use --reason "<why direct task execution is appropriate>"`
-8. Do not record route-decision for tiny precise fixes where scope and verification are already obvious.
-9. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
-10. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.
-11. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need the task details.
-12. If this is a small precise fix with intentionally minimal artifacts, run:
+9. Do not record route-decision for tiny precise fixes where scope and verification are already obvious.
+10. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
+11. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.
+12. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need the task details.
+13. For non-tiny implementation work, create a lightweight implementation contract before editing code:
+    - Use `workflow/templates/implementation-contract.md` as the shape when a separate artifact is useful.
+    - Prefer forming this contract from the team decision when the default team flow ran.
+    - Required when the task changes user-visible behavior, touches multiple files, changes UI/API/CLI/background-job behavior, or has meaningful edge cases.
+    - Tiny precise fixes may skip this when the acceptance path is obvious; say why in the working note or final reply.
+    - The contract must name goal, non-goals, acceptance criteria, real validation command or browser/API/CLI action, evidence path, and stop conditions.
+    - Do not let the contract expand scope beyond the user request or the clarified spec.
+14. If this is a small precise fix with intentionally minimal artifacts, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --skip "<why artifacts are intentionally minimal>"`
-13. For nontrivial implementation with filled planning artifacts, run the relevant `ready` check before reporting execution readiness or handoff.
-14. Before reporting success, verify the work with real commands.
-15. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
-16. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
-17. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.
+15. For nontrivial implementation with filled planning artifacts, run the relevant `ready` check before reporting execution readiness or handoff.
+16. Before reporting success, verify the work with real commands.
+17. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
+18. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
+19. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.

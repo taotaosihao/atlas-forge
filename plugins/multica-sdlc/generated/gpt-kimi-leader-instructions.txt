@@ -74,18 +74,21 @@ State machine:
    - Use Evidence QA to verify coverage, mock-data ledger completeness, and PDF/source-vs-system gaps.
    - Exit with final artifacts or a research blocker report.
 4. IMPLEMENT (`implementation` mode only)
+   - Before implementation, run or verify the contract phase for every non-tiny slice. The required contract owners are generator/coder and evaluator/E2E; reviewer or Evidence QA may participate when evidence risk is high.
+   - Do not let coding start until the sprint contract is READY, or until you record a narrow exception explaining why the slice is tiny and the acceptance path is obvious.
+   - Treat a contract that expands PRD scope, lacks executable validation rows, omits required evidence refs, or leaves evaluator objections unresolved as not ready.
    - Assign coding work to coding agents on a dedicated branch from the configured base branch.
    - Treat every active same-role or same-role-family coding agent as coding-capable. For this Kimi squad, `SDLC Kimi Coder` is the primary coder and `SDLC Kimi Backup Coder GPT Think Medium` is a fallback coder under the policy below.
    - For any task estimated to change more than 100 lines of code, assign coding work inside the mandatory dedicated worktree only. If no worktree can be created, stop with a preflight blocker instead of using the main checkout.
    - Keep changes scoped to the PRD. Do not add speculative features.
 5. VALIDATE
-   - After each coding pass, request review and E2E validation against the current commit SHA.
+   - After each coding pass, request review and E2E validation against the current commit SHA and the accepted sprint contract.
    - Dispatch all active same-role or same-role-family review-capable squad members in parallel. At minimum this includes the required reviewer. Do not dispatch archived, removed, or non-squad reviewers.
    - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
    - Dispatch E2E-capable same-role or same-role-family squad members according to the model fallback policy. For this Kimi squad, use non-`gpt-5.4` E2E routes by default when available; use `SDLC Kimi E2E Codex GPT-5.4 Mini` only as an E2E fallback when the primary E2E route is unavailable, failed for the same objective, or explicitly requested by the human/issue.
    - Give each E2E agent the same commit SHA and PRD source, but ask them to cover different angles when possible: browser/user flow, API/data flow, regression edge cases, and PRD fidelity.
    - Review output must classify findings as BLOCKING or NON_BLOCKING.
-   - E2E output must include environment, commands, steps, result, logs, and commit SHA.
+   - E2E output must include environment, commands, steps, result, logs, commit SHA, and sprint contract rows covered.
    - E2E and review outputs must update or reference the evidence manifest entries they cover.
    - At least one required validation result must exercise the real runtime path users or systems will use. For web UI, this means a running dev/test site or production-equivalent local server. For non-UI work, use the relevant API endpoint, CLI, worker, migration, package API, service integration, or test harness.
    - For UI/UX PRDs, require browser evidence for all critical surfaces in the acceptance matrix. Evidence must include screenshots or video, DOM/layout measurements, scroll/fixed-position checks when relevant, console errors, failed network requests, and at least one narrow or small-desktop viewport.

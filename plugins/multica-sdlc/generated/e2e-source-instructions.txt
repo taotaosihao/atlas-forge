@@ -26,8 +26,16 @@ Required output:
 - Result: PASS or FAIL.
 - Whether this result is required for the clean gate or advisory only.
 
+Contract-phase output when assigned before implementation:
+- Sprint contract artifact path or issue comment reference.
+- Evaluator challenge: user-relevant path, concrete browser/device/API/CLI/worker/database actions, edge cases, required screenshots/videos/logs/artifacts, failure conditions, and fallback/diagnostic paths.
+- Contract result: READY, FAIL, or BLOCKER.
+- Any acceptance rows that are not testable as written, with exact rewrite needed.
+
 Rules:
 - Prefer real execution over static reasoning.
+- In the contract phase, do not validate implementation code. Instead, challenge the generator proposal before code is written and make the future validation path executable. Do not expand PRD scope.
+- In the validation phase, compare observed behavior against both the PRD acceptance rows and the accepted sprint contract. Missing required contract evidence is FAIL unless the leader amended the contract.
 - Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` when reporting evidence. If you cannot update the manifest directly, output manifest-ready records.
 - If no E2E harness exists, run the strongest available validation and clearly label it as fallback validation.
 - If credentials, services, or environment variables are missing, report a BLOCKER with exact missing prerequisites.
@@ -40,10 +48,3 @@ Rules:
 - For `gearjob`, `beezer`, and `hive`, local deployment/runtime startup is required before PASS. Frontend/UI changes require screenshot evidence and GIF/MP4 evidence when interaction, animation, responsive behavior, or a multi-step flow changed. Backend/API/worker/data changes require command output, request/response, server log, job log, migration log, or database assertion evidence.
 - For framework-specific apps, test the framework runtime directly. Examples: Frappe/ERPNext Desk on a real bench site route, SPA through dev/preview server, server-rendered app through the app server, CLI packages through local CLI invocation, backend services through service/API calls, migrations through a real or disposable database.
 - If you must use fallback validation, say exactly which required acceptance rows remain unvalidated. A fallback-only result for a required UI/user-flow row is FAIL unless the leader explicitly marked that row advisory.
-
-Antigravity vision bridge routing rules for deepseek-v4-pro:
-- This agent runs `deepseek-v4-pro` through ZenMux and has the `agy-bridge` MCP server attached from `https://github.com/sshahzaiib/agy-bridge.git`.
-- It may run browser automation, Playwright tests, DOM assertions, API checks, logs, and generate screenshot/video artifact files directly.
-- When a required row needs screenshot, video, rendered image/canvas, visual design fidelity, layout overflow visible only in pixels, or userguide screenshot content judgment, use `agy-bridge` to delegate the visual inspection to Antigravity instead of marking the row pending solely because DeepSeek is text-only. Pass `cwd`, relevant artifact paths, expected/actual criteria, viewport, commit SHA, and the acceptance row ID.
-- Prefer `delegate` for visual inspection tasks, `adversarial_review` for visual/design-fidelity critique, `analyze_files` for large artifact manifests or logs, and `follow_up` with the returned session id for iterative checks.
-- If `agy-bridge` or Antigravity is unavailable, report the exact bridge failure and mark the affected required visual row FAIL/BLOCKER or pending visual validation rather than pretending to inspect pixels.

@@ -1,0 +1,17 @@
+{
+  "issue_id": "MULTICA-1",
+  "phase": "contract",
+  "source_role": "e2e",
+  "source_comment_id": "comment-contract-ready-1",
+  "run_id": "run-contract-ready-1",
+  "artifact_type": "sprint-contract",
+  "result": "READY",
+  "completed_roles": {
+    "coder": {
+      "result": "READY"
+    },
+    "e2e": {
+      "result": "READY"
+    }
+  }
+}

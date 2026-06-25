@@ -102,7 +102,8 @@ State machine:
 2. PLAN
    - Ask the planner to create a mode-appropriate plan. For implementation, this is an implementation plan. For product research, this is a research/staffing/evidence plan.
    - If multiple active planner-capable squad members fit the selected task mode, they may be dispatched in parallel for independent plans or critique, then reconcile into one plan.
-   - Planner routing for this DeepSeek squad: honor explicit human or issue instructions first. If no planner is specified, choose by task complexity: use `SDLC DeepSeek Planner` for straightforward, low-risk PRDs with a clear single-repo scope, known validation path, and an estimated code delta of `<=100 lines`; use `SDLC DeepSeek GPT Planner Backup` for complex or high-risk PRDs, including `unknown` or `>100 lines` estimates, cross-module or multi-repo work, UI plus backend changes, data/schema/security/auth changes, deployment/runtime uncertainty, HTML PRD fidelity risk, ambiguous acceptance criteria, prior failed/blocked runs, or heavy E2E evidence requirements. For very complex, ambiguous, or contentious tasks, dispatch both DeepSeek and GPT planners in parallel and reconcile their outputs before implementation.
+   - Planner routing for this DeepSeek squad: honor explicit human or issue instructions first. If no planner is specified, use `SDLC DeepSeek Planner` by default for both straightforward and complex PRDs. Do not route planner, leader, reviewer, evidence QA, docs summary, clean-gate, or PR-ready-gate ownership to `gpt-5.4` agents. If complex, high-risk, ambiguous, or contentious work needs extra planning critique, use a non-`gpt-5.4` planner/reviewer/technical-feasibility role, or stop with a staffing blocker if no compliant planning route is available.
+   - Model fallback policy: `gpt-5.4` is allowed only as a fallback for coder or E2E roles. It must not be used as fallback for leader, planner, reviewer, evidence QA, docs summary, clean-gate, or PR-ready-gate ownership.
    - The plan must include tasks, owners, acceptance criteria, test commands, E2E scenarios, docs impact, non-goals, risks, and the high-priority repair policy.
    - The plan must estimate code delta size as `<=100 lines`, `>100 lines`, or `unknown`. Treat `unknown` as `>100 lines` for isolation.
    - If the estimate is `>100 lines` or `unknown`, create or require a dedicated git worktree and branch before implementation. Record the worktree path and branch in the artifact manifest.
@@ -119,18 +120,21 @@ State machine:
    - Do not advance from a research phase because a specialist acknowledged the assignment. Advance only after the specialist posts evidence or an explicit blocker/residual-risk record that Evidence QA or the leader can audit.
    - Exit with final artifacts or a research blocker report.
 4. IMPLEMENT (`implementation` mode only)
+   - Before implementation, run or verify the contract phase for every non-tiny slice. The required contract owners are generator/coder and evaluator/E2E; reviewer or Evidence QA may participate when evidence risk is high.
+   - Do not let coding start until the sprint contract is READY, or until you record a narrow exception explaining why the slice is tiny and the acceptance path is obvious.
+   - Treat a contract that expands PRD scope, lacks executable validation rows, omits required evidence refs, or leaves evaluator objections unresolved as not ready.
    - Assign coding work to coding agents on a dedicated branch from the configured base branch.
    - Treat every active same-role or same-role-family coding agent as coding-capable. For example, the default `SDLC Coder`, `SDLC Coder Deepseek`, and `SDLC Coder Antigravity CLI` can all use the `coder` role and run in parallel when assigned explicit non-overlapping implementation or repair slices, or intentional independent second-pass repair tasks.
    - For any task estimated to change more than 100 lines of code, assign coding work inside the mandatory dedicated worktree only. If no worktree can be created, stop with a preflight blocker instead of using the main checkout.
    - Keep changes scoped to the PRD. Do not add speculative features.
 5. VALIDATE
-   - After each coding pass, request review and E2E validation against the current commit SHA.
+   - After each coding pass, request review and E2E validation against the current commit SHA and the accepted sprint contract.
    - Dispatch all active same-role or same-role-family review-capable squad members in parallel. At minimum this includes the required reviewer. Do not dispatch archived, removed, or non-squad reviewers.
    - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
    - Dispatch every E2E-capable same-role or same-role-family squad member in parallel. At minimum this includes the regular DeepSeek E2E agent, the DeepSeek E2E peer when available, and the Antigravity E2E agent for browser and visual evidence rows. The two DeepSeek E2E agents have `agy-bridge` attached and may delegate screenshot/video/image inspection to Antigravity when visual judgment is required. If the Antigravity runtime is unavailable, record it and continue unless the issue explicitly marks Antigravity E2E as required.
    - Give each E2E agent the same commit SHA and PRD source, but ask them to cover different angles when possible: browser/user flow, API/data flow, regression edge cases, and PRD fidelity.
    - Review output must classify findings as BLOCKING or NON_BLOCKING.
-   - E2E output must include environment, commands, steps, result, logs, and commit SHA.
+   - E2E output must include environment, commands, steps, result, logs, commit SHA, and sprint contract rows covered.
    - E2E and review outputs must update or reference the evidence manifest entries they cover.
    - At least one required validation result must exercise the real runtime path users or systems will use. For web UI, this means a running dev/test site or production-equivalent local server. For non-UI work, use the relevant API endpoint, CLI, worker, migration, package API, service integration, or test harness.
    - For UI/UX PRDs, require browser evidence for all critical surfaces in the acceptance matrix. Evidence must include screenshots or video, DOM/layout measurements, scroll/fixed-position checks when relevant, console errors, failed network requests, and at least one narrow or small-desktop viewport.

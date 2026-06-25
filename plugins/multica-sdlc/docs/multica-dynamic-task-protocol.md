@@ -53,10 +53,16 @@ Run the flow as an issue assigned to the Multica leader/squad:
    - For every proposed edit to an existing agent, record the `agent tasks` and `issue list --assignee-id` evidence proving there is no active issue/task.
 2. PLAN
    - If multiple active planner-capable agents exist for the selected task mode, they may run in parallel and the leader reconciles their outputs.
+   - For `implementation`, define contract owners for each implementation slice: generator/coder owner, evaluator/E2E owner, optional reviewer or Evidence QA owner, sprint contract artifact path, covered acceptance rows, and the real runtime targets that must be negotiated before coding.
 3. EXECUTE
    - For `product-research-prd`, execute discovery, mock-data validation, synthesis, and evidence QA. No branch, code edit, draft PR, implementation review, or repair loop.
    - For `implementation`, continue with IMPLEMENT below.
 4. IMPLEMENT (`implementation` mode only)
+   - Before coding, complete the contract phase for each assigned slice unless the leader explicitly marks the slice as a tiny implementation with obvious acceptance. Use `templates/sprint-contract.md` as the canonical shape.
+   - The generator/coder writes a generator proposal: intended change, boundaries, touched surfaces, assumptions, risks, and proposed validation rows.
+   - The evaluator/E2E writes an evaluator challenge before code is written: user-relevant path, real browser/API/CLI/worker/database actions, edge cases, failure conditions, and required evidence.
+   - Reviewer or Evidence QA checks scope, testability, evidence refs, required/advisory split, and PRD fidelity when assigned.
+   - Implementation may start only after the required generator and evaluator roles report `READY` for the sprint contract, or the leader records a scoped exception.
    - If the plan estimates more than 100 lines of code changes, implementation must use a dedicated git worktree and branch.
    - If multiple active coding-capable agents exist for the same role or role family, they may run in parallel on explicit non-overlapping implementation or repair slices. For example, the default `SDLC Coder`, `SDLC Coder Deepseek`, and `SDLC Coder Antigravity CLI` can all use the `coder` role and act as peers.
 5. VALIDATE
@@ -65,6 +71,7 @@ Run the flow as an issue assigned to the Multica leader/squad:
    - Dispatch all E2E-capable same-role or same-role-family squad members in parallel for the same commit SHA.
    - Regular DeepSeek E2E and DeepSeek E2E peer results are independent; required E2E agents must all pass for a clean round.
    - Direct Antigravity runtime E2E runs in parallel when the Multica Antigravity runtime agent is online. It is advisory by default unless the issue explicitly requires Antigravity E2E; available FAIL/BLOCKER findings still block.
+   - Validation must compare the final implementation against both the PRD acceptance rows and the accepted sprint contract. Missing contract rows, unexecuted required contract evidence, or implementation outside the accepted contract are validation failures unless the leader approved a contract amendment.
 6. REPAIR (`implementation` mode only)
 7. CLEAN-GATE
    - For `product-research-prd`, clean means required pages/flows/artifacts are covered, evidence is attached, and unresolved gaps are explicit.
