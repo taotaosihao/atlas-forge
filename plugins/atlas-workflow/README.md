@@ -12,6 +12,7 @@ After the plugin is installed, these entrypoints are available:
 - `$atlas-workflow:brainstorm`
 - `$atlas-workflow:analyze`
 - `$atlas-workflow:clarify`
+- `$atlas-workflow:intake`
 - `$atlas-workflow:team`
 - `$atlas-workflow:learn`
 - `$atlas-workflow:design-review`
@@ -29,6 +30,33 @@ judgment, or should produce a lightweight implementation contract. Tiny precise
 fixes may still use direct `$atlas-workflow:task` flow when scope and
 verification are obvious, and explicit user requests to avoid multi-agent should
 be honored when safe.
+
+## Short Request Intake Gate
+
+One-line or low-information requests are not enough to start coding by default.
+First run a short intake check when the request has multiple plausible meanings,
+lacks an acceptance path, or omits important user, data, permission, deployment,
+or workflow boundaries. Give critical feedback before implementation: name the
+main ambiguity, risk, simpler alternative, or stop condition.
+
+Direct execution is allowed only for a tiny escape hatch: the affected surface,
+expected behavior, validation path, and risk are all clear; the change does not
+touch data, permissions, deployment, migration, product strategy, or architecture
+boundaries; and the scope is normally a single file or similarly small. If the
+tiny classification is uncertain, ask one short question before coding.
+
+Non-tiny work must have auditable documentation before code changes. Existing
+external issues, PRDs, or design docs may count as equivalent evidence, but the
+current workflow artifact must cite them and fill any missing acceptance,
+verification, risk, and stop-condition gaps. At minimum, use `context.md` and
+`spec.md`; for execution-ready changes, also use a project doc or lightweight
+implementation contract.
+
+This gate applies to implementation-adjacent Atlas entries, including
+`$atlas-workflow:task`, `$atlas-workflow:cw`, and `$atlas-workflow:worktree`.
+`$atlas-workflow:intake` asks the blocking boundary questions, and
+`$atlas-workflow:clarify` turns the chosen direction into documented execution
+boundaries.
 
 ## 输出语言
 

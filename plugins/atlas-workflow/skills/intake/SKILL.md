@@ -18,6 +18,26 @@ This is the deep-interview style intake layer:
 - Use `$atlas-workflow:intake` when intent, scope, stakeholder, constraints, or success shape is ambiguous.
 - Use `$atlas-workflow:clarify` when the direction is chosen and execution boundaries need to be locked.
 
+## Short Request Intake Gate
+
+Treat one-line or low-information requests as intake candidates by default when
+they have multiple plausible meanings, lack a clear acceptance path, or omit
+important user, data, permission, deployment, workflow, or ownership boundaries.
+Ask only the fewest blocking questions needed, usually 1-3 questions, and include
+critical feedback about the main ambiguity, risk, simpler alternative, or stop
+condition. Do not edit code during intake.
+
+Direct execution is allowed only through the tiny escape hatch: the affected
+surface, expected behavior, validation path, and risk are all clear; the change
+does not touch data, permissions, deployment, migration, product strategy, or
+architecture boundaries; and the scope is normally a single file or similarly
+small. If tiny classification is uncertain, ask one short question first.
+
+Non-tiny requests must produce auditable documentation before coding. Existing
+external issues, PRDs, or design docs may count as equivalent evidence only when
+the current artifact cites them and fills missing acceptance, verification, risk,
+and stop-condition gaps.
+
 Follow this loop:
 
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
@@ -48,4 +68,4 @@ Hard rules:
 
 - Intake does not produce execution-ready specs.
 - Do not force `office-hours -> brainstorm -> intake -> clarify` as a mandatory chain.
-- If the user already gave a precise implementation request, skip intake and use `$atlas-workflow:task`.
+- If the user already gave a precise implementation request, skip intake and use `$atlas-workflow:task` only when the tiny escape hatch or a complete non-tiny documentation path is satisfied.

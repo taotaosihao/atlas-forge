@@ -17,6 +17,28 @@ This is the execution clarification layer:
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the solution shape still needs options and tradeoffs.
 - Use `$atlas-workflow:clarify` when the direction is chosen and the task needs explicit non-goals, decision boundaries, acceptance criteria, and verification before execution.
 
+## Short Request Clarification
+
+When clarifying a one-line or low-information request, explicitly turn the short
+request into an implementable plan before any coding starts. The clarification
+should include:
+
+- Original request.
+- Restated requirement.
+- Critical feedback: ambiguity, risk, simpler alternative, rejected path, or stop condition.
+- Tiny escape decision, including why direct execution is or is not allowed.
+- Goal and non-goals.
+- Decision boundaries.
+- Acceptance criteria.
+- Verification plan.
+- Required documentation source: workflow artifacts, project doc, lightweight implementation contract, or an existing external issue, PRD, or design doc cited from the current artifact.
+
+Non-tiny work must have auditable documentation before code changes. Existing
+external issues, PRDs, or design docs may count as equivalent evidence only when
+the current artifact cites them and fills missing acceptance, verification, risk,
+and stop-condition gaps. If tiny classification is uncertain, ask one short
+question before coding.
+
 Follow this loop:
 
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
@@ -42,6 +64,9 @@ Follow this loop:
    - Decision Boundaries
    - Acceptance Criteria
    - Verification Plan
+   - Critical Feedback
+   - Tiny Escape Decision
+   - Stop Conditions
 10. Make acceptance criteria command-verifiable or user-visible.
 11. When the next step is non-tiny implementation, include an implementation-contract expectation:
    - whether `workflow/templates/implementation-contract.md` should be filled before coding

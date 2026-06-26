@@ -11,6 +11,29 @@ Use the local task helper for this request.
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
 - 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
+## Short Request Intake Gate
+
+Before editing code, classify the request. One-line or low-information requests
+default to intake or clarify when they have multiple plausible meanings, lack a
+clear acceptance path, or omit important user, data, permission, deployment,
+workflow, or ownership boundaries. In that case, do not edit code; ask the
+fewest blocking questions needed and give critical feedback about the main
+ambiguity, risk, simpler alternative, or stop condition.
+
+Direct task execution is allowed only through the tiny escape hatch: the
+affected surface, expected behavior, validation path, and risk are all clear; the
+change does not touch data, permissions, deployment, migration, product strategy,
+or architecture boundaries; and the scope is normally a single file or similarly
+small. If tiny classification is uncertain, ask one short question before
+coding.
+
+Non-tiny work must have auditable documentation before code changes. Existing
+external issues, PRDs, or design docs may count as equivalent evidence only when
+the current workflow artifact cites them and fills missing acceptance,
+verification, risk, and stop-condition gaps. At minimum use `context.md` and
+`spec.md`; execution-ready changes should also have a project doc or lightweight
+implementation contract.
+
 Follow this loop:
 
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
@@ -19,7 +42,7 @@ Follow this loop:
    - `~/.codex/workflow/bin/codex-workflow init-task "<short title>" "<clear done condition>"`
    - then `~/.codex/workflow/bin/codex-workflow start <task-id>`
 4. Use `$atlas-workflow:analyze` when the task still needs read-only evidence synthesis across multiple files.
-5. Use `$atlas-workflow:clarify` when the task needs explicit non-goals, decision boundaries, and acceptance criteria before execution.
+5. Use `$atlas-workflow:clarify` when the request fails the short request intake gate or the task needs explicit non-goals, decision boundaries, and acceptance criteria before execution.
 6. Default to `$atlas-workflow:team` for non-tiny bounded work before code changes:
    - Use team when the task changes behavior, touches multiple files, has meaningful implementation choices, benefits from reviewer/evaluator judgment, or needs a lightweight implementation contract.
    - Tiny precise fixes may stay in direct task flow when scope and verification are obvious.
