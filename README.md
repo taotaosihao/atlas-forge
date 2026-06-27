@@ -65,6 +65,13 @@ Multica agent assets into `~/.agents`, and refreshes command shims in
 
 After installation, start a new Codex thread so the updated skills are loaded.
 
+## Remote Agent Deployment
+
+远端主机上的 agent 部署请优先使用
+[远端 Agent 部署手册](docs/remote-agent-deployment.md)。该手册按从空主机到
+可用 agent runtime 的顺序记录 SSH 授权、全量安装、非默认目录、仅刷新
+`~/.agents` 资产、验证清单、更新流程和常见故障处理。
+
 ## Agent Install
 
 The full installer also installs the reusable Multica agent assets. It syncs:
