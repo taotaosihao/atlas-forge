@@ -13,21 +13,22 @@ assert_route() {
   local expected_roles_json="$4"
   local output
   output="$("$ROUTER" --template "$TEMPLATE" --event "$EVENTS/$event_name.json")"
-  python3 - "$output" "$expected_action" "$expected_phase" "$expected_roles_json" <<'PY'
-import json
-import sys
+  node - "$output" "$expected_action" "$expected_phase" "$expected_roles_json" <<'NODE'
+const actual = JSON.parse(process.argv[2]);
+const expectedAction = process.argv[3];
+const expectedPhase = process.argv[4];
+const expectedRoles = JSON.parse(process.argv[5]);
 
-actual = json.loads(sys.argv[1])
-expected_action = sys.argv[2]
-expected_phase = sys.argv[3]
-expected_roles = json.loads(sys.argv[4])
-if actual["action"] != expected_action:
-    raise SystemExit(f"action mismatch: {actual['action']} != {expected_action}")
-if actual["next_phase"] != expected_phase:
-    raise SystemExit(f"phase mismatch: {actual['next_phase']} != {expected_phase}")
-if actual["next_roles"] != expected_roles:
-    raise SystemExit(f"roles mismatch: {actual['next_roles']} != {expected_roles}")
-PY
+if (actual.action !== expectedAction) {
+  throw new Error(`action mismatch: ${actual.action} != ${expectedAction}`);
+}
+if (actual.next_phase !== expectedPhase) {
+  throw new Error(`phase mismatch: ${actual.next_phase} != ${expectedPhase}`);
+}
+if (JSON.stringify(actual.next_roles) !== JSON.stringify(expectedRoles)) {
+  throw new Error(`roles mismatch: ${JSON.stringify(actual.next_roles)} != ${JSON.stringify(expectedRoles)}`);
+}
+NODE
 }
 
 assert_route contract-coder-ready wait contract '[]'
@@ -44,12 +45,11 @@ tmp_store="$(mktemp)"
 trap 'rm -f "$tmp_store"' EXIT
 "$ROUTER" --template "$TEMPLATE" --event "$EVENTS/coder-done.json" --dedupe-store "$tmp_store" --record-dedupe >/dev/null
 duplicate="$("$ROUTER" --template "$TEMPLATE" --event "$EVENTS/coder-done.json" --dedupe-store "$tmp_store")"
-python3 - "$duplicate" <<'PY'
-import json
-import sys
-actual = json.loads(sys.argv[1])
-if actual["action"] != "duplicate":
-    raise SystemExit(f"dedupe mismatch: {actual['action']} != duplicate")
-PY
+node - "$duplicate" <<'NODE'
+const actual = JSON.parse(process.argv[2]);
+if (actual.action !== "duplicate") {
+  throw new Error(`dedupe mismatch: ${actual.action} != duplicate`);
+}
+NODE
 
 echo "router self-test passed"

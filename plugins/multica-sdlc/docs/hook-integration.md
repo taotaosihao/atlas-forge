@@ -44,6 +44,37 @@ Codex task. Use one of these integration paths:
 The plugin does not modify Multica runtime code. Treat hook installation as an
 operator/runtime step and verify it in the target Multica environment.
 
+## Codex WebSocket Listener
+
+For Codex-managed Multica SDLC work, `scripts/multica-sdlc-listener` provides a
+runtime supervisor path that does not depend on per-task hook propagation. It is
+a Node.js CLI and uses Node runtime built-ins (`fetch` and `WebSocket`) instead
+of an npm WebSocket dependency.
+
+Use it when non-terminal gates need parent visibility, for example a child issue
+entering `in_review` or a linked draft PR appearing before the child reaches
+`done/cancelled`.
+
+```bash
+plugins/multica-sdlc/scripts/multica-sdlc-listener \
+  --ws-url wss://.../ws \
+  --api-url https://... \
+  --workspace-slug sharp-cell \
+  --watch-parent GEW-36 \
+  --template plugins/multica-sdlc/templates/multica-sdlc-workflow.yaml \
+  --token-env MULTICA_TOKEN \
+  --dry-run
+```
+
+The listener hydrates issue/children/PR/metadata/task facts before routing and
+shares router code with `scripts/multica-next-role-router`. It does not change
+Multica runtime semantics and does not continuously poll. Startup/reconnect
+reconciliation is bounded to watched issues only.
+
+`--apply` is opt-in and must include `--allow-action`. The first version only
+executes `comment` and `metadata`; `leader-task` remains blocked until a stable
+entry is confirmed.
+
 ## Dispatch Boundary
 
 The router may output `leader_required: true`, but that is only a routing fact.

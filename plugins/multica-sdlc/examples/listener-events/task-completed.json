@@ -1,0 +1,11 @@
+{
+  "type": "task:completed",
+  "actor_id": "agent-coder",
+  "actor_type": "agent",
+  "payload": {
+    "task_id": "task-123",
+    "agent_id": "agent-coder",
+    "issue_id": "GEW-37",
+    "status": "completed"
+  }
+}

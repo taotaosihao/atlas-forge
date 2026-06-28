@@ -1,0 +1,12 @@
+{
+  "type": "pull_request:updated",
+  "actor_id": "github-integration",
+  "actor_type": "system",
+  "payload": {
+    "linked_issue_ids": ["GEW-37"],
+    "pull_request": {
+      "state": "draft",
+      "head_sha": "abc123"
+    }
+  }
+}

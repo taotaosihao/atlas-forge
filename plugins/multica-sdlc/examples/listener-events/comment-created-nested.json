@@ -1,0 +1,12 @@
+{
+  "type": "comment:created",
+  "actor_id": "agent-coder",
+  "actor_type": "agent",
+  "payload": {
+    "comment": {
+      "id": "comment-123",
+      "issue_id": "GEW-37",
+      "content": "{\"multica_sdlc\":{\"phase\":\"implementation\",\"source_role\":\"coder\",\"result\":\"DONE\",\"commit_sha\":\"abc123\"}}"
+    }
+  }
+}

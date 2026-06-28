@@ -1,0 +1,13 @@
+{
+  "type": "issue:updated",
+  "actor_id": "agent-coder",
+  "actor_type": "agent",
+  "payload": {
+    "issue": {
+      "id": "GEW-37",
+      "parent_issue_id": "GEW-36",
+      "status": "in_review"
+    },
+    "status_changed": true
+  }
+}

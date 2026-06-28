@@ -1,0 +1,14 @@
+{
+  "type": "issue_metadata:changed",
+  "actor_id": "agent-coder",
+  "actor_type": "agent",
+  "payload": {
+    "issue_id": "GEW-37",
+    "metadata": {
+      "multica_sdlc.phase": "implementation",
+      "multica_sdlc.source_role": "coder",
+      "multica_sdlc.result": "DONE",
+      "multica_sdlc.commit_sha": "abc123"
+    }
+  }
+}
