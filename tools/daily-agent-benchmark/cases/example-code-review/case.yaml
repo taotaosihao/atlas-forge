@@ -1,0 +1,31 @@
+id: example-code-review
+title: Synthetic cache boundary review
+category: code-review
+source_type: sanitized-synthetic
+difficulty: small
+privacy: sanitized
+requires_network: false
+prompt_file: prompt.md
+oracle_file: oracle.md
+snapshot_dir: snapshot
+snapshot_manifest:
+  - path: app.py
+    description: Synthetic profile cache handler with a viewer-specific authorization bug.
+check:
+  type: hybrid
+  command: bash check.sh
+redaction_notes:
+  - Synthetic fixture written for this benchmark.
+  - Contains no real account names, hostnames, logs, credentials, or project code.
+scoring:
+  total_points: 20
+  dimensions:
+    issue_identification: 8
+    impact_reasoning: 4
+    fix_quality: 4
+    evidence_use: 2
+    communication: 2
+tags:
+  - review
+  - cache
+  - authorization

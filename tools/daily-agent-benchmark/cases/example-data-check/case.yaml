@@ -1,0 +1,31 @@
+id: example-data-check
+title: Synthetic weekly conversion audit
+category: data-check
+source_type: sanitized-synthetic
+difficulty: small
+privacy: sanitized
+requires_network: false
+prompt_file: prompt.md
+oracle_file: oracle.md
+snapshot_dir: snapshot
+snapshot_manifest:
+  - path: weekly_signups.csv
+    description: Synthetic segment-level visits and signups with an incorrect total rate.
+check:
+  type: script
+  command: bash check.sh
+redaction_notes:
+  - Synthetic rows written for this benchmark.
+  - Contains no customer records, raw exports, live metrics, or private business data.
+scoring:
+  total_points: 20
+  dimensions:
+    calculation_accuracy: 8
+    discrepancy_detection: 4
+    evidence_use: 3
+    recommendation: 3
+    communication: 2
+tags:
+  - data-check
+  - reconciliation
+  - reporting
