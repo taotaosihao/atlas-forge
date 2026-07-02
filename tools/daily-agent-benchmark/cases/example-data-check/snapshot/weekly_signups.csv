@@ -1,0 +1,5 @@
+segment,visits,signups,reported_rate
+alpha,120,18,0.1500
+beta,80,8,0.1000
+gamma,100,14,0.1400
+TOTAL,300,40,0.1200

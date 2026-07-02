@@ -18,6 +18,12 @@ cache/
 .tmp/
 tmp/
 
+# Daily agent benchmark local/private data
+tools/daily-agent-benchmark/runs/*
+!tools/daily-agent-benchmark/runs/.gitkeep
+tools/daily-agent-benchmark/cases/private-*/
+tools/daily-agent-benchmark/local-cases/
+
 # Multica local runtime/secrets are copied into ~/.agents locally, not stored.
 .agents/multica-sdlc/*-env.json
 .agents/multica-sdlc/*-settings.json
