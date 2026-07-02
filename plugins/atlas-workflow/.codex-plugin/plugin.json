@@ -1,6 +1,6 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260626150352",
+  "version": "0.1.0+codex.20260630092259",
   "description": "Atlas workflow plugin for bounded local Codex work.",
   "author": {
     "name": "Local Atlas",
@@ -40,7 +40,7 @@
       "Write"
     ],
     "defaultPrompt": [
-      "生成项目文档、workflow artifacts、交接材料和面向用户总结时，默认使用中文，除非用户明确要求其他语言",
+      "\u751f\u6210\u9879\u76ee\u6587\u6863\u3001workflow artifacts\u3001\u4ea4\u63a5\u6750\u6599\u548c\u9762\u5411\u7528\u6237\u603b\u7ed3\u65f6\uff0c\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00",
       "Use $atlas-workflow:task for bounded implementation or diagnosis",
       "Use $atlas-workflow:analyze for read-only cross-file synthesis",
       "Use $atlas-workflow:clarify before execution when boundaries are unclear"

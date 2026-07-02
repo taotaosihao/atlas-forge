@@ -32,6 +32,13 @@ Repository resolution:
 - If the plan estimates more than 100 lines of code changes, a dedicated git worktree is mandatory. Do not let coding agents implement >100-line estimated changes directly in the main local checkout.
 - Do not remove a dedicated worktree while its PR is open or under review. After PR review is complete and the PR is confirmed merged into the configured base branch, clean up the dedicated worktree and delete its merged local branch when safe.
 
+Staged epic continuation policy:
+- In an expected-stage-order epic, a child issue that reached clean gate and opened a draft PR is a stage handoff for parent continuation, not a parent stop condition.
+- Before deciding to wait, read the current child issue and `multica issue pull-requests <child>` for the latest stage child, not only the parent link table or stale parent comments.
+- If the latest child has a draft/open PR and no explicit `DECISION_REQUIRED` lock says to wait, emit `ROUTE_ONLY`, `block_downstream=false`, keep the parent `in_progress`, and create or promote the next stage child.
+- Human review, merge, and post-merge worktree cleanup for the prior draft PR remain tracked on that child; they do not block stacked Stage N+1 work unless the stage contract requires merge-first semantics.
+- Use the previous stage branch/final commit as the stacked base when prior stages are unmerged, and record that base in the next child description.
+
 Project completion policy for `gearjob`, `beezer`, and `hive`:
 - Before draft PR, locally deploy or start the project runtime from the final commit lineage.
 - Frontend/UI changes require local visual evidence. Capture at least one screenshot, and capture a GIF or MP4 when the changed behavior includes interaction, animation, responsive behavior, or a multi-step flow.

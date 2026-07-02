@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LISTENER="$SCRIPT_DIR/multica-sdlc-listener.js"
+
+state_dir=""
+keepalive_seen=0
+keepalive_seconds=1800
+exit_if_not_owner_seen=0
+
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i += 1)); do
+  case "${args[$i]}" in
+    --state-dir)
+      if (( i + 1 >= ${#args[@]} )); then
+        echo "missing value for --state-dir" >&2
+        exit 2
+      fi
+      state_dir="${args[$((i + 1))]}"
+      i=$((i + 1))
+      ;;
+    --session-keepalive-seconds|--keepalive-seconds)
+      keepalive_seen=1
+      if (( i + 1 >= ${#args[@]} )); then
+        echo "missing value for ${args[$i]}" >&2
+        exit 2
+      fi
+      keepalive_seconds="${args[$((i + 1))]}"
+      i=$((i + 1))
+      ;;
+    --exit-if-not-owner)
+      exit_if_not_owner_seen=1
+      ;;
+  esac
+done
+
+if [[ -z "$state_dir" ]]; then
+  echo "multica-sdlc-guard-launch requires --state-dir" >&2
+  exit 2
+fi
+
+mkdir -p "$state_dir"
+
+if [[ "$keepalive_seen" -eq 0 ]]; then
+  args+=(--session-keepalive-seconds 1800)
+fi
+
+if [[ "$exit_if_not_owner_seen" -eq 0 ]]; then
+  args+=(--exit-if-not-owner)
+fi
+
+out_log="$state_dir/listener.out.log"
+err_log="$state_dir/listener.err.log"
+pid_file="$state_dir/listener-launch.pid"
+
+(
+  export MULTICA_GUARD_LAUNCH_MODE="setsid-nohup"
+  exec setsid nohup node "$LISTENER" "${args[@]}" >>"$out_log" 2>>"$err_log" </dev/null
+) &
+
+pid="$!"
+printf '%s\n' "$pid" >"$pid_file"
+echo "multica-sdlc guard launch requested: pid=$pid state_dir=$state_dir keepalive_seconds=$keepalive_seconds" >&2

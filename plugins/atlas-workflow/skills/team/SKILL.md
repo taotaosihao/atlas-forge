@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use the Atlas team flow for multi-agent discussion, review, staffing, and promotion.
+description: Use the Atlas team flow for multi-agent discussion, review, staffing, promotion, and bounded execution loops.
 ---
 
 Use the Atlas team flow for this request.
@@ -26,36 +26,43 @@ Follow this loop:
    - `~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>"`
 7. Use execute mode when the round should focus on implementation roles:
    - `~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>" --mode execute`
-8. Use `--claude-review` only when an explicit Claude review lane is wanted.
-9. Treat `workflow/artifacts/<task-id>/team/decision.md` as the single main decision file.
-10. When a high-risk route or Multica handoff needs consensus evidence, run:
+8. Use an Atlas-managed bounded team loop when the user wants team implementation to keep fixing until the objective is met:
+   - `~/.codex/workflow/bin/codex-workflow team-loop <task-id> "<objective>" --max-iterations 5 --max-time 1h`
+   - Add `--verify-check "<command>"` when a shell command can objectively prove the goal.
+   - Use this instead of one-shot `team-start --mode execute` for "keep trying", "未达标反复修", PR/check babysitting, or repeated implementation/verification cycles.
+   - The loop runs inside Atlas workflow: each iteration launches `team-start --mode execute`, runs checks, asks a verifier to put `done=true` or `done=false` on the first non-empty message line, and writes a `team/loop-*.md` ledger.
+   - `--max-time` is enforced across team/check/verifier substeps; a substep that exceeds the remaining deadline stops the loop with `loop-timeout`.
+   - Do not use open-ended loops. Always keep `--max-iterations` and/or `--max-time` bounded.
+9. Use `--claude-review` only when an explicit Claude review lane is wanted.
+10. Treat `workflow/artifacts/<task-id>/team/decision.md` as the single main decision file.
+11. When a high-risk route or Multica handoff needs consensus evidence, run:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent team --risk high --decision use --reason "<why consensus evidence is required>" --consensus`
-11. Use `workflow/artifacts/<task-id>/team/staffing.md` for ownership suggestions.
-12. When promoting to execution, record whether the next implementation needs a lightweight implementation contract:
+12. Use `workflow/artifacts/<task-id>/team/staffing.md` for ownership suggestions.
+13. When promoting to execution, record whether the next implementation needs a lightweight implementation contract:
     - Use it for non-tiny local work with UI/API/CLI/background-job behavior, cross-file changes, or meaningful edge cases.
     - The contract owner is the main implementer unless the team explicitly assigns a separate reviewer.
     - The contract must preserve the team decision and must not add new scope.
     - For Multica handoff, prefer the Multica sprint contract rather than the Atlas lightweight template.
-13. When the team discussion settles an actionable plan, promotion, or staffing handoff, also write a concise project doc:
+14. When the team discussion settles an actionable plan, promotion, or staffing handoff, also write a concise project doc:
     - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
     - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
     - include the final decision, consensus basis, owner/staffing plan when relevant, acceptance criteria, verification gates, risks, and next execution step.
     - keep `workflow/artifacts/<task-id>/team/decision.md` as the discussion record; the project doc is the durable handoff for the repo.
-14. Check status or stop the active round with:
+15. Check status or stop the active round with:
    - `~/.codex/workflow/bin/codex-workflow team-status <task-id>`
    - `~/.codex/workflow/bin/codex-workflow team-stop <task-id>`
-15. While `team-status` reports `team_status: running`, inspect the reported `team_round` and `team_temp_dir` paths before deciding the round is stalled. Parent command stdout may stay empty until all lanes finish; do not treat `Pending discussion.` or empty stdout alone as proof that no lane discussion exists.
-16. If the round is interrupted, stalled, or produces empty lane stdout:
+16. While `team-status` reports `team_status: running`, inspect the reported `team_round` and `team_temp_dir` paths before deciding the round is stalled. Parent command stdout may stay empty until all lanes finish; do not treat `Pending discussion.` or empty stdout alone as proof that no lane discussion exists.
+17. If the round is interrupted, stalled, or produces empty lane stdout:
     - inspect `team-status`, the `team_round` file, and the lane files in `team_temp_dir` before deciding whether any substantive partial output exists.
     - if partial output is enough to act on, replace the template/interrupted `team/decision.md` with a synthesized decision that says it was synthesized from partial output, lists evidence checked, blocking findings, non-blocking risks, and the recommended next step.
     - run `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec,analysis,decision` after writing the synthesized decision.
     - continue with direct execution only when the synthesized decision has no unresolved blocking issue and the validation path is clear; record the direct-execution rationale with `route-decision --intent task`.
     - ask the user or rerun `team-start` when partial output is insufficient, the task is high-risk, or the next action would change scope, data safety, deployment, credentials, or external systems.
-17. Before promoting to execution, worktree, finish, or Multica handoff, run:
+18. Before promoting to execution, worktree, finish, or Multica handoff, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec,analysis,decision`
     - use a narrower `--require` list only when the missing artifact is intentionally out of scope and explain why.
-18. Promote explicitly with:
+19. Promote explicitly with:
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to execute`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to worktree`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to finish`
-19. In the final reply, include the task id, `decision.md` path, staffing path if produced, project doc path if written, readiness result if run, promotion state, and any open decision.
+20. In the final reply, include the task id, `decision.md` path, staffing path if produced, project doc path if written, readiness result if run, promotion state, and any open decision.

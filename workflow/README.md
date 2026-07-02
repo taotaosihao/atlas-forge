@@ -95,6 +95,21 @@ Start a team discussion or execution round:
 ~/.codex/workflow/bin/codex-workflow team-stop <task-id>
 ```
 
+Run an Atlas-managed bounded team implementation loop when the team should keep
+fixing until the objective and verification command pass:
+
+```bash
+~/.codex/workflow/bin/codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check "<command>"]... [--verify "<prompt>"] [--archive]
+```
+
+`team-loop` runs inside Atlas workflow: each iteration launches
+`team-start --mode execute`, records a `team/loop-*.md` ledger, runs optional
+`--verify-check` commands, and asks a verifier to put `done=true` or
+`done=false` on the first non-empty message line. Each team/check/verifier
+substep runs under the remaining `--max-time` deadline; timed-out substeps stop
+the loop with `loop-timeout`. Keep loops bounded with `--max-iterations` and
+`--max-time`.
+
 Save a durable learning:
 
 ```bash

@@ -44,6 +44,13 @@ gate.
 Worktree policy: during planning, estimate the expected code delta. If the implementation is expected to change more than 100 lines of code, the work must happen in a dedicated git worktree and branch from the configured base branch. Do not implement >100-line estimated changes directly in the main local checkout.
 Worktree cleanup policy: do not remove an implementation worktree while its draft PR is still open or under review. After PR review is complete and the PR is confirmed merged into the configured base branch, clean up the dedicated worktree and its local branch if it is safe to do so.
 
+Staged epic continuation policy:
+- In an expected-stage-order epic, a child issue that reached clean gate and opened a draft PR is a stage handoff for parent continuation. It is not, by itself, a parent stop condition.
+- Before deciding to wait, read the current child issue and `multica issue pull-requests <child>` for the latest stage child, not only the parent link table or stale parent comments.
+- If the latest child has a draft/open PR and no explicit `DECISION_REQUIRED` lock says to wait, emit `ROUTE_ONLY`, `block_downstream=false`, keep the parent `in_progress`, and create or promote the next stage child.
+- Human review, merge, and post-merge worktree cleanup for the prior draft PR remain tracked on that child; they do not block stacked Stage N+1 work unless the stage contract requires merge-first semantics.
+- Use the previous stage branch/final commit as the stacked base when prior stages are unmerged, and record that base in the next child description.
+
 Run the flow as an issue assigned to the Multica leader/squad:
 
 1. PREFLIGHT

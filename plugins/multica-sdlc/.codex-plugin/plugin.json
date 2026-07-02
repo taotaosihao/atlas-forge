@@ -1,6 +1,6 @@
 {
   "name": "multica-sdlc",
-  "version": "0.1.0+codex.20260625054938",
+  "version": "0.1.0+codex.20260628202300",
   "description": "Reusable Multica SDLC orchestration skills, dynamic workflow templates, and next-role routing helpers.",
   "author": {
     "name": "Local Atlas",

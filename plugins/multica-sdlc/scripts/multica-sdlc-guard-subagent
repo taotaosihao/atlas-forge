@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+payload="$(mktemp "${TMPDIR:-/tmp}/multica-guard-subagent.XXXXXX.json")"
+trap 'rm -f "$payload"' EXIT
+cat >"$payload"
+
+codex_error=""
+if command -v codex >/dev/null 2>&1; then
+  if codex exec \
+      --sandbox read-only \
+      -C "${MULTICA_SDLC_SUBAGENT_CWD:-/home/gewu/work/atlas-forge}" \
+      "你是 Multica SDLC guard 的只读判断子代理。读取 JSON 文件：$payload。判断 guard 下一步如何确保完整 PRD 继续实施。只输出一段 JSON，不要写文件、不要调用 Multica 写接口、不要改 PR。JSON 字段：severity, recommended_action, target_issue, reason, stop_condition。"; then
+    exit 0
+  fi
+  codex_error="codex_exec_failed"
+fi
+
+MULTICA_SDLC_SUBAGENT_DEGRADED_REASON="$codex_error" node - "$payload" <<'NODE'
+const fs = require("fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const decision = payload.decision || {};
+const event = (payload.normalized && payload.normalized.router_event) || {};
+console.log(JSON.stringify({
+  degraded: true,
+  severity: "needs_attention",
+  recommended_action: "rerun_parent_leader_or_request_manual_review",
+  target_issue: event.parent_issue_id || event.issue_id || null,
+  reason: decision.reason_code || payload.normalized?.classification || "unknown",
+  degraded_reason: process.env.MULTICA_SDLC_SUBAGENT_DEGRADED_REASON || "codex_unavailable",
+  stop_condition: "A Multica leader task is running, the next stage is created, or the parent issue reaches a documented terminal disposition."
+}));
+NODE

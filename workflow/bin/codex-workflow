@@ -153,6 +153,67 @@ validate_positive_integer() {
   fi
 }
 
+duration_to_seconds() {
+  local value="$1"
+  python3 - "$value" <<'PY'
+import re
+import sys
+
+value = sys.argv[1].strip()
+match = re.fullmatch(r"([1-9][0-9]*)([smhd]?)", value)
+if not match:
+    print(f"invalid duration: {value}", file=sys.stderr)
+    raise SystemExit(1)
+
+amount = int(match.group(1))
+unit = match.group(2) or "s"
+multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+print(amount * multiplier)
+PY
+}
+
+team_loop_remaining_seconds() {
+  local deadline="$1"
+  local now
+  now="$(date +%s)"
+  echo $((deadline - now))
+}
+
+team_loop_run_with_deadline() {
+  local deadline="$1"
+  shift
+  local remaining
+  remaining="$(team_loop_remaining_seconds "$deadline")"
+  if (( remaining <= 0 )); then
+    return 124
+  fi
+  timeout --kill-after=5s "${remaining}s" "$@"
+}
+
+team_loop_verifier_sentinel() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("missing")
+    raise SystemExit(0)
+
+for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    stripped = line.strip()
+    if not stripped:
+        continue
+    match = re.fullmatch(r"done\s*[:=]\s*(true|false)", stripped, flags=re.IGNORECASE)
+    print(match.group(1).lower() if match else "invalid")
+    raise SystemExit(0)
+
+print("missing")
+PY
+}
+
 title_token() {
   local title="$1"
   local slug token
@@ -6159,6 +6220,382 @@ EOF
   printf 'round: %s\n' "$round_file"
 }
 
+cmd_team_loop() {
+  local task_id="$1"
+  local objective="$2"
+  shift 2
+  local agents="3"
+  local max_iterations="5"
+  local max_time="1h"
+  local archive="0"
+  local name=""
+  local verify_prompt_extra=""
+  local arg
+  local -a verify_checks=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agents)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check <command>]... [--verify "<prompt>"] [--archive] [--name <name>]' >&2; exit 1; }
+        agents="$2"
+        shift 2
+        ;;
+      --agents=*)
+        agents="${1#--agents=}"
+        shift
+        ;;
+      --max-iterations)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--max-iterations N]' >&2; exit 1; }
+        max_iterations="$2"
+        shift 2
+        ;;
+      --max-iterations=*)
+        max_iterations="${1#--max-iterations=}"
+        shift
+        ;;
+      --max-time)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--max-time <duration>]' >&2; exit 1; }
+        max_time="$2"
+        shift 2
+        ;;
+      --max-time=*)
+        max_time="${1#--max-time=}"
+        shift
+        ;;
+      --verify-check)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--verify-check <command>]...' >&2; exit 1; }
+        verify_checks+=("$2")
+        shift 2
+        ;;
+      --verify-check=*)
+        verify_checks+=("${1#--verify-check=}")
+        shift
+        ;;
+      --archive)
+        archive="1"
+        shift
+        ;;
+      --verify)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--verify "<prompt>"]' >&2; exit 1; }
+        verify_prompt_extra="$2"
+        shift 2
+        ;;
+      --verify=*)
+        verify_prompt_extra="${1#--verify=}"
+        shift
+        ;;
+      --name)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--name <name>]' >&2; exit 1; }
+        name="$2"
+        shift 2
+        ;;
+      --name=*)
+        name="${1#--name=}"
+        shift
+        ;;
+      *)
+        echo "unknown team-loop option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  validate_positive_integer "$agents" "agents"
+  validate_positive_integer "$max_iterations" "max iterations"
+  validate_query "$objective"
+  validate_single_line_reason "max time" "$max_time"
+  if [[ -n "$name" ]]; then
+    validate_single_line_reason "loop name" "$name"
+  fi
+  for arg in "${verify_checks[@]}"; do
+    validate_single_line_reason "verify check" "$arg"
+  done
+
+  if [[ -n "$verify_prompt_extra" ]]; then
+    validate_single_line_reason "verify prompt" "$verify_prompt_extra"
+  fi
+
+  if ! command -v "$CODEX_BIN" >/dev/null 2>&1; then
+    echo "codex CLI is required for team-loop verifier but was not found: $CODEX_BIN" >&2
+    exit 1
+  fi
+  if ! command -v timeout >/dev/null 2>&1; then
+    echo "timeout command is required for bounded team-loop execution" >&2
+    exit 1
+  fi
+
+  local task_file title artifact_dir team_dir decision_file staffing_file decision_rel staffing_rel
+  local max_time_seconds start_epoch deadline loop_token loop_file loop_rel loop_status iteration iterations_completed workflow_cmd
+  local workflow_cmd_q task_id_q objective_q agents_q workflow_root_q codex_home_q team_command
+  local iter_dir team_stdout team_stderr team_status checks_pass check_index check_stdout check_stderr check_status
+  local verifier_prompt verifier_message verifier_stdout verifier_stderr verifier_status verifier_done verifier_sentinel now
+
+  max_time_seconds="$(duration_to_seconds "$max_time")"
+
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  title="$(get_field "$task_file" title)"
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  team_dir="$(task_team_dir "$task_id")"
+  decision_file="$(task_team_decision_file "$task_id")"
+  staffing_file="$(task_team_staffing_file "$task_id")"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+  name="${name:-atlas-team-loop-$task_id}"
+  loop_token="$(timestamp_token)"
+  loop_file="$team_dir/loop-$loop_token.md"
+  loop_rel="$(path_relative_to_codex_home "$loop_file")"
+  start_epoch="$(date +%s)"
+  deadline=$((start_epoch + max_time_seconds))
+  workflow_cmd="$SCRIPT_DIR/codex-workflow"
+  printf -v workflow_cmd_q '%q' "$workflow_cmd"
+  printf -v task_id_q '%q' "$task_id"
+  printf -v objective_q '%q' "$objective"
+  printf -v agents_q '%q' "$agents"
+  printf -v workflow_root_q '%q' "$WORKFLOW_ROOT"
+  printf -v codex_home_q '%q' "$CODEX_HOME_ROOT"
+  team_command="CODEX_WORKFLOW_ROOT=$workflow_root_q CODEX_HOME_ROOT=$codex_home_q $workflow_cmd_q team-start $task_id_q $objective_q --mode execute --agents $agents_q"
+
+  {
+    printf '# Team Loop\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- title: %s\n' "$title"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- name: %s\n' "$name"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- max_iterations: %s\n' "$max_iterations"
+    printf -- '- max_time: %s\n' "$max_time"
+    printf -- '- archive_requested: %s\n' "$archive"
+    printf -- '- team_command: `%s`\n' "$team_command"
+    printf -- '- created_at: %s\n\n' "$(timestamp_utc)"
+  } > "$loop_file"
+
+  upsert_task_fields "$task_file" "active_team_mode=execute" "active_team_status=loop-running" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.mode=execute" \
+    "active_team.status=loop-running" \
+    "active_team.objective=$objective" \
+    "active_team.agents=$agents" \
+    "active_team.decision=$decision_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.loop.status=loop-running" \
+    "active_team.loop.name=$name" \
+    "active_team.loop.file=$loop_rel" \
+    "active_team.loop.iteration=0" \
+    "active_team.loop.max_iterations=$max_iterations" \
+    "active_team.loop.max_time=$max_time"
+  append_task_runtime_event "$task_id" "team-loop-start" "name=$name max_iterations=$max_iterations max_time=$max_time loop=$loop_rel"
+
+  iteration=1
+  while (( iteration <= max_iterations )); do
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      loop_status="loop-timeout"
+      {
+        printf '\n## Timeout\n\n'
+        printf -- '- iteration_before_start: %s\n' "$iteration"
+        printf -- '- max_time: %s\n' "$max_time"
+        printf -- '- created_at: %s\n' "$(timestamp_utc)"
+      } >> "$loop_file"
+      break
+    fi
+
+    iter_dir="$team_dir/loop-$loop_token-iteration-$iteration"
+    mkdir -p "$iter_dir"
+    team_stdout="$iter_dir/team-start.stdout"
+    team_stderr="$iter_dir/team-start.stderr"
+    checks_pass="1"
+
+    set_task_state_fields "$task_id" \
+      "active_team.status=loop-running" \
+      "active_team.loop.status=loop-running" \
+      "active_team.loop.iteration=$iteration" \
+      "active_team.loop.file=$loop_rel"
+    append_task_runtime_event "$task_id" "team-loop-iteration-start" "$iteration"
+
+    set +e
+    team_loop_run_with_deadline "$deadline" env \
+      CODEX_WORKFLOW_ROOT="$WORKFLOW_ROOT" \
+      CODEX_HOME_ROOT="$CODEX_HOME_ROOT" \
+      CODEX_BIN="$CODEX_BIN" \
+      PASEO_BIN="$PASEO_BIN" \
+      PASEO_CONFIG_FILE="$PASEO_CONFIG_FILE" \
+      CODEX_CONFIG_FILE="$CODEX_CONFIG_FILE" \
+      CODEX_HOOKS_FILE="$CODEX_HOOKS_FILE" \
+      "$workflow_cmd" team-start "$task_id" "$objective" --mode execute --agents "$agents" >"$team_stdout" 2>"$team_stderr"
+    team_status="$?"
+    set -e
+
+    {
+      printf '\n## Iteration %s\n\n' "$iteration"
+      printf -- '- team_start_exit_code: %s\n' "$team_status"
+      if [[ "$team_status" -eq 124 ]]; then
+        printf -- '- team_start_timed_out: true\n'
+      fi
+      printf -- '- output_dir: %s\n\n' "$iter_dir"
+      printf '### Team Start Stdout\n\n```text\n'
+      trimmed_preview "$team_stdout"
+      printf '\n```\n\n'
+      printf '### Team Start Stderr\n\n```text\n'
+      trimmed_preview "$team_stderr"
+      printf '\n```\n\n'
+    } >> "$loop_file"
+
+    if [[ "$team_status" -eq 124 ]]; then
+      loop_status="loop-timeout"
+      break
+    fi
+    if [[ "$team_status" -ne 0 ]]; then
+      loop_status="loop-failed"
+      break
+    fi
+
+    check_index=1
+    for arg in "${verify_checks[@]}"; do
+      check_stdout="$iter_dir/verify-check-$check_index.stdout"
+      check_stderr="$iter_dir/verify-check-$check_index.stderr"
+      set +e
+      team_loop_run_with_deadline "$deadline" bash -lc "$arg" >"$check_stdout" 2>"$check_stderr"
+      check_status="$?"
+      set -e
+      if [[ "$check_status" -ne 0 ]]; then
+        checks_pass="0"
+      fi
+      if [[ "$check_status" -eq 124 ]]; then
+        loop_status="loop-timeout"
+      fi
+      {
+        printf '### Verify Check %s\n\n' "$check_index"
+        printf -- '- command: `%s`\n' "$arg"
+        printf -- '- exit_code: %s\n' "$check_status"
+        if [[ "$check_status" -eq 124 ]]; then
+          printf -- '- timed_out: true\n'
+        fi
+        printf '\n#### Stdout\n\n```text\n'
+        trimmed_preview "$check_stdout"
+        printf '\n```\n\n'
+        printf '#### Stderr\n\n```text\n'
+        trimmed_preview "$check_stderr"
+        printf '\n```\n\n'
+      } >> "$loop_file"
+      if [[ "${loop_status:-}" == "loop-timeout" ]]; then
+        break
+      fi
+      check_index=$((check_index + 1))
+    done
+    if [[ "${loop_status:-}" == "loop-timeout" ]]; then
+      break
+    fi
+
+    verifier_message="$iter_dir/verifier.message"
+    verifier_stdout="$iter_dir/verifier.stdout"
+    verifier_stderr="$iter_dir/verifier.stderr"
+    verifier_prompt="$(cat <<EOF
+You are the verifier for an Atlas-managed team loop.
+
+First non-empty line must be exactly one of:
+done=true
+done=false
+
+Return done=true only when all required evidence proves the objective is satisfied. Return done=false when the latest team round only gives advice, when required implementation is missing, when verification was not run, when any verify-check failed, or when blockers remain unresolved.
+
+Task: $task_id
+Objective: $objective
+Additional verification instruction: ${verify_prompt_extra:-Use the objective, team artifacts, and verify-check results as the acceptance contract.}
+Iteration: $iteration
+Verify checks passed: $checks_pass
+Artifact directory: $artifact_dir
+Team decision: $decision_file
+Team staffing: $staffing_file
+Team loop ledger: $loop_file
+
+Check the latest artifacts and repository state. Cite the specific command output, file path, or artifact path that proves the result. Do not suggest fixes; only judge whether the loop should stop.
+EOF
+)"
+    set +e
+    team_loop_run_with_deadline "$deadline" "$CODEX_BIN" exec --skip-git-repo-check -C "$PWD" --output-last-message "$verifier_message" "$verifier_prompt" >"$verifier_stdout" 2>"$verifier_stderr"
+    verifier_status="$?"
+    set -e
+    verifier_sentinel="$(team_loop_verifier_sentinel "$verifier_message")"
+    verifier_done="0"
+    if [[ "$checks_pass" == "1" ]] && [[ "$verifier_status" -eq 0 ]] && [[ "$verifier_sentinel" == "true" ]]; then
+      verifier_done="1"
+    fi
+    {
+      printf '### Verifier\n\n'
+      printf -- '- exit_code: %s\n' "$verifier_status"
+      if [[ "$verifier_status" -eq 124 ]]; then
+        printf -- '- timed_out: true\n'
+      fi
+      printf -- '- sentinel: %s\n' "$verifier_sentinel"
+      printf -- '- done: %s\n\n' "$verifier_done"
+      printf '#### Message\n\n```markdown\n'
+      trimmed_preview "$verifier_message"
+      printf '\n```\n\n'
+      printf '#### Stdout\n\n```text\n'
+      trimmed_preview "$verifier_stdout"
+      printf '\n```\n\n'
+      printf '#### Stderr\n\n```text\n'
+      trimmed_preview "$verifier_stderr"
+      printf '\n```\n\n'
+    } >> "$loop_file"
+
+    if [[ "$verifier_status" -eq 124 ]]; then
+      loop_status="loop-timeout"
+      break
+    fi
+    if [[ "$verifier_status" -ne 0 ]]; then
+      loop_status="loop-failed"
+      break
+    fi
+    if [[ "$verifier_done" == "1" ]]; then
+      loop_status="loop-done"
+      break
+    fi
+
+    loop_status="loop-incomplete"
+    iteration=$((iteration + 1))
+  done
+
+  if [[ -z "${loop_status:-}" ]]; then
+    loop_status="loop-incomplete"
+  fi
+  if (( iteration > max_iterations )); then
+    iterations_completed="$max_iterations"
+  else
+    iterations_completed="$iteration"
+  fi
+  {
+    printf '\n## Final Status\n\n'
+    printf -- '- status: %s\n' "$loop_status"
+    printf -- '- iterations_completed: %s\n' "$iterations_completed"
+    printf -- '- completed_at: %s\n' "$(timestamp_utc)"
+  } >> "$loop_file"
+
+  upsert_task_fields "$task_file" "active_team_status=$loop_status" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.status=$loop_status" \
+    "active_team.decision=$decision_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.loop.status=$loop_status" \
+    "active_team.loop.file=$loop_rel" \
+    "active_team.loop.iteration=$iterations_completed" \
+    "active_team.loop.max_iterations=$max_iterations" \
+    "active_team.loop.max_time=$max_time"
+  append_task_runtime_event "$task_id" "team-loop-complete" "$loop_status"
+
+  printf 'task_id: %s\n' "$task_id"
+  printf 'status: %s\n' "$loop_status"
+  printf 'loop: %s\n' "$loop_file"
+  printf 'iterations: %s\n' "$iterations_completed"
+  if [[ "$loop_status" == "loop-done" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 cmd_team_status() {
   local task_id="$1"
   sync_task_runtime "$task_id"
@@ -6170,6 +6607,7 @@ import sys
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 team = data.get("active_team", {})
+loop = team.get("loop", {})
 print(f"task_id: {data.get('task_id', '')}")
 print(f"status: {data.get('status', '')}")
 print(f"artifact_dir: {data.get('artifact_dir', '')}")
@@ -6184,6 +6622,11 @@ print(f"team_round: {team.get('round_file', '')}")
 print(f"team_staffing: {team.get('staffing', '')}")
 print(f"team_temp_dir: {team.get('temp_dir', '')}")
 print(f"team_promoted_to: {team.get('promoted_to', '')}")
+print(f"team_loop_status: {loop.get('status', '')}")
+print(f"team_loop_file: {loop.get('file', '')}")
+print(f"team_loop_iteration: {loop.get('iteration', '')}")
+print(f"team_loop_max_iterations: {loop.get('max_iterations', '')}")
+print(f"team_loop_max_time: {loop.get('max_time', '')}")
 PY
 }
 
@@ -6408,8 +6851,13 @@ main() {
       shift
       cmd_team_promote "$@"
       ;;
+    team-loop)
+      [[ $# -ge 3 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check <command>]... [--verify "<prompt>"] [--archive] [--name <name>]' >&2; exit 1; }
+      shift
+      cmd_team_loop "$@"
+      ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-status|team-stop|team-promote}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-status|team-stop|team-promote|team-loop}' >&2
       exit 1
       ;;
   esac
