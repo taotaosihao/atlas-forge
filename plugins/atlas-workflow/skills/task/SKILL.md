@@ -68,6 +68,12 @@ Follow this loop:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --skip "<why artifacts are intentionally minimal>"`
 15. For nontrivial implementation with filled planning artifacts, run the relevant `ready` check before reporting execution readiness or handoff.
 16. Before reporting success, verify the work with real commands.
-17. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
+17. Treat commits as implementation step boundaries. For implementation work,
+    each completed step, phase, or acceptance slice that changes files must get
+    its own dedicated git commit after verification passes and before the next
+    implementation step starts. Use `type[optional scope]: <description>`. If a
+    step is read-only, abandoned, intentionally uncommitted by user request, or
+    batched by explicit user instruction, record the reason in the workflow
+    artifact or final reply.
 18. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
 19. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.

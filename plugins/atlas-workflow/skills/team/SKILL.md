@@ -115,6 +115,7 @@ Agent planning rules:
     - `## Active Roles`
     - `## Omitted Roles`
     - `## Phase Gates`
+    - `## Commit Boundaries`
     - `## Concurrency And Write Boundaries`
     - `## Verification Evidence`
 
@@ -138,8 +139,15 @@ Recommended `staffing.md` table shape:
 
 ## Phase Gates
 
-| Phase | Owner | Input | Output | Required Gate |
-| --- | --- | --- | --- | --- |
+| Phase | Owner | Input | Output | Required Gate | Commit Boundary |
+| --- | --- | --- | --- | --- | --- |
+
+## Commit Boundaries
+
+- Each implementation step or acceptance slice that changes files:
+- Verification required before each commit:
+- Commit owner:
+- Allowed no-commit exceptions:
 
 ## Concurrency And Write Boundaries
 
@@ -199,6 +207,17 @@ Execution ownership rules:
 - Tell writable workers that they are not alone in the codebase, must not revert user or other-agent changes, and must list changed file paths in their final message.
 - Keep reviewer and verifier lanes read-only unless a repair is explicitly assigned to them after integration.
 - The main Codex must inspect and integrate subagent changes before finalizing. Native subagent completion is evidence, not automatic acceptance.
+- Treat commits as implementation step boundaries. Each completed implementation
+  step, phase, or acceptance slice that changes files must receive a dedicated
+  git commit after its verification gate passes and before the next
+  implementation step starts.
+- Do not batch multiple completed steps into one commit unless the user
+  explicitly asks for that batching. Record any no-commit exception in the
+  workflow artifact, and only use it for read-only steps, failed/abandoned
+  attempts, or user-directed no-commit work.
+- Use the `commit-work` skill for each commit. The commit message should
+  describe the behavior or workflow boundary completed by that step, not the
+  mechanics of the patch.
 
 ## Native Bounded Loop
 
@@ -218,6 +237,8 @@ Native loop requirements:
    - spawn or reuse a native executor only for the bounded repair task;
    - run reviewer/verifier native lanes or main-agent verification as appropriate;
    - record commands, changed files, artifacts, and unresolved blockers;
+   - create a dedicated commit for the verified iteration step when files changed
+     and `done=true` or the iteration produced a keeper repair;
    - judge completion using an explicit sentinel equivalent: `done=true` or `done=false`.
 6. Stop immediately when verification proves `done=true`, when `max_iterations` is exhausted, when `max_time` is reached, or when a blocker makes more iterations unsafe.
 7. Record terminal loop status with:
