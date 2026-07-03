@@ -31,12 +31,15 @@ evaluator/reviewer judgment, or should produce a lightweight implementation
 contract. `$atlas-workflow:team` requires native subagent tools and records
 native rounds with `team-record-start`, `team-record-finalize`, and
 `team-loop-record`; it must not silently fall back to the legacy CLI-backed
-lanes. Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging,
-or when native subagent tools are unavailable and the user explicitly accepts the
-legacy `codex-workflow team-start/team-loop` behavior. Tiny precise fixes may
-still use direct `$atlas-workflow:task` flow when scope and verification are
-obvious, and explicit user requests to avoid multi-agent should be honored when
-safe.
+lanes. Native team uses a Multica-style dynamic Agent Plan: choose active roles
+by task shape, list omitted roles, define phase gates, write boundaries,
+verification evidence, and concurrency strategy; three roles are only a common
+small-round seed, not a limit. Use `$atlas-workflow:team-v1` only for
+compatibility, old flow debugging, or when native subagent tools are unavailable
+and the user explicitly accepts the legacy `codex-workflow team-start/team-loop`
+behavior. Tiny precise fixes may still use direct `$atlas-workflow:task` flow
+when scope and verification are obvious, and explicit user requests to avoid
+multi-agent should be honored when safe.
 
 ## Short Request Intake Gate
 
@@ -88,11 +91,14 @@ They share the same task artifact directory:
 ## Lightweight Implementation Contracts
 
 For non-tiny local implementation work, Atlas workflow uses a lightweight
-contract before coding instead of a full multi-agent harness. Use
-`workflow/templates/implementation-contract.md` when the task changes
-user-visible behavior, touches multiple files, changes UI/API/CLI/background-job
-behavior, or has meaningful edge cases. Tiny precise fixes can skip it when the
-acceptance path is obvious.
+contract before coding as the implementation artifact that captures the selected
+scope, acceptance rows, evidence paths, and stop conditions. For non-tiny work
+this contract is normally formed from or checked by `$atlas-workflow:team`;
+direct `$atlas-workflow:task` may use it without team only for tiny work or an
+explicit safe bypass. Use `workflow/templates/implementation-contract.md` when
+the task changes user-visible behavior, touches multiple files, changes
+UI/API/CLI/background-job behavior, or has meaningful edge cases. Tiny precise
+fixes can skip it when the acceptance path is obvious.
 
 This contract records goal, non-goals, acceptance criteria, real validation
 steps, evidence paths, and stop conditions. Multica uses the fuller sprint

@@ -58,17 +58,122 @@ For every native round:
    - `## Recommendation`
 6. Separate facts from conclusions. Put source paths, command output, user constraints, and observed behavior in Evidence; put derived conclusions in Inference; put unresolved questions in Unknown.
 
+## Native Agent Planning
+
+Before spawning native subagents, produce a task-specific Agent Plan. Follow the
+same planning discipline as Multica staffing: inventory first, reuse first,
+dynamic roles, explicit omissions, phase gates, write boundaries, and evidence
+requirements. Do not treat three roles as a limit. Three roles are only a
+common seed for small or ordinary rounds.
+
+Agent planning rules:
+
+1. Classify the team mode:
+   - `planning-review`: options, architecture, risk review, staffing, contract formation.
+   - `implementation`: code/config/docs changes with reviewer and verifier coverage.
+   - `investigation`: evidence gathering and diagnosis without implementation.
+   - `design-or-doc-review`: design, copy, docs, or product artifact review without code changes.
+   - `loop-repair`: bounded repeated implementation/review/verification cycles.
+2. Inventory available execution surfaces:
+   - native subagent tools available in this session;
+   - repo/worktree state and files likely touched;
+   - required local tools, browser/MCP/runtime targets, credentials, or external blockers;
+   - existing workflow artifacts and acceptance rows.
+3. Choose only the roles the task needs, and list omitted roles with reasons.
+4. There is no hard agent-count cap in the skill. Set `--agents <N>` to the
+   number of active native roles/subagents actually planned. Keep the number
+   small enough to integrate safely, but scale up when the task has separable
+   domains or independent evidence lanes.
+5. For each active role, define:
+   - role name;
+   - native `agent_type` (`explorer`, `worker`, `default`, or another available role);
+   - read/write permission;
+   - owned files, modules, or evidence surfaces;
+   - required tools or runtime access;
+   - expected deliverable;
+   - join condition;
+   - stop/blocker condition.
+6. Prefer reuse of the main Codex for tight integration work. Spawn a subagent
+   only when the role is bounded, material, and can run without duplicating the
+   main Codex's immediate work.
+7. Add writable workers only when write scopes are disjoint. Multiple writable
+   workers must have explicit non-overlapping file/module ownership in
+   `staffing.md`.
+8. Add separate reviewer, verifier, browser/UI, evidence QA, docs, or risk
+   roles when the task risk justifies them. Do not force those roles when they
+   are not useful.
+9. For high-risk, cross-module, UI/backend/API/data/permission/deployment work,
+   actively plan reviewer and verification roles instead of relying only on
+   executor self-checks.
+10. Decide active roles, omitted roles, `--agents <N>`, and `--roles` before
+    `team-record-start`; those CLI fields must reflect the planned native
+    subagents. Write at least `## Agent Plan`, `## Active Roles`, and
+    `## Omitted Roles` in `staffing.md` before `team-record-start`, then fill or
+    refine the remaining staffing sections before spawning.
+11. `staffing.md` must include these sections when the team is non-tiny:
+    - `## Agent Plan`
+    - `## Active Roles`
+    - `## Omitted Roles`
+    - `## Phase Gates`
+    - `## Concurrency And Write Boundaries`
+    - `## Verification Evidence`
+
+Recommended `staffing.md` table shape:
+
+```markdown
+## Agent Plan
+
+| Role | Agent Type | Count | Read/Write | Owned Scope | Tools | Deliverable | Join Gate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+## Active Roles
+
+| Role | Why Active | Agent Type | Count | Read/Write | Owned Scope |
+| --- | --- | --- | --- | --- | --- |
+
+## Omitted Roles
+
+| Role | Omission Reason |
+| --- | --- |
+
+## Phase Gates
+
+| Phase | Owner | Input | Output | Required Gate |
+| --- | --- | --- | --- | --- |
+
+## Concurrency And Write Boundaries
+
+- Writable workers:
+- Disjoint write sets:
+- Main Codex integration owner:
+
+## Verification Evidence
+
+- Commands:
+- Browser/API/runtime evidence:
+- Artifact paths:
+- Stop conditions:
+```
+
 ## Discuss Mode
 
 Use discuss mode when the task needs options, architecture, risk review, staffing, implementation contract formation, or promotion advice before code changes.
 
-Default lanes:
+Seed roles for small discuss rounds:
 
 1. `architect`: propose the implementation path, boundaries, and simplest viable structure.
 2. `critic`: challenge risks, regressions, data safety, scope creep, and missing acceptance criteria.
 3. `verifier`: define concrete checks, evidence paths, and stop conditions.
 
-Run all discuss lanes as native subagents, normally `agent_type: explorer` or `default` depending on the task. Keep prompts read-only unless the user explicitly asks a discuss lane to edit files. After all lanes finish or a bounded timeout/interruption occurs, synthesize `decision.md` and `staffing.md`.
+These are seed roles, not a required set and not a maximum. Add, split, merge,
+or omit roles according to the Agent Plan. Examples: `domain-architect`,
+`api-reviewer`, `ui-verifier`, `security-critic`, `docs-reviewer`,
+`migration-risk`, or `evidence-qa`.
+
+Run planned discuss roles as native subagents, normally `agent_type: explorer`
+or `default` depending on the task. Keep prompts read-only unless the user
+explicitly asks a discuss lane to edit files. After all lanes finish or a
+bounded timeout/interruption occurs, synthesize `decision.md` and `staffing.md`.
 
 If a lane fails or is interrupted, do not pretend consensus exists. Write the partial evidence into `round-*.md`, mark the record `failed` or `interrupted`, and only proceed when the remaining evidence is enough and the risk is low enough to justify direct main-agent action.
 
@@ -76,16 +181,21 @@ If a lane fails or is interrupted, do not pretend consensus exists. Write the pa
 
 Use execute mode when the native team is expected to help implement.
 
-Default lanes:
+Seed roles for small execute rounds:
 
 1. `executor`: owns the primary patch or a clearly bounded implementation slice.
 2. `reviewer`: reviews the implementation for regressions, contract drift, and missing tests.
 3. `verifier`: runs or specifies checks and judges whether acceptance criteria are met.
 
+These are seed roles, not a required set and not a maximum. A larger execution
+plan may split executor roles by module, add dedicated E2E/browser/API
+verification, add migration or security review, or omit reviewer/verifier only
+when the task is tiny and the main Codex owns equivalent evidence.
+
 Execution ownership rules:
 
 - Prefer one writable `worker` subagent for the primary implementation. The main Codex may also implement directly when it owns integration.
-- Use additional writable workers only when write scopes are disjoint and explicitly documented in `staffing.md`.
+- Use additional writable workers only when write scopes are disjoint and explicitly documented in `staffing.md`; there is no fixed maximum when scopes and integration gates are clear.
 - Tell writable workers that they are not alone in the codebase, must not revert user or other-agent changes, and must list changed file paths in their final message.
 - Keep reviewer and verifier lanes read-only unless a repair is explicitly assigned to them after integration.
 - The main Codex must inspect and integrate subagent changes before finalizing. Native subagent completion is evidence, not automatic acceptance.

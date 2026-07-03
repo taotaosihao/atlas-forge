@@ -8,9 +8,10 @@ Use the legacy Atlas team flow for this request.
 `$atlas-workflow:team-v1` is the compatibility entrypoint for the pre-native
 team implementation. It uses `codex-workflow team-start`, `codex-workflow
 team-loop`, and child `codex exec` lane processes. It is not the Codex native
-subagent implementation. Use it only when the user explicitly asks for legacy
-behavior, when native subagent tools are unavailable, or when you need to
-reproduce/debug old `team-start` / `team-loop` behavior.
+subagent implementation. Use it only when the user explicitly asks for or
+accepts legacy behavior, when native subagent tools are unavailable and the user
+explicitly accepts this legacy entrypoint, or when you need to reproduce/debug
+old `team-start` / `team-loop` behavior.
 
 ## 输出语言
 
@@ -24,13 +25,14 @@ Follow this loop:
 2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
 3. Treat this as the legacy Atlas collaboration layer for bounded work that must stay on the old CLI-backed implementation:
    - Use `$atlas-workflow:team` for the default Codex native subagent path.
-   - Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging, or native subagent unavailability.
+   - Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging, or native subagent unavailability after the user explicitly accepts this legacy entrypoint.
    - Tiny precise fixes may skip team when scope and verification are obvious.
 4. Record team routing evidence for nontrivial discussion, review, staffing, contract formation, or promotion:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent team --risk <low|medium|high> --decision use --reason "<why legacy team is needed>"`
 5. Read `workflow/artifacts/<task-id>/context.md`, `spec.md`, and `analysis.md` before launching the round.
-6. Default to discuss mode with 3 agents:
+6. Legacy discuss mode defaults to 3 agents:
    - `~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>"`
+   - In legacy `team-v1`, 3 is the default, not a hard limit. Use `--agents N` when a legacy round needs more lanes; lanes beyond the named seed roles are recorded as `lane-4`, `lane-5`, and so on.
 7. Use execute mode when the round should focus on implementation roles:
    - `~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>" --mode execute`
 8. Use the legacy Atlas-managed bounded team loop when the user wants the old CLI-backed loop:
