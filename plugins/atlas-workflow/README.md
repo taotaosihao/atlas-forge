@@ -14,6 +14,7 @@ After the plugin is installed, these entrypoints are available:
 - `$atlas-workflow:clarify`
 - `$atlas-workflow:intake`
 - `$atlas-workflow:team`
+- `$atlas-workflow:team-v1`
 - `$atlas-workflow:learn`
 - `$atlas-workflow:design-review`
 - `$atlas-workflow:worktree`
@@ -23,13 +24,19 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
-Atlas defaults to multi-agent collaboration for non-tiny bounded work. Use
-`$atlas-workflow:team` before execution when a task changes behavior, touches
-multiple files, has meaningful implementation choices, needs evaluator/reviewer
-judgment, or should produce a lightweight implementation contract. Tiny precise
-fixes may still use direct `$atlas-workflow:task` flow when scope and
-verification are obvious, and explicit user requests to avoid multi-agent should
-be honored when safe.
+Atlas defaults to native Codex subagent collaboration for non-tiny bounded work.
+Use `$atlas-workflow:team` before execution when a task changes behavior,
+touches multiple files, has meaningful implementation choices, needs
+evaluator/reviewer judgment, or should produce a lightweight implementation
+contract. `$atlas-workflow:team` requires native subagent tools and records
+native rounds with `team-record-start`, `team-record-finalize`, and
+`team-loop-record`; it must not silently fall back to the legacy CLI-backed
+lanes. Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging,
+or when native subagent tools are unavailable and the user explicitly accepts the
+legacy `codex-workflow team-start/team-loop` behavior. Tiny precise fixes may
+still use direct `$atlas-workflow:task` flow when scope and verification are
+obvious, and explicit user requests to avoid multi-agent should be honored when
+safe.
 
 ## Short Request Intake Gate
 
@@ -115,7 +122,8 @@ If you change this plugin source, rebuild the installed local copy before starti
 - `skills/brainstorm/SKILL.md`: design exploration entry
 - `skills/analyze/SKILL.md`: read-only analysis entry
 - `skills/clarify/SKILL.md`: brownfield clarification entry
-- `skills/team/SKILL.md`: multi-agent discussion and promotion entry
+- `skills/team/SKILL.md`: Codex native subagent team entry
+- `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry
 - `skills/worktree/SKILL.md`: isolated git worktree entry

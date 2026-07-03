@@ -70,6 +70,7 @@ $BIN start "$team_id"
 write_ready_artifacts "$team_id"
 expect_fail "team failed lanes" "$BIN" team-start "$team_id" "contract objective" --agents 1
 $BIN team-status "$team_id" > "$TMP_ROOT/team-status.out"
+grep -q "team_backend: legacy" "$TMP_ROOT/team-status.out"
 grep -q "team_status: failed" "$TMP_ROOT/team-status.out"
 grep -q "team_roles: architect" "$TMP_ROOT/team-status.out"
 grep -q "team_round: " "$TMP_ROOT/team-status.out"
@@ -78,6 +79,77 @@ team_round="$(awk -F': ' '/^team_round:/ {print $2}' "$TMP_ROOT/team-status.out"
 grep -q "# Team Round" "$team_round"
 grep -q "Team round failed. Inspect the round file" "$CODEX_WORKFLOW_ROOT/artifacts/$team_id/team/decision.md"
 pass "team observability"
+
+native_id="$($BIN init-task "contract native team records" "native team records")"
+$BIN start "$native_id"
+write_ready_artifacts "$native_id"
+native_team_dir="$CODEX_WORKFLOW_ROOT/artifacts/$native_id/team"
+expect_fail "native finalize before start" "$BIN" team-record-finalize "$native_id" --backend native --status complete --round "$native_team_dir/round-missing.md" --decision "$native_team_dir/decision.md" --staffing "$native_team_dir/staffing.md"
+expect_fail "native record invalid backend" "$BIN" team-record-start "$native_id" "native objective" --backend legacy --mode discuss --agents 1 --roles architect
+expect_fail "native record invalid mode" "$BIN" team-record-start "$native_id" "native objective" --backend native --mode plan --agents 1 --roles architect
+expect_fail "native record invalid agents" "$BIN" team-record-start "$native_id" "native objective" --backend native --mode discuss --agents 0 --roles architect
+expect_fail "native record missing task" "$BIN" team-record-start missing-native-task "native objective" --backend native --mode discuss --agents 1 --roles architect
+$BIN team-record-start "$native_id" "native objective" --backend native --mode discuss --agents 3 --roles "architect,critic,verifier" >/dev/null
+$BIN team-status "$native_id" > "$TMP_ROOT/native-status-running.out"
+grep -q "team_backend: native" "$TMP_ROOT/native-status-running.out"
+grep -q "team_status: running" "$TMP_ROOT/native-status-running.out"
+grep -q "^team_temp_dir: $" "$TMP_ROOT/native-status-running.out"
+native_round="$native_team_dir/round-native.md"
+native_decision="$native_team_dir/decision.md"
+native_staffing="$native_team_dir/staffing.md"
+printf '%s\n' '# Native Round' '' '- backend: native' '' '## Evidence' 'Native round evidence for record command contract.' '## Inference' 'Native inference.' '## Unknown' '-' '## Recommendation' 'Finalize native record.' > "$native_round"
+printf '%s\n' '# Team Decision' '' '- backend: native' '' '## Primary Decision' 'Native decision evidence is substantive enough for readiness.' > "$native_decision"
+printf '%s\n' '# Staffing' '' '- backend: native' '' '## Suggested Ownership' 'Native executor owns the patch; verifier owns contract checks.' > "$native_staffing"
+expect_fail "native finalize invalid status" "$BIN" team-record-finalize "$native_id" --backend native --status loop-done --round "$native_round" --decision "$native_decision" --staffing "$native_staffing"
+expect_fail "native finalize missing artifact" "$BIN" team-record-finalize "$native_id" --backend native --status complete --round "$native_team_dir/missing-round.md" --decision "$native_decision" --staffing "$native_staffing"
+printf '%s\n' '# Outside Decision' '' '- backend: native' '' 'Outside artifact should fail current task ownership.' > "$TMP_ROOT/outside-native.md"
+expect_fail "native finalize outside artifact" "$BIN" team-record-finalize "$native_id" --backend native --status complete --round "$TMP_ROOT/outside-native.md" --decision "$native_decision" --staffing "$native_staffing"
+$BIN team-status "$native_id" > "$TMP_ROOT/native-status-after-failed-finalize.out"
+grep -q "team_status: running" "$TMP_ROOT/native-status-after-failed-finalize.out"
+$BIN team-record-finalize "$native_id" --backend native --status complete --round "$native_round" --decision "$native_decision" --staffing "$native_staffing" >/dev/null
+$BIN team-status "$native_id" > "$TMP_ROOT/native-status-complete.out"
+grep -q "team_backend: native" "$TMP_ROOT/native-status-complete.out"
+grep -q "team_status: complete" "$TMP_ROOT/native-status-complete.out"
+grep -q "team_round: " "$TMP_ROOT/native-status-complete.out"
+grep -q "team_staffing: " "$TMP_ROOT/native-status-complete.out"
+grep -q "^team_temp_dir: $" "$TMP_ROOT/native-status-complete.out"
+$BIN ready "$native_id" --require context,spec,analysis,decision >/dev/null
+native_loop="$native_team_dir/loop-native.md"
+printf '%s\n' '# Native Team Loop' '' '- backend: native' '- status: loop-done' '' '## Evidence' 'Native loop evidence proves the requested objective completed.' '## Final Status' 'done=true' > "$native_loop"
+expect_fail "native loop invalid status" "$BIN" team-loop-record "$native_id" --backend native --status complete --loop "$native_loop" --iterations 1
+expect_fail "native loop invalid iterations" "$BIN" team-loop-record "$native_id" --backend native --status loop-done --loop "$native_loop" --iterations 0
+expect_fail "native loop missing task" "$BIN" team-loop-record missing-native-task --backend native --status loop-done --loop "$native_loop" --iterations 1
+$BIN team-loop-record "$native_id" --backend native --status loop-done --loop "$native_loop" --iterations 1 --max-iterations 2 --max-time 10m >/dev/null
+$BIN team-status "$native_id" > "$TMP_ROOT/native-loop-status.out"
+grep -q "team_backend: native" "$TMP_ROOT/native-loop-status.out"
+grep -q "team_status: loop-done" "$TMP_ROOT/native-loop-status.out"
+grep -q "team_loop_status: loop-done" "$TMP_ROOT/native-loop-status.out"
+grep -q "team_loop_iteration: 1" "$TMP_ROOT/native-loop-status.out"
+grep -q "team_loop_max_iterations: 2" "$TMP_ROOT/native-loop-status.out"
+grep -q "team_loop_max_time: 10m" "$TMP_ROOT/native-loop-status.out"
+
+native_template_id="$($BIN init-task "contract native template rejection" "native template rejection")"
+$BIN start "$native_template_id"
+write_ready_artifacts "$native_template_id"
+native_template_dir="$CODEX_WORKFLOW_ROOT/artifacts/$native_template_id/team"
+$BIN team-record-start "$native_template_id" "native template objective" --backend native --mode discuss --agents 1 --roles architect >/dev/null
+printf '%s\n' '# Native Round' '' '- backend: native' '' '## Evidence' 'Native template rejection has substantive round evidence.' > "$native_template_dir/round-native.md"
+expect_fail "native finalize template decision" "$BIN" team-record-finalize "$native_template_id" --backend native --status complete --round "$native_template_dir/round-native.md" --decision "$native_template_dir/decision.md" --staffing "$native_template_dir/staffing.md"
+$BIN team-status "$native_template_id" > "$TMP_ROOT/native-template-status.out"
+grep -q "team_status: running" "$TMP_ROOT/native-template-status.out"
+
+native_stale_id="$($BIN init-task "contract native clears legacy temp dir" "native clears legacy temp dir")"
+$BIN start "$native_stale_id"
+write_ready_artifacts "$native_stale_id"
+expect_fail "native stale legacy setup" "$BIN" team-start "$native_stale_id" "legacy temp dir" --agents 1
+$BIN team-status "$native_stale_id" > "$TMP_ROOT/native-stale-before.out"
+grep -q "team_backend: legacy" "$TMP_ROOT/native-stale-before.out"
+grep -q "team_temp_dir: " "$TMP_ROOT/native-stale-before.out"
+$BIN team-record-start "$native_stale_id" "native clears temp dir" --backend native --mode execute --agents 1 --roles executor >/dev/null
+$BIN team-status "$native_stale_id" > "$TMP_ROOT/native-stale-after.out"
+grep -q "team_backend: native" "$TMP_ROOT/native-stale-after.out"
+grep -q "^team_temp_dir: $" "$TMP_ROOT/native-stale-after.out"
+pass "native team record observability"
 
 loop_id="$($BIN init-task "contract team loop" "team loop")"
 $BIN start "$loop_id"
@@ -324,7 +396,7 @@ if [[ -z "$cache_skills_root" ]]; then
 elif [[ -z "$cache_plugin_root" ]]; then
   cache_plugin_root="$(cd "$cache_skills_root/.." && pwd)"
 fi
-for skill in analyze office-hours brainstorm intake clarify team task cw worktree; do
+for skill in analyze office-hours brainstorm intake clarify team team-v1 task cw worktree; do
   src="$source_skills_root/$skill/SKILL.md"
   cache="$cache_skills_root/$skill/SKILL.md"
   cmp -s "$src" "$cache"
@@ -344,7 +416,14 @@ rg -q "Non-tiny work must have auditable documentation" "$REAL_CODEX_HOME/AGENTS
 rg -q "critical feedback" "$REAL_CODEX_HOME/AGENTS.md"
 rg -q "Short Request Intake Gate" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q 'atlas-workflow:intake' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
+rg -q 'atlas-workflow:team-v1' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q 'atlas-workflow:intake' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json"
+rg -q 'atlas-workflow:team-v1' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json"
+rg -q "multi_agent_v1.spawn_agent" "$source_skills_root/team/SKILL.md"
+rg -q "team-record-start" "$source_skills_root/team/SKILL.md"
+rg -q "team-loop-record" "$source_skills_root/team/SKILL.md"
+rg -q "team-start" "$source_skills_root/team-v1/SKILL.md"
+rg -q "team-loop" "$source_skills_root/team-v1/SKILL.md"
 rg -q "Short Request Intake Gate" "$source_skills_root/intake/SKILL.md"
 rg -q "Short Request Intake Gate" "$source_skills_root/task/SKILL.md"
 rg -q "Short Request Intake Gate" "$source_skills_root/cw/SKILL.md"

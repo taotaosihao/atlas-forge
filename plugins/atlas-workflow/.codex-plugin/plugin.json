@@ -23,6 +23,9 @@
     "spec",
     "product",
     "team",
+    "team-v1",
+    "subagent",
+    "native-subagent",
     "finish",
     "worktree",
     "design-review",
@@ -31,8 +34,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Atlas Workflow",
-    "shortDescription": "Atlas entry plugin for $atlas-workflow:cw, $atlas-workflow:task, $atlas-workflow:intake, $atlas-workflow:office-hours, $atlas-workflow:brainstorm, $atlas-workflow:analyze, $atlas-workflow:clarify, $atlas-workflow:team, $atlas-workflow:learn, $atlas-workflow:design-review, $atlas-workflow:worktree, and $atlas-workflow:finish",
-    "longDescription": "Adds Atlas workflow, task, intake, office-hours, brainstorm, analyze, clarify, team, learning, design-review, worktree, and finish entrypoints as local plugin skills so `$atlas-workflow:cw`, `$atlas-workflow:task`, `$atlas-workflow:intake`, `$atlas-workflow:office-hours`, `$atlas-workflow:brainstorm`, `$atlas-workflow:analyze`, `$atlas-workflow:clarify`, `$atlas-workflow:team`, `$atlas-workflow:learn`, `$atlas-workflow:design-review`, `$atlas-workflow:worktree`, and `$atlas-workflow:finish` stay available even when custom slash prompts are unavailable.",
+    "shortDescription": "Atlas entry plugin for bounded workflow, native $atlas-workflow:team, legacy $atlas-workflow:team-v1, and related planning skills",
+    "longDescription": "Adds Atlas workflow, task, intake, office-hours, brainstorm, analyze, clarify, native team, legacy team-v1, learning, design-review, worktree, and finish entrypoints as local plugin skills so `$atlas-workflow:cw`, `$atlas-workflow:task`, `$atlas-workflow:intake`, `$atlas-workflow:office-hours`, `$atlas-workflow:brainstorm`, `$atlas-workflow:analyze`, `$atlas-workflow:clarify`, `$atlas-workflow:team`, `$atlas-workflow:team-v1`, `$atlas-workflow:learn`, `$atlas-workflow:design-review`, `$atlas-workflow:worktree`, and `$atlas-workflow:finish` stay available even when custom slash prompts are unavailable.",
     "developerName": "Local Atlas",
     "category": "Productivity",
     "capabilities": [
@@ -43,7 +46,8 @@
       "\u751f\u6210\u9879\u76ee\u6587\u6863\u3001workflow artifacts\u3001\u4ea4\u63a5\u6750\u6599\u548c\u9762\u5411\u7528\u6237\u603b\u7ed3\u65f6\uff0c\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00",
       "Use $atlas-workflow:task for bounded implementation or diagnosis",
       "Use $atlas-workflow:analyze for read-only cross-file synthesis",
-      "Use $atlas-workflow:clarify before execution when boundaries are unclear"
+      "Use $atlas-workflow:clarify before execution when boundaries are unclear",
+      "Use $atlas-workflow:team for Codex native subagent collaboration; use $atlas-workflow:team-v1 only for legacy CLI-backed team-start/team-loop behavior"
     ],
     "brandColor": "#0F766E"
   }

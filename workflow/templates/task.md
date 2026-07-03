@@ -5,6 +5,7 @@ created: {{CREATED}}
 updated: {{UPDATED}}
 artifact_dir: {{ARTIFACT_DIR}}
 last_verified_at: {{LAST_VERIFIED_AT}}
+active_team_backend: {{ACTIVE_TEAM_BACKEND}}
 active_team_mode: {{ACTIVE_TEAM_MODE}}
 active_team_status: {{ACTIVE_TEAM_STATUS}}
 active_team_decision: {{ACTIVE_TEAM_DECISION}}

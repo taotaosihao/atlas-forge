@@ -86,7 +86,7 @@ Install Codex Bash hooks for workflow evidence capture:
 ~/.codex/workflow/bin/codex-workflow install-hooks
 ```
 
-Start a team discussion or execution round:
+Start a legacy CLI-backed team discussion or execution round:
 
 ```bash
 ~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>" [--mode discuss|execute] [--agents N] [--claude-review]
@@ -95,8 +95,22 @@ Start a team discussion or execution round:
 ~/.codex/workflow/bin/codex-workflow team-stop <task-id>
 ```
 
-Run an Atlas-managed bounded team implementation loop when the team should keep
-fixing until the objective and verification command pass:
+Record a Codex native subagent team round. Native subagents are spawned by
+Codex, while `codex-workflow` records auditable task state and artifacts:
+
+```bash
+~/.codex/workflow/bin/codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"
+~/.codex/workflow/bin/codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>
+~/.codex/workflow/bin/codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]
+```
+
+Native round, decision, staffing, and loop files must live under the current
+task's `team/` artifact directory, include `backend: native` metadata, and
+contain substantive content beyond template headings.
+
+Run a legacy Atlas-managed bounded team implementation loop when the old
+CLI-backed team should keep fixing until the objective and verification command
+pass:
 
 ```bash
 ~/.codex/workflow/bin/codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check "<command>"]... [--verify "<prompt>"] [--archive]

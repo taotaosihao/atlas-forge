@@ -153,6 +153,137 @@ validate_positive_integer() {
   fi
 }
 
+validate_team_backend() {
+  local backend="$1"
+  case "$backend" in
+    native) ;;
+    *)
+      echo "invalid team backend: $backend" >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_team_mode() {
+  local mode="$1"
+  case "$mode" in
+    discuss|execute) ;;
+    *)
+      echo "invalid team mode: $mode" >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_team_final_status() {
+  local status="$1"
+  case "$status" in
+    complete|failed|interrupted) ;;
+    *)
+      echo "invalid team final status: $status" >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_team_loop_status() {
+  local status="$1"
+  case "$status" in
+    loop-done|loop-incomplete|loop-failed|loop-timeout) ;;
+    *)
+      echo "invalid team loop status: $status" >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_existing_nonempty_file() {
+  local label="$1"
+  local file="$2"
+
+  if [[ -z "$file" || "$file" == *$'\n'* || "$file" == *$'\r'* || "$file" == *$'\t'* ]]; then
+    echo "invalid $label path: $file" >&2
+    exit 1
+  fi
+  if [[ ! -f "$file" ]]; then
+    echo "missing $label file: $file" >&2
+    exit 1
+  fi
+  if [[ ! -s "$file" ]]; then
+    echo "empty $label file: $file" >&2
+    exit 1
+  fi
+}
+
+validate_team_native_artifact_file() {
+  local task_id="$1"
+  local label="$2"
+  local file="$3"
+  local team_dir
+
+  validate_existing_nonempty_file "$label" "$file"
+  team_dir="$(task_team_dir "$task_id")"
+  python3 - "$team_dir" "$file" "$label" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+team_dir = Path(sys.argv[1]).resolve()
+path = Path(sys.argv[2]).resolve()
+label = sys.argv[3]
+
+try:
+    path.relative_to(team_dir)
+except ValueError:
+    print(f"{label} file is outside current task team directory: {path}", file=sys.stderr)
+    raise SystemExit(1)
+
+text = path.read_text(encoding="utf-8", errors="replace")
+if not re.search(r"(^|\b)backend\s*[:=]\s*native\b", text, flags=re.IGNORECASE | re.MULTILINE):
+    print(f"{label} file is missing backend: native marker: {path}", file=sys.stderr)
+    raise SystemExit(1)
+
+ignored_prefixes = (
+    "Task:",
+    "Title:",
+    "- task_id:",
+    "- title:",
+    "- backend:",
+    "- mode:",
+    "- objective:",
+    "- agents:",
+    "- roles:",
+    "- status:",
+    "- created_at:",
+    "- completed_at:",
+    "- decision_file:",
+    "- round_file:",
+    "- staffing:",
+    "- loop:",
+    "- iterations",
+    "- max_",
+)
+content = []
+for raw in text.splitlines():
+    line = raw.strip()
+    if not line:
+        continue
+    if line.startswith("#"):
+        continue
+    if line.startswith("```"):
+        continue
+    if line == "Pending discussion.":
+        continue
+    if any(line.startswith(prefix) for prefix in ignored_prefixes):
+        continue
+    content.append(line)
+
+if len("\n".join(content).strip()) < 20:
+    print(f"{label} file is not substantive: {path}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
 duration_to_seconds() {
   local value="$1"
   python3 - "$value" <<'PY'
@@ -2921,6 +3052,7 @@ if state_file.exists():
         state = {}
 
 active_team = state.get("active_team", {})
+active_team["backend"] = get_field("active_team_backend") or active_team.get("backend", "")
 active_team["mode"] = get_field("active_team_mode") or active_team.get("mode", "")
 active_team["status"] = get_field("active_team_status") or active_team.get("status", "")
 active_team["decision"] = get_field("active_team_decision") or active_team.get("decision", "")
@@ -3009,11 +3141,12 @@ PY
 
 sync_task_runtime() {
   local task_id="$1"
-  local task_file title artifact_dir_rel last_verified_at active_team_mode active_team_status active_team_decision
+  local task_file title artifact_dir_rel last_verified_at active_team_backend active_team_mode active_team_status active_team_decision
   task_file="$(require_task "$task_id")"
   title="$(get_field "$task_file" title)"
   artifact_dir_rel="$(task_artifact_dir_rel "$task_id")"
   last_verified_at="$(get_field "$task_file" last_verified_at)"
+  active_team_backend="$(get_field "$task_file" active_team_backend)"
   active_team_mode="$(get_field "$task_file" active_team_mode)"
   active_team_status="$(get_field "$task_file" active_team_status)"
   active_team_decision="$(get_field "$task_file" active_team_decision)"
@@ -3023,6 +3156,7 @@ sync_task_runtime() {
   upsert_task_fields "$task_file" \
     "artifact_dir=$artifact_dir_rel" \
     "last_verified_at=$last_verified_at" \
+    "active_team_backend=$active_team_backend" \
     "active_team_mode=$active_team_mode" \
     "active_team_status=$active_team_status" \
     "active_team_decision=$active_team_decision"
@@ -3152,11 +3286,12 @@ render_task() {
   UPDATED="$now" \
   ARTIFACT_DIR="$artifact_dir_rel" \
   LAST_VERIFIED_AT="" \
+  ACTIVE_TEAM_BACKEND="" \
   ACTIVE_TEAM_MODE="" \
   ACTIVE_TEAM_STATUS="" \
   ACTIVE_TEAM_DECISION="" \
   SUCCESS_CRITERIA="$criteria" \
-  perl -pe 's/\{\{(ID|TITLE|STATUS|CREATED|UPDATED|ARTIFACT_DIR|LAST_VERIFIED_AT|ACTIVE_TEAM_MODE|ACTIVE_TEAM_STATUS|ACTIVE_TEAM_DECISION|SUCCESS_CRITERIA)\}\}/$ENV{$1}/ge' \
+  perl -pe 's/\{\{(ID|TITLE|STATUS|CREATED|UPDATED|ARTIFACT_DIR|LAST_VERIFIED_AT|ACTIVE_TEAM_BACKEND|ACTIVE_TEAM_MODE|ACTIVE_TEAM_STATUS|ACTIVE_TEAM_DECISION|SUCCESS_CRITERIA)\}\}/$ENV{$1}/ge' \
     "$TASK_TEMPLATE" > "$file"
 }
 
@@ -5943,9 +6078,9 @@ cmd_team_start() {
 
   if [[ "$claude_review" == "1" ]] && ! claude_provider_available; then
     sync_task_runtime "$task_id"
-    upsert_task_fields "$(require_task "$task_id")" "active_team_mode=$mode" "active_team_status=error" "active_team_decision=$(path_relative_to_codex_home "$(task_team_decision_file "$task_id")")"
+    upsert_task_fields "$(require_task "$task_id")" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=error" "active_team_decision=$(path_relative_to_codex_home "$(task_team_decision_file "$task_id")")"
     write_task_state_json "$task_id"
-    set_task_state_fields "$task_id" "active_team.status=error" "active_team.error=claude provider unavailable"
+    set_task_state_fields "$task_id" "active_team.backend=legacy" "active_team.status=error" "active_team.error=claude provider unavailable"
     echo "claude review requested but paseo claude provider is unavailable" >&2
     exit 1
   fi
@@ -5976,9 +6111,10 @@ cmd_team_start() {
   local team_lock
   team_lock="$(team_lock_file "$task_id")"
   acquire_lock "$team_lock"
-  upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=running" "active_team_decision=$decision_rel"
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=running" "active_team_decision=$decision_rel"
   write_task_state_json "$task_id"
   set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
     "active_team.mode=$mode" \
     "active_team.status=running" \
     "active_team.decision=$decision_rel" \
@@ -6174,9 +6310,10 @@ EOF
   } > "$staffing_file"
 
   if [[ "$team_interrupted" == "1" ]]; then
-    upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=interrupted" "active_team_decision=$decision_rel"
+    upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=interrupted" "active_team_decision=$decision_rel"
     write_task_state_json "$task_id"
     set_task_state_fields "$task_id" \
+      "active_team.backend=legacy" \
       "active_team.status=interrupted" \
       "active_team.round_file=$round_rel" \
       "active_team.staffing=$staffing_rel" \
@@ -6194,9 +6331,10 @@ EOF
   fi
 
   if [[ "$status_any_fail" == "1" ]]; then
-    upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=failed" "active_team_decision=$decision_rel"
+    upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=failed" "active_team_decision=$decision_rel"
     write_task_state_json "$task_id"
     set_task_state_fields "$task_id" \
+      "active_team.backend=legacy" \
       "active_team.status=failed" \
       "active_team.round_file=$round_rel" \
       "active_team.staffing=$staffing_rel" \
@@ -6206,9 +6344,10 @@ EOF
     exit 1
   fi
 
-  upsert_task_fields "$task_file" "active_team_mode=$mode" "active_team_status=complete" "active_team_decision=$decision_rel"
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=complete" "active_team_decision=$decision_rel"
   write_task_state_json "$task_id"
   set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
     "active_team.status=complete" \
     "active_team.round_file=$round_rel" \
     "active_team.staffing=$staffing_rel"
@@ -6370,9 +6509,10 @@ cmd_team_loop() {
     printf -- '- created_at: %s\n\n' "$(timestamp_utc)"
   } > "$loop_file"
 
-  upsert_task_fields "$task_file" "active_team_mode=execute" "active_team_status=loop-running" "active_team_decision=$decision_rel"
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=execute" "active_team_status=loop-running" "active_team_decision=$decision_rel"
   write_task_state_json "$task_id"
   set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
     "active_team.mode=execute" \
     "active_team.status=loop-running" \
     "active_team.objective=$objective" \
@@ -6573,9 +6713,10 @@ EOF
     printf -- '- completed_at: %s\n' "$(timestamp_utc)"
   } >> "$loop_file"
 
-  upsert_task_fields "$task_file" "active_team_status=$loop_status" "active_team_decision=$decision_rel"
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_status=$loop_status" "active_team_decision=$decision_rel"
   write_task_state_json "$task_id"
   set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
     "active_team.status=$loop_status" \
     "active_team.decision=$decision_rel" \
     "active_team.staffing=$staffing_rel" \
@@ -6596,6 +6737,361 @@ EOF
   return 1
 }
 
+cmd_team_record_start() {
+  local task_id="$1"
+  local objective="$2"
+  shift 2
+  local backend=""
+  local mode=""
+  local agents=""
+  local roles=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --backend)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"' >&2; exit 1; }
+        backend="$2"
+        shift 2
+        ;;
+      --backend=*)
+        backend="${1#--backend=}"
+        shift
+        ;;
+      --mode)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"' >&2; exit 1; }
+        mode="$2"
+        shift 2
+        ;;
+      --mode=*)
+        mode="${1#--mode=}"
+        shift
+        ;;
+      --agents)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"' >&2; exit 1; }
+        agents="$2"
+        shift 2
+        ;;
+      --agents=*)
+        agents="${1#--agents=}"
+        shift
+        ;;
+      --roles)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"' >&2; exit 1; }
+        roles="$2"
+        shift 2
+        ;;
+      --roles=*)
+        roles="${1#--roles=}"
+        shift
+        ;;
+      *)
+        echo "unknown team-record-start option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  [[ -n "$backend" ]] || { echo 'missing team backend' >&2; exit 1; }
+  [[ -n "$mode" ]] || { echo 'missing team mode' >&2; exit 1; }
+  [[ -n "$agents" ]] || { echo 'missing team agents' >&2; exit 1; }
+  [[ -n "$roles" ]] || { echo 'missing team roles' >&2; exit 1; }
+  validate_team_backend "$backend"
+  validate_team_mode "$mode"
+  validate_positive_integer "$agents" "agents"
+  validate_query "$objective"
+  validate_single_line_reason "team roles" "$roles"
+
+  local task_file decision_file staffing_file decision_rel staffing_rel team_lock
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  decision_file="$(task_team_decision_file "$task_id")"
+  staffing_file="$(task_team_staffing_file "$task_id")"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+
+  ensure_team_lock_dir
+  team_lock="$(team_lock_file "$task_id")"
+  acquire_lock "$team_lock"
+  upsert_task_fields "$task_file" \
+    "active_team_backend=$backend" \
+    "active_team_mode=$mode" \
+    "active_team_status=running" \
+    "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=$backend" \
+    "active_team.mode=$mode" \
+    "active_team.status=running" \
+    "active_team.decision=$decision_rel" \
+    "active_team.objective=$objective" \
+    "active_team.agents=$agents" \
+    "active_team.roles=$roles" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.temp_dir="
+  release_lock "$team_lock"
+
+  append_task_runtime_event "$task_id" "team-record-start" "$backend/$mode roles=$roles"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'backend: %s\n' "$backend"
+  printf 'mode: %s\n' "$mode"
+  printf 'status: running\n'
+  printf 'decision: %s\n' "$decision_file"
+  printf 'staffing: %s\n' "$staffing_file"
+}
+
+cmd_team_record_finalize() {
+  local task_id="$1"
+  shift
+  local backend=""
+  local status=""
+  local round_file=""
+  local decision_file=""
+  local staffing_file=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --backend)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+        backend="$2"
+        shift 2
+        ;;
+      --backend=*)
+        backend="${1#--backend=}"
+        shift
+        ;;
+      --status)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+        status="$2"
+        shift 2
+        ;;
+      --status=*)
+        status="${1#--status=}"
+        shift
+        ;;
+      --round)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+        round_file="$2"
+        shift 2
+        ;;
+      --round=*)
+        round_file="${1#--round=}"
+        shift
+        ;;
+      --decision)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+        decision_file="$2"
+        shift 2
+        ;;
+      --decision=*)
+        decision_file="${1#--decision=}"
+        shift
+        ;;
+      --staffing)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+        staffing_file="$2"
+        shift 2
+        ;;
+      --staffing=*)
+        staffing_file="${1#--staffing=}"
+        shift
+        ;;
+      *)
+        echo "unknown team-record-finalize option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  [[ -n "$backend" ]] || { echo 'missing team backend' >&2; exit 1; }
+  [[ -n "$status" ]] || { echo 'missing team status' >&2; exit 1; }
+  validate_team_backend "$backend"
+  validate_team_final_status "$status"
+
+  local task_file current_backend current_status
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  current_backend="$(get_field "$task_file" active_team_backend)"
+  current_status="$(get_field "$task_file" active_team_status)"
+  if [[ "$current_backend" != "native" || "$current_status" != "running" ]]; then
+    echo "team-record-finalize requires an active native team record in running status" >&2
+    exit 1
+  fi
+  validate_team_native_artifact_file "$task_id" "team round" "$round_file"
+  validate_team_native_artifact_file "$task_id" "team decision" "$decision_file"
+  validate_team_native_artifact_file "$task_id" "team staffing" "$staffing_file"
+
+  local round_rel decision_rel staffing_rel mode team_lock
+  round_rel="$(path_relative_to_codex_home "$round_file")"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+  mode="$(get_field "$task_file" active_team_mode)"
+
+  ensure_team_lock_dir
+  team_lock="$(team_lock_file "$task_id")"
+  acquire_lock "$team_lock"
+  upsert_task_fields "$task_file" \
+    "active_team_backend=$backend" \
+    "active_team_status=$status" \
+    "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=$backend" \
+    "active_team.mode=$mode" \
+    "active_team.status=$status" \
+    "active_team.decision=$decision_rel" \
+    "active_team.round_file=$round_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.temp_dir="
+  release_lock "$team_lock"
+
+  append_task_runtime_event "$task_id" "team-record-finalize" "$backend/$status round=$round_rel"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'backend: %s\n' "$backend"
+  printf 'status: %s\n' "$status"
+  printf 'decision: %s\n' "$decision_file"
+  printf 'staffing: %s\n' "$staffing_file"
+  printf 'round: %s\n' "$round_file"
+}
+
+cmd_team_loop_record() {
+  local task_id="$1"
+  shift
+  local backend=""
+  local status=""
+  local loop_file=""
+  local iterations=""
+  local max_iterations=""
+  local max_time=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --backend)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        backend="$2"
+        shift 2
+        ;;
+      --backend=*)
+        backend="${1#--backend=}"
+        shift
+        ;;
+      --status)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        status="$2"
+        shift 2
+        ;;
+      --status=*)
+        status="${1#--status=}"
+        shift
+        ;;
+      --loop)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        loop_file="$2"
+        shift 2
+        ;;
+      --loop=*)
+        loop_file="${1#--loop=}"
+        shift
+        ;;
+      --iterations)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        iterations="$2"
+        shift 2
+        ;;
+      --iterations=*)
+        iterations="${1#--iterations=}"
+        shift
+        ;;
+      --max-iterations)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        max_iterations="$2"
+        shift 2
+        ;;
+      --max-iterations=*)
+        max_iterations="${1#--max-iterations=}"
+        shift
+        ;;
+      --max-time)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+        max_time="$2"
+        shift 2
+        ;;
+      --max-time=*)
+        max_time="${1#--max-time=}"
+        shift
+        ;;
+      *)
+        echo "unknown team-loop-record option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  [[ -n "$backend" ]] || { echo 'missing team backend' >&2; exit 1; }
+  [[ -n "$status" ]] || { echo 'missing team loop status' >&2; exit 1; }
+  [[ -n "$iterations" ]] || { echo 'missing team loop iterations' >&2; exit 1; }
+  validate_team_backend "$backend"
+  validate_team_loop_status "$status"
+  validate_positive_integer "$iterations" "loop iterations"
+  if [[ -n "$max_iterations" ]]; then
+    validate_positive_integer "$max_iterations" "loop max iterations"
+  fi
+  if [[ -n "$max_time" ]]; then
+    validate_single_line_reason "loop max time" "$max_time"
+  fi
+
+  local task_file current_backend
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  current_backend="$(get_field "$task_file" active_team_backend)"
+  if [[ "$current_backend" != "native" ]]; then
+    echo "team-loop-record requires a native team record" >&2
+    exit 1
+  fi
+  validate_team_native_artifact_file "$task_id" "team loop" "$loop_file"
+
+  local decision_file decision_rel staffing_file staffing_rel loop_rel mode team_lock
+  decision_file="$(task_team_decision_file "$task_id")"
+  staffing_file="$(task_team_staffing_file "$task_id")"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+  loop_rel="$(path_relative_to_codex_home "$loop_file")"
+  mode="$(get_field "$task_file" active_team_mode)"
+  mode="${mode:-execute}"
+
+  ensure_team_lock_dir
+  team_lock="$(team_lock_file "$task_id")"
+  acquire_lock "$team_lock"
+  upsert_task_fields "$task_file" \
+    "active_team_backend=$backend" \
+    "active_team_mode=$mode" \
+    "active_team_status=$status" \
+    "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=$backend" \
+    "active_team.mode=$mode" \
+    "active_team.status=$status" \
+    "active_team.decision=$decision_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.loop.status=$status" \
+    "active_team.loop.file=$loop_rel" \
+    "active_team.loop.iteration=$iterations"
+  if [[ -n "$max_iterations" ]]; then
+    set_task_state_fields "$task_id" "active_team.loop.max_iterations=$max_iterations"
+  fi
+  if [[ -n "$max_time" ]]; then
+    set_task_state_fields "$task_id" "active_team.loop.max_time=$max_time"
+  fi
+  release_lock "$team_lock"
+
+  append_task_runtime_event "$task_id" "team-loop-record" "$backend/$status loop=$loop_rel iterations=$iterations"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'backend: %s\n' "$backend"
+  printf 'status: %s\n' "$status"
+  printf 'loop: %s\n' "$loop_file"
+  printf 'iterations: %s\n' "$iterations"
+}
+
 cmd_team_status() {
   local task_id="$1"
   sync_task_runtime "$task_id"
@@ -6612,6 +7108,7 @@ print(f"task_id: {data.get('task_id', '')}")
 print(f"status: {data.get('status', '')}")
 print(f"artifact_dir: {data.get('artifact_dir', '')}")
 print(f"last_verified_at: {data.get('last_verified_at', '')}")
+print(f"team_backend: {team.get('backend', '')}")
 print(f"team_mode: {team.get('mode', '')}")
 print(f"team_status: {team.get('status', '')}")
 print(f"team_decision: {team.get('decision', '')}")
@@ -6838,6 +7335,21 @@ main() {
       shift
       cmd_team_start "$@"
       ;;
+    team-record-start)
+      [[ $# -ge 3 ]] || { echo 'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"' >&2; exit 1; }
+      shift
+      cmd_team_record_start "$@"
+      ;;
+    team-record-finalize)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>' >&2; exit 1; }
+      shift
+      cmd_team_record_finalize "$@"
+      ;;
+    team-loop-record)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]' >&2; exit 1; }
+      shift
+      cmd_team_loop_record "$@"
+      ;;
     team-status)
       [[ $# -eq 2 ]] || { echo 'usage: codex-workflow team-status <task-id>' >&2; exit 1; }
       cmd_team_status "$2"
@@ -6857,7 +7369,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-status|team-stop|team-promote|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
       exit 1
       ;;
   esac

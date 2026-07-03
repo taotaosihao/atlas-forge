@@ -87,7 +87,7 @@ Follow this loop:
 14. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
-15. Use `$atlas-workflow:team` when the task should go through discussion or promotion before execution.
+15. Use `$atlas-workflow:team` when the task should go through Codex native subagent discussion or promotion before execution. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
 16. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
 
 Hard rules:

@@ -34,7 +34,7 @@ Follow this loop:
    - `## 综合排序`
 7. Keep inference and unknown separate.
 8. If the boundary is still unclear, switch to `$atlas-workflow:clarify`.
-9. If discussion or staffing is the next step, switch to `$atlas-workflow:team`.
+9. If discussion or staffing is the next step, switch to `$atlas-workflow:team` for Codex native subagents. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
 10. Before claiming the analysis artifact is ready for clarification, team discussion, handoff, or execution planning, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require analysis`
 11. If the artifact is intentionally partial or exploratory, do not claim execution readiness; report the remaining unknowns instead.

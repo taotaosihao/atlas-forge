@@ -45,10 +45,11 @@ Follow this loop:
 5. Use `$atlas-workflow:analyze` for read-only cross-file evidence synthesis when the next step is still diagnosis.
 6. Use `$atlas-workflow:clarify` when the request fails the short request intake gate or brownfield facts need to become `context.md` and `spec.md`.
 7. Default to `$atlas-workflow:team` for non-tiny bounded work before execution:
-   - Use team for behavior changes, multi-file work, meaningful implementation choices, evaluator/reviewer judgment, or contract formation.
+   - Use native team for behavior changes, multi-file work, meaningful implementation choices, evaluator/reviewer judgment, or contract formation.
+   - `$atlas-workflow:team` uses Codex native subagents. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
    - Tiny precise fixes may stay in direct local flow when scope and verification are obvious.
    - Explicit user requests to avoid multi-agent or directly perform a tiny fix override the default when safe.
-   - If the default team round is interrupted or stalls, follow `$atlas-workflow:team` fallback: inspect partial lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct local execution only when no unresolved blocking issue remains.
+   - If the native team round is interrupted or stalls, follow `$atlas-workflow:team`: inspect recorded native lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct local execution only when no unresolved blocking issue remains.
 8. Use `$atlas-workflow:team` when the task needs discussion, staffing, review, contract formation, or promotion before execution.
 9. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
 10. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.

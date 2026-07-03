@@ -44,11 +44,12 @@ Follow this loop:
 4. Use `$atlas-workflow:analyze` when the task still needs read-only evidence synthesis across multiple files.
 5. Use `$atlas-workflow:clarify` when the request fails the short request intake gate or the task needs explicit non-goals, decision boundaries, and acceptance criteria before execution.
 6. Default to `$atlas-workflow:team` for non-tiny bounded work before code changes:
-   - Use team when the task changes behavior, touches multiple files, has meaningful implementation choices, benefits from reviewer/evaluator judgment, or needs a lightweight implementation contract.
+   - Use native team when the task changes behavior, touches multiple files, has meaningful implementation choices, benefits from reviewer/evaluator judgment, or needs a lightweight implementation contract.
+   - `$atlas-workflow:team` uses Codex native subagents. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
    - Tiny precise fixes may stay in direct task flow when scope and verification are obvious.
    - Explicit user requests such as "directly implement", "no multi-agent", or "tiny fix" override this default when safe.
    - When team is skipped for a non-tiny task, record why direct execution is still appropriate.
-   - If the default team round is interrupted or stalls, follow `$atlas-workflow:team` fallback: inspect partial lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct task execution only when no unresolved blocking issue remains.
+   - If the native team round is interrupted or stalls, follow `$atlas-workflow:team`: inspect recorded native lane output, write a synthesized `team/decision.md` when evidence is sufficient, run readiness, then continue direct task execution only when no unresolved blocking issue remains.
 7. Use `$atlas-workflow:team` specifically for discussion, staffing, review, contract formation, or promotion before code changes.
 8. For nontrivial direct execution that intentionally bypasses earlier planning layers or the default team flow, record:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent task --risk <low|medium|high> --decision use --reason "<why direct task execution is appropriate>"`
