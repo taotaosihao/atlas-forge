@@ -24,22 +24,23 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
-Atlas defaults to native Codex subagent collaboration for non-tiny bounded work.
-Use `$atlas-workflow:team` before execution when a task changes behavior,
-touches multiple files, has meaningful implementation choices, needs
-evaluator/reviewer judgment, or should produce a lightweight implementation
-contract. `$atlas-workflow:team` requires native subagent tools and records
+Atlas has separate team entrypoints with separate rule sets.
+
+Native entrypoint: use `$atlas-workflow:team` before execution when a task
+changes behavior, touches multiple files, has meaningful implementation choices,
+needs evaluator/reviewer judgment, or should produce a lightweight
+implementation contract. It requires Codex native subagent tools and records
 native rounds with `team-record-start`, `team-record-finalize`, and
-`team-loop-record`; it must not silently fall back to the legacy CLI-backed
-lanes. Native team uses a Multica-style dynamic Agent Plan: choose active roles
-by task shape, list omitted roles, define phase gates, write boundaries,
-verification evidence, and concurrency strategy; three roles are only a common
-small-round seed, not a limit. Use `$atlas-workflow:team-v1` only for
-compatibility, old flow debugging, or when native subagent tools are unavailable
-and the user explicitly accepts the legacy `codex-workflow team-start/team-loop`
-behavior. Tiny precise fixes may still use direct `$atlas-workflow:task` flow
-when scope and verification are obvious, and explicit user requests to avoid
-multi-agent should be honored when safe.
+`team-loop-record`. Native team uses a Multica-style dynamic Agent Plan: choose
+active roles by task shape, list omitted roles, define phase gates, write
+boundaries, verification evidence, and concurrency strategy; three roles are
+only a common small-round seed, not a limit.
+
+Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
+flow debugging, or explicit user acceptance of the CLI-backed team behavior.
+Tiny precise fixes may still use direct `$atlas-workflow:task` flow when scope
+and verification are obvious, and explicit user requests to avoid multi-agent
+should be honored when safe.
 
 ## Short Request Intake Gate
 

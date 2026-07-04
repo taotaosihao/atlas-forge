@@ -5,13 +5,11 @@ description: Use the legacy Atlas team flow backed by codex-workflow team-start/
 
 Use the legacy Atlas team flow for this request.
 
-`$atlas-workflow:team-v1` is the compatibility entrypoint for the pre-native
-team implementation. It uses `codex-workflow team-start`, `codex-workflow
-team-loop`, and child `codex exec` lane processes. It is not the Codex native
-subagent implementation. Use it only when the user explicitly asks for or
-accepts legacy behavior, when native subagent tools are unavailable and the user
-explicitly accepts this legacy entrypoint, or when you need to reproduce/debug
-old `team-start` / `team-loop` behavior.
+`$atlas-workflow:team-v1` is the legacy Atlas team entrypoint. It uses
+`codex-workflow team-start`, `codex-workflow team-loop`, and child `codex exec`
+lane processes. Use it only when the user explicitly asks for legacy behavior,
+explicitly accepts legacy behavior, or when you need to reproduce/debug old
+`team-start` / `team-loop` behavior.
 
 ## 输出语言
 
@@ -24,8 +22,7 @@ Follow this loop:
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
 2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
 3. Treat this as the legacy Atlas collaboration layer for bounded work that must stay on the old CLI-backed implementation:
-   - Use `$atlas-workflow:team` for the default Codex native subagent path.
-   - Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging, or native subagent unavailability after the user explicitly accepts this legacy entrypoint.
+   - Use `$atlas-workflow:team-v1` only for compatibility, old flow debugging, or explicit user acceptance of this legacy entrypoint.
    - Tiny precise fixes may skip team when scope and verification are obvious.
 4. Record team routing evidence for nontrivial discussion, review, staffing, contract formation, or promotion:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent team --risk <low|medium|high> --decision use --reason "<why legacy team is needed>"`
@@ -38,7 +35,7 @@ Follow this loop:
 8. Use the legacy Atlas-managed bounded team loop when the user wants the old CLI-backed loop:
    - `~/.codex/workflow/bin/codex-workflow team-loop <task-id> "<objective>" --max-iterations 5 --max-time 1h`
    - Add `--verify-check "<command>"` when a shell command can objectively prove the goal.
-   - Use this legacy loop only when `$atlas-workflow:team-v1` is intentional. The default `$atlas-workflow:team` loop is native subagent orchestration and must not silently call this command.
+   - Use this legacy loop only when `$atlas-workflow:team-v1` is intentional.
    - The legacy loop runs inside Atlas workflow: each iteration launches `team-start --mode execute`, runs checks, asks a verifier to put `done=true` or `done=false` on the first non-empty message line, and writes a `team/loop-*.md` ledger.
    - `--max-time` is enforced across team/check/verifier substeps; a substep that exceeds the remaining deadline stops the loop with `loop-timeout`.
    - Do not use open-ended loops. Always keep `--max-iterations` and/or `--max-time` bounded.

@@ -7,9 +7,9 @@ Use the Atlas native team flow for this request.
 
 `$atlas-workflow:team` is the default Atlas team entrypoint. It must use Codex
 native subagents through `multi_agent_v1.spawn_agent`,
-`multi_agent_v1.wait_agent`, and `multi_agent_v1.close_agent`. Do not silently
-fallback to `codex-workflow team-start` or `codex-workflow team-loop`; those
-legacy CLI-backed commands belong to `$atlas-workflow:team-v1`.
+`multi_agent_v1.wait_agent`, and `multi_agent_v1.close_agent`. This skill is a
+native-only contract: if native subagent tools are unavailable, stop instead of
+substituting another orchestration implementation.
 
 ## 输出语言
 
@@ -22,8 +22,8 @@ legacy CLI-backed commands belong to `$atlas-workflow:team-v1`.
 1. Confirm native subagent tools are callable.
    - If `multi_agent_v1.spawn_agent`, `multi_agent_v1.wait_agent`, and `multi_agent_v1.close_agent` are already available, use them directly.
    - If they are not available but `tool_search` is available, search for `multi_agent_v1 spawn_agent wait_agent close_agent` and use the exposed tools.
-   - If the native tools still are not callable, stop and tell the user that `$atlas-workflow:team` requires Codex native subagents and that they can explicitly run `$atlas-workflow:team-v1` for the legacy CLI-backed flow.
-2. Never replace a requested native team run with `codex-workflow team-start`, `codex-workflow team-loop`, `paseo`, background shell lanes, or another non-native delegate mechanism.
+   - If the native tools still are not callable, stop and tell the user that `$atlas-workflow:team` requires Codex native subagents; ask for an explicit alternate workflow before proceeding.
+2. Never replace a requested native team run with shell-managed lanes, background processes, or another non-native delegate mechanism.
 3. Keep the main Codex as orchestrator. Subagents provide lane work, implementation slices, review, or verification; the main Codex owns final synthesis, file integration, and final user reporting.
 
 ## Task Setup
@@ -50,7 +50,7 @@ For every native round:
    - `~/.codex/workflow/bin/codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents <N> --roles "<comma-separated roles>"`
 3. Finalize the native record after writing non-empty artifacts:
    - `~/.codex/workflow/bin/codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <round-file> --decision <decision-file> --staffing <staffing-file>`
-4. Use `~/.codex/workflow/bin/codex-workflow team-status <task-id>` for observability. Native status must show `team_backend: native` and must not depend on a legacy `team_temp_dir`.
+4. Use `~/.codex/workflow/bin/codex-workflow team-status <task-id>` for observability. Native status must show `team_backend: native`; only native record fields and native artifacts count as team evidence.
 5. All lane outputs must contain exactly these top-level sections:
    - `## Evidence`
    - `## Inference`
@@ -225,7 +225,7 @@ Use a native bounded loop when the user asks for team implementation to keep fix
 
 Native loop requirements:
 
-1. Do not call `codex-workflow team-loop` for native loop execution. That command remains legacy `team-v1` behavior.
+1. Execute bounded repair loops with native subagents only. Use the native loop ledger and `team-loop-record` for terminal status recording.
 2. Define both:
    - `max_iterations` as a positive integer.
    - `max_time` as a bounded wall-clock target when practical.
