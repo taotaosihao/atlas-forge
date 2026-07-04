@@ -67,4 +67,3 @@ grep -q "team_backend: native" "$TMP_ROOT/native-dynamic-roles-status.out"
 grep -q "team_agents: 4" "$TMP_ROOT/native-dynamic-roles-status.out"
 grep -q "team_roles: domain-architect,api-reviewer,ui-verifier,evidence-qa" "$TMP_ROOT/native-dynamic-roles-status.out"
 pass "native team record observability"
-

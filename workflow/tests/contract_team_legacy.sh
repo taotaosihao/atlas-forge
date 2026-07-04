@@ -140,4 +140,3 @@ grep -q "status: loop-timeout" "$TMP_ROOT/legacy-team-loop-timeout.out"
 $BIN team-status "$loop_timeout_id" > "$TMP_ROOT/legacy-team-loop-timeout-status.out"
 grep -q "team_loop_status: loop-timeout" "$TMP_ROOT/legacy-team-loop-timeout-status.out"
 pass "legacy team loop enforces max time"
-
