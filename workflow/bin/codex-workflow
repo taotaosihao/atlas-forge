@@ -1,4 +1,29 @@
 #!/usr/bin/env bash
+
+if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+  if [[ -z "${CODEX_WORKFLOW_BASH_REEXECED:-}" ]]; then
+    for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+      if [[ -x "$candidate" ]]; then
+        major="$("$candidate" -c 'printf "%s" "${BASH_VERSINFO[0]:-0}"' 2>/dev/null || true)"
+        case "$major" in
+          ''|*[!0-9]*)
+            continue
+            ;;
+        esac
+        if [[ "$major" -ge 4 ]]; then
+          export CODEX_WORKFLOW_BASH_REEXECED=1
+          exec "$candidate" "$0" "$@"
+        fi
+      fi
+    done
+  fi
+
+  echo "codex-workflow requires Bash 4+; install a newer bash or put it earlier in PATH" >&2
+  exit 1
+fi
+
+unset CODEX_WORKFLOW_BASH_REEXECED
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,10 +82,17 @@ LOCK_DIRS=()
 
 release_all_locks() {
   local lock_dir
+  local held_locks=()
 
-  for lock_dir in "${LOCK_DIRS[@]}"; do
-    rmdir "$lock_dir" 2>/dev/null || true
-  done
+  set +u
+  held_locks=("${LOCK_DIRS[@]}")
+  set -u
+
+  if ((${#held_locks[@]})); then
+    for lock_dir in "${held_locks[@]}"; do
+      rmdir "$lock_dir" 2>/dev/null || true
+    done
+  fi
 }
 
 trap release_all_locks EXIT
@@ -310,15 +342,87 @@ team_loop_remaining_seconds() {
   echo $((deadline - now))
 }
 
+team_loop_timeout_bin() {
+  if command -v timeout >/dev/null 2>&1 && timeout --help 2>&1 | grep -q -- '--kill-after'; then
+    printf '%s\n' timeout
+    return 0
+  fi
+
+  if command -v gtimeout >/dev/null 2>&1 && gtimeout --help 2>&1 | grep -q -- '--kill-after'; then
+    printf '%s\n' gtimeout
+    return 0
+  fi
+
+  return 1
+}
+
 team_loop_run_with_deadline() {
   local deadline="$1"
   shift
-  local remaining
+  local remaining timeout_bin
   remaining="$(team_loop_remaining_seconds "$deadline")"
   if (( remaining <= 0 )); then
     return 124
   fi
-  timeout --kill-after=5s "${remaining}s" "$@"
+
+  timeout_bin="$(team_loop_timeout_bin || true)"
+  if [[ -n "$timeout_bin" ]]; then
+    "$timeout_bin" --kill-after=5s "${remaining}s" "$@"
+    return
+  fi
+
+  # Stock macOS does not include GNU timeout; keep bounded loops portable.
+  python3 - "$remaining" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+remaining = int(sys.argv[1])
+argv = sys.argv[2:]
+deadline = time.monotonic() + remaining
+
+try:
+    proc = subprocess.Popen(argv, start_new_session=True)
+except FileNotFoundError:
+    print(f"{argv[0]}: command not found", file=sys.stderr)
+    raise SystemExit(127)
+except OSError as exc:
+    print(f"failed to start {argv[0]}: {exc}", file=sys.stderr)
+    raise SystemExit(126)
+
+while True:
+    status = proc.poll()
+    if status is not None:
+        if status < 0:
+            raise SystemExit(128 + abs(status))
+        raise SystemExit(status)
+
+    now = time.monotonic()
+    if now >= deadline:
+        break
+    time.sleep(min(0.1, max(0.0, deadline - now)))
+
+try:
+    os.killpg(proc.pid, signal.SIGTERM)
+except ProcessLookupError:
+    pass
+
+kill_deadline = time.monotonic() + 5
+while time.monotonic() < kill_deadline:
+    if proc.poll() is not None:
+        raise SystemExit(124)
+    time.sleep(0.1)
+
+try:
+    os.killpg(proc.pid, signal.SIGKILL)
+except ProcessLookupError:
+    pass
+
+proc.wait()
+raise SystemExit(124)
+PY
 }
 
 team_loop_verifier_sentinel() {
@@ -571,16 +675,27 @@ release_lock() {
   local lock_file="$1"
   local lock_dir="${lock_file}.dir"
   local remaining=()
+  local held_locks=()
   local held
 
   rmdir "$lock_dir" 2>/dev/null || true
 
-  for held in "${LOCK_DIRS[@]}"; do
-    if [[ "$held" != "$lock_dir" ]]; then
-      remaining+=("$held")
-    fi
-  done
-  LOCK_DIRS=("${remaining[@]}")
+  set +u
+  held_locks=("${LOCK_DIRS[@]}")
+  set -u
+
+  if ((${#held_locks[@]})); then
+    for held in "${held_locks[@]}"; do
+      if [[ "$held" != "$lock_dir" ]]; then
+        remaining+=("$held")
+      fi
+    done
+  fi
+  if ((${#remaining[@]})); then
+    LOCK_DIRS=("${remaining[@]}")
+  else
+    LOCK_DIRS=()
+  fi
 }
 
 path_relative_to_codex_home() {
@@ -3921,8 +4036,16 @@ write_verification_record() {
   local failure_attribution="${14:-}"
   local evidence_count="${15:-0}"
   shift $((15 < $# ? 15 : $#))
-  local evidence_refs=("$@")
-  python3 - "$record_file" "$record_type" "$task_id" "$command_text" "$cwd" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$created_at" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" "$evidence_count" "${evidence_refs[@]}" <<'PY'
+  local evidence_refs=()
+  if (($#)); then
+    evidence_refs=("$@")
+  fi
+  if ((evidence_count > 0)); then
+    set -- "$record_file" "$record_type" "$task_id" "$command_text" "$cwd" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$created_at" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" "$evidence_count" "${evidence_refs[@]}"
+  else
+    set -- "$record_file" "$record_type" "$task_id" "$command_text" "$cwd" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$created_at" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" "$evidence_count"
+  fi
+  python3 - "$@" <<'PY'
 from pathlib import Path
 import sys
 
@@ -5893,6 +6016,7 @@ cmd_verify() {
   shift
   local stdout_file stderr_file exit_code verdict record_file verified_at command_text
   local outcome trajectory evaluator failure_attribution
+  local evidence_count evidence_summary
   local evidence_refs=()
   outcome=""
   trajectory=""
@@ -5980,7 +6104,14 @@ cmd_verify() {
     evaluator="local-command"
   fi
   record_file="$(task_verification_dir "$task_id")/$(timestamp_token).md"
-  write_verification_record "$record_file" "verification" "$task_id" "$command_text" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$(timestamp_utc)" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" "${#evidence_refs[@]}" "${evidence_refs[@]}"
+  evidence_count="${#evidence_refs[@]}"
+  if ((evidence_count > 0)); then
+    write_verification_record "$record_file" "verification" "$task_id" "$command_text" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$(timestamp_utc)" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" "$evidence_count" "${evidence_refs[@]}"
+    evidence_summary="$(IFS=' ;; '; printf '%s' "${evidence_refs[*]}")"
+  else
+    write_verification_record "$record_file" "verification" "$task_id" "$command_text" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$(timestamp_utc)" "$outcome" "$trajectory" "$evaluator" "$failure_attribution" 0
+    evidence_summary="-"
+  fi
   verified_at="$(timestamp_utc)"
   upsert_task_fields "$(require_task "$task_id")" "last_verified_at=$verified_at"
   write_task_state_json "$task_id"
@@ -5992,7 +6123,7 @@ cmd_verify() {
     "verification.trajectory=$trajectory" \
     "verification.evaluator=$evaluator" \
     "verification.failure_attribution=$failure_attribution" \
-    "verification.evidence_refs=$(IFS=' ;; '; printf '%s' "${evidence_refs[*]:--}")"
+    "verification.evidence_refs=$evidence_summary"
   append_task_runtime_event "$task_id" "verify" "$command_text => $verdict"
   printf 'task_id: %s\n' "$task_id"
   printf 'record: %s\n' "$record_file"
@@ -6474,10 +6605,7 @@ cmd_team_loop() {
     echo "codex CLI is required for team-loop verifier but was not found: $CODEX_BIN" >&2
     exit 1
   fi
-  if ! command -v timeout >/dev/null 2>&1; then
-    echo "timeout command is required for bounded team-loop execution" >&2
-    exit 1
-  fi
+  command -v python3 >/dev/null 2>&1 || { echo "python3 is required for bounded team-loop execution" >&2; exit 1; }
 
   local task_file title artifact_dir team_dir decision_file staffing_file decision_rel staffing_rel
   local max_time_seconds start_epoch deadline loop_token loop_file loop_rel loop_status iteration iterations_completed workflow_cmd
