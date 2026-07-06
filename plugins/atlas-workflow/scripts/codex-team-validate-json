@@ -1,0 +1,109 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const { validateBrief } = require("../contracts/team-sdd/validators/brief");
+const { validateImplementerReport } = require("../contracts/team-sdd/validators/implementer-report");
+const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const { validateLedgerEvent } = require("../contracts/team-sdd/validators/ledger-event");
+const { validatePathLeaseDocument } = require("../contracts/team-sdd/validators/path-lease");
+const { validateScorecardEvent } = require("../contracts/team-sdd/validators/scorecard");
+const { readJsonFile, extractLabeledJsonBlock } = require("../contracts/team-sdd/validators/common");
+
+const TYPES = {
+  brief: {
+    label: "BRIEF_JSON",
+    validate: validateBrief,
+  },
+  "implementer-report": {
+    label: "IMPLEMENTER_REPORT_JSON",
+    validate: validateImplementerReport,
+  },
+  "review-verdict": {
+    label: "REVIEW_VERDICT_JSON",
+    validate: validateReviewVerdict,
+  },
+  "ledger-event": {
+    label: "LEDGER_EVENT_JSON",
+    validate: validateLedgerEvent,
+  },
+  "path-lease": {
+    label: "PATH_LEASE_JSON",
+    validate: validatePathLeaseDocument,
+  },
+  scorecard: {
+    label: "SCORECARD_JSON",
+    validate: validateScorecardEvent,
+  },
+};
+
+function usage() {
+  console.log(`usage:
+  codex-team-validate-json --type brief|implementer-report|review-verdict|ledger-event|path-lease|scorecard --file <json-file>
+  codex-team-validate-json --type implementer-report|review-verdict --from-message <message-file>
+  codex-team-validate-json --type implementer-report|review-verdict --stdin`);
+}
+
+function parseArgs(argv) {
+  const options = { type: null, file: null, fromMessage: null, stdin: false, help: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--type") {
+      options.type = argv[++i];
+    } else if (arg.startsWith("--type=")) {
+      options.type = arg.slice("--type=".length);
+    } else if (arg === "--file") {
+      options.file = argv[++i];
+    } else if (arg.startsWith("--file=")) {
+      options.file = arg.slice("--file=".length);
+    } else if (arg === "--from-message") {
+      options.fromMessage = argv[++i];
+    } else if (arg.startsWith("--from-message=")) {
+      options.fromMessage = arg.slice("--from-message=".length);
+    } else if (arg === "--stdin") {
+      options.stdin = true;
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function loadValue(options, contract) {
+  const sourceCount = [options.file, options.fromMessage, options.stdin].filter(Boolean).length;
+  if (sourceCount !== 1) {
+    throw new Error("provide exactly one of --file, --from-message, or --stdin");
+  }
+  if (options.file) {
+    return readJsonFile(options.file);
+  }
+  const text = options.stdin ? fs.readFileSync(0, "utf8") : fs.readFileSync(options.fromMessage, "utf8");
+  return extractLabeledJsonBlock(text, contract.label);
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    const contract = TYPES[options.type];
+    if (!contract) {
+      throw new Error("--type must be one of: brief, implementer-report, review-verdict, ledger-event, path-lease, scorecard");
+    }
+    const value = loadValue(options, contract);
+    const errors = contract.validate(value);
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
+    console.log("valid: true");
+  } catch (error) {
+    console.error(`codex-team-validate-json: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

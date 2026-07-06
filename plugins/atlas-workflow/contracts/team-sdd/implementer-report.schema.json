@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "task_id",
+    "slice_id",
+    "base_sha",
+    "head_sha",
+    "commits",
+    "changed_files",
+    "checks",
+    "self_review",
+    "concerns",
+    "questions",
+    "blockers",
+    "no_change_reason"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "status": { "type": "string", "enum": ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"] },
+    "task_id": { "type": "string" },
+    "slice_id": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "head_sha": { "type": ["string", "null"] },
+    "commits": { "type": "array", "items": { "type": "string" } },
+    "changed_files": { "type": "array", "items": { "type": "string" } },
+    "checks": { "type": "array" },
+    "self_review": { "type": "string" },
+    "concerns": { "type": "array" },
+    "questions": { "type": "array" },
+    "blockers": { "type": "array" },
+    "no_change_reason": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

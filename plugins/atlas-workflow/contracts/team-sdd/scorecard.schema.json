@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "slice_id",
+    "role",
+    "model",
+    "status",
+    "event",
+    "timestamp"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "task_id": { "type": "string" },
+    "slice_id": { "type": "string" },
+    "role": { "type": "string" },
+    "model": { "type": "string" },
+    "status": { "type": "string" },
+    "event": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "duration_ms": { "type": ["integer", "null"] },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

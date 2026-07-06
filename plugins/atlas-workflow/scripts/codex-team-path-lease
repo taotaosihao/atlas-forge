@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const {
+  validatePathLeaseDocument,
+  normalizeLeasePath,
+  pathsOverlap,
+  findConflicts,
+} = require("../contracts/team-sdd/validators/path-lease");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log(`usage:
+  codex-team-path-lease --task <task-id> --slice <slice-id> acquire --paths 'src/**[,docs/**]' [--brief brief.json]
+  codex-team-path-lease --task <task-id> --slice <slice-id> release
+  codex-team-path-lease --task <task-id> --slice <slice-id> check --paths 'src/**' [--brief brief.json]`);
+}
+
+function parseArgs(argv) {
+  const options = { task: null, slice: null, command: null, paths: [], brief: null, help: false };
+  const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--task") {
+      options.task = argv[++i];
+    } else if (arg.startsWith("--task=")) {
+      options.task = arg.slice("--task=".length);
+    } else if (arg === "--slice") {
+      options.slice = argv[++i];
+    } else if (arg.startsWith("--slice=")) {
+      options.slice = arg.slice("--slice=".length);
+    } else {
+      rest.push(arg);
+    }
+  }
+  options.command = rest.shift() || null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--paths") {
+      addPaths(options.paths, rest[++i]);
+    } else if (arg.startsWith("--paths=")) {
+      addPaths(options.paths, arg.slice("--paths=".length));
+    } else if (arg === "--brief") {
+      options.brief = rest[++i];
+    } else if (arg.startsWith("--brief=")) {
+      options.brief = arg.slice("--brief=".length);
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function addPaths(target, raw) {
+  if (typeof raw !== "string") {
+    throw new Error("missing --paths value");
+  }
+  for (const item of raw.split(",")) {
+    const trimmed = item.trim();
+    if (trimmed) {
+      target.push(trimmed);
+    }
+  }
+}
+
+function workflowRoot() {
+  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function sddDir(taskId) {
+  safeId("task", taskId);
+  return path.join(workflowRoot(), "artifacts", taskId, "team", "sdd");
+}
+
+function leasePath(taskId) {
+  return path.join(sddDir(taskId), "path-leases.json");
+}
+
+function normalizeRequested(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error("--paths is required");
+  }
+  return paths.map((item) => normalizeLeasePath(item));
+}
+
+function readDocument(taskId) {
+  const file = leasePath(taskId);
+  if (!fs.existsSync(file)) {
+    return { schema_version: 1, task_id: taskId, leases: [] };
+  }
+  const document = JSON.parse(fs.readFileSync(file, "utf8"));
+  const errors = validatePathLeaseDocument(document);
+  if (errors.length > 0) {
+    throw new Error(`invalid lease document: ${errors.join("; ")}`);
+  }
+  if (document.task_id !== taskId) {
+    throw new Error(`lease document task_id does not match: ${document.task_id}`);
+  }
+  return document;
+}
+
+function writeDocument(taskId, document) {
+  const errors = validatePathLeaseDocument(document);
+  if (errors.length > 0) {
+    throw new Error(`invalid lease document: ${errors.join("; ")}`);
+  }
+  fs.mkdirSync(sddDir(taskId), { recursive: true });
+  fs.writeFileSync(leasePath(taskId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
+}
+
+function enforceBrief(briefFile, requestedPaths) {
+  if (!briefFile) {
+    return;
+  }
+  const brief = JSON.parse(fs.readFileSync(briefFile, "utf8"));
+  const owned = (brief.owned_paths || []).map((item) => normalizeLeasePath(item));
+  const forbidden = (brief.forbidden_paths || []).map((item) => normalizeLeasePath(item));
+  if (owned.length === 0) {
+    throw new Error("brief owned_paths must not be empty when --brief is used");
+  }
+  for (const requested of requestedPaths) {
+    if (!owned.some((ownedPath) => pathsOverlap(requested, ownedPath))) {
+      throw new Error(`requested path is not covered by brief owned_paths: ${requested}`);
+    }
+    if (forbidden.some((forbiddenPath) => pathsOverlap(requested, forbiddenPath))) {
+      throw new Error(`requested path overlaps brief forbidden_paths: ${requested}`);
+    }
+  }
+}
+
+function check(options, document, requestedPaths) {
+  enforceBrief(options.brief, requestedPaths);
+  const conflicts = findConflicts(requestedPaths, document.leases, options.slice);
+  if (conflicts.length > 0) {
+    for (const conflict of conflicts) {
+      console.error(`conflict: requested=${conflict.requested} existing=${conflict.existing} slice=${conflict.slice_id}`);
+    }
+    throw new Error("path lease conflict");
+  }
+  console.log("available: true");
+}
+
+function acquire(options) {
+  const requestedPaths = normalizeRequested(options.paths);
+  const document = readDocument(options.task);
+  check(options, document, requestedPaths);
+  document.leases = document.leases.filter((lease) => lease.slice_id !== options.slice);
+  document.leases.push({
+    slice_id: options.slice,
+    paths: requestedPaths,
+    acquired_at: new Date().toISOString(),
+  });
+  writeDocument(options.task, document);
+  console.log(`acquired: ${options.slice}`);
+}
+
+function release(options) {
+  const document = readDocument(options.task);
+  const before = document.leases.length;
+  document.leases = document.leases.filter((lease) => lease.slice_id !== options.slice);
+  writeDocument(options.task, document);
+  console.log(`released: ${before - document.leases.length}`);
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    safeId("task", options.task);
+    safeId("slice", options.slice);
+    if (options.command === "acquire") {
+      acquire(options);
+    } else if (options.command === "release") {
+      release(options);
+    } else if (options.command === "check") {
+      const requestedPaths = normalizeRequested(options.paths);
+      check(options, readDocument(options.task), requestedPaths);
+    } else {
+      throw new Error(`unknown or missing command: ${options.command || ""}`);
+    }
+  } catch (error) {
+    console.error(`codex-team-path-lease: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

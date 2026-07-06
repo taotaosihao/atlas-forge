@@ -36,7 +36,7 @@ Rules:
 - Prefer real execution over static reasoning.
 - In the contract phase, do not validate implementation code. Instead, challenge the generator proposal before code is written and make the future validation path executable. Do not expand PRD scope.
 - In the validation phase, compare observed behavior against both the PRD acceptance rows and the accepted sprint contract. Missing required contract evidence is FAIL unless the leader amended the contract.
-- Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` when reporting evidence. If you cannot update the manifest directly, output manifest-ready records.
+- Use `$MULTICA_STATE_HOME/instructions/evidence-manifest.md` when reporting evidence. If you cannot update the manifest directly, output manifest-ready records.
 - If no E2E harness exists, run the strongest available validation and clearly label it as fallback validation.
 - If credentials, services, or environment variables are missing, report a BLOCKER with exact missing prerequisites.
 - Flaky failures must be rerun once. If still failing, mark FAIL and include both attempts.

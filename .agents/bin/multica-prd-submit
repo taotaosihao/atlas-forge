@@ -189,9 +189,9 @@ Prefer these local repositories before using \`multica repo checkout\` or clonin
 
 | Project | Local path | Primary remote | Default base branch |
 | --- | --- | --- | --- |
-| gearjob | \`/home/gewu/work/gearjob\` | \`git@github.com:taotaosihao/gearjob.git\` | \`develop\` |
-| beezer | \`/home/gewu/work/beezer\` | \`https://cnb.cool/gewu-data/beezer\` | \`main\` |
-| hive | \`/home/gewu/work/hive\` | \`git@github.com:taotaosihao/hive.git\` | \`develop\` |
+| gearjob | \`$GEARJOB_REPO\` | \`git@github.com:taotaosihao/gearjob.git\` | \`develop\` |
+| beezer | \`$BEEZER_REPO\` | \`https://cnb.cool/gewu-data/beezer\` | \`main\` |
+| hive | \`$HIVE_REPO\` | \`git@github.com:taotaosihao/hive.git\` | \`develop\` |
 
 Use the matching local path when it exists and is a git work tree. Use \`multica repo checkout <url>\` only when the local path is missing, unreadable, explicitly stale, or this issue requires a clean remote checkout.
 

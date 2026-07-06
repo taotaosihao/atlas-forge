@@ -2,12 +2,12 @@
 
 Review agents append one JSON object per reviewed agent-produced artifact to:
 
-`/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`
+`$MULTICA_STATE_HOME/agent-scorecards.jsonl`
 
 Use:
 
 ```sh
-flock /home/gewu/.agents/multica-sdlc/agent-scorecards.lock -c 'printf "%s\n" "$SCORECARD_JSON" >> /home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl'
+flock $MULTICA_STATE_HOME/agent-scorecards.lock -c 'printf "%s\n" "$SCORECARD_JSON" >> $MULTICA_STATE_HOME/agent-scorecards.jsonl'
 ```
 
 Required keys:

@@ -51,7 +51,7 @@ description: Plan a task-specific Multica squad and agent configuration before s
 2. 先盘点当前已有 agent 和 skill：
    - 读取 Multica 当前 agent：`multica agent list --include-archived --output json`。
    - 对候选 agent 读取详情和 skill：`multica agent get <agent-id> --output json`、`multica agent skills list <agent-id> --output json`。
-   - 读取本地可用 instruction/skill 来源：优先使用本 plugin 的 `instructions/*.md`、`generated/*.txt`、`skills/*/SKILL.md`；兼容 live install 路径 `/home/gewu/.agents/multica-sdlc/instructions/*.md`、`/home/gewu/.agents/multica-sdlc/generated/*.txt`、`/home/gewu/.agents/skills/*/SKILL.md`。
+   - 读取本地可用 instruction/skill 来源：优先使用本 plugin 的 `instructions/*.md`、`generated/*.txt`、`skills/*/SKILL.md`；兼容 live install 路径 `$MULTICA_STATE_HOME/instructions/*.md`、`$MULTICA_STATE_HOME/generated/*.txt`、`$AGENTS_HOME/skills/*/SKILL.md`。
    - 输出当前 agent/skill inventory：agent id、名称、状态、模型/runtime、已绑定 skill、适配角色、当前任务占用情况、是否可直接复用。
 3. 复用优先，再补齐：
    - 如果现有非 archived agent 的模型、runtime、skill、MCP、instructions 可以满足角色要求，直接加入实施小组，不新增、不改造。

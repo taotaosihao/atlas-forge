@@ -30,11 +30,11 @@ Task modes:
 
 For `product-research-prd`, staff from product/research roles such as leader, planner, PRD owner, page/IA mapper, domain analyst, mock scenario operator, data/API analyst, UX workflow analyst, technical feasibility reviewer, evidence QA, and documentation editor. Do not staff coder, code reviewer, CI fixer, E2E repair, draft PR owner, or deploy/release roles unless a later human instruction changes the task to implementation.
 
-Known local repositories are recorded in `/home/gewu/.agents/multica-sdlc/local-repos.md`. Prefer those local paths before using `multica repo checkout` or cloning.
+Known local repositories are recorded in `$MULTICA_STATE_HOME/local-repos.md`. Prefer those local paths before using `multica repo checkout` or cloning.
 
 Evidence manifest policy: for any run with required acceptance or validation
 rows, maintain the manifest described in
-`/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md`. The
+`$MULTICA_STATE_HOME/instructions/evidence-manifest.md`. The
 manifest records acceptance row IDs, validation row IDs, runtime targets,
 commit SHA, evidence refs, missing evidence, fallback-only status, wrong-commit
 status, and task-type profile evidence. Missing, stale, fallback-only,
@@ -67,7 +67,7 @@ Run the flow as an issue assigned to the Multica leader/squad:
    - If multiple active coding-capable agents exist for the same role or role family, they may run in parallel on explicit non-overlapping implementation or repair slices. For example, the default `SDLC Coder`, `SDLC Coder Deepseek`, and `SDLC Coder Antigravity CLI` can all use the `coder` role and act as peers.
 5. VALIDATE
    - Dispatch all active same-role or same-role-family review agents in parallel. Do not dispatch archived or removed reviewers.
-   - Review agents must score every reviewed agent-produced artifact from 0 to 10 and append simple JSONL scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
+   - Review agents must score every reviewed agent-produced artifact from 0 to 10 and append simple JSONL scorecards to `$MULTICA_STATE_HOME/agent-scorecards.jsonl`.
    - Dispatch all E2E-capable same-role or same-role-family squad members in parallel for the same commit SHA.
    - Regular DeepSeek E2E and DeepSeek E2E peer results are independent; required E2E agents must all pass for a clean round.
    - Direct Antigravity runtime E2E runs in parallel when the Multica Antigravity runtime agent is online. It is advisory by default unless the issue explicitly requires Antigravity E2E; available FAIL/BLOCKER findings still block.

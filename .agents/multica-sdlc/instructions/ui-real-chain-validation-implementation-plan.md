@@ -78,8 +78,8 @@ Verification:
 
 ```bash
 rg -n "screenshot|DOM/layout|viewport|console|network|fallback-only" \
-  /home/gewu/.agents/multica-sdlc/instructions \
-  /home/gewu/.agents/multica-sdlc/generated
+  $MULTICA_STATE_HOME/instructions \
+  $MULTICA_STATE_HOME/generated
 ```
 
 ## Phase M3: Real-Chain Evidence Collector
@@ -110,8 +110,8 @@ Verification:
 
 ```bash
 rg -n "runtime target|request/response|job log|migration|database assertion|mock" \
-  /home/gewu/.agents/multica-sdlc/instructions \
-  /home/gewu/.agents/multica-sdlc/generated
+  $MULTICA_STATE_HOME/instructions \
+  $MULTICA_STATE_HOME/generated
 ```
 
 ## Phase M4: Review/E2E Scorecard Integration
@@ -126,7 +126,7 @@ Output:
   - `required_or_advisory`
   - `missing_evidence`
   - `fallback_only`
-- Keep writing to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`
+- Keep writing to `$MULTICA_STATE_HOME/agent-scorecards.jsonl`
   atomically with the existing lock.
 
 Acceptance:
@@ -142,7 +142,7 @@ Verification:
 python3 - <<'PY'
 import json
 from pathlib import Path
-path = Path('/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl')
+path = Path('$MULTICA_STATE_HOME/agent-scorecards.jsonl')
 if path.exists():
     for raw in path.read_text(encoding='utf-8').splitlines()[-20:]:
         json.loads(raw)
@@ -172,7 +172,7 @@ Verification:
 
 ```bash
 rg -n "evidence manifest|PR-ready|fallback-only|wrong commit|required row" \
-  /home/gewu/.agents/multica-sdlc
+  $MULTICA_STATE_HOME
 ```
 
 ## Rollout Order

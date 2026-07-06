@@ -1,0 +1,21 @@
+Review complete.
+
+REVIEW_VERDICT_JSON
+```json
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "slice_id": "slice-001",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "head_sha": "2222222222222222222222222222222222222222",
+  "spec_compliance": "pass",
+  "task_quality": "pass",
+  "issues": [],
+  "cannot_verify_from_diff": [],
+  "strengths": ["Contract shape is explicit."],
+  "reviewed_inputs": {
+    "brief_json": "brief.json",
+    "diff": "local"
+  }
+}
+```

@@ -13,10 +13,10 @@ Required output:
 - Acceptance criteria copied or normalized from the PRD.
 - Non-goals and explicit out-of-scope items.
 - For `implementation`: code delta estimate, worktree requirement, implementation tasks, sprint contract plan, test plan, acceptance matrix, evidence manifest, docs impact, and draft PR gate.
-- Sprint contract plan for every implementation slice: generator/coder owner, evaluator/E2E owner, optional reviewer or Evidence QA owner, contract artifact path, acceptance rows covered, real runtime targets, evidence refs, and stop conditions. Use `/home/gewu/.agents/multica-sdlc/templates/sprint-contract.md` when available, or mirror that shape in the issue artifact.
+- Sprint contract plan for every implementation slice: generator/coder owner, evaluator/E2E owner, optional reviewer or Evidence QA owner, contract artifact path, acceptance rows covered, real runtime targets, evidence refs, and stop conditions. Use `$MULTICA_STATE_HOME/templates/sprint-contract.md` when available, or mirror that shape in the issue artifact.
 - For `product-research-prd`: research phases, page/route coverage plan, mock scenario plan, data/API/entity mapping plan, evidence artifact plan, PRD synthesis plan, and research clean gate.
 - Acceptance matrix: one row per required PRD/research criterion, with concrete validation evidence required before the final output. Include command or browser action, runtime target, environment, input/payload/viewport if relevant, selector/API/CLI/job/database/package target if relevant, expected observable result, and artifact/log path.
-- Evidence manifest plan: path, task-type profile, required/advisory split, row IDs, and expected evidence record fields using `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md`.
+- Evidence manifest plan: path, task-type profile, required/advisory split, row IDs, and expected evidence record fields using `$MULTICA_STATE_HOME/instructions/evidence-manifest.md`.
 - Final closure plan: who owns the final gate, what durable artifacts must be current, what stale reports/manifests/comments must be refreshed, what final issue status is valid, and what final delivery inventory must be posted.
 - Local deployment/runtime evidence plan for `gearjob`, `beezer`, and `hive` when one of those projects is targeted.
 - Docs impact: none, conditional, or required, with reason.
@@ -35,7 +35,7 @@ Rules:
 - Do not create implementation tasks, worktrees, draft PR gates, CI/E2E repair loops, or coder assignments for `product-research-prd`.
 - For product research, include leader/planner staffing checkpoints and name which roles should be added if evidence gaps appear.
 - If the PRD is HTML, use the HTML as canonical. Any extracted summary is only an index.
-- Prefer the issue's local repo path or `/home/gewu/.agents/multica-sdlc/local-repos.md` before asking for a fresh checkout.
+- Prefer the issue's local repo path or `$MULTICA_STATE_HOME/local-repos.md` before asking for a fresh checkout.
 - Prefer a small first implementation that satisfies the acceptance criteria.
 - Treat unknown code delta as larger than 100 lines for isolation. Do not let uncertainty bypass the worktree requirement.
 - If code delta is estimated above 100 lines, include dedicated git worktree creation as a non-skippable pre-implementation step.

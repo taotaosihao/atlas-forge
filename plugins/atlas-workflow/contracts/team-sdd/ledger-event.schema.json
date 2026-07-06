@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "required": ["schema_version", "event", "task_id", "timestamp"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "event": {
+      "type": "string",
+      "enum": [
+        "run_started",
+        "preflight_clean",
+        "preflight_conflict",
+        "slice_planned",
+        "slice_started",
+        "brief_written",
+        "path_lease_acquired",
+        "implementer_spawned",
+        "implementer_done",
+        "needs_context",
+        "context_answered",
+        "implementer_blocked",
+        "review_package_written",
+        "reviewer_spawned",
+        "review_clean",
+        "review_failed",
+        "cannot_verify_recorded",
+        "fix_started",
+        "fix_done",
+        "fix_progress_stalled",
+        "re_review_started",
+        "slice_complete",
+        "slice_blocked",
+        "slice_superseded",
+        "slice_abandoned",
+        "final_review_started",
+        "final_review_clean",
+        "final_review_failed",
+        "escalated_human",
+        "run_complete",
+        "run_failed"
+      ]
+    },
+    "task_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "slice_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "timestamp": { "type": "string" }
+  },
+  "additionalProperties": true
+}

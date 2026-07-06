@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "slice_id",
+    "base_sha",
+    "head_sha",
+    "spec_compliance",
+    "task_quality",
+    "issues",
+    "cannot_verify_from_diff",
+    "strengths",
+    "reviewed_inputs"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "task_id": { "type": "string" },
+    "slice_id": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "head_sha": { "type": "string" },
+    "spec_compliance": { "type": "string", "enum": ["pass", "fail", "cannot_verify"] },
+    "task_quality": { "type": "string", "enum": ["pass", "fail"] },
+    "issues": { "type": "array" },
+    "cannot_verify_from_diff": { "type": "array" },
+    "strengths": { "type": "array" },
+    "reviewed_inputs": { "type": "object" }
+  },
+  "additionalProperties": false
+}

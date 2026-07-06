@@ -1,0 +1,183 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { validateScorecardEvent } = require("../contracts/team-sdd/validators/scorecard");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log(`usage:
+  codex-team-scorecard --task <task-id> append --json '<json>'
+  codex-team-scorecard --task <task-id> summary`);
+}
+
+function parseArgs(argv) {
+  const options = { task: null, command: null, json: null, help: false };
+  const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--task") {
+      options.task = argv[++i];
+    } else if (arg.startsWith("--task=")) {
+      options.task = arg.slice("--task=".length);
+    } else {
+      rest.push(arg);
+    }
+  }
+  options.command = rest.shift() || null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--json") {
+      options.json = rest[++i];
+    } else if (arg.startsWith("--json=")) {
+      options.json = arg.slice("--json=".length);
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function workflowRoot() {
+  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function sddDir(taskId) {
+  safeId("task", taskId);
+  return path.join(workflowRoot(), "artifacts", taskId, "team", "sdd");
+}
+
+function scorecardPath(taskId) {
+  return path.join(sddDir(taskId), "scorecard.jsonl");
+}
+
+function withLock(taskId, fn) {
+  const dir = sddDir(taskId);
+  fs.mkdirSync(dir, { recursive: true });
+  const lockDir = path.join(dir, "scorecard.lock");
+  const deadline = Date.now() + 5000;
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST" || Date.now() > deadline) {
+        throw new Error("could not acquire scorecard lock");
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+function append(options) {
+  if (!options.json) {
+    throw new Error("append requires --json");
+  }
+  const event = {
+    schema_version: 1,
+    timestamp: new Date().toISOString(),
+    ...JSON.parse(options.json),
+    task_id: options.task,
+  };
+  const errors = validateScorecardEvent(event);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+  withLock(options.task, () => {
+    fs.appendFileSync(scorecardPath(options.task), `${JSON.stringify(event)}\n`, "utf8");
+  });
+  console.log(`appended: ${event.event}`);
+}
+
+function readEvents(taskId) {
+  const file = scorecardPath(taskId);
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  return fs.readFileSync(file, "utf8").split(/\n/).filter(Boolean).map((line, index) => {
+    const event = JSON.parse(line);
+    const errors = validateScorecardEvent(event);
+    if (errors.length > 0) {
+      throw new Error(`scorecard line ${index + 1}: ${errors.join("; ")}`);
+    }
+    return event;
+  });
+}
+
+function increment(map, key) {
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function printGroup(title, map) {
+  console.log(`${title}:`);
+  for (const [key, count] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    console.log(`- ${key}: ${count}`);
+  }
+}
+
+function summary(options) {
+  const events = readEvents(options.task);
+  const byRole = new Map();
+  const byModel = new Map();
+  const byStatus = new Map();
+  const byEvent = new Map();
+  for (const event of events) {
+    increment(byRole, event.role);
+    increment(byModel, event.model);
+    increment(byStatus, event.status);
+    increment(byEvent, event.event);
+  }
+  const reviewClean = byEvent.get("review_clean") || 0;
+  const reviewFailed = byEvent.get("review_failed") || 0;
+  const reviewTotal = reviewClean + reviewFailed;
+  const failRate = reviewTotal === 0 ? 0 : reviewFailed / reviewTotal;
+  console.log(`task_id: ${options.task}`);
+  console.log(`events: ${events.length}`);
+  printGroup("by_role", byRole);
+  printGroup("by_model", byModel);
+  printGroup("by_status", byStatus);
+  printGroup("by_event", byEvent);
+  console.log(`review_fail_rate: ${failRate.toFixed(4)}`);
+  console.log(`fix_loop_count: ${(byEvent.get("fix_started") || 0) + (byEvent.get("fix_progress_stalled") || 0)}`);
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    if (!options.task) {
+      throw new Error("--task is required");
+    }
+    if (options.command === "append") {
+      append(options);
+    } else if (options.command === "summary") {
+      summary(options);
+    } else {
+      throw new Error(`unknown or missing command: ${options.command || ""}`);
+    }
+  } catch (error) {
+    console.error(`codex-team-scorecard: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

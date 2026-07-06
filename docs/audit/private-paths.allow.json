@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "path": "README.md",
+      "pattern": "/home/gewu",
+      "categories": ["docs"],
+      "reason": "Existing documentation examples reference the original local Codex install path; PR0 reports these but does not block runtime or live instructions on historical docs."
+    },
+    {
+      "path": "docs/**",
+      "pattern": "/home/gewu",
+      "categories": ["docs"],
+      "reason": "Historical Atlas workflow docs preserve source-session paths for traceability; PR0 keeps them report-only until a dedicated docs cleanup pass."
+    },
+    {
+      "path": "plugins/multica-sdlc/docs/**",
+      "pattern": "/home/gewu",
+      "categories": ["docs"],
+      "reason": "Multica protocol docs contain historical local path examples; PR0 tracks them as docs and prevents live instruction/runtime regressions separately."
+    }
+  ]
+}

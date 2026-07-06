@@ -8,6 +8,7 @@ if [[ -z "$PLUGIN_SELECTOR" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_CREATOR_CACHEBUSTER_SCRIPT="${PLUGIN_CREATOR_CACHEBUSTER_SCRIPT:-${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py}"
 
 case "$PLUGIN_SELECTOR" in
   atlas-workflow)
@@ -25,7 +26,7 @@ case "$PLUGIN_SELECTOR" in
     ;;
 esac
 
-python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py "$PLUGIN_PATH"
+python3 "$PLUGIN_CREATOR_CACHEBUSTER_SCRIPT" "$PLUGIN_PATH"
 python3 - "$PLUGIN_PATH" <<'PY'
 import json
 import sys

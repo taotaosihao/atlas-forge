@@ -5,11 +5,19 @@ payload="$(mktemp "${TMPDIR:-/tmp}/multica-guard-subagent.XXXXXX.json")"
 trap 'rm -f "$payload"' EXIT
 cat >"$payload"
 
+if [[ -n "${MULTICA_SDLC_SUBAGENT_CWD:-}" ]]; then
+  guard_cwd="$MULTICA_SDLC_SUBAGENT_CWD"
+elif guard_repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  guard_cwd="$guard_repo_root"
+else
+  guard_cwd="$PWD"
+fi
+
 codex_error=""
 if command -v codex >/dev/null 2>&1; then
   if codex exec \
       --sandbox read-only \
-      -C "${MULTICA_SDLC_SUBAGENT_CWD:-/home/gewu/work/atlas-forge}" \
+      -C "$guard_cwd" \
       "你是 Multica SDLC guard 的只读判断子代理。读取 JSON 文件：$payload。判断 guard 下一步如何确保完整 PRD 继续实施。只输出一段 JSON，不要写文件、不要调用 Multica 写接口、不要改 PR。JSON 字段：severity, recommended_action, target_issue, reason, stop_condition。"; then
     exit 0
   fi

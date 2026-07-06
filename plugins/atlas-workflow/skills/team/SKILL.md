@@ -219,6 +219,159 @@ Execution ownership rules:
   describe the behavior or workflow boundary completed by that step, not the
   mechanics of the patch.
 
+## Codex-Native SDD Slice Protocol
+
+Use this protocol when the team flow is acting as a Codex-native SDD controller
+for implementation slices. This protocol is separate from the Native Bounded
+Loop below: SDD repair uses `fix_loop_policy:
+unbounded_until_clean_or_terminal` and stops only on a clean review or a real
+terminal state such as `NEEDS_CONTEXT`, `BLOCKED`, `fix_progress_stalled`,
+`slice_superseded`, or `slice_abandoned`.
+
+Controller responsibilities:
+
+1. The main Codex is the only workflow artifact writer. Subagents must not write
+   `workflow/artifacts/**`, SDD ledger files, review packages, verdict files, or
+   controller state directly.
+2. Create the slice workspace with `codex-team-workspace`, write `brief.md` and
+   `brief.json` with `codex-team-brief`, and validate all JSON contracts with
+   `codex-team-validate-json`.
+3. Record lifecycle events in `codex-team-ledger` before and after slice work,
+   review, fix rounds, terminal states, and final whole-branch review.
+4. Generate `review-package.diff` with `codex-team-review-package --repo/-C
+   --base --head --task --slice`; use the recorded base and head for the slice.
+5. Append controller-authored answers to `answers.jsonl` when a subagent returns
+   `NEEDS_CONTEXT`, and enforce `max_question_rounds` from `brief.json`.
+6. Do not write workflow artifacts from implementer, reviewer, fixer, verifier,
+   or explorer subagents. Their final messages are the input; the controller
+   validates, records, and writes artifacts.
+
+Fresh context discipline:
+
+- Give every implementer, reviewer, and fixer the current `brief.json`,
+  `brief.md`, global constraints, relevant `answers.jsonl` entries, owned paths,
+  forbidden paths, base/head commits, and the latest review verdict.
+- Do not assume a subagent remembers earlier rounds. Restate the current slice
+  state, required checks, commit policy, and terminal conditions in each prompt.
+- For reviewers, provide the review package and relevant source files or diff
+  context. They should report evidence-backed findings at their natural
+  severity and must not soften a finding to keep the loop moving.
+
+Continuous execution:
+
+- Once a slice starts, keep the controller loop moving until the ledger reaches
+  a clean or terminal state.
+- A `NEEDS_CONTEXT` report pauses implementation only long enough for the
+  controller to answer or record that the question cannot be resolved.
+- A `BLOCKED` report must name blockers. A `fix_progress_stalled` terminal state
+  needs evidence that the latest fix round did not materially change the review
+  outcome or that continuing would be unsafe.
+- Each implementation or fix round that changes files must create a dedicated
+  commit before review. Record any no-commit exception in the slice artifacts.
+
+Implementer prompt template:
+
+```text
+You are the SDD implementer for one slice.
+
+Inputs:
+- brief_json: <path>
+- brief_md: <path>
+- global_constraints: <path>
+- answers_jsonl: <path or none>
+- repo: <absolute repo path>
+- base_sha: <sha>
+- owned_paths: <paths>
+- forbidden_paths: <paths>
+- required_checks: <commands>
+
+Rules:
+- Modify only the target repo and only within owned paths.
+- Do not write workflow artifacts.
+- Preserve user and other-agent work.
+- Commit file changes before reporting DONE or DONE_WITH_CONCERNS.
+- Return exactly one IMPLEMENTER_REPORT_JSON fenced block.
+
+If you need clarification, return NEEDS_CONTEXT with concrete questions.
+If you are blocked, return BLOCKED with concrete blockers.
+```
+
+Reviewer prompt template:
+
+```text
+You are the SDD reviewer for one slice.
+
+Inputs:
+- brief_json: <path>
+- review_package_diff: <path>
+- repo: <absolute repo path>
+- base_sha: <sha>
+- head_sha: <sha>
+- acceptance_refs: <refs>
+- required_checks: <commands and results when available>
+
+Rules:
+- Read only; do not modify files.
+- Do not write workflow artifacts.
+- Judge spec compliance and task quality from evidence.
+- Report Critical, Important, and Minor issues according to impact.
+- Return exactly one REVIEW_VERDICT_JSON fenced block.
+```
+
+Fixer prompt template:
+
+```text
+You are the SDD fixer for one failed slice review.
+
+Inputs:
+- brief_json: <path>
+- latest_review_verdict: <path or pasted JSON>
+- review_package_diff: <path>
+- answers_jsonl: <path or none>
+- repo: <absolute repo path>
+- head_sha: <sha>
+
+Rules:
+- Fix only the issues assigned by the controller.
+- Modify only the target repo and only within owned paths.
+- Do not write workflow artifacts.
+- Commit file changes before reporting DONE or DONE_WITH_CONCERNS.
+- If the same review result persists and no safe progress remains, report
+  BLOCKED with evidence for controller evaluation.
+- Return exactly one IMPLEMENTER_REPORT_JSON fenced block.
+```
+
+Question loop:
+
+1. A subagent may return `NEEDS_CONTEXT` only with non-empty `questions`.
+2. The controller answers from current repo/user context when safe, appends a
+   structured entry to `answers.jsonl`, records the ledger event, and respawns
+   the role with fresh context.
+3. When `max_question_rounds` is reached, the controller records a terminal
+   state instead of continuing to ask the same unresolved question.
+
+Review and fix loop:
+
+1. Implementer returns a valid implementer report.
+2. Controller validates the report, checks commit policy, records ledger state,
+   and builds a review package from recorded base/head.
+3. Reviewer returns a valid review verdict.
+4. If verdict is clean, record `slice_complete`.
+5. If verdict has unresolved Critical or Important issues, assign a fixer round,
+   require a new commit for file changes, regenerate the review package, and
+   review again.
+6. Continue until clean or a terminal state is evidenced. Do not use a fixed
+   iteration count as the SDD repair stop condition.
+
+Final whole-branch review:
+
+- After all slices are clean or intentionally terminal, run a final
+  whole-branch review over the integrated branch before reporting completion.
+- The final reviewer receives the branch-level diff, slice ledger summary,
+  outstanding terminal states, and required checks.
+- The controller writes the final synthesis and user report only after this
+  final whole-branch review is accounted for.
+
 ## Native Bounded Loop
 
 Use a native bounded loop when the user asks for team implementation to keep fixing until the objective is met, such as "keep trying", "未达标反复修", PR/check babysitting, repeated review/repair, or explicit loop wording.

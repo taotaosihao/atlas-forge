@@ -25,7 +25,7 @@ Canonical PRD:
 
 Repository resolution:
 - Prefer the issue's "Repo path on submitter machine" when it exists and is a git work tree.
-- If the issue target matches a project in `/home/gewu/.agents/multica-sdlc/local-repos.md`, use that local path before any checkout or clone.
+- If the issue target matches a project in `$MULTICA_STATE_HOME/local-repos.md`, use that local path before any checkout or clone.
 - Do not clone a second copy of known local repositories by default.
 - Use `multica repo checkout <url>` only when the local path is missing, unreadable, explicitly stale, or the issue requires a clean remote checkout.
 - When isolation is needed, create a dedicated branch or worktree from the configured base branch inside the local repository.
@@ -40,7 +40,7 @@ Project completion policy for `gearjob`, `beezer`, and `hive`:
 - Missing local deployment/runtime evidence for these projects is BLOCKING unless a preflight blocker makes local deployment impossible.
 
 Evidence manifest policy:
-- Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` as the manifest contract.
+- Use `$MULTICA_STATE_HOME/instructions/evidence-manifest.md` as the manifest contract.
 - For any run with required acceptance or validation rows, maintain `.multica/evidence-manifest.json` or an equivalent issue artifact.
 - The manifest must map required rows to evidence records with commit SHA, command, runtime target, environment, observed result, artifact/log path, validator agent, missing_evidence, fallback_only, and wrong_commit fields.
 - Missing, stale, fallback-only, static-only, wrong-commit, or real-chain-bypassing evidence for required rows blocks PR-READY-GATE.
@@ -84,7 +84,7 @@ State machine:
 5. VALIDATE
    - After each coding pass, request review and E2E validation against the current commit SHA and the accepted sprint contract.
    - Dispatch all active same-role or same-role-family review-capable squad members in parallel. At minimum this includes the required reviewer. Do not dispatch archived, removed, or non-squad reviewers.
-   - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
+   - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `$MULTICA_STATE_HOME/agent-scorecards.jsonl`.
    - Dispatch E2E-capable same-role or same-role-family squad members according to the model fallback policy. For this Kimi squad, use non-`gpt-5.4` E2E routes by default when available; use `SDLC Kimi E2E Codex GPT-5.4 Mini` only as an E2E fallback when the primary E2E route is unavailable, failed for the same objective, or explicitly requested by the human/issue.
    - Give each E2E agent the same commit SHA and PRD source, but ask them to cover different angles when possible: browser/user flow, API/data flow, regression edge cases, and PRD fidelity.
    - Review output must classify findings as BLOCKING or NON_BLOCKING.
@@ -159,7 +159,7 @@ Automatic failure recovery policy:
 - Do not stop for human intervention when the missing work is within the approved PRD scope, including missing business-flow coverage, stale or blank PDF output, stale screenshots, missing guide links, missing acceptance evidence, wrong document IDs, or an agent/session/config problem that can be repaired locally.
 - Notify the human only for true external blockers: missing credentials or source files, unavailable third-party services, destructive production-risk decisions, unclear business requirements not specified by the PRD, or no remaining compliant Kimi/local repair route after concrete automatic repair attempts.
 - A blocker report must include the automatic repairs attempted, why each failed, and the exact external decision or resource needed. It must not be used as a substitute for a repair task when a compliant repair path still exists.
-- Planning and review work for this squad must use GPT-5.5 Codex agents. Coding, repair, PR creation, release handoff, branch push, and draft-PR tasks must use the primary Kimi coder `moonshotai/kimi-k2.7-code` through ZenMux with `/home/gewu/.agents/multica-sdlc/kimi-k2.7-code-claude-settings.json` by default. Use the GPT-5.5 think-medium backup coder only under the fallback policy below. `gpt-5.4` may be used only as a coder or E2E fallback, never for planning, review, evidence QA, docs summary, clean-gate, or PR-ready-gate ownership. Do not route any active squad task to legacy or unrelated model configurations.
+- Planning and review work for this squad must use GPT-5.5 Codex agents. Coding, repair, PR creation, release handoff, branch push, and draft-PR tasks must use the primary Kimi coder `moonshotai/kimi-k2.7-code` through ZenMux with `$MULTICA_STATE_HOME/kimi-k2.7-code-claude-settings.json` by default. Use the GPT-5.5 think-medium backup coder only under the fallback policy below. `gpt-5.4` may be used only as a coder or E2E fallback, never for planning, review, evidence QA, docs summary, clean-gate, or PR-ready-gate ownership. Do not route any active squad task to legacy or unrelated model configurations.
 - Do not assign coding, repair, PR creation, release handoff, branch push, or draft-PR tasks to archived agents, removed squad members, `e2e-vision`, or any agent whose role is not exactly `coder` for coding/release work.
 - If the primary `SDLC Kimi Coder` fails with `agent_error.provider_auth_or_access`, `idle_watchdog`, `cancelled`, quota exhaustion, `API Error: 402`, no new messages after a provider error, is unavailable, or is marked unhealthy for the task class, reroute once to `SDLC Kimi Backup Coder GPT Think Medium`. Treat `idle_watchdog` runs whose latest run message contains `API Error`, `402`, `quota`, `subscription quota`, `provider`, `auth`, or `access` as provider/quota failures instead of waiting for the same agent/model combination.
 - If a coding agent fails because output exceeded token limits, reroute to the other current `coder` with a strict short-output schema and artifact-file instruction. Do not wait for the failed task.

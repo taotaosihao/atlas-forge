@@ -1,0 +1,40 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "slice_id",
+    "repo",
+    "base_sha",
+    "objective",
+    "requirements_path",
+    "global_constraints_path",
+    "owned_paths",
+    "forbidden_paths",
+    "acceptance_refs",
+    "required_checks",
+    "commit_policy",
+    "max_question_rounds",
+    "fix_loop_policy",
+    "output_contract"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "task_id": { "type": "string" },
+    "slice_id": { "type": "string" },
+    "repo": { "type": "string" },
+    "base_sha": { "type": "string" },
+    "objective": { "type": "string" },
+    "requirements_path": { "type": "string" },
+    "global_constraints_path": { "type": "string" },
+    "owned_paths": { "type": "array", "items": { "type": "string" } },
+    "forbidden_paths": { "type": "array", "items": { "type": "string" } },
+    "acceptance_refs": { "type": "array", "items": { "type": "string" } },
+    "required_checks": { "type": "array", "items": { "type": "string" } },
+    "commit_policy": { "type": "string", "enum": ["required_for_file_changes", "required_always", "no_change_allowed"] },
+    "max_question_rounds": { "type": "integer" },
+    "fix_loop_policy": { "type": "string", "enum": ["unbounded_until_clean_or_terminal"] },
+    "output_contract": { "type": "string", "enum": ["final_message_json_only"] }
+  },
+  "additionalProperties": false
+}

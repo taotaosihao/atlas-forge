@@ -1,0 +1,199 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const {
+  validateLedgerEvent,
+  isTerminalSliceEvent,
+} = require("../contracts/team-sdd/validators/ledger-event");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log(`usage:
+  codex-team-ledger --task <task-id> append --event <event> --json '<json>'
+  codex-team-ledger --task <task-id> status
+  codex-team-ledger --task <task-id> next-slice
+  codex-team-ledger --task <task-id> verify`);
+}
+
+function parseArgs(argv) {
+  const options = { task: null, command: null, event: null, json: null, help: false };
+  const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--task") {
+      options.task = argv[++i];
+    } else if (arg.startsWith("--task=")) {
+      options.task = arg.slice("--task=".length);
+    } else {
+      rest.push(arg);
+    }
+  }
+  options.command = rest.shift() || null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--event") {
+      options.event = rest[++i];
+    } else if (arg.startsWith("--event=")) {
+      options.event = arg.slice("--event=".length);
+    } else if (arg === "--json") {
+      options.json = rest[++i];
+    } else if (arg.startsWith("--json=")) {
+      options.json = arg.slice("--json=".length);
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function workflowRoot() {
+  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function sddDir(taskId) {
+  safeId("task", taskId);
+  return path.join(workflowRoot(), "artifacts", taskId, "team", "sdd");
+}
+
+function ledgerPath(taskId) {
+  return path.join(sddDir(taskId), "progress.jsonl");
+}
+
+function appendEvent(options) {
+  if (!options.event) {
+    throw new Error("append requires --event");
+  }
+  if (!options.json) {
+    throw new Error("append requires --json");
+  }
+  const payload = JSON.parse(options.json);
+  if (payload.task_id && payload.task_id !== options.task) {
+    throw new Error(`payload task_id does not match --task: ${payload.task_id}`);
+  }
+  const event = {
+    schema_version: 1,
+    timestamp: new Date().toISOString(),
+    ...payload,
+    event: options.event,
+    task_id: options.task,
+  };
+  const errors = validateLedgerEvent(event);
+  if (errors.length > 0) {
+    throw new Error(errors.join("; "));
+  }
+  fs.mkdirSync(sddDir(options.task), { recursive: true });
+  fs.appendFileSync(ledgerPath(options.task), `${JSON.stringify(event)}\n`, "utf8");
+  console.log(`appended: ${event.event}`);
+}
+
+function readEvents(taskId) {
+  const file = ledgerPath(taskId);
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  const lines = fs.readFileSync(file, "utf8").split(/\n/).filter(Boolean);
+  return lines.map((line, index) => {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch (error) {
+      throw new Error(`invalid JSON on ledger line ${index + 1}: ${error.message}`);
+    }
+    const errors = validateLedgerEvent(event);
+    if (errors.length > 0) {
+      throw new Error(`invalid ledger line ${index + 1}: ${errors.join("; ")}`);
+    }
+    return event;
+  });
+}
+
+function replay(events) {
+  const slices = new Map();
+  for (const event of events) {
+    if (!event.slice_id) {
+      continue;
+    }
+    const state = slices.get(event.slice_id) || {
+      slice_id: event.slice_id,
+      events: 0,
+      last_event: null,
+      terminal: false,
+    };
+    state.events += 1;
+    state.last_event = event.event;
+    if (isTerminalSliceEvent(event.event)) {
+      state.terminal = true;
+    }
+    slices.set(event.slice_id, state);
+  }
+  return { slices };
+}
+
+function status(taskId) {
+  const events = readEvents(taskId);
+  const state = replay(events);
+  console.log(`task_id: ${taskId}`);
+  console.log(`events: ${events.length}`);
+  console.log(`slices: ${state.slices.size}`);
+  for (const slice of [...state.slices.values()].sort((a, b) => a.slice_id.localeCompare(b.slice_id))) {
+    console.log(`- ${slice.slice_id}: last_event=${slice.last_event} terminal=${slice.terminal}`);
+  }
+}
+
+function nextSlice(taskId) {
+  const events = readEvents(taskId);
+  const state = replay(events);
+  const next = [...state.slices.values()]
+    .sort((a, b) => a.slice_id.localeCompare(b.slice_id))
+    .find((slice) => !slice.terminal);
+  if (next) {
+    console.log(next.slice_id);
+  }
+}
+
+function verify(taskId) {
+  const events = readEvents(taskId);
+  console.log(`ledger_valid: true`);
+  console.log(`events: ${events.length}`);
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    if (!options.task) {
+      throw new Error("--task is required");
+    }
+    if (options.command === "append") {
+      appendEvent(options);
+    } else if (options.command === "status") {
+      status(options.task);
+    } else if (options.command === "next-slice") {
+      nextSlice(options.task);
+    } else if (options.command === "verify") {
+      verify(options.task);
+    } else {
+      throw new Error(`unknown or missing command: ${options.command || ""}`);
+    }
+  } catch (error) {
+    console.error(`codex-team-ledger: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

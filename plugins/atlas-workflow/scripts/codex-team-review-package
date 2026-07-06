@@ -1,0 +1,171 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const childProcess = require("child_process");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log(`usage:
+  codex-team-review-package --repo <absolute-path> --base <rev> --head <rev> --task <task-id> --slice <slice-id>
+  codex-team-review-package -C <absolute-path> --base <rev> --head <rev> --task <task-id> --slice <slice-id>
+
+options:
+  --out <relative-path>       default: review-package.diff
+  --allow-head-parent         test fixture escape hatch when --base is omitted`);
+}
+
+function parseArgs(argv) {
+  const options = {
+    repo: null,
+    base: null,
+    head: null,
+    task: null,
+    slice: null,
+    out: "review-package.diff",
+    allowHeadParent: false,
+    help: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--repo" || arg === "-C") {
+      options.repo = argv[++i];
+    } else if (arg.startsWith("--repo=")) {
+      options.repo = arg.slice("--repo=".length);
+    } else if (arg === "--base") {
+      options.base = argv[++i];
+    } else if (arg.startsWith("--base=")) {
+      options.base = arg.slice("--base=".length);
+    } else if (arg === "--head") {
+      options.head = argv[++i];
+    } else if (arg.startsWith("--head=")) {
+      options.head = arg.slice("--head=".length);
+    } else if (arg === "--task") {
+      options.task = argv[++i];
+    } else if (arg.startsWith("--task=")) {
+      options.task = arg.slice("--task=".length);
+    } else if (arg === "--slice") {
+      options.slice = argv[++i];
+    } else if (arg.startsWith("--slice=")) {
+      options.slice = arg.slice("--slice=".length);
+    } else if (arg === "--out") {
+      options.out = argv[++i];
+    } else if (arg.startsWith("--out=")) {
+      options.out = arg.slice("--out=".length);
+    } else if (arg === "--allow-head-parent") {
+      options.allowHeadParent = true;
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function workflowRoot() {
+  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function requireOptions(options) {
+  for (const key of ["repo", "head", "task", "slice"]) {
+    if (!options[key]) {
+      throw new Error(`--${key} is required`);
+    }
+  }
+  if (!options.base && !options.allowHeadParent) {
+    throw new Error("--base is required unless --allow-head-parent is explicit");
+  }
+  if (!path.isAbsolute(options.repo)) {
+    throw new Error("--repo must be an absolute path");
+  }
+  if (!fs.existsSync(options.repo) || !fs.statSync(options.repo).isDirectory()) {
+    throw new Error("--repo must exist and be a directory");
+  }
+}
+
+function ensureWithin(parent, child) {
+  const relative = path.relative(parent, child);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    return;
+  }
+  throw new Error(`resolved path escapes slice dir: ${child}`);
+}
+
+function sliceDir(taskId, sliceId) {
+  safeId("task", taskId);
+  safeId("slice", sliceId);
+  const artifactRoot = path.join(workflowRoot(), "artifacts", taskId);
+  const dir = path.join(artifactRoot, "team", "sdd", "slices", sliceId);
+  ensureWithin(artifactRoot, dir);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function resolveCommit(repo, revision, label) {
+  try {
+    return childProcess.execFileSync("git", ["-C", repo, "rev-parse", "--verify", `${revision}^{commit}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    const detail = error.stderr ? String(error.stderr).trim() : error.message;
+    throw new Error(`${label} must resolve to a commit in repo: ${detail}`);
+  }
+}
+
+function outputPath(dir, out) {
+  if (typeof out !== "string" || out.length === 0) {
+    throw new Error("--out must be a non-empty relative path");
+  }
+  if (path.isAbsolute(out)) {
+    throw new Error("--out must be relative to the slice dir");
+  }
+  const resolved = path.resolve(dir, out);
+  ensureWithin(dir, resolved);
+  return resolved;
+}
+
+function reviewPackage(options) {
+  requireOptions(options);
+  const headSha = resolveCommit(options.repo, options.head, "head");
+  const baseRev = options.base || `${headSha}~1`;
+  const baseSha = resolveCommit(options.repo, baseRev, "base");
+  const dir = sliceDir(options.task, options.slice);
+  const file = outputPath(dir, options.out);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const diff = childProcess.execFileSync("git", ["-C", options.repo, "diff", "--binary", baseSha, headSha], {
+    encoding: "utf8",
+    maxBuffer: 100 * 1024 * 1024,
+  });
+  fs.writeFileSync(file, diff, "utf8");
+  console.log(`review_package: ${file}`);
+  console.log(`repo: ${options.repo}`);
+  console.log(`base_sha: ${baseSha}`);
+  console.log(`head_sha: ${headSha}`);
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    reviewPackage(options);
+  } catch (error) {
+    console.error(`codex-team-review-package: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

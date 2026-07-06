@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": ["schema_version", "task_id", "leases"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "task_id": { "type": "string" },
+    "leases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slice_id", "paths", "acquired_at"],
+        "properties": {
+          "slice_id": { "type": "string" },
+          "paths": { "type": "array", "items": { "type": "string" } },
+          "acquired_at": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

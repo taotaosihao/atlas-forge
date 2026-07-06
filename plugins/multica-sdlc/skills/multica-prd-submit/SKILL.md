@@ -44,13 +44,13 @@ description: Submit an already-approved PRD, design packet, research packet, imp
 
 ## 仓库选择
 
-优先读取 `/home/gewu/.agents/multica-sdlc/local-repos.md` 中的本地 repo 注册信息。
+优先读取 `$MULTICA_STATE_HOME/local-repos.md` 中的本地 repo 注册信息。
 
 常见本地 repo：
 
-- gearjob: `/home/gewu/work/gearjob`
-- beezer: `/home/gewu/work/beezer`
-- hive: `/home/gewu/work/hive`
+- gearjob: `$GEARJOB_REPO`
+- beezer: `$BEEZER_REPO`
+- hive: `$HIVE_REPO`
 
 不要默认要求 Multica 重新 clone 这些 repo。除非本地路径不存在、不可读、明确过期，或任务明确要求干净 checkout，否则使用本地路径。
 

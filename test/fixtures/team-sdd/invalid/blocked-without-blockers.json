@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "status": "BLOCKED",
+  "task_id": "fixture",
+  "slice_id": "slice-001",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "head_sha": null,
+  "commits": [],
+  "changed_files": [],
+  "checks": [],
+  "self_review": "",
+  "concerns": [],
+  "questions": [],
+  "blockers": [],
+  "no_change_reason": "Blocked."
+}

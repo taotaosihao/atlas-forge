@@ -1,0 +1,26 @@
+Implementation complete.
+
+IMPLEMENTER_REPORT_JSON
+```json
+{
+  "schema_version": 1,
+  "status": "DONE",
+  "task_id": "fixture",
+  "slice_id": "slice-001",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "head_sha": "2222222222222222222222222222222222222222",
+  "commits": ["2222222222222222222222222222222222222222"],
+  "changed_files": ["plugins/atlas-workflow/scripts/codex-team-brief"],
+  "checks": [
+    {
+      "command": "workflow/tests/contract.sh",
+      "outcome": "passed"
+    }
+  ],
+  "self_review": "Scope matches the brief.",
+  "concerns": [],
+  "questions": [],
+  "blockers": [],
+  "no_change_reason": null
+}
+```

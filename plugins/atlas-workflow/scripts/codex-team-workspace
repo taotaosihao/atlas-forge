@@ -1,0 +1,101 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log("usage: codex-team-workspace --task <task-id> [--slice <slice-id>] [--print root|team|sdd|slice]");
+}
+
+function parseArgs(argv) {
+  const options = { task: null, slice: null, print: "sdd", help: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--task") {
+      options.task = argv[++i];
+    } else if (arg.startsWith("--task=")) {
+      options.task = arg.slice("--task=".length);
+    } else if (arg === "--slice") {
+      options.slice = argv[++i];
+    } else if (arg.startsWith("--slice=")) {
+      options.slice = arg.slice("--slice=".length);
+    } else if (arg === "--print") {
+      options.print = argv[++i];
+    } else if (arg.startsWith("--print=")) {
+      options.print = arg.slice("--print=".length);
+    } else {
+      throw new Error(`unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function workflowRoot() {
+  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function ensureWithin(parent, child) {
+  const relative = path.relative(parent, child);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    return;
+  }
+  throw new Error(`resolved path escapes artifact root: ${child}`);
+}
+
+function pathsFor(options) {
+  safeId("task", options.task);
+  if (options.slice !== null) {
+    safeId("slice", options.slice);
+  }
+  const root = workflowRoot();
+  const artifactRoot = path.join(root, "artifacts", options.task);
+  const team = path.join(artifactRoot, "team");
+  const sdd = path.join(team, "sdd");
+  const slice = options.slice ? path.join(sdd, "slices", options.slice) : null;
+  for (const candidate of [team, sdd, slice].filter(Boolean)) {
+    ensureWithin(artifactRoot, candidate);
+  }
+  return { root: artifactRoot, team, sdd, slice };
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    if (!options.task) {
+      throw new Error("--task is required");
+    }
+    if (!["root", "team", "sdd", "slice"].includes(options.print)) {
+      throw new Error(`invalid --print value: ${options.print}`);
+    }
+    if (options.print === "slice" && !options.slice) {
+      throw new Error("--slice is required when --print slice");
+    }
+    const resolved = pathsFor(options);
+    fs.mkdirSync(resolved.sdd, { recursive: true });
+    if (resolved.slice) {
+      fs.mkdirSync(resolved.slice, { recursive: true });
+    }
+    console.log(resolved[options.print]);
+  } catch (error) {
+    console.error(`codex-team-workspace: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

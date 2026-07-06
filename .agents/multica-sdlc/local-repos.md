@@ -4,9 +4,9 @@ Prefer these local repositories before using `multica repo checkout` or cloning.
 
 | Project | Local path | Primary remote | Default base branch |
 | --- | --- | --- | --- |
-| gearjob | `/home/gewu/work/gearjob` | `git@github.com:taotaosihao/gearjob.git` | `develop` |
-| beezer | `/home/gewu/work/beezer` | `https://cnb.cool/gewu-data/beezer` | `main` |
-| hive | `/home/gewu/work/hive` | `git@github.com:taotaosihao/hive.git` | `develop` |
+| gearjob | `$GEARJOB_REPO` | `git@github.com:taotaosihao/gearjob.git` | `develop` |
+| beezer | `$BEEZER_REPO` | `https://cnb.cool/gewu-data/beezer` | `main` |
+| hive | `$HIVE_REPO` | `git@github.com:taotaosihao/hive.git` | `develop` |
 
 Rules:
 - Use the local path when it exists and is a git work tree.

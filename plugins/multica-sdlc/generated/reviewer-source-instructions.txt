@@ -30,7 +30,7 @@ Rules:
 - Review docs changes if docs were modified.
 - Treat missing validation evidence as a product risk, not a paperwork issue. If a required PRD acceptance row lacks real evidence on the final commit SHA, mark BLOCKING.
 - Treat missing, stale, or unapproved sprint contract evidence as BLOCKING for non-tiny implementation slices. If implementation started without a required contract or diverged from the accepted contract without leader approval, mark BLOCKING.
-- Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` as the evidence contract. If the evidence manifest is missing, stale, fallback-only, static-only for UI, or tied to the wrong commit for a required row, mark BLOCKING.
+- Use `$MULTICA_STATE_HOME/instructions/evidence-manifest.md` as the evidence contract. If the evidence manifest is missing, stale, fallback-only, static-only for UI, or tied to the wrong commit for a required row, mark BLOCKING.
 - For UI/UX PRDs, do not mark CLEAN without real rendered-screen evidence: screenshots or video, DOM/layout metrics, console/network checks, responsive coverage, and critical interaction checks from the acceptance matrix.
 - If an E2E report skipped a required check, used only static reasoning, used a static design artifact as the target, or only proved that assets loaded, mark BLOCKING unless the PRD explicitly made that row optional.
 - For non-UI PRDs, verify evidence against the appropriate runtime target: API request/response, CLI invocation, worker/job execution, migration/database assertion, package import/API call, service integration, or test harness evidence.
@@ -39,7 +39,7 @@ Rules:
 - Score each reviewed agent output from 0 to 10. The score is separate from CLEAN/BLOCKED: blocking defects should usually lower the score, but the score is for later capability analysis, not for overriding the gate result.
 - Keep each score simple: one number plus a short reason, one strength, and one gap when applicable.
 - Include agent information whenever known: agent ID, agent name, squad role, model/runtime, and artifact type. If exact agent metadata is unavailable, write the best known name/role and set unknown fields to `null`.
-- Append one JSON object per scored artifact to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`. Use an atomic append with `flock /home/gewu/.agents/multica-sdlc/agent-scorecards.lock` because multiple reviewers may run in parallel.
+- Append one JSON object per scored artifact to `$MULTICA_STATE_HOME/agent-scorecards.jsonl`. Use an atomic append with `flock $MULTICA_STATE_HOME/agent-scorecards.lock` because multiple reviewers may run in parallel.
 - Scorecard JSON keys:
   - `timestamp`
   - `issue_id`
@@ -63,7 +63,7 @@ Rules:
   - `fallback_only`
   - `wrong_commit`
 - Example append command shape:
-  `flock /home/gewu/.agents/multica-sdlc/agent-scorecards.lock -c 'printf "%s\n" "$SCORECARD_JSON" >> /home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl'`
+  `flock $MULTICA_STATE_HOME/agent-scorecards.lock -c 'printf "%s\n" "$SCORECARD_JSON" >> $MULTICA_STATE_HOME/agent-scorecards.jsonl'`
 
 Borrowed discipline:
 - Use gstack /review style: prioritize correctness, regressions, missing tests, security, API contracts, and user-visible behavior over style nits.

@@ -27,7 +27,7 @@ Canonical PRD:
 
 Repository resolution:
 - Prefer the issue's "Repo path on submitter machine" when it exists and is a git work tree.
-- If the issue target matches a project in `/home/gewu/.agents/multica-sdlc/local-repos.md`, use that local path before any checkout or clone.
+- If the issue target matches a project in `$MULTICA_STATE_HOME/local-repos.md`, use that local path before any checkout or clone.
 - Do not clone a second copy of known local repositories by default.
 - Use `multica repo checkout <url>` only when the local path is missing, unreadable, explicitly stale, or the issue requires a clean remote checkout.
 - When isolation is needed, create a dedicated branch or worktree from the configured base branch inside the local repository.
@@ -42,7 +42,7 @@ Project completion policy for `gearjob`, `beezer`, and `hive`:
 - Missing local deployment/runtime evidence for these projects is BLOCKING unless a preflight blocker makes local deployment impossible.
 
 Evidence manifest policy:
-- Use `/home/gewu/.agents/multica-sdlc/instructions/evidence-manifest.md` as the manifest contract.
+- Use `$MULTICA_STATE_HOME/instructions/evidence-manifest.md` as the manifest contract.
 - For any run with required acceptance or validation rows, maintain `.multica/evidence-manifest.json` or an equivalent issue artifact.
 - The manifest must map required rows to evidence records with commit SHA, command, runtime target, environment, observed result, artifact/log path, validator agent, missing_evidence, fallback_only, and wrong_commit fields.
 - Missing, stale, fallback-only, static-only, wrong-commit, or real-chain-bypassing evidence for required rows blocks PR-READY-GATE.
@@ -50,7 +50,7 @@ Evidence manifest policy:
 Agent inventory and mutation safety:
 - Dynamic staffing is inventory-first and reuse-first. Before staffing, run or inspect the equivalent of `multica agent list --include-archived --output json`.
 - For candidate agents, inspect details and skill assignments with `multica agent get <agent-id> --output json` and `multica agent skills list <agent-id> --output json`.
-- Use local instruction/skill sources as evidence when relevant: `/home/gewu/.agents/multica-sdlc/instructions/*.md`, `/home/gewu/.agents/multica-sdlc/generated/*.txt`, and `/home/gewu/.agents/skills/*/SKILL.md`.
+- Use local instruction/skill sources as evidence when relevant: `$MULTICA_STATE_HOME/instructions/*.md`, `$MULTICA_STATE_HOME/generated/*.txt`, and `$AGENTS_HOME/skills/*/SKILL.md`.
 - If an existing non-archived agent already satisfies the role through model, runtime, skills, MCP configuration, and instructions, add that agent directly to the active squad. Do not create or edit an agent for a role that an existing suitable agent can cover.
 - Editing includes changing instructions, model, runtime, MCP config, environment, max concurrency, role identity, or skill assignments such as `agent skills add/set`.
 - Before editing any existing agent, prove it has no active issue or task using `multica agent tasks <agent-id> --output json` and `multica issue list --assignee-id <agent-id> --output json`.
@@ -130,7 +130,7 @@ State machine:
 5. VALIDATE
    - After each coding pass, request review and E2E validation against the current commit SHA and the accepted sprint contract.
    - Dispatch all active same-role or same-role-family review-capable squad members in parallel. At minimum this includes the required reviewer. Do not dispatch archived, removed, or non-squad reviewers.
-   - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `/home/gewu/.agents/multica-sdlc/agent-scorecards.jsonl`.
+   - Reviewers must score each reviewed plan, code/repair output, test/E2E report, docs summary, or PR body from 0 to 10 and append scorecards to `$MULTICA_STATE_HOME/agent-scorecards.jsonl`.
    - Dispatch every E2E-capable same-role or same-role-family squad member in parallel. At minimum this includes the regular DeepSeek E2E agent, the DeepSeek E2E peer when available, and the Antigravity E2E agent for browser and visual evidence rows. The two DeepSeek E2E agents have `agy-bridge` attached and may delegate screenshot/video/image inspection to Antigravity when visual judgment is required. If the Antigravity runtime is unavailable, record it and continue unless the issue explicitly marks Antigravity E2E as required.
    - Give each E2E agent the same commit SHA and PRD source, but ask them to cover different angles when possible: browser/user flow, API/data flow, regression edge cases, and PRD fidelity.
    - Review output must classify findings as BLOCKING or NON_BLOCKING.
