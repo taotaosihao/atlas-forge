@@ -147,7 +147,15 @@ Lightweight implementation contracts:
   steps, evidence paths, and stop conditions. It is the Atlas workflow
   lightweight counterpart to the full Multica sprint contract.
 
-Refresh the installed local plugin copy after changing a plugin source directory:
+Refresh Atlas workflow after changing plugin source, workflow helper source, or
+native Codex agent source from the Atlas Forge checkout:
+
+```bash
+scripts/update-atlas-workflow-plugin
+```
+
+Refresh only the installed local plugin copy when you are intentionally using
+the low-level cache primitive:
 
 ```bash
 ~/.codex/workflow/bin/codex-refresh-local-plugin atlas-workflow

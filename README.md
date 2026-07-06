@@ -35,6 +35,7 @@ The repository also stores non-secret Multica agent assets under `.agents/`:
 
 - Codex CLI with `codex plugin` support.
 - Git.
+- rsync.
 - GitHub SSH access to `git@github.com:taotaosihao/atlas-forge.git`.
 
 ## Install
@@ -121,20 +122,30 @@ starts.
 
 ## Development Workflow
 
-1. Edit plugin or workflow source in this repository.
-2. If plugin content changed, bump the plugin manifest cachebuster:
+For local development, edit plugin, workflow, or native agent source in this
+repository, then run one command:
 
 ```bash
-scripts/bump-plugin-cachebuster.sh atlas-workflow
-scripts/bump-plugin-cachebuster.sh mempalace
-scripts/bump-plugin-cachebuster.sh multica-sdlc
+scripts/update-atlas-workflow-plugin
 ```
 
-3. Run the local checks:
+This syncs `plugins/atlas-workflow/` into the local Codex plugin source,
+refreshes installed runtime cache copies, syncs workflow helpers and native
+Codex agents, and verifies source/cache equality. Use `--dry-run` to preview
+the runtime writes and `--contract` when you want the full workflow contract
+suite after the refresh:
+
+```bash
+scripts/update-atlas-workflow-plugin --dry-run
+scripts/update-atlas-workflow-plugin --contract
+```
+
+Start a new Codex thread before relying on changed skills or native agents.
+
+For repository checks that are not part of the one-command local refresh, run:
 
 ```bash
 python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
-python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/atlas-workflow
 python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mempalace-codex-plugin
 python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/multica-sdlc
 bash -n scripts/bump-plugin-cachebuster.sh
@@ -142,17 +153,20 @@ bash -n scripts/codex-plugin-update.sh
 bash -n scripts/install-atlas-forge.sh
 bash -n scripts/sync-live-agents.sh
 bash -n scripts/sync-live-workflow.sh
+bash -n scripts/update-atlas-workflow-plugin
 plugins/multica-sdlc/scripts/self-test-router.sh
-latest_atlas_cache="$(find ~/.codex/plugins/cache/atlas-forge/atlas-workflow -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-latest_multica_cache="$(find ~/.codex/plugins/cache/atlas-forge/multica-sdlc -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-cmp plugins/atlas-workflow/skills/task/SKILL.md "$latest_atlas_cache/skills/task/SKILL.md"
-cmp plugins/atlas-workflow/skills/team/SKILL.md "$latest_atlas_cache/skills/team/SKILL.md"
-cmp plugins/multica-sdlc/.codex-plugin/plugin.json "$latest_multica_cache/.codex-plugin/plugin.json"
-cmp plugins/multica-sdlc/templates/multica-sdlc-workflow.yaml "$latest_multica_cache/templates/multica-sdlc-workflow.yaml"
-cmp plugins/multica-sdlc/templates/sprint-contract.md "$latest_multica_cache/templates/sprint-contract.md"
 ```
 
-4. Commit and push:
+Before publishing a new marketplace snapshot, bump the changed plugin's
+manifest cachebuster:
+
+```bash
+scripts/bump-plugin-cachebuster.sh atlas-workflow
+scripts/bump-plugin-cachebuster.sh mempalace
+scripts/bump-plugin-cachebuster.sh multica-sdlc
+```
+
+Then commit and push:
 
 ```bash
 git add -A
@@ -160,7 +174,7 @@ git commit -m "type(scope): summary"
 git push origin main
 ```
 
-5. Refresh Codex from the Git marketplace snapshot:
+Refresh Codex from the Git marketplace snapshot:
 
 ```bash
 scripts/codex-plugin-update.sh atlas-workflow
@@ -168,18 +182,9 @@ scripts/codex-plugin-update.sh mempalace
 scripts/codex-plugin-update.sh multica-sdlc
 ```
 
-6. If workflow helper files or Multica agent assets changed, sync them to the
-   live local paths:
-
-```bash
-scripts/sync-live-agents.sh
-scripts/sync-live-workflow.sh
-```
-
-The sync scripts refresh command shims in `~/.local/bin` for `codex-workflow`,
-`codex-design-review`, `codex-refresh-local-plugin`, and `multica-prd-submit`.
-
-7. Start a new Codex thread before relying on changed skills.
+`codex-plugin-update.sh` is the stricter publish/update path for installed
+devices. It requires a clean local checkout whose `HEAD` matches `origin/main`,
+then upgrades the `atlas-forge` marketplace and reinstalls the selected plugin.
 
 ## Repository Layout
 
@@ -199,6 +204,7 @@ atlas-forge/
     codex-plugin-update.sh
     install-atlas-forge.sh
     sync-live-workflow.sh
+    update-atlas-workflow-plugin
   workflow/
     bin/
     hooks/

@@ -72,6 +72,19 @@ source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
 
+update_plugin_script="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-plugin"
+if [[ -x "$update_plugin_script" ]]; then
+  bash -n "$update_plugin_script"
+  "$update_plugin_script" --dry-run > "$TMP_ROOT/update-atlas-workflow-plugin.out"
+  grep -q "would sync workflow helpers" "$TMP_ROOT/update-atlas-workflow-plugin.out"
+  grep -q "would sync native Codex agents" "$TMP_ROOT/update-atlas-workflow-plugin.out"
+  grep -q "would sync atlas-workflow source to local plugin source" "$TMP_ROOT/update-atlas-workflow-plugin.out"
+  grep -q "would refresh installed local plugin cache" "$TMP_ROOT/update-atlas-workflow-plugin.out"
+  pass "local plugin update dry run"
+else
+  pass "local plugin update dry run skipped without source checkout"
+fi
+
 audit_script="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/audit-private-paths.js"
 audit_allow="$ATLAS_FORGE_ROOT/docs/audit/private-paths.allow.json"
 node "$audit_script" --help >/dev/null
@@ -126,7 +139,7 @@ $BIN route-decision "$route_id" \
   --decision skip \
   --reason "legacy layer alias remains accepted" >/dev/null
 grep -q "route_intent: task" "$CODEX_WORKFLOW_ROOT/tasks/$route_id.md"
-$BIN route-decision --help >/dev/null
+$BIN route-decision --help >/dev/null 2>&1
 $BIN route-decision "$route_id" \
   --intent analyze \
   --risk low \

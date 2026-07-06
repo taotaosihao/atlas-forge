@@ -114,11 +114,17 @@ Do not treat `plugins/cache/` as the source of truth.
 
 ## Refresh After Changes
 
-If you change this plugin source, rebuild the installed local copy before starting a new session:
+If you change this plugin source from the Atlas Forge checkout, use the local
+development refresh command before starting a new session:
 
 ```bash
-~/.codex/workflow/bin/codex-refresh-local-plugin atlas-workflow
+scripts/update-atlas-workflow-plugin
 ```
+
+That command syncs the plugin source, workflow helpers, native Codex agents,
+and installed runtime cache copies, then verifies source/cache equality.
+`codex-refresh-local-plugin atlas-workflow` remains the lower-level cache
+primitive used by the update command.
 
 ## Layout
 

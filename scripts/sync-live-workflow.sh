@@ -14,6 +14,13 @@ cp -a "$REPO_ROOT/workflow/hooks/." "$LIVE_WORKFLOW_ROOT/hooks/"
 cp -a "$REPO_ROOT/workflow/templates/." "$LIVE_WORKFLOW_ROOT/templates/"
 cp -a "$REPO_ROOT/workflow/tests/." "$LIVE_WORKFLOW_ROOT/tests/"
 cp -a "$REPO_ROOT/workflow/README.md" "$LIVE_WORKFLOW_ROOT/README.md"
+printf '%s\n' "$REPO_ROOT" > "$LIVE_WORKFLOW_ROOT/source-root"
+
+if [[ -d "$REPO_ROOT/test/fixtures" ]]; then
+  rm -rf "$CODEX_HOME_ROOT/test/fixtures"
+  mkdir -p "$CODEX_HOME_ROOT/test"
+  cp -a "$REPO_ROOT/test/fixtures" "$CODEX_HOME_ROOT/test/"
+fi
 
 chmod +x "$LIVE_WORKFLOW_ROOT/bin/"* "$LIVE_WORKFLOW_ROOT/hooks/"* "$LIVE_WORKFLOW_ROOT/tests/contract.sh"
 
@@ -32,4 +39,4 @@ for command_name in codex-workflow codex-design-review codex-refresh-local-plugi
   chmod +x "$shim_path"
 done
 
-"$LIVE_WORKFLOW_ROOT/bin/codex-workflow" self-test
+ATLAS_FORGE_ROOT="$REPO_ROOT" "$LIVE_WORKFLOW_ROOT/bin/codex-workflow" self-test

@@ -6003,11 +6003,27 @@ cmd_verify() {
 
 cmd_self_test() {
   local contract_script="$SCRIPT_DIR/../tests/contract.sh"
+  local source_root_file="$SCRIPT_DIR/../source-root"
+  local atlas_forge_root="${ATLAS_FORGE_ROOT:-}"
+
   if [[ ! -x "$contract_script" ]]; then
     echo "missing executable contract test script: $contract_script" >&2
     exit 1
   fi
-  CODEX_WORKFLOW_BIN="$SCRIPT_DIR/codex-workflow" "$contract_script"
+  if [[ -z "$atlas_forge_root" && -f "$source_root_file" ]]; then
+    read -r atlas_forge_root < "$source_root_file" || atlas_forge_root=""
+    if [[ ! -d "$atlas_forge_root" ]]; then
+      atlas_forge_root=""
+    fi
+  fi
+  if [[ -n "$atlas_forge_root" ]]; then
+    (
+      cd "$atlas_forge_root"
+      ATLAS_FORGE_ROOT="$atlas_forge_root" CODEX_WORKFLOW_BIN="$SCRIPT_DIR/codex-workflow" "$contract_script"
+    )
+  else
+    CODEX_WORKFLOW_BIN="$SCRIPT_DIR/codex-workflow" "$contract_script"
+  fi
 }
 
 cmd_install_hooks() {
