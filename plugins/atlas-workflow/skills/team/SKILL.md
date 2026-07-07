@@ -176,10 +176,14 @@ Agent planning rules:
     subagents. Write at least `## Agent Plan`, `## Active Roles`, and
     `## Omitted Roles` in `staffing.md` before `team-record-start`, then fill or
     refine the remaining staffing sections before spawning.
-11. `staffing.md` must include these sections when the team is non-tiny:
+11. Initial staffing is a starting hypothesis, not a frozen runtime contract.
+    Do not try to pre-plan every future implementation role, model, or thinking
+    effort in early staffing or in the implementation contract.
+12. `staffing.md` must include these sections when the team is non-tiny:
     - `## Agent Plan`
     - `## Active Roles`
     - `## Omitted Roles`
+    - `## Runtime Staffing Adjustments`
     - `## Phase Gates`
     - `## Commit Boundaries`
     - `## Concurrency And Write Boundaries`
@@ -202,6 +206,11 @@ Recommended `staffing.md` table shape:
 
 | Role | Omission Reason |
 | --- | --- |
+
+## Runtime Staffing Adjustments
+
+| Trigger | Role Change | Model | Reasoning Effort | Why Now | Ledger/Event |
+| --- | --- | --- | --- | --- | --- |
 
 ## Phase Gates
 
@@ -228,6 +237,51 @@ Recommended `staffing.md` table shape:
 - Artifact paths:
 - Stop conditions:
 ```
+
+## Dynamic Runtime Staffing During Implementation
+
+Use this rule only after an implementation contract is selected and actual
+implementation is underway. The implementation contract defines scope,
+acceptance rows, validation, evidence, and stop conditions; it does not need to
+and should not freeze every future subagent role, model, or thinking effort.
+
+Runtime staffing rules:
+
+1. Before each implementation slice, fix round, blocker investigation, verifier
+   pass, or final integration review, reassess the current problem using the
+   latest code diff, review verdict, failed command, missing evidence, user
+   correction, or blocker report.
+2. Dynamically add, remove, merge, split, or replace roles when the actual
+   implementation problem changes. Examples: add a database reviewer after a
+   migration issue appears, add a browser verifier after a layout risk appears,
+   drop a reviewer whose domain is no longer touched, or split one worker into
+   two only when write scopes are provably disjoint.
+3. Choose a runtime profile for each spawned subagent from the current task
+   difficulty and risk. Record at least:
+   - `model`
+   - `reasoning_effort` / thinking effort
+   - role
+   - trigger
+   - why that profile is appropriate now
+4. Do not let implementation subagents silently inherit the parent agent
+   runtime profile. If the native spawn tool supports model or reasoning-effort
+   arguments, pass them explicitly. If the tool does not expose those arguments,
+   write the requested runtime profile into the prompt and record it in
+   `staffing.md`, the slice ledger, or the loop ledger.
+5. Use cheaper/lower-effort profiles for narrow mechanical checks, formatting,
+   fixture updates, and already-understood one-file repairs. Use stronger/higher
+   reasoning profiles for ambiguous failures, cross-module design choices,
+   security/data/permission/migration changes, conflicting review findings,
+   business acceptance gates, final integration review, and repeated failed
+   repair loops.
+6. Every runtime role/model/thinking adjustment must be append-only evidence:
+   record it under `## Runtime Staffing Adjustments` in `staffing.md`, or in the
+   relevant slice/loop ledger when the adjustment is local to that slice.
+7. The controller may change the role mix during implementation without
+   revising the implementation contract when the change stays inside contract
+   scope. If the needed role change expands scope, changes acceptance, changes
+   deployment/data safety, or contradicts the contract, stop and return to
+   clarify/team review instead.
 
 ## Discuss Mode
 
@@ -311,6 +365,10 @@ Controller responsibilities:
 6. Do not write workflow artifacts from implementer, reviewer, fixer, verifier,
    or explorer subagents. Their final messages are the input; the controller
    validates, records, and writes artifacts.
+7. Apply Dynamic Runtime Staffing During Implementation before each slice,
+   review, fix, blocker, verifier, or final whole-branch review spawn. Record
+   the actual role mix, model, reasoning effort, and trigger in `staffing.md` or
+   the slice ledger.
 
 Fresh context discipline:
 
@@ -345,6 +403,7 @@ Inputs:
 - brief_md: <path>
 - global_constraints: <path>
 - answers_jsonl: <path or none>
+- runtime_profile: <model and reasoning_effort selected for this slice>
 - repo: <absolute repo path>
 - base_sha: <sha>
 - owned_paths: <paths>
@@ -370,6 +429,7 @@ You are the SDD reviewer for one slice.
 Inputs:
 - brief_json: <path>
 - review_package_diff: <path>
+- runtime_profile: <model and reasoning_effort selected for this review>
 - repo: <absolute repo path>
 - base_sha: <sha>
 - head_sha: <sha>
@@ -394,6 +454,7 @@ Inputs:
 - latest_review_verdict: <path or pasted JSON>
 - review_package_diff: <path>
 - answers_jsonl: <path or none>
+- runtime_profile: <model and reasoning_effort selected for this fix round>
 - repo: <absolute repo path>
 - head_sha: <sha>
 
@@ -454,6 +515,8 @@ Native loop requirements:
    - The loop ledger must include `- backend: native` or `backend: native` metadata and substantive evidence beyond headings/template text before `team-loop-record` is called.
 5. Each iteration must:
    - spawn or reuse a native executor only for the bounded repair task;
+   - reassess runtime staffing, model, and reasoning effort for the current
+     failure before spawning the executor/reviewer/verifier;
    - run reviewer/verifier native lanes or main-agent verification as appropriate;
    - record commands, changed files, artifacts, and unresolved blockers;
    - create a dedicated commit for the verified iteration step when files changed
