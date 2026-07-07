@@ -68,9 +68,11 @@ pass "readiness gate"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
+bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_business_acceptance.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
+source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_business_acceptance.sh"
 
 update_plugin_script="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-plugin"
 if [[ -x "$update_plugin_script" ]]; then

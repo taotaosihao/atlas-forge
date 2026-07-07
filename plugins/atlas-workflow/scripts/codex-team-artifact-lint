@@ -8,15 +8,21 @@ const { validateLedgerEvent } = require("../contracts/team-sdd/validators/ledger
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
 const { validatePathLeaseDocument } = require("../contracts/team-sdd/validators/path-lease");
+const { validateBusinessIntent } = require("../contracts/team-sdd/validators/business-intent");
+const { validateBusinessScenarioCard } = require("../contracts/team-sdd/validators/business-scenario-card");
+const { validateBusinessEvidenceMap } = require("../contracts/team-sdd/validators/business-evidence-map");
+const { validateBusinessAcceptanceReport } = require("../contracts/team-sdd/validators/business-acceptance-report");
+const { validateBusinessDeviationLog } = require("../contracts/team-sdd/validators/business-deviation-log");
+const { validateBusinessVerdict } = require("../contracts/team-sdd/validators/business-verdict");
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function usage() {
-  console.log("usage: codex-team-artifact-lint --task <task-id> [--strict]");
+  console.log("usage: codex-team-artifact-lint --task <task-id> [--strict] [--business-acceptance]");
 }
 
 function parseArgs(argv) {
-  const options = { task: null, strict: false, help: false };
+  const options = { task: null, strict: false, businessAcceptance: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -27,6 +33,8 @@ function parseArgs(argv) {
       options.task = arg.slice("--task=".length);
     } else if (arg === "--strict") {
       options.strict = true;
+    } else if (arg === "--business-acceptance") {
+      options.businessAcceptance = true;
     } else {
       throw new Error(`unknown option: ${arg}`);
     }
@@ -222,6 +230,143 @@ function lintForbiddenTerms(sddDir, errors) {
   }
 }
 
+function validateJsonFile(file, validate, errors) {
+  const value = readJson(file, errors);
+  if (!value) {
+    return null;
+  }
+  const validation = validate(value);
+  if (validation.length > 0) {
+    errors.push(`${file}: ${validation.join("; ")}`);
+  }
+  return value;
+}
+
+function ensureArtifactRelativePath(artifactRoot, rawPath, label, errors) {
+  if (typeof rawPath !== "string" || rawPath.length === 0) {
+    errors.push(`${label}: path must be a non-empty string`);
+    return null;
+  }
+  if (path.isAbsolute(rawPath)) {
+    errors.push(`${label}: local evidence path must be artifact-root-relative`);
+    return null;
+  }
+  const resolved = path.resolve(artifactRoot, rawPath);
+  const relative = path.relative(artifactRoot, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    errors.push(`${label}: local evidence path must not escape artifact root`);
+    return null;
+  }
+  if (!fs.existsSync(resolved)) {
+    errors.push(`${label}: local evidence path does not exist: ${rawPath}`);
+  }
+  return resolved;
+}
+
+function lintEvidenceMap(artifactRoot, evidenceMap, errors) {
+  if (!evidenceMap || !Array.isArray(evidenceMap.evidence_refs)) {
+    return;
+  }
+  evidenceMap.evidence_refs.forEach((ref, index) => {
+    if (!ref || typeof ref !== "object") {
+      return;
+    }
+    const label = `business-evidence-map.evidence_refs[${index}]`;
+    if (ref.source_type === "local") {
+      ensureArtifactRelativePath(artifactRoot, ref.evidence_path, label, errors);
+    } else if (["external", "manual"].includes(ref.source_type)) {
+      if (typeof ref.description !== "string" || ref.description.length === 0) {
+        errors.push(`${label}: external/manual evidence requires description`);
+      }
+    }
+  });
+}
+
+function lintDeviationLog(file, errors) {
+  if (!fs.existsSync(file)) {
+    return;
+  }
+  const lines = fs.readFileSync(file, "utf8").split(/\n/);
+  lines.forEach((line, index) => {
+    if (!line.trim()) {
+      return;
+    }
+    let value;
+    try {
+      value = JSON.parse(line);
+    } catch (error) {
+      errors.push(`${file}:${index + 1}: invalid JSON: ${error.message}`);
+      return;
+    }
+    const validation = validateBusinessDeviationLog(value);
+    if (validation.length > 0) {
+      errors.push(`${file}:${index + 1}: ${validation.join("; ")}`);
+    }
+  });
+}
+
+function lintBusinessAcceptance(artifactRoot, errors) {
+  const acceptanceDir = path.join(artifactRoot, "team", "acceptance");
+  const intentFile = path.join(acceptanceDir, "business-intent.json");
+  const scenariosDir = path.join(acceptanceDir, "scenarios");
+  const evidenceMapFile = path.join(acceptanceDir, "business-evidence-map.json");
+  const acceptanceReportFile = path.join(acceptanceDir, "business-acceptance-report.json");
+  const verdictFile = path.join(acceptanceDir, "business-verdict.json");
+  const deviationLogFile = path.join(acceptanceDir, "business-deviation-log.jsonl");
+
+  if (!fs.existsSync(intentFile)) {
+    errors.push("missing team/acceptance/business-intent.json");
+  } else {
+    validateJsonFile(intentFile, validateBusinessIntent, errors);
+  }
+
+  const scenarioFiles = fs.existsSync(scenariosDir)
+    ? fs.readdirSync(scenariosDir)
+      .filter((entry) => /^business-scenario-card\..*\.json$/.test(entry))
+      .map((entry) => path.join(scenariosDir, entry))
+      .sort()
+    : [];
+  if (scenarioFiles.length === 0) {
+    errors.push("missing team/acceptance/scenarios/business-scenario-card.*.json");
+  }
+  for (const file of scenarioFiles) {
+    validateJsonFile(file, validateBusinessScenarioCard, errors);
+  }
+
+  const evidenceMap = fs.existsSync(evidenceMapFile)
+    ? validateJsonFile(evidenceMapFile, validateBusinessEvidenceMap, errors)
+    : null;
+  const acceptanceReport = fs.existsSync(acceptanceReportFile)
+    ? validateJsonFile(acceptanceReportFile, validateBusinessAcceptanceReport, errors)
+    : null;
+  const verdict = fs.existsSync(verdictFile)
+    ? validateJsonFile(verdictFile, validateBusinessVerdict, errors)
+    : null;
+
+  lintDeviationLog(deviationLogFile, errors);
+  lintEvidenceMap(artifactRoot, evidenceMap, errors);
+
+  if (!verdict) {
+    return;
+  }
+  const acceptedVerdicts = ["accepted", "conditionally_accepted"];
+  if (acceptedVerdicts.includes(verdict.verdict) && !fs.existsSync(evidenceMapFile)) {
+    errors.push("business-verdict accepted/conditionally_accepted requires business-evidence-map.json");
+  }
+  if (acceptedVerdicts.includes(verdict.verdict) && !fs.existsSync(acceptanceReportFile)) {
+    errors.push("business-verdict accepted/conditionally_accepted requires business-acceptance-report.json");
+  }
+  if (acceptedVerdicts.includes(verdict.verdict) && ["failed", "blocked"].includes(verdict.technical_gate_status)) {
+    errors.push("business-verdict accepted/conditionally_accepted is forbidden when technical_gate_status is failed or blocked");
+  }
+  if (acceptedVerdicts.includes(verdict.verdict)
+    && acceptanceReport
+    && acceptanceReport.rating
+    && acceptanceReport.rating.blocking_technical_gate_failed === true) {
+    errors.push("business-verdict accepted/conditionally_accepted is forbidden when blocking_technical_gate_failed is true");
+  }
+}
+
 function lint(options) {
   safeId("task", options.task);
   const artifactRoot = path.join(workflowRoot(), "artifacts", options.task);
@@ -252,6 +397,9 @@ function lint(options) {
   lintTeamMetadata(teamDir, errors, options.strict);
   lintPlaceholderArtifacts(teamDir, errors, options.strict);
   lintForbiddenTerms(sddDir, errors);
+  if (options.businessAcceptance) {
+    lintBusinessAcceptance(artifactRoot, errors);
+  }
   return errors;
 }
 
