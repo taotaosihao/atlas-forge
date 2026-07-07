@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "verdict": "accepted",
+  "technical_gate_status": "passed",
+  "business_acceptance_status": "passed",
+  "required_followups": []
+}

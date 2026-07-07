@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "threads": [
+    {
+      "thread_id": "thread-001",
+      "business_trigger": "Evidence is ready",
+      "actor_role": "reviewer",
+      "business_objects": [
+        "acceptance-case"
+      ],
+      "start_state": "ready_for_review",
+      "allowed_actions": [
+        "review",
+        "accept"
+      ],
+      "blocked_actions": [
+        "accept_without_evidence"
+      ],
+      "expected_state_transitions": [
+        "ready_for_review -> accepted"
+      ],
+      "exception_paths": [
+        "missing evidence -> blocked"
+      ],
+      "human_handoff_points": [
+        "stakeholder signoff"
+      ],
+      "evidence_required": [
+        "ev-playback"
+      ]
+    }
+  ]
+}

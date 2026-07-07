@@ -1,0 +1,7 @@
+{
+  "task_id": "fixture",
+  "verdict": "accepted",
+  "technical_gate_status": "passed",
+  "business_acceptance_status": "passed",
+  "required_followups": []
+}

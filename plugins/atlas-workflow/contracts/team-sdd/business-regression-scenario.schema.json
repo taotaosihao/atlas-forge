@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "scenario_id",
+    "source_scenario_id",
+    "regression_goal",
+    "trigger",
+    "initial_state",
+    "expected_agent_behavior",
+    "expected_business_state",
+    "evidence_required",
+    "pass_criteria"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "source_scenario_id": {
+      "type": "string"
+    },
+    "regression_goal": {
+      "type": "string"
+    },
+    "trigger": {
+      "type": "string"
+    },
+    "initial_state": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_agent_behavior": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected_business_state": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_required": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pass_criteria": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

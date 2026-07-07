@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "business_goal",
+    "agent_responsibility",
+    "excluded_scope",
+    "stakeholders",
+    "success_definition",
+    "risk_boundaries"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "business_goal": {
+      "type": "string"
+    },
+    "agent_responsibility": {
+      "type": "string"
+    },
+    "excluded_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stakeholders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "success_definition": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_boundaries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

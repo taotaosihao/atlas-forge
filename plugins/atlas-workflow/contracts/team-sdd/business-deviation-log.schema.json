@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "deviation_id",
+    "deviation_type",
+    "severity",
+    "status",
+    "scenario_id",
+    "description",
+    "owner",
+    "evidence_refs",
+    "resolution_plan"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "deviation_id": {
+      "type": "string"
+    },
+    "deviation_type": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "scenario_id": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "resolution_plan": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

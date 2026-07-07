@@ -77,6 +77,12 @@ function expectArray(value, key, errors) {
   }
 }
 
+function expectObjectArray(value, key, errors) {
+  if (!Array.isArray(value[key]) || value[key].some((item) => !isObject(item))) {
+    errors.push(`${key} must be an array of objects`);
+  }
+}
+
 function expectSafeId(value, key, errors) {
   if (typeof value[key] !== "string" || !ID_PATTERN.test(value[key])) {
     errors.push(`${key} must be a safe identifier`);
@@ -133,6 +139,7 @@ module.exports = {
   expectEnum,
   expectStringArray,
   expectArray,
+  expectObjectArray,
   expectSafeId,
   expectAbsoluteExistingDir,
   expectGitRevision,

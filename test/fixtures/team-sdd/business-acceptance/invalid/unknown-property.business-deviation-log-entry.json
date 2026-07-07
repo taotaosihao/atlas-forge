@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "deviation_id": "dev-001",
+  "deviation_type": "scope_mismatch",
+  "severity": "P3",
+  "status": "open",
+  "scenario_id": "close-loop",
+  "description": "Fixture deviation.",
+  "owner": "atlas",
+  "evidence_refs": [
+    "ev-playback"
+  ],
+  "resolution_plan": "Retest after repair.",
+  "unexpected": true
+}

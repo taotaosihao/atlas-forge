@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "business_goal": "Close a business workflow with evidence-backed acceptance.",
+  "agent_responsibility": "Collect business artifacts and preserve technical hard gates.",
+  "excluded_scope": [
+    "Customer-specific manufacturing integration"
+  ],
+  "stakeholders": [
+    "operator",
+    "reviewer"
+  ],
+  "success_definition": [
+    "Accepted verdict maps to scenario evidence"
+  ],
+  "risk_boundaries": [
+    "Technical gate failure blocks acceptance"
+  ]
+}

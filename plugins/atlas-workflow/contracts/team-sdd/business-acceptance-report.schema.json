@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "scenario_results",
+    "technical_gate_summary",
+    "rating",
+    "open_deviations"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "scenario_results": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "technical_gate_summary": {
+      "type": "object"
+    },
+    "rating": {
+      "type": "object"
+    },
+    "open_deviations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

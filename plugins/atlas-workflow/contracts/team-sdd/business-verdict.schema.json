@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "verdict",
+    "technical_gate_status",
+    "business_acceptance_status",
+    "required_followups"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "conditionally_accepted",
+        "rejected",
+        "blocked"
+      ]
+    },
+    "technical_gate_status": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "blocked",
+        "not_run"
+      ]
+    },
+    "business_acceptance_status": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "blocked",
+        "not_run"
+      ]
+    },
+    "required_followups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

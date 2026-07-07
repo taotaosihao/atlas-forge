@@ -1,0 +1,13 @@
+{
+  "task_id": "fixture",
+  "evidence_refs": [
+    {
+      "evidence_id": "ev-playback",
+      "scenario_id": "close-loop",
+      "source_type": "local",
+      "description": "Playback artifact",
+      "evidence_path": "team/acceptance/evidence/playback.md",
+      "result": "passed"
+    }
+  ]
+}

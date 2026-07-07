@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "sources": [
+    {
+      "source_id": "src-001",
+      "source_type": "customer_requirement",
+      "description": "Approved requirement packet",
+      "refs": [
+        "docs/prd.md"
+      ],
+      "coverage_status": "covered",
+      "covered_threads": [
+        "thread-001"
+      ]
+    }
+  ],
+  "coverage_gaps": [],
+  "conflicts": [],
+  "coverage_summary": "Primary sources cover the acceptance workflow.",
+  "unexpected": true
+}

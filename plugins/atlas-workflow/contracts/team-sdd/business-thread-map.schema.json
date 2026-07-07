@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "threads"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": false
+}

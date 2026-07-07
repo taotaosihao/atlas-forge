@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "source_scenario_id": "close-loop",
+  "regression_goal": "Prevent acceptance with failed technical gates.",
+  "trigger": "technical gate fails",
+  "initial_state": [
+    "verdict pending"
+  ],
+  "expected_agent_behavior": [
+    "block accepted verdict"
+  ],
+  "expected_business_state": [
+    "business verdict blocked"
+  ],
+  "evidence_required": [
+    "failed gate output"
+  ],
+  "pass_criteria": [
+    "accepted verdict is rejected"
+  ]
+}

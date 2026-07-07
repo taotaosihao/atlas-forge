@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "scenario_results": [
+    {
+      "scenario_id": "close-loop",
+      "business_result": "passed",
+      "technical_gate_result": "passed",
+      "score": 95
+    }
+  ],
+  "technical_gate_summary": {
+    "blocking_failure_count": 0,
+    "failed_gates": []
+  },
+  "rating": {
+    "total": 95,
+    "level": "maybe",
+    "blocking_technical_gate_failed": false
+  },
+  "open_deviations": []
+}

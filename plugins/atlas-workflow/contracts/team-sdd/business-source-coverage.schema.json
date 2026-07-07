@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task_id",
+    "sources",
+    "coverage_gaps",
+    "conflicts",
+    "coverage_summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "coverage_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "coverage_summary": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

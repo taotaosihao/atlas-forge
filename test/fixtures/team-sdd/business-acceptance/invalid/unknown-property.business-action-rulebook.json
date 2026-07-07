@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "actions": [
+    {
+      "action_id": "record-verdict",
+      "actor_role": "main-codex",
+      "risk_level": "medium",
+      "preconditions": [
+        "technical gate passed"
+      ],
+      "required_context": [
+        "business-intent"
+      ],
+      "allowed_business_apis": [
+        "codex-team-artifact-lint --business-acceptance"
+      ],
+      "forbidden_tools": [
+        "codex-business-*"
+      ],
+      "success_state": "verdict recorded",
+      "failure_state": "verdict blocked",
+      "audit_requirements": [
+        "evidence map exists"
+      ],
+      "evidence_required": [
+        "ev-playback"
+      ]
+    }
+  ],
+  "unexpected": true
+}

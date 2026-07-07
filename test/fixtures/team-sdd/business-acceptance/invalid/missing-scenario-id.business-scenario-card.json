@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "business_goal": "Business acceptance can be judged from evidence.",
+  "entry_role": "reviewer",
+  "initial_state": [
+    "implementation complete"
+  ],
+  "trigger": "review starts",
+  "expected_agent_behavior": [
+    "map evidence",
+    "check technical gates"
+  ],
+  "expected_business_state": [
+    "accepted or blocked verdict is justified"
+  ],
+  "technical_hard_gates": [
+    "contract tests pass"
+  ],
+  "business_evidence_required": [
+    "ev-playback"
+  ],
+  "technical_evidence_required": [
+    "contract output"
+  ],
+  "pass_criteria": [
+    "verdict aligns with gates"
+  ],
+  "fail_criteria": [
+    "accepted despite failed gate"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "fixture",
+  "objects": [
+    {
+      "object_id": "acceptance-case",
+      "name": "Acceptance Case",
+      "state_owner": "main-codex",
+      "states": [
+        "draft",
+        "ready_for_review",
+        "accepted",
+        "blocked"
+      ],
+      "transitions": [
+        {
+          "from": "ready_for_review",
+          "to": "accepted",
+          "action": "record_verdict",
+          "allowed_roles": [
+            "reviewer"
+          ],
+          "evidence_required": [
+            "ev-playback"
+          ]
+        }
+      ],
+      "conflict_policy": "Technical hard gate wins over business rating."
+    }
+  ],
+  "unexpected": true
+}
