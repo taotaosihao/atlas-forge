@@ -97,6 +97,72 @@ printf '{"entries":[{"path":"*","pattern":"%s","categories":["docs"]}]}\n' "$bad
 expect_fail "private path audit allowlist requires reason" node "$audit_script" --root "$ATLAS_FORGE_ROOT" --deny-private-home --allow-list "$TMP_ROOT/bad-private-path-allow.json" --report-only docs
 pass "private path audit"
 
+contract_index_lint="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
+node --check "$contract_index_lint" >/dev/null
+node "$contract_index_lint" --help >/dev/null
+
+planning_bundle="$TMP_ROOT/contract-index-planning"
+mkdir -p "$planning_bundle"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: planning-fixture' \
+  'contract_status: planning' \
+  'current_authoritative_contract: ./implementation-plan.md' \
+  > "$planning_bundle/contract-index.md"
+printf '%s\n' '# Implementation Plan' '' 'Plan is the current authority before final contract.' > "$planning_bundle/implementation-plan.md"
+node "$contract_index_lint" --root "$planning_bundle" >/dev/null
+
+ready_bundle="$TMP_ROOT/contract-index-ready"
+mkdir -p "$ready_bundle"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: ready-fixture' \
+  'contract_status: ready-for-implementation' \
+  'current_authoritative_contract: ./implementation-contract.final.md' \
+  > "$ready_bundle/contract-index.md"
+printf '%s\n' \
+  '# Final Implementation Contract' \
+  '' \
+  '## Scope' \
+  '' \
+  '- Goal: implement the selected behavior.' \
+  '' \
+  '## Acceptance Criteria' \
+  '' \
+  '| ID | Criterion | Required | Verification |' \
+  '|----|-----------|----------|--------------|' \
+  '| AC-1 | Feature works | yes | command passes |' \
+  > "$ready_bundle/implementation-contract.final.md"
+node "$contract_index_lint" --root "$ready_bundle" >/dev/null
+
+missing_final_bundle="$TMP_ROOT/contract-index-missing-final"
+mkdir -p "$missing_final_bundle"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: missing-final-fixture' \
+  'contract_status: ready-for-implementation' \
+  'current_authoritative_contract: ./implementation-contract.final.md' \
+  > "$missing_final_bundle/contract-index.md"
+expect_fail "missing final contract" node "$contract_index_lint" --root "$missing_final_bundle"
+grep -q "authoritative contract does not exist" "$TMP_ROOT/expect-fail.err"
+
+stale_final_bundle="$TMP_ROOT/contract-index-stale-final"
+mkdir -p "$stale_final_bundle"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: stale-final-fixture' \
+  'contract_status: ready-for-implementation' \
+  'current_authoritative_contract: ./implementation-contract.final.md' \
+  > "$stale_final_bundle/contract-index.md"
+printf '%s\n' '# Final Implementation Contract' '' '修订意见如下：把旧合同正文追加在这里。' > "$stale_final_bundle/implementation-contract.final.md"
+expect_fail "stale final contract markers" node "$contract_index_lint" --root "$stale_final_bundle"
+grep -q "stale final contract marker found" "$TMP_ROOT/expect-fail.err"
+pass "contract index lint"
+
 repo="$TMP_ROOT/repo"
 setup_repo "$repo"
 
@@ -313,6 +379,22 @@ rg -q "Critical Feedback" "$source_skills_root/clarify/SKILL.md"
 rg -q "external issues, PRDs, or design docs" "$source_skills_root/task/SKILL.md"
 rg -q "external issues, PRDs, or design docs" "$source_skills_root/cw/SKILL.md"
 rg -q "external issues, PRDs, or design docs" "$source_skills_root/worktree/SKILL.md"
+rg -q "workflow docs bundle" "$source_skills_root/brainstorm/SKILL.md"
+rg -q "workflow docs bundle" "$source_skills_root/clarify/SKILL.md"
+rg -q "workflow docs bundle" "$source_skills_root/team/SKILL.md"
+rg -q "workflow docs bundle" "$source_skills_root/team-v1/SKILL.md"
+rg -q "contract-index.md" "$source_skills_root/task/SKILL.md"
+rg -q "implementation-contract.final.md" "$source_skills_root/task/SKILL.md"
+rg -q "clean rewrite" "$source_skills_root/clarify/SKILL.md"
+rg -q "clean rewrite" "$source_skills_root/team/SKILL.md"
+rg -q "clean rewrite" "$source_skills_root/team-v1/SKILL.md"
+test -f "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+test -f "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
+rg -q "current_authoritative_contract" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "superseded_contracts" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "review_history" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "Final Contract Cleanliness Gate" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
+test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
 rg -q "handoff-envelope" "$REAL_AGENTS_HOME/skills/multica-prd-submit/SKILL.md"
 rg -q "name: multica-agent-plan" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"
 rg -q "Agent / Skill Inventory" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"

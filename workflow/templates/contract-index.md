@@ -1,0 +1,30 @@
+# Contract Index
+
+workflow_id: {{WORKFLOW_ID}}
+contract_status: {{planning|draft|ready-for-implementation|implemented|superseded}}
+current_authoritative_contract: ./implementation-contract.final.md
+
+contract_rules:
+- 同一 workflow 的 durable docs 放在本目录。
+- 进入实施前，`current_authoritative_contract` 必须指向 `implementation-contract.final.md`。
+- `implementation-contract.final.md` 必须是 clean rewrite，只包含最终定稿要求。
+- review history 保留在 `reviews/` 或 `decisions/`，不得混入 final contract 正文。
+
+source_chain:
+- intake:
+- clarify:
+- team decision:
+- implementation plan:
+
+superseded_contracts:
+- path:
+  reason:
+  superseded_by: ./implementation-contract.final.md
+
+review_history:
+- path:
+  status:
+  disposition:
+
+next_action:
+- 按 `current_authoritative_contract` 指向的文件进入下一步。

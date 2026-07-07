@@ -70,14 +70,18 @@ Follow this loop:
 10. Make acceptance criteria command-verifiable or user-visible.
 11. When the next step is non-tiny implementation, include an implementation-contract expectation:
    - whether `workflow/templates/implementation-contract.md` should be filled before coding
+   - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
    - which acceptance criteria become required validation rows
    - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce evidence
    - what failure or ambiguity should stop implementation and return to the user
+   - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final contract body
    Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
 12. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
-   - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
+   - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
+   - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
    - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
+   - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
    - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
 13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
@@ -94,4 +98,4 @@ Hard rules:
 
 - Do not re-open product strategy or design exploration unless execution safety depends on it.
 - Do not implement code from this skill unless the user explicitly changes the request to implementation after the spec is locked.
-- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; execution-ready specs must also be mirrored into project docs as described above.
+- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; execution-ready specs must also be mirrored into the workflow docs bundle described above.

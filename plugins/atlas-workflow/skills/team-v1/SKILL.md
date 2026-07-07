@@ -48,10 +48,13 @@ Follow this loop:
     - Use it for non-tiny local work with UI/API/CLI/background-job behavior, cross-file changes, or meaningful edge cases.
     - The contract owner is the main implementer unless the team explicitly assigns a separate reviewer.
     - The contract must preserve the team decision and must not add new scope.
+    - After review, the final implementation contract must be a clean rewrite of the settled requirements in `implementation-contract.final.md`; keep review history in `reviews/` or `decisions/`, not appended to the final contract body.
+    - Maintain `contract-index.md` so the next implementer can find the current authoritative contract without reading older drafts first.
     - For Multica handoff, prefer the Multica sprint contract rather than the Atlas lightweight template.
 14. When the team discussion settles an actionable plan, promotion, or staffing handoff, also write a concise project doc:
     - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
-    - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
+    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
+    - use stable files inside the bundle, such as `README.md`, `team-decision.md`, `staffing.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
     - include the final decision, consensus basis, owner/staffing plan when relevant, acceptance criteria, verification gates, risks, and next execution step.
     - keep `workflow/artifacts/<task-id>/team/decision.md` as the discussion record; the project doc is the durable handoff for the repo.
 15. Check status or stop the active round with:
@@ -71,4 +74,4 @@ Follow this loop:
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to execute`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to worktree`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to finish`
-20. In the final reply, include the task id, `decision.md` path, staffing path if produced, project doc path if written, readiness result if run, promotion state, and any open decision.
+20. In the final reply, include the task id, `decision.md` path, staffing path if produced, workflow docs bundle path if written, authoritative contract path if produced, readiness result if run, promotion state, and any open decision.

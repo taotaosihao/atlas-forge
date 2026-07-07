@@ -59,6 +59,10 @@ Follow this loop:
 12. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need the task details.
 13. For non-tiny implementation work, create a lightweight implementation contract before editing code:
     - Use `workflow/templates/implementation-contract.md` as the shape when a separate artifact is useful.
+    - If the contract is part of repo durable docs, place it in one workflow docs bundle: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
+    - Maintain `contract-index.md` in that bundle so `current_authoritative_contract` points to the file implementers should read first.
+    - When a reviewed implementation contract becomes final, write `implementation-contract.final.md` from the settled requirements as a clean rewrite; do not append old contract text, rejected requirements, or review notes into the final contract body.
+    - Keep review provenance in `reviews/` or `decisions/`, and list superseded drafts in `contract-index.md`.
     - Prefer forming this contract from the team decision when the default team flow ran.
     - Required when the task changes user-visible behavior, touches multiple files, changes UI/API/CLI/background-job behavior, or has meaningful edge cases.
     - Tiny precise fixes may skip this when the acceptance path is obvious; say why in the working note or final reply.
@@ -76,4 +80,4 @@ Follow this loop:
     batched by explicit user instruction, record the reason in the workflow
     artifact or final reply.
 18. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
-19. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.
+19. In the final reply, include the task id, changed files or artifact paths, workflow docs bundle path and authoritative contract path if produced, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.

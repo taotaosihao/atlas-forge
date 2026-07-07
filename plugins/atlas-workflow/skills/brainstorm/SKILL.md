@@ -59,8 +59,10 @@ Follow this loop:
    - switch to `$atlas-workflow:clarify` when explicit non-goals, decision boundaries, and acceptance criteria still need to be locked.
 12. When the discussion has become actionable enough for clarify, team, task, or Multica handoff, also write a concise project doc:
     - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
-    - name it `docs/atlas-workflow/<task-id>-<short-topic>.md` unless the project already has a stronger naming convention.
+    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
+    - use stable files inside the bundle, such as `README.md`, `brainstorm.md`, `decision.md`, `contract-index.md`, and later `implementation-contract.final.md`; do not create scattered sibling markdown files for the same workflow.
     - include the chosen direction, rejected alternatives, assumptions, acceptance shape, verification strategy, and next execution step.
+    - if the handoff names an authoritative implementation contract, keep `contract-index.md` pointed at the current authoritative file.
     - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
 13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
@@ -80,4 +82,4 @@ Hard rules:
 - Do not over-question clear engineering fixes. If the user already gave a precise implementation request, use `$atlas-workflow:task` or `$atlas-workflow:clarify` instead.
 - Keep confirmed facts separate from inferences and assumptions.
 - Do not make routing evidence a ceremony for tiny explicit fixes; route only when a planning layer choice was meaningful.
-- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; once a solution is actionable, mirror the durable handoff into project docs as described above.
+- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; once a solution is actionable, mirror the durable handoff into the workflow docs bundle described above.
