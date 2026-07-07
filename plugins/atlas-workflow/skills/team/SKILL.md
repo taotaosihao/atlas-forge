@@ -58,6 +58,72 @@ For every native round:
    - `## Recommendation`
 6. Separate facts from conclusions. Put source paths, command output, user constraints, and observed behavior in Evidence; put derived conclusions in Inference; put unresolved questions in Unknown.
 
+## Business Acceptance First Mode
+
+Use Business Acceptance First Mode when a `$atlas-workflow:team` task must prove
+that an implemented workflow satisfies a business process, stakeholder
+expectation, domain rulebook, or scenario-level acceptance contract in addition
+to the normal technical SDD gates. This mode is opt-in: do not require business
+acceptance artifacts for ordinary native team tasks unless the user request,
+PRD, implementation contract, or team decision explicitly calls for business
+workflow acceptance.
+
+Activation conditions:
+
+1. The task has business scenarios, domain state transitions, stakeholder
+   sign-off, source coverage, or scenario playback as acceptance evidence.
+2. Technical correctness alone is insufficient to decide whether the work is
+   acceptable.
+3. The team decision or implementation contract names business acceptance,
+   BAF, business verdict, or `team/acceptance/` artifacts.
+
+Before implementation begins, the main Codex should create or require the
+pre-implementation business artifacts under
+`workflow/artifacts/<task-id>/team/acceptance/` when they are relevant:
+
+- `business-intent.json`
+- `business-source-coverage.json`
+- `business-thread-map.json`
+- `business-object-state-model.json`
+- `business-action-rulebook.json`
+- `scenarios/business-scenario-card.<scenario-id>.json`
+
+Before recording a business verdict, the main Codex must have current evidence
+for:
+
+- `business-evidence-map.json`
+- `business-acceptance-report.json`
+- `business-verdict.json`
+- `business-deviation-log.jsonl` when deviations exist
+- `business-regression-scenario.json` when a deviation creates a future guard
+
+Business Gates belong in the existing `Phase Gates` section of `staffing.md`.
+Business Acceptance Evidence belongs in the existing `Verification Evidence`
+section. Do not add a separate staffing section, do not create a
+`business-controller` role, and do not redefine `reviewer`, `verifier`, or
+`evidence-qa`. Main Codex remains the only workflow artifact writer; subagents
+may provide evidence, review, and verification results, but they must not write
+`workflow/artifacts/**` directly.
+
+Technical hard gates are one-way blockers. If the SDD ledger, contract tests,
+artifact lint, required CI, or another named technical gate is failed or
+blocked, `business-verdict.verdict` must not be `accepted` or
+`conditionally_accepted`. A business verdict never replaces SDD ledger terminal
+events such as `run_complete` or `run_failed`; it records the business layer's
+judgment after technical gates are accounted for.
+
+When validating artifacts locally, use:
+
+```bash
+codex-team-validate-json --type business-intent --file <path>
+codex-team-validate-json --type business-scenario-card --file <path>
+codex-team-artifact-lint --task <task-id> --business-acceptance
+```
+
+`codex-team-artifact-lint --business-acceptance` means SDD lint plus business
+acceptance lint. Without `--business-acceptance`, existing artifact lint behavior
+must remain unchanged.
+
 ## Native Agent Planning
 
 Before spawning native subagents, produce a task-specific Agent Plan. Follow the
