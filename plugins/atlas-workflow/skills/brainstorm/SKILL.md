@@ -63,6 +63,7 @@ Follow this loop:
     - use stable files inside the bundle, such as `README.md`, `brainstorm.md`, `decision.md`, `contract-index.md`, and later `implementation-contract.final.md`; do not create scattered sibling markdown files for the same workflow.
     - include the chosen direction, rejected alternatives, assumptions, acceptance shape, verification strategy, and next execution step.
     - if the handoff names an authoritative implementation contract, keep `contract-index.md` pointed at the current authoritative file.
+    - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`.
     - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
 13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`

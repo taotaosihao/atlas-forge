@@ -114,13 +114,20 @@ printf '%s\n' '# Implementation Plan' '' 'Plan is the current authority before f
 node "$contract_index_lint" --root "$planning_bundle" >/dev/null
 
 ready_bundle="$TMP_ROOT/contract-index-ready"
-mkdir -p "$ready_bundle"
+mkdir -p "$ready_bundle/evidence"
 printf '%s\n' \
   '# Contract Index' \
   '' \
   'workflow_id: ready-fixture' \
   'contract_status: ready-for-implementation' \
   'current_authoritative_contract: ./implementation-contract.final.md' \
+  '' \
+  'supporting_evidence:' \
+  '- team_decision: ./team-decision.md' \
+  '- staffing: ./staffing.md' \
+  '- evidence_index: ./evidence/evidence-index.md' \
+  '- workflow_team_decision: workflow/artifacts/ready-fixture/team/decision.md' \
+  '- workflow_team_staffing: workflow/artifacts/ready-fixture/team/staffing.md' \
   > "$ready_bundle/contract-index.md"
 printf '%s\n' \
   '# Final Implementation Contract' \
@@ -135,6 +142,9 @@ printf '%s\n' \
   '|----|-----------|----------|--------------|' \
   '| AC-1 | Feature works | yes | command passes |' \
   > "$ready_bundle/implementation-contract.final.md"
+printf '%s\n' '# Team Decision' '' 'Decision evidence.' > "$ready_bundle/team-decision.md"
+printf '%s\n' '# Staffing' '' 'Staffing evidence.' > "$ready_bundle/staffing.md"
+printf '%s\n' '# Evidence Index' '' 'Supporting evidence index.' > "$ready_bundle/evidence/evidence-index.md"
 node "$contract_index_lint" --root "$ready_bundle" >/dev/null
 
 missing_final_bundle="$TMP_ROOT/contract-index-missing-final"
@@ -161,6 +171,49 @@ printf '%s\n' \
 printf '%s\n' '# Final Implementation Contract' '' '修订意见如下：把旧合同正文追加在这里。' > "$stale_final_bundle/implementation-contract.final.md"
 expect_fail "stale final contract markers" node "$contract_index_lint" --root "$stale_final_bundle"
 grep -q "stale final contract marker found" "$TMP_ROOT/expect-fail.err"
+
+missing_support_bundle="$TMP_ROOT/contract-index-missing-support"
+mkdir -p "$missing_support_bundle/evidence"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: missing-support-fixture' \
+  'contract_status: ready-for-implementation' \
+  'current_authoritative_contract: ./implementation-contract.final.md' \
+  '' \
+  'supporting_evidence:' \
+  '- team_decision: ./team-decision.md' \
+  '- evidence_index: ./evidence/evidence-index.md' \
+  '- workflow_team_decision: workflow/artifacts/missing-support-fixture/team/decision.md' \
+  '- workflow_team_staffing: workflow/artifacts/missing-support-fixture/team/staffing.md' \
+  > "$missing_support_bundle/contract-index.md"
+printf '%s\n' '# Final Implementation Contract' '' 'Clean final contract.' > "$missing_support_bundle/implementation-contract.final.md"
+printf '%s\n' '# Team Decision' '' 'Decision evidence.' > "$missing_support_bundle/team-decision.md"
+printf '%s\n' '# Evidence Index' '' 'Supporting evidence index.' > "$missing_support_bundle/evidence/evidence-index.md"
+expect_fail "missing staffing support key" node "$contract_index_lint" --root "$missing_support_bundle"
+grep -q "missing supporting evidence key: staffing" "$TMP_ROOT/expect-fail.err"
+
+missing_support_file_bundle="$TMP_ROOT/contract-index-missing-support-file"
+mkdir -p "$missing_support_file_bundle/evidence"
+printf '%s\n' \
+  '# Contract Index' \
+  '' \
+  'workflow_id: missing-support-file-fixture' \
+  'contract_status: ready-for-implementation' \
+  'current_authoritative_contract: ./implementation-contract.final.md' \
+  '' \
+  'supporting_evidence:' \
+  '- team_decision: ./team-decision.md' \
+  '- staffing: ./staffing.md' \
+  '- evidence_index: ./evidence/evidence-index.md' \
+  '- workflow_team_decision: workflow/artifacts/missing-support-file-fixture/team/decision.md' \
+  '- workflow_team_staffing: workflow/artifacts/missing-support-file-fixture/team/staffing.md' \
+  > "$missing_support_file_bundle/contract-index.md"
+printf '%s\n' '# Final Implementation Contract' '' 'Clean final contract.' > "$missing_support_file_bundle/implementation-contract.final.md"
+printf '%s\n' '# Team Decision' '' 'Decision evidence.' > "$missing_support_file_bundle/team-decision.md"
+printf '%s\n' '# Evidence Index' '' 'Supporting evidence index.' > "$missing_support_file_bundle/evidence/evidence-index.md"
+expect_fail "missing staffing support file" node "$contract_index_lint" --root "$missing_support_file_bundle"
+grep -q "supporting evidence does not exist: staffing=./staffing.md" "$TMP_ROOT/expect-fail.err"
 pass "contract index lint"
 
 repo="$TMP_ROOT/repo"
@@ -383,6 +436,11 @@ rg -q "workflow docs bundle" "$source_skills_root/brainstorm/SKILL.md"
 rg -q "workflow docs bundle" "$source_skills_root/clarify/SKILL.md"
 rg -q "workflow docs bundle" "$source_skills_root/team/SKILL.md"
 rg -q "workflow docs bundle" "$source_skills_root/team-v1/SKILL.md"
+rg -q "supporting evidence links" "$source_skills_root/brainstorm/SKILL.md"
+rg -q "supporting evidence links" "$source_skills_root/clarify/SKILL.md"
+rg -q "supporting evidence links" "$source_skills_root/team/SKILL.md"
+rg -q "supporting evidence links" "$source_skills_root/team-v1/SKILL.md"
+rg -q "complete bundle entrypoint" "$source_skills_root/task/SKILL.md"
 rg -q "contract-index.md" "$source_skills_root/task/SKILL.md"
 rg -q "implementation-contract.final.md" "$source_skills_root/task/SKILL.md"
 rg -q "clean rewrite" "$source_skills_root/clarify/SKILL.md"
@@ -393,6 +451,10 @@ test -f "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 rg -q "current_authoritative_contract" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "superseded_contracts" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "review_history" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "supporting_evidence" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "team_decision" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "staffing" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
+rg -q "evidence_index" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Final Contract Cleanliness Gate" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
 rg -q "handoff-envelope" "$REAL_AGENTS_HOME/skills/multica-prd-submit/SKILL.md"

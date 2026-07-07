@@ -482,6 +482,7 @@ Native loop requirements:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
    - use stable files inside the bundle, such as `README.md`, `team-decision.md`, `staffing.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
+   - make `contract-index.md` the bundle entrypoint: besides `current_authoritative_contract`, include supporting evidence links for `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing` so later implementers can find staffing and evidence without relying on the final reply.
    - include the final decision, consensus basis, owner/staffing plan when relevant, acceptance criteria, verification gates, risks, and next execution step.
    - keep `workflow/artifacts/<task-id>/team/decision.md` as the discussion record; the project doc is the durable handoff for the repo.
 6. Promote explicitly with:

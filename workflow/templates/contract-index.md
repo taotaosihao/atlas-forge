@@ -1,7 +1,7 @@
 # Contract Index
 
 workflow_id: {{WORKFLOW_ID}}
-contract_status: {{planning|draft|ready-for-implementation|implemented|superseded}}
+contract_status: {{planning|draft|ready-for-implementation|final|implemented|superseded}}
 current_authoritative_contract: ./implementation-contract.final.md
 
 contract_rules:
@@ -15,6 +15,13 @@ source_chain:
 - clarify:
 - team decision:
 - implementation plan:
+
+supporting_evidence:
+- team_decision: ./team-decision.md
+- staffing: ./staffing.md
+- evidence_index: ./evidence/evidence-index.md
+- workflow_team_decision: {{WORKFLOW_TEAM_DECISION_PATH}}
+- workflow_team_staffing: {{WORKFLOW_TEAM_STAFFING_PATH}}
 
 superseded_contracts:
 - path:

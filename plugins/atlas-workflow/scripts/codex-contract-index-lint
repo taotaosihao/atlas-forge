@@ -32,6 +32,18 @@ const STALE_MARKERS = [
   { label: "review notes heading", pattern: /^#{1,6}\s*(review notes|修订意见|评审原文|旧合同|旧版方案)\s*$/im },
 ];
 
+const REQUIRED_SUPPORTING_EVIDENCE = [
+  "team_decision",
+  "staffing",
+  "evidence_index",
+];
+
+const REQUIRED_SUPPORTING_EVIDENCE_KEYS = [
+  ...REQUIRED_SUPPORTING_EVIDENCE,
+  "workflow_team_decision",
+  "workflow_team_staffing",
+];
+
 function usage() {
   console.log(`usage: codex-contract-index-lint --root <workflow-docs-bundle>
 
@@ -80,6 +92,20 @@ function readIndex(root) {
   return { indexPath, content, fields };
 }
 
+function findRepoRoot(root) {
+  let current = root;
+  while (true) {
+    if (fs.existsSync(path.join(current, ".git"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return root;
+    }
+    current = parent;
+  }
+}
+
 function resolveBundlePath(root, value, fieldName) {
   if (!value) {
     throw new Error(`missing ${fieldName} in contract-index.md`);
@@ -122,6 +148,62 @@ function assertAuthoritativeTarget(root, fields) {
   return { status, target, relativeTarget, isFinal, mustBeFinal };
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractEvidencePath(content, key) {
+  const pattern = new RegExp(`^\\s*-?\\s*${escapeRegExp(key)}:\\s*(.+?)\\s*$`, "m");
+  const match = pattern.exec(content);
+  if (!match) {
+    return "";
+  }
+  return match[1].trim().replace(/^`|`$/g, "");
+}
+
+function resolveEvidencePath(bundleRoot, repoRoot, value, fieldName) {
+  if (!value) {
+    throw new Error(`missing supporting evidence path: ${fieldName}`);
+  }
+  if (/^(n\/a|not-applicable|not recorded|not-recorded|-|none)$/i.test(value)) {
+    throw new Error(`supporting evidence path must point to a durable file: ${fieldName}`);
+  }
+  if (path.isAbsolute(value)) {
+    return value;
+  }
+
+  const base = value.startsWith(".") ? bundleRoot : repoRoot;
+  const resolved = path.resolve(base, value);
+  const relative = path.relative(base, resolved);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`supporting evidence path must stay inside ${base}: ${fieldName}=${value}`);
+  }
+
+  return resolved;
+}
+
+function assertSupportingEvidence(root, content) {
+  const repoRoot = findRepoRoot(root);
+
+  for (const key of REQUIRED_SUPPORTING_EVIDENCE_KEYS) {
+    const value = extractEvidencePath(content, key);
+    if (!value) {
+      throw new Error(`missing supporting evidence key: ${key}`);
+    }
+  }
+
+  for (const key of REQUIRED_SUPPORTING_EVIDENCE) {
+    const value = extractEvidencePath(content, key);
+    const resolved = resolveEvidencePath(root, repoRoot, value, key);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`supporting evidence does not exist: ${key}=${value}`);
+    }
+    if (!fs.statSync(resolved).isFile()) {
+      throw new Error(`supporting evidence is not a file: ${key}=${value}`);
+    }
+  }
+}
+
 function assertCleanFinalContract(target) {
   const content = fs.readFileSync(target, "utf8");
   if (content.trim().length === 0) {
@@ -150,10 +232,11 @@ function main() {
     throw new Error(`workflow docs bundle root does not exist: ${root}`);
   }
 
-  const { fields } = readIndex(root);
+  const { content, fields } = readIndex(root);
   const target = assertAuthoritativeTarget(root, fields);
   if (target.mustBeFinal || target.isFinal) {
     assertCleanFinalContract(target.target);
+    assertSupportingEvidence(root, content);
   }
 
   console.log(`contract_index_lint: true`);

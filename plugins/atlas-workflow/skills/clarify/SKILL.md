@@ -82,6 +82,7 @@ Follow this loop:
    - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
    - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
    - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
+   - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`; if a non-team flow has no staffing owner, create a brief `staffing.md` that says not applicable and names the human/main-agent owner.
    - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
 13. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`

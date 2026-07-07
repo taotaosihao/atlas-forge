@@ -61,6 +61,7 @@ Follow this loop:
     - Use `workflow/templates/implementation-contract.md` as the shape when a separate artifact is useful.
     - If the contract is part of repo durable docs, place it in one workflow docs bundle: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
     - Maintain `contract-index.md` in that bundle so `current_authoritative_contract` points to the file implementers should read first.
+    - Keep `contract-index.md` as the complete bundle entrypoint: include supporting evidence links for `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`; if a field is not applicable, create a brief durable file that says why instead of leaving the entrypoint silent.
     - When a reviewed implementation contract becomes final, write `implementation-contract.final.md` from the settled requirements as a clean rewrite; do not append old contract text, rejected requirements, or review notes into the final contract body.
     - Keep review provenance in `reviews/` or `decisions/`, and list superseded drafts in `contract-index.md`.
     - Prefer forming this contract from the team decision when the default team flow ran.
