@@ -21,6 +21,64 @@ native_staffing="$native_team_dir/staffing.md"
 printf '%s\n' '# Native Round' '' '- backend: native' '' '## Evidence' 'Native round evidence for record command contract.' '## Inference' 'Native inference.' '## Unknown' '-' '## Recommendation' 'Finalize native record.' > "$native_round"
 printf '%s\n' '# Team Decision' '' '- backend: native' '' '## Primary Decision' 'Native decision evidence is substantive enough for readiness.' > "$native_decision"
 printf '%s\n' '# Staffing' '' '- backend: native' '' '## Suggested Ownership' 'Native executor owns the patch; verifier owns contract checks.' > "$native_staffing"
+expect_fail "native finalize incomplete staffing" "$BIN" team-record-finalize "$native_id" --backend native --status complete --round "$native_round" --decision "$native_decision" --staffing "$native_staffing"
+cat > "$native_staffing" <<'EOF'
+# Staffing
+
+- backend: native
+
+## Agent Plan
+
+| Role | Agent Type | Count | Read/Write | Owned Scope | Tools | Deliverable | Join Gate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| executor | worker | 1 | read/write | owned files | shell | patch | verification passes |
+
+## Active Roles
+
+| Role | Why Active | Agent Type | Count | Read/Write | Owned Scope |
+| --- | --- | --- | --- | --- | --- |
+| executor | Native record contract coverage. | worker | 1 | read/write | owned files |
+
+## Omitted Roles
+
+| Role | Omission Reason |
+| --- | --- |
+| browser verifier | No browser surface. |
+
+## Runtime Staffing Adjustments
+
+| Trigger | Role Change | Model | Reasoning Effort | Why Now | Ledger/Event |
+| --- | --- | --- | --- | --- | --- |
+| initial | none | inherited | inherited | contract fixture | team-record-start |
+
+## Phase Gates
+
+| Phase | Owner | Input | Output | Required Gate | Commit Boundary |
+| --- | --- | --- | --- | --- | --- |
+| native-record | executor | fixture | status | finalize succeeds | no repo commit |
+
+## Commit Boundaries
+
+- Each implementation step or acceptance slice that changes files: none.
+- Verification required before each commit: contract fixture.
+- Commit owner: none.
+- Allowed no-commit exceptions: contract-only fixture.
+
+## Concurrency And Write Boundaries
+
+- Writable workers: none.
+- Disjoint write sets: not applicable.
+- Main Codex integration owner: contract test.
+
+## Verification Evidence
+
+- Commands: contract.sh.
+- Phase conclusion files: none.
+- Temporary raw run directory: test temp dir.
+- Browser/API/runtime evidence kept in git: none.
+- Artifact paths: native team fixture.
+- Stop conditions: finalize status observed.
+EOF
 expect_fail "native finalize invalid status" "$BIN" team-record-finalize "$native_id" --backend native --status loop-done --round "$native_round" --decision "$native_decision" --staffing "$native_staffing"
 expect_fail "native finalize missing artifact" "$BIN" team-record-finalize "$native_id" --backend native --status complete --round "$native_team_dir/missing-round.md" --decision "$native_decision" --staffing "$native_staffing"
 printf '%s\n' '# Outside Decision' '' '- backend: native' '' 'Outside artifact should fail current task ownership.' > "$TMP_ROOT/outside-native.md"

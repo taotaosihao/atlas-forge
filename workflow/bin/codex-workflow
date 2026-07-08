@@ -323,6 +323,31 @@ for raw in text.splitlines():
 if len("\n".join(content).strip()) < 20:
     print(f"{label} file is not substantive: {path}", file=sys.stderr)
     raise SystemExit(1)
+
+if label == "team staffing":
+    required_sections = (
+        "Agent Plan",
+        "Active Roles",
+        "Omitted Roles",
+        "Runtime Staffing Adjustments",
+        "Phase Gates",
+        "Commit Boundaries",
+        "Concurrency And Write Boundaries",
+        "Verification Evidence",
+    )
+    missing = [
+        section
+        for section in required_sections
+        if not re.search(rf"(?im)^##\s+{re.escape(section)}\s*$", text)
+    ]
+    required_tokens = ("Tools", "Read/Write", "Commit Boundary")
+    missing.extend(token for token in required_tokens if token not in text)
+    if missing:
+        print(
+            f"{label} file is missing required native staffing fields: {', '.join(missing)}: {path}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 PY
 }
 
