@@ -72,7 +72,8 @@ Follow this loop:
    - whether `workflow/templates/implementation-contract.md` should be filled before coding
    - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
    - which acceptance criteria become required validation rows
-   - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce evidence
+   - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
+   - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
    - what failure or ambiguity should stop implementation and return to the user
    - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final contract body
    Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
@@ -80,6 +81,7 @@ Follow this loop:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
    - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
+   - keep `evidence/` concise: prefer `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`; target 10 git evidence files or fewer and 1 MB or less per phase, with exceptions explained in `phase-review-report.md`.
    - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
    - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
    - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`; if a non-team flow has no staffing owner, create a brief `staffing.md` that says not applicable and names the human/main-agent owner.

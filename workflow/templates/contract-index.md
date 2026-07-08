@@ -23,6 +23,12 @@ supporting_evidence:
 - workflow_team_decision: {{WORKFLOW_TEAM_DECISION_PATH}}
 - workflow_team_staffing: {{WORKFLOW_TEAM_STAFFING_PATH}}
 
+evidence_rules:
+- Git evidence is the phase conclusion packet, not the raw run archive.
+- Default phase files: `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`.
+- Keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, retry logs, debug JSONL, API dumps, port status, and intermediate repair output outside git by default.
+- Target each phase at 10 git evidence files or fewer and 1 MB or less; explain exceptions in `phase-review-report.md`.
+
 superseded_contracts:
 - path:
   reason:

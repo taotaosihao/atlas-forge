@@ -58,6 +58,24 @@ For every native round:
    - `## Recommendation`
 6. Separate facts from conclusions. Put source paths, command output, user constraints, and observed behavior in Evidence; put derived conclusions in Inference; put unresolved questions in Unknown.
 
+## Concise Phase Evidence
+
+Atlas phase evidence is a conclusion packet, not a raw run archive.
+
+- Git should keep only phase-level conclusions by default. The normal phase
+  packet is limited to `phase-review-report.md`, `defect-queue.md`,
+  `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`.
+- Add `review-checklist.md`, `verification-checklist.md`, final screenshots, or
+  customer deliverables only when they are needed to prove acceptance.
+- Keep raw logs, Playwright JSON, traces, videos, HAR files, bulk screenshots, full command output, failed retry logs, worker debug JSONL, API dumps, localhost or port status, and intermediate repair output in the temporary run directory by default. Do not add them to git unless a blocking defect or gate dispute requires that exact raw artifact.
+- Agent review defaults to the phase conclusion files. Reviewers should open raw
+  artifacts only for a blocking defect, a disputed gate, or a missing conclusion
+  reference.
+- Target each phase's git evidence at 10 files or fewer and 1 MB or less. If a
+  phase exceeds either limit, explain why in `phase-review-report.md`.
+- Customer-facing HTML, PDF, sign-off files, and final deliverables may be kept
+  in git when they are the artifact being delivered.
+
 ## Business Acceptance First Mode
 
 Use Business Acceptance First Mode when a `$atlas-workflow:team` task must prove
@@ -233,7 +251,9 @@ Recommended `staffing.md` table shape:
 ## Verification Evidence
 
 - Commands:
-- Browser/API/runtime evidence:
+- Phase conclusion files:
+- Temporary raw run directory:
+- Browser/API/runtime evidence kept in git:
 - Artifact paths:
 - Stop conditions:
 ```
@@ -439,7 +459,10 @@ Inputs:
 Rules:
 - Read only; do not modify files.
 - Do not write workflow artifacts.
-- Judge spec compliance and task quality from evidence.
+- Judge spec compliance and task quality from phase conclusion files first.
+- Open raw logs, traces, videos, HAR, bulk screenshots, JSONL, or full command
+  output only when a blocking defect, disputed gate, or missing conclusion
+  reference requires it.
 - Report Critical, Important, and Minor issues according to impact.
 - Return exactly one REVIEW_VERDICT_JSON fenced block.
 ```
@@ -518,7 +541,8 @@ Native loop requirements:
    - reassess runtime staffing, model, and reasoning effort for the current
      failure before spawning the executor/reviewer/verifier;
    - run reviewer/verifier native lanes or main-agent verification as appropriate;
-   - record commands, changed files, artifacts, and unresolved blockers;
+   - record commands, changed files, phase conclusion artifacts, the temporary
+     raw run directory when relevant, and unresolved blockers;
    - create a dedicated commit for the verified iteration step when files changed
      and `done=true` or the iteration produced a keeper repair;
    - judge completion using an explicit sentinel equivalent: `done=true` or `done=false`.

@@ -58,6 +58,8 @@ Follow this loop:
     - make `contract-index.md` the bundle entrypoint: besides `current_authoritative_contract`, include supporting evidence links for `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing` so later implementers can find staffing and evidence without relying on the final reply.
     - include the final decision, consensus basis, owner/staffing plan when relevant, acceptance criteria, verification gates, risks, and next execution step.
     - keep `workflow/artifacts/<task-id>/team/decision.md` as the discussion record; the project doc is the durable handoff for the repo.
+    - keep phase git evidence concise: default to `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`; keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, command full output, debug JSONL, API dumps, port status, and intermediate repair output in the temporary run directory unless a blocking defect or gate dispute requires that raw artifact.
+    - reviewers inspect phase conclusion files first and open raw artifacts only for blocking defects, disputed gates, or missing conclusion references; target each phase at 10 git evidence files or fewer and 1 MB or less, with any exception explained in `phase-review-report.md`.
 15. Check status or stop the active round with:
    - `~/.codex/workflow/bin/codex-workflow team-status <task-id>`
    - `~/.codex/workflow/bin/codex-workflow team-stop <task-id>`

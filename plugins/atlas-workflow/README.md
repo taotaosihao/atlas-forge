@@ -105,6 +105,23 @@ This contract records goal, non-goals, acceptance criteria, real validation
 steps, evidence paths, and stop conditions. Multica uses the fuller sprint
 contract flow for multi-agent PRD implementation.
 
+## Concise Phase Evidence
+
+Atlas phase evidence should be small enough to review. Keep git evidence to
+phase conclusion files by default: `phase-review-report.md`,
+`defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and
+`gate-checklist.md`. Use `review-checklist.md`, `verification-checklist.md`,
+final screenshots, or customer-facing HTML/PDF/sign-off deliverables only when
+they prove acceptance.
+
+Raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command
+output, retry logs, worker debug JSONL, API dumps, localhost or port status,
+and intermediate repair output belong in the temporary run directory by
+default, not git. Reviewers inspect phase conclusion files first and open raw
+artifacts only for blocking defects, disputed gates, or missing conclusion
+references. Target each phase at 10 git evidence files or fewer and 1 MB or
+less; explain exceptions in `phase-review-report.md`.
+
 ## Source vs Installed Copy
 
 - `plugins/atlas-workflow/` is the source directory you edit.

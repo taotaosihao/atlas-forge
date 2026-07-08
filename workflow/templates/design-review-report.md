@@ -12,7 +12,7 @@ created: {{CREATED}}
 - Reviewer:
 - Goal:
 
-## Evidence Log
+## Phase Evidence
 
 ### Desktop
 
@@ -27,6 +27,12 @@ created: {{CREATED}}
 - Structure snapshot:
 - Key measurements:
 - Interaction notes:
+
+### Raw Run Artifacts
+
+- Temporary run directory:
+- Raw artifacts opened for blocking defect or disputed gate:
+- Git evidence budget exception:
 
 ## Gate Results
 
@@ -45,7 +51,7 @@ created: {{CREATED}}
 |----|----------|-------|----------|---------------|--------|
 | 1 |  |  |  |  | open |
 
-## Retry Log
+## Retry Summary
 
 | Attempt | Trigger | Action Taken | Result |
 |---------|---------|--------------|--------|

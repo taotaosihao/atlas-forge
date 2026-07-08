@@ -68,6 +68,8 @@ Follow this loop:
     - Required when the task changes user-visible behavior, touches multiple files, changes UI/API/CLI/background-job behavior, or has meaningful edge cases.
     - Tiny precise fixes may skip this when the acceptance path is obvious; say why in the working note or final reply.
     - The contract must name goal, non-goals, acceptance criteria, real validation command or browser/API/CLI action, evidence path, and stop conditions.
+    - Evidence paths should name phase conclusion files, not raw run archives. Keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output in a temporary run directory by default.
+    - Target each phase's git evidence at 10 files or fewer and 1 MB or less; document any exception in `phase-review-report.md`.
     - Do not let the contract expand scope beyond the user request or the clarified spec.
 14. If this is a small precise fix with intentionally minimal artifacts, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --skip "<why artifacts are intentionally minimal>"`

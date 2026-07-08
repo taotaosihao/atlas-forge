@@ -29,10 +29,12 @@ Follow this loop:
    - target viewports
    - required states and interactions
 6. Collect evidence from the implementation with real tools:
-   - per-viewport screenshots
+   - final representative screenshots for the required viewports
    - DOM/text structure
    - computed styles and geometry for critical elements
    - interaction evidence for required states
+   - keep bulk screenshots, Playwright JSON, traces, videos, HAR, command full
+     output, and retry logs in the temporary run directory by default
 7. Evaluate gates in this order:
    - input completeness
    - structure and copy
@@ -50,4 +52,4 @@ Follow this loop:
 11. Before reporting success, verify with real commands and tools. Do not claim design fidelity based only on “looks right”.
 12. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
 13. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
-14. In the final reply, include the task id, verdict path, evidence artifacts, verification commands and results, and any remaining fidelity risks.
+14. In the final reply, include the task id, verdict path, phase conclusion artifacts, verification commands and results, and any remaining fidelity risks.

@@ -54,10 +54,11 @@ Follow this loop:
 9. Keep small features and fixes in the current workspace. Only switch to `$atlas-workflow:worktree` when the work clearly needs isolation.
 10. If isolated branch work reaches completion, switch to `$atlas-workflow:finish` instead of merging, discarding, or cleaning up automatically.
 11. Keep the task scope small and use `~/.codex/workflow/bin/codex-workflow show <task-id>` when you need to inspect the task file.
-12. For nontrivial implementation with filled planning artifacts, run the relevant `~/.codex/workflow/bin/codex-workflow ready <task-id> --require ...` check before reporting execution readiness or handoff.
-13. If this is a small precise fix with intentionally minimal artifacts, run `~/.codex/workflow/bin/codex-workflow ready <task-id> --skip "<why artifacts are intentionally minimal>"`.
-14. Before reporting success, verify the work with real commands.
-15. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
-16. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
-17. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
-18. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.
+12. Keep phase evidence concise: git should hold phase conclusion files and final deliverables, while raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output stay in the temporary run directory by default.
+13. For nontrivial implementation with filled planning artifacts, run the relevant `~/.codex/workflow/bin/codex-workflow ready <task-id> --require ...` check before reporting execution readiness or handoff.
+14. If this is a small precise fix with intentionally minimal artifacts, run `~/.codex/workflow/bin/codex-workflow ready <task-id> --skip "<why artifacts are intentionally minimal>"`.
+15. Before reporting success, verify the work with real commands.
+16. When one feature or fix is complete, create a dedicated git commit for that single piece of work using `type[optional scope]: <description>`. If the change is larger, add a clear body that explains what changed and what it affects.
+17. When the work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`.
+18. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
+19. In the final reply, include the task id, changed files or artifact paths, readiness/skip result if used, verification commands and results, and any blockers or unverified assumptions.
