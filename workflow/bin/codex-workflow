@@ -185,6 +185,16 @@ validate_positive_integer() {
   fi
 }
 
+validate_safe_id() {
+  local value="$1"
+  local label="$2"
+
+  if [[ -z "$value" || ! "$value" =~ ^[A-Za-z0-9._-]+$ || "$value" == "." || "$value" == ".." ]]; then
+    echo "invalid $label: $value" >&2
+    exit 1
+  fi
+}
+
 validate_team_backend() {
   local backend="$1"
   case "$backend" in
@@ -577,6 +587,15 @@ ensure_task_template() {
 ensure_learning_template() {
   if [[ ! -f "$LEARNING_TEMPLATE" ]]; then
     echo "missing learning template: $LEARNING_TEMPLATE" >&2
+    exit 1
+  fi
+}
+
+ensure_named_template() {
+  local name="$1"
+  local template="$TEMPLATE_DIR/$name"
+  if [[ ! -f "$template" ]]; then
+    echo "missing template: $template" >&2
     exit 1
   fi
 }
@@ -3428,6 +3447,25 @@ render_learning() {
     "$LEARNING_TEMPLATE" > "$file"
 }
 
+render_workflow_template() {
+  local template_name="$1"
+  local file="$2"
+  local task_id="$3"
+  local phase_id="${4:-}"
+  local task_file title now
+
+  ensure_named_template "$template_name"
+  task_file="$(require_task "$task_id")"
+  title="$(get_field "$task_file" title)"
+  now="$(today)"
+  TASK_ID="$task_id" \
+  TITLE="$title" \
+  CREATED="$now" \
+  PHASE_ID="$phase_id" \
+  perl -pe 's/\{\{(TASK_ID|TITLE|CREATED|PHASE_ID)\}\}/$ENV{$1}/ge' \
+    "$TEMPLATE_DIR/$template_name" > "$file"
+}
+
 learning_basename() {
   local task_id="$1"
   local title="$2"
@@ -4839,6 +4877,81 @@ cmd_ready() {
   if [[ "$status" != "ready" ]]; then
     exit 1
   fi
+}
+
+scaffold_write_file() {
+  local template_name="$1"
+  local output_file="$2"
+  local task_id="$3"
+  local phase_id="${4:-}"
+  local placeholder="${5:-}"
+
+  mkdir -p "$(dirname "$output_file")"
+  if [[ -f "$output_file" ]]; then
+    if [[ -n "$placeholder" ]] && cmp -s "$output_file" <(printf '%s' "$placeholder"); then
+      render_workflow_template "$template_name" "$output_file" "$task_id" "$phase_id"
+      printf 'updated\t%s\n' "$output_file"
+      return
+    fi
+    printf 'exists\t%s\n' "$output_file"
+    return
+  fi
+
+  render_workflow_template "$template_name" "$output_file" "$task_id" "$phase_id"
+  printf 'created\t%s\n' "$output_file"
+}
+
+cmd_scaffold_intake() {
+  local task_id="$1"
+  local artifact_dir
+  require_task "$task_id" >/dev/null
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  scaffold_write_file "intake.md" "$artifact_dir/intake.md" "$task_id"
+  append_task_runtime_event "$task_id" "scaffold" "intake"
+}
+
+cmd_scaffold_brainstorm() {
+  local task_id="$1"
+  local artifact_dir
+  require_task "$task_id" >/dev/null
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  scaffold_write_file "brainstorm.md" "$artifact_dir/brainstorm.md" "$task_id"
+  append_task_runtime_event "$task_id" "scaffold" "brainstorm"
+}
+
+cmd_scaffold_clarify() {
+  local task_id="$1"
+  local artifact_dir
+  require_task "$task_id" >/dev/null
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  scaffold_write_file "clarify.md" "$artifact_dir/clarify.md" "$task_id"
+  append_task_runtime_event "$task_id" "scaffold" "clarify"
+}
+
+cmd_scaffold_team() {
+  local task_id="$1"
+  local team_dir decision_placeholder staffing_placeholder
+  require_task "$task_id" >/dev/null
+  team_dir="$(task_team_dir "$task_id")"
+  decision_placeholder=$'# Team Decision\n\nPending discussion.\n'
+  staffing_placeholder=$'# Staffing\n\nPending discussion.\n'
+  scaffold_write_file "team-decision.md" "$team_dir/decision.md" "$task_id" "" "$decision_placeholder"
+  scaffold_write_file "team-staffing.md" "$team_dir/staffing.md" "$task_id" "" "$staffing_placeholder"
+  append_task_runtime_event "$task_id" "scaffold" "team"
+}
+
+cmd_scaffold_phase() {
+  local task_id="$1"
+  local phase_id="$2"
+  local phase_dir
+  require_task "$task_id" >/dev/null
+  validate_safe_id "$phase_id" "phase id"
+  phase_dir="$(task_artifact_dir "$task_id")/evidence/$phase_id"
+  scaffold_write_file "phase-review-report.md" "$phase_dir/phase-review-report.md" "$task_id" "$phase_id"
+  scaffold_write_file "defect-queue.md" "$phase_dir/defect-queue.md" "$task_id" "$phase_id"
+  scaffold_write_file "evidence-index.md" "$phase_dir/evidence-index.md" "$task_id" "$phase_id"
+  scaffold_write_file "gate-checklist.md" "$phase_dir/gate-checklist.md" "$task_id" "$phase_id"
+  append_task_runtime_event "$task_id" "scaffold" "phase:$phase_id"
 }
 
 cmd_handoff_envelope() {
@@ -7370,6 +7483,26 @@ main() {
       shift
       cmd_ready "$@"
       ;;
+    scaffold-intake)
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow scaffold-intake <task-id>' >&2; exit 1; }
+      cmd_scaffold_intake "$2"
+      ;;
+    scaffold-brainstorm)
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow scaffold-brainstorm <task-id>' >&2; exit 1; }
+      cmd_scaffold_brainstorm "$2"
+      ;;
+    scaffold-clarify)
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow scaffold-clarify <task-id>' >&2; exit 1; }
+      cmd_scaffold_clarify "$2"
+      ;;
+    scaffold-team)
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow scaffold-team <task-id>' >&2; exit 1; }
+      cmd_scaffold_team "$2"
+      ;;
+    scaffold-phase)
+      [[ $# -eq 3 ]] || { echo 'usage: codex-workflow scaffold-phase <task-id> <phase-id>' >&2; exit 1; }
+      cmd_scaffold_phase "$2" "$3"
+      ;;
     handoff-envelope)
       [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
       shift
@@ -7513,7 +7646,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
       exit 1
       ;;
   esac

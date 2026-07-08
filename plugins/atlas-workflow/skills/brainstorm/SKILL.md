@@ -42,7 +42,9 @@ Follow this loop:
    - error and edge cases
    - verification strategy
 8. For UI or visual product work, offer visual exploration only when seeing options would be materially clearer than text. If accepted, use the available browser or image workflow; otherwise continue text-only.
-9. Write `workflow/artifacts/<task-id>/context.md` when the factual base changes:
+9. Run `~/.codex/workflow/bin/codex-workflow scaffold-brainstorm <task-id>`,
+   then write `workflow/artifacts/<task-id>/brainstorm.md` and update
+   `context.md` when the factual base changes:
    - current state
    - confirmed facts
    - source-of-truth files

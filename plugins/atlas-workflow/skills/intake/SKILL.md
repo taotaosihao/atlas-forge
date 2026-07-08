@@ -85,7 +85,8 @@ Follow this loop:
 6. Look up codebase facts before asking about them.
 7. Ask the next single decision question with a recommended answer. Stop and
    wait for the user's answer before continuing.
-8. Write or update `workflow/artifacts/<task-id>/intake.md`:
+8. Run `~/.codex/workflow/bin/codex-workflow scaffold-intake <task-id>`, then
+   write or update `workflow/artifacts/<task-id>/intake.md`:
    - known facts
    - decision tree
    - answered decisions and accepted recommendations

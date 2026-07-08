@@ -42,6 +42,7 @@ substituting another orchestration implementation.
 For every native round:
 
 1. Create or update these files under `workflow/artifacts/<task-id>/team/`:
+   - First run `~/.codex/workflow/bin/codex-workflow scaffold-team <task-id>`.
    - `round-<timestamp>.md`: lane prompts, lane results, subagent ids or nicknames when available, evidence, exit state, and synthesis inputs.
    - `decision.md`: single main decision record.
    - `staffing.md`: owner/reviewer/verifier responsibilities and write-scope boundaries.
@@ -75,6 +76,8 @@ Atlas phase evidence is a conclusion packet, not a raw run archive.
   phase exceeds either limit, explain why in `phase-review-report.md`.
 - Customer-facing HTML, PDF, sign-off files, and final deliverables may be kept
   in git when they are the artifact being delivered.
+- Before writing phase conclusion files, run
+  `~/.codex/workflow/bin/codex-workflow scaffold-phase <task-id> <phase-id>`.
 
 ## Workflow Artifact Categories
 

@@ -49,7 +49,8 @@ Follow this loop:
 4. Read any existing `workflow/artifacts/<task-id>/context.md`, `decision.md`, `spec.md`, or `analysis.md` before writing new boundaries.
 5. Collect brownfield facts before proposing boundaries.
 6. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
-7. Write `workflow/artifacts/<task-id>/context.md`.
+7. Run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>`, then
+   write `workflow/artifacts/<task-id>/clarify.md` and update `context.md`.
    - current state
    - confirmed facts
    - source of truth files

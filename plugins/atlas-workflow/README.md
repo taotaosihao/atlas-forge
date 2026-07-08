@@ -142,6 +142,11 @@ Classify Atlas process docs before adding them to git:
   and other machine output. Keep this outside git unless a blocking gate needs
   the exact artifact.
 
+Use process-specific scaffold commands before filling Atlas artifacts:
+`codex-workflow scaffold-intake`, `scaffold-brainstorm`, `scaffold-clarify`,
+`scaffold-team`, and `scaffold-phase`. These commands create the expected
+templates and keep agents from inventing file shapes.
+
 ## Source vs Installed Copy
 
 - `plugins/atlas-workflow/` is the source directory you edit.

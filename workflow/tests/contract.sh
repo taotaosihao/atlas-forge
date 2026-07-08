@@ -65,6 +65,26 @@ printf '%s\n' '# Team Decision' '' 'Substantive decision.' > "$CODEX_WORKFLOW_RO
 $BIN ready "$ready_id" --require context,spec,analysis,decision >/dev/null
 pass "readiness gate"
 
+scaffold_id="$($BIN init-task "contract process scaffolds" "process scaffolds")"
+$BIN start "$scaffold_id"
+$BIN scaffold-intake "$scaffold_id" >/dev/null
+$BIN scaffold-brainstorm "$scaffold_id" >/dev/null
+$BIN scaffold-clarify "$scaffold_id" >/dev/null
+$BIN scaffold-team "$scaffold_id" >/dev/null
+$BIN scaffold-phase "$scaffold_id" phase-1 >/dev/null
+scaffold_dir="$CODEX_WORKFLOW_ROOT/artifacts/$scaffold_id"
+grep -q "artifact_category: workflow_working_notes" "$scaffold_dir/intake.md"
+grep -q "artifact_category: workflow_working_notes" "$scaffold_dir/brainstorm.md"
+grep -q "artifact_category: workflow_working_notes" "$scaffold_dir/clarify.md"
+grep -q "## Agent Plan" "$scaffold_dir/team/staffing.md"
+grep -q "artifact_category: phase_conclusion" "$scaffold_dir/evidence/phase-1/phase-review-report.md"
+grep -q "Evidence Budget" "$scaffold_dir/evidence/phase-1/phase-review-report.md"
+printf '%s\n' 'KEEP-ME' >> "$scaffold_dir/intake.md"
+$BIN scaffold-intake "$scaffold_id" >/dev/null
+grep -q "KEEP-ME" "$scaffold_dir/intake.md"
+expect_fail "invalid scaffold phase id" "$BIN" scaffold-phase "$scaffold_id" "../bad"
+pass "process scaffold commands"
+
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
@@ -475,6 +495,13 @@ rg -q "workflow working notes by default" "$source_skills_root/intake/SKILL.md"
 rg -q "classify process docs before mirroring" "$source_skills_root/clarify/SKILL.md"
 rg -q "artifact_categories" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Classify Atlas process docs" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json"
+rg -q "scaffold-intake" "$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow"
+rg -q "scaffold-brainstorm" "$source_skills_root/brainstorm/SKILL.md"
+rg -q "scaffold-clarify" "$source_skills_root/clarify/SKILL.md"
+rg -q "scaffold-team" "$source_skills_root/team/SKILL.md"
+rg -q "scaffold-phase" "$source_skills_root/task/SKILL.md"
+test -f "$ATLAS_FORGE_ROOT/workflow/templates/intake.md"
+test -f "$ATLAS_FORGE_ROOT/workflow/templates/phase-review-report.md"
 rg -q "clean rewrite" "$source_skills_root/clarify/SKILL.md"
 rg -q "clean rewrite" "$source_skills_root/team/SKILL.md"
 rg -q "clean rewrite" "$source_skills_root/team-v1/SKILL.md"
