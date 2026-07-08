@@ -65,9 +65,11 @@ implementation contract.
 
 This gate applies to implementation-adjacent Atlas entries, including
 `$atlas-workflow:task`, `$atlas-workflow:cw`, and `$atlas-workflow:worktree`.
-`$atlas-workflow:intake` asks the blocking boundary questions, and
-`$atlas-workflow:clarify` turns the chosen direction into documented execution
-boundaries.
+`$atlas-workflow:intake` runs grilling-style intake: it asks one blocking
+question at a time, recommends an answer for each decision, looks up codebase
+facts instead of asking for them, and does not enact the plan until the user
+confirms shared understanding. `$atlas-workflow:clarify` turns the chosen
+direction into documented execution boundaries.
 
 ## 输出语言
 
@@ -170,6 +172,7 @@ primitive used by the update command.
 - `skills/brainstorm/SKILL.md`: design exploration entry
 - `skills/analyze/SKILL.md`: read-only analysis entry
 - `skills/clarify/SKILL.md`: brownfield clarification entry
+- `skills/intake/SKILL.md`: grilling-style intake and plan stress-test entry
 - `skills/team/SKILL.md`: Codex native subagent team entry
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
