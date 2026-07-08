@@ -76,6 +76,24 @@ Atlas phase evidence is a conclusion packet, not a raw run archive.
 - Customer-facing HTML, PDF, sign-off files, and final deliverables may be kept
   in git when they are the artifact being delivered.
 
+## Workflow Artifact Categories
+
+Before writing or asking reviewers to inspect Atlas process docs, classify them:
+
+- `durable handoff`: concise repo docs for future implementation or audit,
+  usually `README.md`, `clarify.md`, `team-decision.md`, `staffing.md`,
+  `contract-index.md`, and `implementation-contract.final.md`.
+- `phase conclusion`: small gate outputs that may be committed as evidence,
+  usually `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or
+  `evidence-manifest.json`, and `gate-checklist.md`.
+- `workflow working notes`: intake notes, early `context.md`, `analysis.md`,
+  draft `decision.md`, draft `spec.md`, `team/round-*.md`, loop ledgers, and
+  repair notes. Keep these in `workflow/artifacts/<task-id>/` by default and
+  mirror only the confirmed summary into durable handoff docs.
+- `temporary raw run`: raw logs, traces, videos, HAR, bulk screenshots, command
+  full output, dumps, debug JSONL, and retry output. Keep outside git unless a
+  blocking gate needs the exact raw artifact.
+
 ## Business Acceptance First Mode
 
 Use Business Acceptance First Mode when a `$atlas-workflow:team` task must prove

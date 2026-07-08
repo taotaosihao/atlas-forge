@@ -61,6 +61,7 @@ Follow this loop:
     - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
     - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
     - use stable files inside the bundle, such as `README.md`, `brainstorm.md`, `decision.md`, `contract-index.md`, and later `implementation-contract.final.md`; do not create scattered sibling markdown files for the same workflow.
+    - classify process docs before mirroring: exploratory `context.md`, `analysis.md`, draft `decision.md`, and option notes stay as workflow working notes; the project doc gets only the confirmed direction, rejected alternatives, assumptions, acceptance shape, and next execution step.
     - include the chosen direction, rejected alternatives, assumptions, acceptance shape, verification strategy, and next execution step.
     - if the handoff names an authoritative implementation contract, keep `contract-index.md` pointed at the current authoritative file.
     - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`.

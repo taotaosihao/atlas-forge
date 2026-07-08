@@ -122,6 +122,24 @@ artifacts only for blocking defects, disputed gates, or missing conclusion
 references. Target each phase at 10 git evidence files or fewer and 1 MB or
 less; explain exceptions in `phase-review-report.md`.
 
+## Workflow Artifact Categories
+
+Classify Atlas process docs before adding them to git:
+
+- Durable handoff: repo docs that future implementers should read, such as
+  `README.md`, `clarify.md`, `team-decision.md`, `staffing.md`,
+  `contract-index.md`, and `implementation-contract.final.md`.
+- Phase conclusion: small reviewable gate outputs such as
+  `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or
+  `evidence-manifest.json`, and `gate-checklist.md`.
+- Workflow working notes: `intake.md`, early `context.md`, `analysis.md`,
+  draft `decision.md`, draft `spec.md`, `team/round-*.md`, and loop ledgers.
+  Keep these under `workflow/artifacts/<task-id>/` by default; mirror only the
+  confirmed summary into durable handoff docs.
+- Temporary raw run: raw logs, traces, bulk screenshots, dumps, retry output,
+  and other machine output. Keep this outside git unless a blocking gate needs
+  the exact artifact.
+
 ## Source vs Installed Copy
 
 - `plugins/atlas-workflow/` is the source directory you edit.

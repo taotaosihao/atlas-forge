@@ -17,6 +17,10 @@ This is the deep-interview style intake layer:
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the solution shape is unclear.
 - Use `$atlas-workflow:intake` when intent, scope, stakeholder, constraints, or success shape is ambiguous.
 - Use `$atlas-workflow:clarify` when the direction is chosen and execution boundaries need to be locked.
+- Treat `intake.md` as workflow working notes by default. Do not mirror the full
+  interview transcript or decision tree into repo docs; when intake produces a
+  durable handoff, write only the confirmed summary, open blockers, and next
+  layer recommendation.
 
 ## Short Request Intake Gate
 

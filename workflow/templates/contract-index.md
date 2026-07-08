@@ -29,6 +29,12 @@ evidence_rules:
 - Keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, retry logs, debug JSONL, API dumps, port status, and intermediate repair output outside git by default.
 - Target each phase at 10 git evidence files or fewer and 1 MB or less; explain exceptions in `phase-review-report.md`.
 
+artifact_categories:
+- durable_handoff: repo docs future implementers should read, including this index and the current authoritative contract.
+- phase_conclusion: small gate outputs linked from `supporting_evidence` or `evidence/`.
+- workflow_working_notes: intake, clarify drafts, analysis, team rounds, loop ledgers, and repair notes kept under `workflow/artifacts/<task-id>/` unless a confirmed summary is promoted.
+- temporary_raw_run: raw machine output kept outside git unless required for a blocking gate.
+
 superseded_contracts:
 - path:
   reason:

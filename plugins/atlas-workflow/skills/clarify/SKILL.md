@@ -81,6 +81,7 @@ Follow this loop:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
    - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
+   - classify process docs before mirroring: draft `context.md`, `analysis.md`, `decision.md`, and `spec.md` are workflow working notes until confirmed; durable repo docs should contain the locked boundaries, accepted assumptions, verification plan, and next step, not the full clarification trail.
    - keep `evidence/` concise: prefer `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`; target 10 git evidence files or fewer and 1 MB or less per phase, with exceptions explained in `phase-review-report.md`.
    - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
    - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
