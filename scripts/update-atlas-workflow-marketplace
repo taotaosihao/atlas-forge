@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERIFY="$REPO_ROOT/scripts/verify-atlas-workflow-install.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/update-atlas-workflow-marketplace --preflight-only <verifier options>
+  scripts/update-atlas-workflow-marketplace --verify-only <verifier options>
+  scripts/update-atlas-workflow-marketplace --execute <verifier options>
+
+The current release channel is read-only. --execute always fails closed because
+the shared atlas-forge marketplace and exact-SHA rotation protocol cannot yet
+guarantee that other enabled plugins remain unchanged.
+EOF
+}
+
+json_error() {
+  local code="$1"
+  local message="$2"
+  local exit_code="$3"
+  python3 - "$code" "$message" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "schema_version": 1,
+    "tool": "update-atlas-workflow-marketplace",
+    "mode": "execute" if sys.argv[1] == "MUTATION_DISABLED" else "usage",
+    "ok": False,
+    "mutation_enabled": False,
+    "errors": [{"code": sys.argv[1], "message": sys.argv[2]}],
+}, indent=2, sort_keys=True))
+PY
+  exit "$exit_code"
+}
+
+if [[ $# -eq 0 ]]; then
+  json_error CLI_USAGE 'an explicit --preflight-only, --verify-only, or --execute mode is required' 2
+fi
+
+case "$1" in
+  --preflight-only)
+    shift
+    exec "$VERIFY" preflight "$@"
+    ;;
+  --verify-only)
+    shift
+    exec "$VERIFY" installed "$@"
+    ;;
+  --execute)
+    json_error MUTATION_DISABLED 'release mutation is disabled until an Atlas-only marketplace and safe exact-SHA rotation protocol are proven' 1
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    json_error CLI_USAGE "unknown mode: $1" 2
+    ;;
+esac
