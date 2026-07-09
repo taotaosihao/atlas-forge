@@ -16,7 +16,16 @@ committing, and publishing changes.
 | --- | --- |
 | `atlas-workflow` | Atlas skills for task routing, planning, workflow gates, design review, team handoff, and bounded local work. |
 | `mempalace` | MemPalace wrapper plugin for local memory search and related commands. |
-| `multica-sdlc` | Multica SDLC skills, role instruction assets, dynamic workflow templates, and deterministic next-role routing helpers. |
+| `multica-sdlc` | **Planned deprecation.** Existing compatibility assets remain available until a separate removal decision; no new feature or migration investment is planned. |
+
+### Multica Lifecycle Notice
+
+`multica-sdlc` and the mirrored `.agents` Multica assets are in planned
+deprecation. Atlas native workflow is the forward path for new orchestration
+work. This status does not remove the existing plugin, installer entries, or
+runtime assets; removal and compatibility cleanup require a separate approved
+plan. Until then, Multica code, generated instructions, tests, router, listener,
+and runtime state are maintenance-frozen.
 
 The repository also stores the Atlas workflow helper source under `workflow/`.
 Those helpers are synced into `~/.codex/workflow` when workflow runtime files
