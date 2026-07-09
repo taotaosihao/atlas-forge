@@ -15,6 +15,24 @@ finalized: {{FINALIZED}}
 - Files or surfaces likely affected:
 - User-visible behavior:
 
+## Product/UI Acceptance Gate
+
+- Product/UI gate: required | not_applicable
+- first_operable_user_flow:
+- browser_entrypoint:
+- served_ui_validation_action:
+- ui_data_mode:
+- required_safety_gates:
+- allowed_headless_only_until:
+- stop_if_no_ui_by_phase:
+- Ordering rule: for non-tiny user-facing product/UI/browser work, the served operable UI thin slice must precede release, perf, soak, and phase evidence expansion.
+- Hard safety rule: the UI thin slice and required hard safety gates must be satisfied together; neither may pass acceptance without the other.
+- Served UI evidence: HTML document and JS/CSS app assets must come from a real HTTP server. `page.route` may mock backend/data-plane responses only, not the main document or app bundle.
+- UI/product non-evidence: `page.setContent`, synthetic HTML, fulfilled main document or app bundle, headless model tests, scanner fixtures, CLI pass, typecheck/build-only proof, and network allowlist capture without a served UI route.
+- Evidence purpose boundary: the non-evidence list applies to UI/product acceptance evidence. Correctly labeled headless/network evidence may still satisfy safety gates.
+- Reverse guard: served UI evidence does not replace required hard safety-gate evidence.
+- Not-applicable boundary: only genuinely headless CLI/worker/library/scanner work or tiny changes that do not alter user-visible UI behavior. A product task with no served app is not tiny solely because the slice is small.
+
 ## Acceptance Criteria
 
 | ID | Criterion | Required | Verification |

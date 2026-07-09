@@ -35,6 +35,24 @@ backend: native
 | --- | --- | --- | --- | --- | --- |
 |  |  |  |  |  |  |
 
+## Product/UI Gate Staffing
+
+| Field | Owner | Evidence |
+| --- | --- | --- |
+| Product/UI gate classification |  |  |
+| first_operable_user_flow |  |  |
+| browser_entrypoint |  |  |
+| served_ui_validation_action |  |  |
+| ui_data_mode |  |  |
+| required_safety_gates |  |  |
+| stop_if_no_ui_by_phase |  |  |
+
+Served UI evidence and hard safety-gate evidence are separate acceptance inputs.
+Served UI evidence does not replace `no-data-plane-direct`, `no-cloud-runtime`,
+Provider credential, or browser network boundary evidence. Correctly labeled
+headless/network evidence may satisfy safety gates, but not UI/product
+acceptance by itself.
+
 ## Commit Boundaries
 
 - Each implementation step or acceptance slice that changes files:

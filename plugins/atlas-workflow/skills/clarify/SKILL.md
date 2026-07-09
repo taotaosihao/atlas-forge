@@ -76,6 +76,25 @@ Follow this loop:
    - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
    - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
    - what failure or ambiguity should stop implementation and return to the user
+   - for non-tiny user-facing product, frontend, dashboard, editor, player,
+     browser, GUI, or site work, whether `Product/UI gate` is `required` or
+     `not_applicable`
+   - when `Product/UI gate` is required, the contract must name
+     `first_operable_user_flow`, `browser_entrypoint`,
+     `served_ui_validation_action`, `ui_data_mode`, `required_safety_gates`,
+     `allowed_headless_only_until`, and `stop_if_no_ui_by_phase`
+   - served UI evidence must open a real app entrypoint whose HTML document and
+     JS/CSS assets are served by a real HTTP server; synthetic HTML,
+     `page.setContent`, fulfilled main documents, fulfilled app bundles,
+     headless model tests, scanner fixtures, build-only proof, and network
+     allowlist capture without a served UI route do not satisfy UI/product
+     acceptance by themselves
+   - the UI thin slice must precede release, perf, soak, and phase evidence
+     expansion, while hard safety gates must be satisfied together with the UI
+     slice and must not be skipped, weakened, or backfilled
+   - the non-evidence list applies to UI/product acceptance evidence; correctly
+     labeled headless/network evidence may still satisfy safety gates, and
+     served UI evidence never replaces required hard safety-gate evidence
    - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final contract body
    Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
 12. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:

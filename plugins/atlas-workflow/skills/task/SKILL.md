@@ -68,6 +68,27 @@ Follow this loop:
     - Required when the task changes user-visible behavior, touches multiple files, changes UI/API/CLI/background-job behavior, or has meaningful edge cases.
     - Tiny precise fixes may skip this when the acceptance path is obvious; say why in the working note or final reply.
     - The contract must name goal, non-goals, acceptance criteria, real validation command or browser/API/CLI action, evidence path, and stop conditions.
+    - For non-tiny user-facing product, frontend, dashboard, editor, player,
+      browser, GUI, or site work, the contract must classify
+      `Product/UI gate` as `required` or `not_applicable`.
+    - When `Product/UI gate` is required, the contract must name
+      `first_operable_user_flow`, `browser_entrypoint`,
+      `served_ui_validation_action`, `ui_data_mode`, `required_safety_gates`,
+      `allowed_headless_only_until`, and `stop_if_no_ui_by_phase`.
+    - Served UI evidence must open a real app entrypoint whose HTML document and
+      JS/CSS app assets are served by a real HTTP server. `page.setContent`,
+      synthetic HTML, fulfilled main documents, fulfilled app bundles, headless
+      model tests, scanner fixtures, build-only proof, and network capture
+      without a served UI route do not satisfy UI/product acceptance by
+      themselves.
+    - The UI thin slice must precede release, perf, soak, and phase evidence
+      expansion. Required hard safety gates must be satisfied together with the
+      UI slice; they must not be skipped, weakened, or backfilled.
+    - The non-evidence list applies to UI/product acceptance evidence. Correctly
+      labeled headless/network evidence may still satisfy safety gates, and
+      served UI evidence never replaces required hard safety-gate evidence.
+    - A product task with no served app cannot be classified as tiny solely
+      because the requested slice is small.
     - Classify process docs before committing: workflow working notes such as intake, clarify drafts, analysis, team rounds, loop ledgers, and repair notes stay under `workflow/artifacts/<task-id>/` unless their confirmed summary is needed as durable handoff.
     - Evidence paths should name phase conclusion files, not raw run archives. Keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output in a temporary run directory by default.
     - Use `~/.codex/workflow/bin/codex-workflow scaffold-phase <task-id> <phase-id>` before creating phase evidence files by hand.

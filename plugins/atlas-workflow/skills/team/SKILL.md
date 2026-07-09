@@ -163,6 +163,77 @@ codex-team-artifact-lint --task <task-id> --business-acceptance
 acceptance lint. Without `--business-acceptance`, existing artifact lint behavior
 must remain unchanged.
 
+## Operable UI Vertical Slice Gate
+
+Use the Operable UI Vertical Slice Gate for non-tiny user-facing product,
+frontend, dashboard, editor, player, browser, GUI, or site work. This gate is
+independent of Business Acceptance First Mode and independent of security hard
+gates: it proves the product has a real operable user entrypoint, while hard
+safety gates continue to prove the entrypoint stays inside the permitted
+runtime and network boundaries.
+
+Ordering and safety rules:
+
+- A served operable UI thin slice must precede release, perf, soak, and phase
+  evidence expansion.
+- The UI thin slice and required hard safety gates must be satisfied together;
+  neither may pass acceptance without the other.
+- `no-data-plane-direct`, `no-cloud-runtime`, Provider credential, and browser
+  network boundary gates must not be skipped, weakened, or deferred after
+  release.
+- Safety gates must not become an open-ended prerequisite that indefinitely
+  blocks the first UI slice. This never means those gates can be bypassed or
+  backfilled later.
+
+When the gate applies, the team decision, implementation contract, staffing, or
+gate checklist must name:
+
+- `Product/UI gate: required | not_applicable`
+- `first_operable_user_flow`
+- `browser_entrypoint`
+- `served_ui_validation_action`
+- `ui_data_mode`
+- `required_safety_gates`
+- `allowed_headless_only_until`
+- `stop_if_no_ui_by_phase`
+
+Evidence rules:
+
+- Served UI means the HTML document and JS/CSS app assets come from a real HTTP
+  server such as a dev server, preview server, static served bundle, or project
+  route.
+- `page.route` may mock backend or data-plane responses, but must not mock the
+  main document or app bundle for UI/product acceptance evidence.
+- `page.setContent`, synthetic HTML, fulfilled main documents, fulfilled app
+  bundles, headless model tests, scanner fixtures, CLI pass, typecheck-only
+  proof, build-only proof, or network allowlist capture without a served UI
+  route are not UI/product acceptance by themselves.
+- The non-evidence list applies to evidence claiming UI/product acceptance.
+  Headless model tests, network capture, allowlist capture, and scanner evidence
+  can remain valid safety-gate evidence when labeled and reviewed as safety
+  evidence.
+- Served UI evidence does not satisfy hard safety gates by itself. If the UI
+  exists but required hard safety-gate evidence is missing, stale, or out of
+  scope, acceptance fails.
+
+Tiny and not-applicable rules:
+
+- `not_applicable` is allowed for genuinely headless CLI, worker, library, or
+  scanner work, and for tiny changes that do not alter user-visible UI behavior.
+- A product task with no served app cannot be classified as tiny solely because
+  the requested slice is small.
+
+If the gate is required and `stop_if_no_ui_by_phase` is omitted, default to
+stopping before release, perf, soak, or P0G-style evidence. Stop expanding
+headless scanners/evidence and return to clarify/team unless the user explicitly
+approves deferral.
+
+When Business Acceptance First Mode also applies, served UI evidence does not
+automatically satisfy BAF Goal B. BAF Goal B still needs business scenario
+evidence. First-patch guidance should record this relationship in UI-gate
+guidance, team decisions, contracts, staffing, and checklists without rewriting
+existing BAF artifacts.
+
 ## Native Agent Planning
 
 Before spawning native subagents, produce a task-specific Agent Plan. Follow the
