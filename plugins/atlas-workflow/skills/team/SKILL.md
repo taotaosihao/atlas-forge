@@ -116,6 +116,25 @@ Activation conditions:
 3. The team decision or implementation contract names business acceptance,
    BAF, business verdict, or `team/acceptance/` artifacts.
 
+Commercial closure has two independent required goals when the workflow spans
+both protocol/device integration and a user-facing business UI:
+
+- Goal A: protocol/device integration closure passed. Evidence must show the
+  real integration path, such as the gateway, adapter, protocol runner, device
+  or approved simulator, command/action, response, callback, persisted state, or
+  audit trail named in the contract.
+- Goal B: business UI acceptance closure passed. Evidence must show that the
+  operator or stakeholder can complete the user-facing workflow in the UI or
+  browser against the same integration-backed data and action path.
+- Goal A cannot replace Goal B. Backend, protocol, device, worker, or log-only
+  success does not prove the business UI workflow is acceptable.
+- Goal B cannot be faked with mock protocol logs. A UI pass backed only by
+  synthetic protocol output, mocked device traces, or protocol-only playback is
+  not business UI acceptance.
+- For a task that requires both goals, `business-verdict.verdict` must not be
+  `accepted` or `conditionally_accepted` until both Goal A and Goal B have
+  current evidence and neither goal is failed, blocked, or not run.
+
 Before implementation begins, the main Codex should create or require the
 pre-implementation business artifacts under
 `workflow/artifacts/<task-id>/team/acceptance/` when they are relevant:

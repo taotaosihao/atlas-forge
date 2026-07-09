@@ -10,6 +10,9 @@ title: {{TITLE}}
 - Decision owner:
 - Decision date:
 - Business workflow:
+- Goal A protocol/device integration closure: pending
+- Goal B business UI acceptance closure: pending
+- Dual-goal rule: accepted or conditionally accepted requires both Goal A and Goal B to pass when both are in scope.
 
 ## Basis
 
@@ -17,6 +20,9 @@ title: {{TITLE}}
 - Conditional scenarios:
 - Rejected scenarios:
 - Evidence references:
+- Goal A evidence references:
+- Goal B evidence references:
+- Substitution check: Goal A did not replace Goal B, and Goal B was not proven only by mock protocol logs.
 
 ## Conditions
 

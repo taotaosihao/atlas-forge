@@ -17,6 +17,9 @@ title: {{TITLE}}
 - Conditional behavior:
 - Rejected behavior:
 - Business value delivered:
+- Goal A protocol/device integration closure status:
+- Goal B business UI acceptance closure status:
+- Dual-goal conclusion:
 
 ## Evidence Summary
 
@@ -24,6 +27,9 @@ title: {{TITLE}}
 - Weakest supporting evidence:
 - Unverified claim:
 - Open deviation:
+- Goal A evidence:
+- Goal B evidence:
+- Substitution risk: Goal A cannot replace Goal B; Goal B cannot rely only on mock protocol logs.
 
 ## Decision Inputs
 
