@@ -2,10 +2,26 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 && "${ATLAS_CONTRACT_LEGACY_HOST:-0}" != 1 ]]; then
+  repo_suite="$ATLAS_FORGE_ROOT/workflow/tests/contract_repo.sh"
+  host_suite="$ATLAS_FORGE_ROOT/workflow/tests/contract_host_install.sh"
+  bash -n "$repo_suite"
+  bash -n "$host_suite"
+  printf 'suite: manifest-release-integrity\n'
+  bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
+  printf 'suite: repo-contract\n'
+  ATLAS_FORGE_ROOT="$ATLAS_FORGE_ROOT" KEEP_TEST_TMP="${KEEP_TEST_TMP:-0}" bash "$repo_suite"
+  printf 'suite: host-layout-fixtures\n'
+  ATLAS_FORGE_ROOT="$ATLAS_FORGE_ROOT" KEEP_TEST_TMP="${KEEP_TEST_TMP:-0}" bash "$host_suite"
+  printf 'contract suites passed\n'
+  exit 0
+fi
+
 BIN="${CODEX_WORKFLOW_BIN:-$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow}"
 REAL_CODEX_HOME="${CODEX_HOME_REAL:-${CODEX_HOME:-$HOME/.codex}}"
 REAL_AGENTS_HOME="${AGENTS_HOME_REAL:-$HOME/.agents}"
-TMP_ROOT="$(mktemp -d)"
+TMP_ROOT="${ATLAS_CONTRACT_TMP_ROOT:-$(mktemp -d)}"
 export CODEX_WORKFLOW_ROOT="$TMP_ROOT/workflow"
 export CODEX_HOME_ROOT="$TMP_ROOT/codex"
 export CODEX_BIN="__missing_codex_for_contract__"
@@ -48,13 +64,15 @@ setup_repo() {
 
 bash -n "$BIN"
 
-bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
-bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
-pass "atlas plugin integrity contract"
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
+  bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
+  bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
+  pass "atlas plugin integrity contract"
 
-bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
-bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
-pass "atlas strict doctor contract"
+  bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
+  bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
+  pass "atlas strict doctor contract"
+fi
 
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"
@@ -249,8 +267,9 @@ expect_fail "missing staffing support file" node "$contract_index_lint" --root "
 grep -q "supporting evidence does not exist: staffing=./staffing.md" "$TMP_ROOT/expect-fail.err"
 pass "contract index lint"
 
-repo="$TMP_ROOT/repo"
-setup_repo "$repo"
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
+  repo="$TMP_ROOT/repo"
+  setup_repo "$repo"
 
 handoff_id="$($BIN init-task "contract handoff" "handoff")"
 $BIN start "$handoff_id"
@@ -351,7 +370,8 @@ $BIN gate-metric "$p2_id" --gate feedback-cycle --action used --reason "required
 $BIN gate-report --days 1 > "$TMP_ROOT/gate-report.md"
 grep -q "feedback-cycle" "$TMP_ROOT/gate-report.md"
 expect_fail "invalid gate metric" "$BIN" gate-metric "$p2_id" --gate unknown --action used --reason bad
-pass "p2 commands"
+  pass "p2 commands"
+fi
 
 $BIN install-hooks >/dev/null
 $BIN doctor --json > "$TMP_ROOT/doctor.json"
@@ -363,7 +383,10 @@ pass "doctor json"
 source_skills_root="${ATLAS_SOURCE_SKILLS_DIR:-$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills}"
 cache_skills_root="${ATLAS_CACHE_SKILLS_DIR:-}"
 cache_plugin_root="${ATLAS_CACHE_PLUGIN_ROOT:-}"
-if [[ -z "$cache_skills_root" ]]; then
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
+  cache_plugin_root="$CODEX_HOME_ROOT/plugins/atlas-workflow"
+  cache_skills_root="$cache_plugin_root/skills"
+elif [[ -z "$cache_skills_root" ]]; then
   latest_atlas_cache="$(find "$REAL_CODEX_HOME/plugins/cache/atlas-forge/atlas-workflow" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -1 || true)"
   cache_plugin_root="$latest_atlas_cache"
   cache_skills_root="$cache_plugin_root/skills"
@@ -378,16 +401,18 @@ for skill in analyze office-hours brainstorm intake clarify team team-v1 task cw
 done
 cmp -s "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md" "$cache_plugin_root/README.md"
 cmp -s "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json" "$cache_plugin_root/.codex-plugin/plugin.json"
-rg -q "route-decision" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "atlas-workflow:intake" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "atlas-workflow:task" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "atlas-workflow:cw" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "atlas-workflow:clarify" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "atlas-workflow:worktree" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "Short Request Intake Gate" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "tiny escape hatch" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "Non-tiny work must have auditable documentation" "$REAL_CODEX_HOME/AGENTS.md"
-rg -q "critical feedback" "$REAL_CODEX_HOME/AGENTS.md"
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
+  rg -q "route-decision" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "atlas-workflow:intake" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "atlas-workflow:task" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "atlas-workflow:cw" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "atlas-workflow:clarify" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "atlas-workflow:worktree" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "Short Request Intake Gate" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "tiny escape hatch" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "Non-tiny work must have auditable documentation" "$REAL_CODEX_HOME/AGENTS.md"
+  rg -q "critical feedback" "$REAL_CODEX_HOME/AGENTS.md"
+fi
 rg -q "Short Request Intake Gate" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q 'atlas-workflow:intake' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q 'grilling-style intake' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
@@ -563,6 +588,10 @@ rg -q "staffing" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "evidence_index" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Final Contract Cleanliness Gate" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
+if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
+  printf 'repo source contract passed\n'
+  exit 0
+fi
 rg -q "handoff-envelope" "$REAL_AGENTS_HOME/skills/multica-prd-submit/SKILL.md"
 rg -q "name: multica-agent-plan" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"
 rg -q "Agent / Skill Inventory" "$REAL_AGENTS_HOME/skills/multica-agent-plan/SKILL.md"

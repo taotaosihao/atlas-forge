@@ -151,20 +151,47 @@ scripts/update-atlas-workflow-plugin --contract
 
 Start a new Codex thread before relying on changed skills or native agents.
 
-For repository checks that are not part of the one-command local refresh, run:
+For repository and installed-layout checks that are not part of the one-command
+local refresh, run the hermetic suites:
 
 ```bash
-python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
-python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/mempalace-codex-plugin
-python3 /home/gewu/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/multica-sdlc
-bash -n scripts/bump-plugin-cachebuster.sh
-bash -n scripts/codex-plugin-update.sh
-bash -n scripts/install-atlas-forge.sh
-bash -n scripts/sync-live-agents.sh
-bash -n scripts/sync-live-workflow.sh
-bash -n scripts/update-atlas-workflow-plugin
-plugins/multica-sdlc/scripts/self-test-router.sh
+bash workflow/tests/contract_repo.sh
+bash workflow/tests/contract_host_install.sh
+bash workflow/tests/contract.sh
 ```
+
+`contract_repo.sh` uses isolated HOME, Codex, agent, XDG, Git, and temporary
+roots and audits file access so stale user caches are not consulted.
+`contract_host_install.sh` runs only temporary Atlas layout, strict-doctor,
+local-cache, and development-sync fixtures. Neither default suite installs from
+a real marketplace or reads the active Multica runtime.
+
+Temporary roots are removed by default. To retain the suite root, syscall
+traces, captured logs, and host layout fixtures for investigation, run:
+
+```bash
+KEEP_TEST_TMP=1 bash workflow/tests/contract_repo.sh
+KEEP_TEST_TMP=1 bash workflow/tests/contract_host_install.sh
+```
+
+The real Codex CLI installation gate remains a separate local or controlled
+self-hosted release check. It requires an explicitly pinned CLI version and is
+not part of ordinary hosted CI:
+
+```bash
+ATLAS_REAL_CLI_E2E=1 \
+ATLAS_EXPECTED_CODEX_VERSION='codex-cli <pinned-version>' \
+  bash workflow/tests/integration_atlas_plugin_install.sh
+```
+
+The compatibility-only live-host contract remains available through
+`ATLAS_CONTRACT_LEGACY_HOST=1 bash workflow/tests/contract.sh`; it reads active
+installation state and is intentionally excluded from Atlas CI and normal
+development checks.
+
+GitHub Actions runs four read-only jobs: `manifest-release-integrity`,
+`repo-contract`, `host-layout-fixtures`, and `docs-links`. The hosted jobs do
+not use Codex credentials, marketplace network access, or Multica tests.
 
 Before publishing a new marketplace snapshot, bump the changed plugin's
 manifest cachebuster:

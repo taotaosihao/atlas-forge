@@ -38,3 +38,4 @@ workflow_id: `20260710-003-atlas-forge`
 - Phase 2A2 public local cache helper hardening: `./phase-2a2-conclusion.md`
 - Phase 2 dev/release isolation and fail-closed verification: `./phase-2-conclusion.md`
 - Phase 3 plugin-scoped strict doctor: `./phase-3-conclusion.md`
+- Phase 4 hermetic contracts and Atlas-only CI: `./phase-4-conclusion.md`

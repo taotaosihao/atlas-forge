@@ -1,0 +1,163 @@
+name: Atlas integrity
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  manifest-release-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate manifest and release identity
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          node --check workflow/bin/atlas-plugin-integrity
+          workflow/bin/atlas-plugin-integrity \
+            manifest \
+            --plugin-root plugins/atlas-workflow
+
+          case "$EVENT_NAME" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push) base="$PUSH_BEFORE_SHA" ;;
+            *) base="" ;;
+          esac
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+          if [[ -n "$base" ]]; then
+            git cat-file -e "$base^{commit}"
+            workflow/bin/atlas-plugin-integrity \
+              release \
+              --repo "$GITHUB_WORKSPACE" \
+              --base "$base"
+          else
+            test "$(git rev-list --count HEAD)" -eq 1
+            printf 'root commit: release comparison has no predecessor\n'
+          fi
+
+          bash workflow/tests/contract_atlas_plugin_integrity.sh
+
+  repo-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install contract dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ripgrep strace
+
+      - name: Verify hermetic repository contract
+        run: |
+          set -euo pipefail
+          command -v rsync
+          command -v strace
+          bash workflow/tests/contract_repo.sh
+
+  host-layout-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ATLAS_REAL_CLI_E2E: "0"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install contract dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes ripgrep
+
+      - name: Verify isolated host layouts
+        run: bash workflow/tests/contract_host_install.sh
+
+  docs-links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate contract index and relative Markdown links
+        run: |
+          set -euo pipefail
+          node plugins/atlas-workflow/scripts/codex-contract-index-lint \
+            --root docs/atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import unquote, urlsplit
+          import re
+          import subprocess
+
+          root = Path.cwd()
+          tracked = subprocess.check_output(
+              ["git", "ls-files", "*.md"], text=True, encoding="utf-8"
+          ).splitlines()
+          excluded = (".agents/", "plugins/multica-sdlc/")
+          link_pattern = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+          missing = []
+          checked = 0
+          for relative in tracked:
+              if relative.startswith(excluded):
+                  continue
+              source = root / relative
+              in_fence = False
+              for line_number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+                  if line.lstrip().startswith("```"):
+                      in_fence = not in_fence
+                      continue
+                  if in_fence:
+                      continue
+                  for match in link_pattern.finditer(line):
+                      raw = match.group(1).strip()
+                      if raw.startswith("<") and raw.endswith(">"):
+                          raw = raw[1:-1]
+                      raw = raw.split(maxsplit=1)[0]
+                      parsed = urlsplit(raw)
+                      if parsed.scheme or raw.startswith(("#", "//")):
+                          continue
+                      target_text = unquote(parsed.path)
+                      if not target_text:
+                          continue
+                      target = (source.parent / target_text).resolve()
+                      checked += 1
+                      try:
+                          target.relative_to(root)
+                      except ValueError:
+                          missing.append(f"{relative}:{line_number} -> outside repository: {raw}")
+                          continue
+                      if not target.exists():
+                          missing.append(f"{relative}:{line_number} -> missing: {raw}")
+          if missing:
+              raise SystemExit("\n".join(missing))
+          print(f"relative_markdown_links_checked={checked}")
+          PY

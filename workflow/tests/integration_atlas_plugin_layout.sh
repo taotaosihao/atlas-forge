@@ -5,9 +5,33 @@ ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../..
 VERIFY="$ATLAS_FORGE_ROOT/scripts/verify-atlas-workflow-install.sh"
 UPDATE="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-marketplace"
 PLUGIN_SOURCE="$ATLAS_FORGE_ROOT/plugins/atlas-workflow"
-TMP_ROOT="$(mktemp -d)"
+KEEP_TEST_TMP="${KEEP_TEST_TMP:-0}"
+case "$KEEP_TEST_TMP" in
+  0|1) ;;
+  *)
+    printf 'KEEP_TEST_TMP must be 0 or 1\n' >&2
+    exit 2
+    ;;
+esac
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-layout-fixture.XXXXXX")"
+OWNERSHIP_MARKER="$TMP_ROOT/.atlas-layout-fixture-owned"
+touch "$OWNERSHIP_MARKER"
 mkdir -p "$TMP_ROOT/outputs"
-trap 'rm -rf "$TMP_ROOT"' EXIT
+cleanup() {
+  local rc=$?
+  trap - EXIT
+  if [[ "$KEEP_TEST_TMP" == 1 ]]; then
+    printf 'layout_fixture_tmp=%s\n' "$TMP_ROOT"
+  else
+    if [[ -L "$TMP_ROOT" || ! -f "$OWNERSHIP_MARKER" || "$(basename "$TMP_ROOT")" != atlas-layout-fixture.* ]]; then
+      printf 'refusing to clean unowned layout fixture path: %s\n' "$TMP_ROOT" >&2
+      exit 2
+    fi
+    rm -rf -- "$TMP_ROOT"
+  fi
+  exit "$rc"
+}
+trap cleanup EXIT
 
 PASS_COUNT=0
 
@@ -18,6 +42,34 @@ pass() {
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2
+  if [[ -n "${OUTPUT:-}" && -f "$OUTPUT" ]]; then
+    printf 'diagnostic.report_path=%s\n' "$OUTPUT" >&2
+    printf 'diagnostic.report_sha256=%s\n' "$(sha256sum "$OUTPUT" | awk '{print $1}')" >&2
+    node - "$OUTPUT" <<'NODE' >&2 || true
+const fs = require("fs");
+const file = process.argv[2];
+let value;
+try {
+  value = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch {
+  process.exit(0);
+}
+function visit(node, prefix) {
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => visit(item, `${prefix}[${index}]`));
+    return;
+  }
+  if (node && typeof node === "object") {
+    for (const [key, item] of Object.entries(node)) visit(item, prefix ? `${prefix}.${key}` : key);
+    return;
+  }
+  if (!/(?:path|root|tree|expected|actual|version|commit|present)/i.test(prefix)) return;
+  const rendered = JSON.stringify(node);
+  if (rendered.length <= 512) process.stdout.write(`diagnostic.${prefix}=${rendered}\n`);
+}
+visit(value, "");
+NODE
+  fi
   exit 1
 }
 
@@ -278,6 +330,27 @@ if (!value.errors.some((error) => error.code === code)) {
 NODE
 }
 
+require_json() {
+  local label="$1"
+  shift
+  if ! assert_json "$@"; then
+    fail "$label report mismatch"
+  fi
+}
+
+require_wrapper_json() {
+  local label="$1"
+  shift
+  if ! assert_wrapper_json "$@"; then
+    fail "$label report mismatch"
+  fi
+}
+
+require_scope_unchanged() {
+  local label="$1" expected="$2"
+  [[ "$(scope_fingerprint)" == "$expected" ]] || fail "$label changed a protected scope"
+}
+
 expect_failure() {
   local label="$1" mode="$2" code="$3"
   local before
@@ -285,9 +358,9 @@ expect_failure() {
   if run_verify "$mode" > "$OUTPUT" 2> "$CASE_ROOT/stderr"; then
     fail "$label unexpectedly passed"
   fi
-  [[ ! -s "$CASE_ROOT/stderr" ]]
-  assert_json "$OUTPUT" false "$mode" "$code"
-  [[ "$(scope_fingerprint)" == "$before" ]] || fail "$label changed a protected scope"
+  [[ ! -s "$CASE_ROOT/stderr" ]] || fail "$label wrote unexpected stderr"
+  require_json "$label" "$OUTPUT" false "$mode" "$code"
+  require_scope_unchanged "$label" "$before"
   pass "$label"
 }
 
@@ -296,13 +369,17 @@ bash -n "$UPDATE"
 
 setup_case healthy
 before="$(scope_fingerprint)"
-run_verify preflight > "$OUTPUT"
-assert_json "$OUTPUT" true preflight
-[[ "$(scope_fingerprint)" == "$before" ]]
+if ! run_verify preflight > "$OUTPUT"; then
+  fail 'healthy release preflight command failed'
+fi
+require_json 'healthy release preflight' "$OUTPUT" true preflight
+require_scope_unchanged 'healthy release preflight' "$before"
 pass 'healthy release preflight is complete JSON and read-only'
-run_verify installed > "$OUTPUT"
-assert_json "$OUTPUT" true installed
-[[ "$(scope_fingerprint)" == "$before" ]]
+if ! run_verify installed > "$OUTPUT"; then
+  fail 'healthy installed layout command failed'
+fi
+require_json 'healthy installed layout' "$OUTPUT" true installed
+require_scope_unchanged 'healthy installed layout' "$before"
 pass 'healthy installed layout is complete JSON and read-only'
 
 setup_case moving-ref
@@ -434,18 +511,22 @@ expect_failure 'symlinked Codex root is rejected' preflight PATH_COMPONENT_SYMLI
 
 setup_case wrapper-delegation
 before="$(scope_fingerprint)"
-run_isolated "$UPDATE" --preflight-only \
+if ! run_isolated "$UPDATE" --preflight-only \
     --repo "$REPO" --base "$BASE_SHA" --expected-commit "$EXPECTED_SHA" \
     --marketplace "$MARKETPLACE" --expected-source "$EXPECTED_SOURCE" \
-    --codex-home "$CODEX_ROOT" > "$OUTPUT"
-assert_json "$OUTPUT" true preflight
-[[ "$(scope_fingerprint)" == "$before" ]]
-run_isolated "$UPDATE" --verify-only \
+    --codex-home "$CODEX_ROOT" > "$OUTPUT"; then
+  fail 'release wrapper preflight delegation failed'
+fi
+require_json 'release wrapper preflight delegation' "$OUTPUT" true preflight
+require_scope_unchanged 'release wrapper preflight delegation' "$before"
+if ! run_isolated "$UPDATE" --verify-only \
     --repo "$REPO" --base "$BASE_SHA" --expected-commit "$EXPECTED_SHA" \
     --marketplace "$MARKETPLACE" --expected-source "$EXPECTED_SOURCE" \
-    --codex-home "$CODEX_ROOT" > "$OUTPUT"
-assert_json "$OUTPUT" true installed
-[[ "$(scope_fingerprint)" == "$before" ]]
+    --codex-home "$CODEX_ROOT" > "$OUTPUT"; then
+  fail 'release wrapper installed delegation failed'
+fi
+require_json 'release wrapper installed delegation' "$OUTPUT" true installed
+require_scope_unchanged 'release wrapper installed delegation' "$before"
 pass 'release wrapper delegates only read-only preflight and installed verification'
 
 setup_case wrapper-execute-disabled
@@ -458,9 +539,10 @@ if PATH="$CASE_ROOT/fake-bin:$PATH" CODEX_CALLED="$CASE_ROOT/codex-called" \
   run_isolated "$UPDATE" --execute --repo "$REPO" > "$OUTPUT" 2> "$CASE_ROOT/stderr"; then
   fail 'release execute unexpectedly passed'
 fi
-[[ ! -s "$CASE_ROOT/stderr" && ! -e "$CASE_ROOT/codex-called" ]]
-assert_wrapper_json "$OUTPUT" MUTATION_DISABLED
-[[ "$(scope_fingerprint)" == "$before" ]]
+[[ ! -s "$CASE_ROOT/stderr" ]] || fail 'release execute wrote unexpected stderr'
+[[ ! -e "$CASE_ROOT/codex-called" ]] || fail 'release execute invoked Codex CLI'
+require_wrapper_json 'release execute' "$OUTPUT" MUTATION_DISABLED
+require_scope_unchanged 'release execute' "$before"
 pass 'release execute is disabled before any Codex CLI lookup or protected write'
 
 setup_case wrapper-shared
@@ -477,9 +559,10 @@ if PATH="$CASE_ROOT/fake-bin:$PATH" CODEX_CALLED="$CASE_ROOT/codex-called" \
     --codex-home "$CODEX_ROOT" > "$OUTPUT" 2> "$CASE_ROOT/stderr"; then
   fail 'shared wrapper preflight unexpectedly passed'
 fi
-[[ ! -s "$CASE_ROOT/stderr" && ! -e "$CASE_ROOT/codex-called" ]]
-assert_json "$OUTPUT" false preflight SHARED_MARKETPLACE_FORBIDDEN
-[[ "$(scope_fingerprint)" == "$before" ]]
+[[ ! -s "$CASE_ROOT/stderr" ]] || fail 'shared wrapper preflight wrote unexpected stderr'
+[[ ! -e "$CASE_ROOT/codex-called" ]] || fail 'shared wrapper preflight invoked Codex CLI'
+require_json 'shared wrapper preflight' "$OUTPUT" false preflight SHARED_MARKETPLACE_FORBIDDEN
+require_scope_unchanged 'shared wrapper preflight' "$before"
 pass 'shared marketplace is rejected without invoking Codex CLI'
 
 printf '1..%s\n' "$PASS_COUNT"
