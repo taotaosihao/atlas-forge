@@ -6,17 +6,21 @@ PLUGIN_NAME="atlas-workflow"
 PLUGIN_SOURCE="$REPO_ROOT/plugins/$PLUGIN_NAME"
 CODEX_HOME_ROOT="${CODEX_HOME_ROOT:-${CODEX_HOME:-$HOME/.codex}}"
 LOCAL_PLUGIN_SOURCE="$CODEX_HOME_ROOT/plugins/$PLUGIN_NAME"
-LOCAL_MARKETPLACE_FILE="$CODEX_HOME_ROOT/.agents/plugins/marketplace.json"
-LOCAL_CACHE_ROOT="$CODEX_HOME_ROOT/plugins/cache/local-atlas/$PLUGIN_NAME/local"
-ATLAS_FORGE_SNAPSHOT="$CODEX_HOME_ROOT/.tmp/marketplaces/atlas-forge/plugins/$PLUGIN_NAME"
-ATLAS_FORGE_CACHE_ROOT="$CODEX_HOME_ROOT/plugins/cache/atlas-forge/$PLUGIN_NAME"
-CODEX_AGENT_SOURCE="$REPO_ROOT/.codex/agents"
-CODEX_AGENT_TARGET="$CODEX_HOME_ROOT/agents"
+LOCAL_MARKETPLACE_FILE="${CODEX_PLUGIN_MARKETPLACE_FILE:-$CODEX_HOME_ROOT/.agents/plugins/marketplace.json}"
+LOCAL_CACHE_BASE="$CODEX_HOME_ROOT/plugins/cache"
+LOCAL_CACHE_ROOT="$LOCAL_CACHE_BASE/local-atlas/$PLUGIN_NAME/local"
+ATLAS_PLUGIN_INTEGRITY="$REPO_ROOT/workflow/bin/atlas-plugin-integrity"
+ATLAS_SYNC_HELPER="$REPO_ROOT/scripts/sync-live-atlas-workflow.sh"
 PLUGIN_CREATOR_VALIDATE_SCRIPT="${PLUGIN_CREATOR_VALIDATE_SCRIPT:-${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py}"
 
 DRY_RUN=0
 RUN_CONTRACT=0
 SKIP_VALIDATE=0
+DEV_COPY_TRANSACTION_ACTIVE=0
+DEV_SOURCE_BACKUP=""
+DEV_CACHE_BACKUP=""
+DEV_SOURCE_EXISTED=0
+DEV_CACHE_EXISTED=0
 
 usage() {
   cat <<'EOF'
@@ -24,15 +28,16 @@ Usage:
   scripts/update-atlas-workflow-plugin [options]
 
 Options:
-  --dry-run         Show the local update plan without writing runtime files.
-  --contract        Run workflow/tests/contract.sh after the local update.
-  --skip-validate   Skip plugin manifest validation.
+  --dry-run         Validate configuration and show dev writes without changing files.
+  --contract        Run the targeted Atlas integrity contract before dev writes.
+  --skip-validate   Skip the optional system plugin validator; repo integrity still runs.
   -h, --help        Show this help.
 
-This is the one-command local development refresh for atlas-workflow. It syncs
-the repo plugin source to the local Codex plugin source, refreshes installed
-runtime cache copies, syncs workflow helpers and native Codex agents, then
-verifies source/cache equality.
+This command refreshes only the local atlas-workflow development channel. It
+validates a local-atlas marketplace, syncs the repo plugin to its local source
+and local-atlas cache, then syncs Atlas workflow helpers, native Codex agents,
+and Atlas command shims. It never writes the atlas-forge marketplace snapshot
+or release cache. Use the separate release workflow for published installs.
 EOF
 }
 
@@ -72,9 +77,143 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -d "$PLUGIN_SOURCE" ]] || die "missing plugin source: $PLUGIN_SOURCE"
+[[ -x "$ATLAS_PLUGIN_INTEGRITY" ]] || die "missing Atlas integrity helper: $ATLAS_PLUGIN_INTEGRITY"
+[[ -x "$ATLAS_SYNC_HELPER" ]] || die "missing Atlas-only sync helper: $ATLAS_SYNC_HELPER"
+command -v node >/dev/null || die "node not found in PATH"
 command -v python3 >/dev/null || die "python3 not found in PATH"
 command -v rsync >/dev/null || die "rsync not found in PATH"
 command -v diff >/dev/null || die "diff not found in PATH"
+
+preflight_local_marketplace() {
+  local output
+
+  if ! output="$(python3 - "$LOCAL_MARKETPLACE_FILE" "$CODEX_HOME_ROOT" "$LOCAL_PLUGIN_SOURCE" "$PLUGIN_NAME" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+marketplace_file, codex_home_root, expected_source, plugin_name = sys.argv[1:5]
+marketplace_path = Path(marketplace_file)
+if not marketplace_path.is_file():
+    raise SystemExit(f"missing local marketplace file: {marketplace_path}")
+
+try:
+    data = json.loads(marketplace_path.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raise SystemExit(f"invalid local marketplace JSON: {error}")
+
+if not isinstance(data, dict):
+    raise SystemExit("local marketplace JSON must be an object")
+if data.get("name") != "local-atlas":
+    raise SystemExit("local marketplace name must be exactly: local-atlas")
+
+plugins = data.get("plugins")
+if not isinstance(plugins, list):
+    raise SystemExit("local marketplace plugins must be an array")
+matches = [item for item in plugins if isinstance(item, dict) and item.get("name") == plugin_name]
+if len(matches) != 1:
+    raise SystemExit(f"local marketplace must contain exactly one {plugin_name} entry")
+
+source = matches[0].get("source")
+if not isinstance(source, dict) or source.get("source") != "local":
+    raise SystemExit(f"{plugin_name} marketplace source must be local")
+source_path = source.get("path")
+if not isinstance(source_path, str) or not source_path:
+    raise SystemExit(f"{plugin_name} local source path must be a non-empty string")
+
+declared = Path(source_path)
+if declared.is_absolute():
+    raise SystemExit(f"{plugin_name} local source path must be relative to CODEX_HOME_ROOT")
+if ".." in declared.parts:
+    raise SystemExit(f"{plugin_name} local source path must not escape CODEX_HOME_ROOT")
+
+root = Path(codex_home_root).absolute()
+expected = Path(expected_source).absolute()
+lexical_source = Path(os.path.abspath(root / declared))
+if lexical_source != expected:
+    raise SystemExit(
+        f"{plugin_name} local source path must resolve to {expected}; got {lexical_source}"
+    )
+
+cursor = root
+for part in expected.relative_to(root).parts:
+    cursor = cursor / part
+    if cursor.is_symlink():
+        raise SystemExit(f"{plugin_name} local source path must not traverse symlinks: {cursor}")
+
+if lexical_source.resolve(strict=False) != expected.resolve(strict=False):
+    raise SystemExit(
+        f"{plugin_name} local source realpath must equal {expected.resolve(strict=False)}"
+    )
+
+print(f"validated local marketplace: {marketplace_path}")
+print(f"validated local plugin source: {expected}")
+PY
+  )"; then
+    die "$output"
+  fi
+
+  log "$output"
+}
+
+preflight_managed_roots() {
+  local workflow_root="${CODEX_WORKFLOW_ROOT:-$CODEX_HOME_ROOT/workflow}"
+  local local_bin_root="${LOCAL_BIN_ROOT:-$HOME/.local/bin}"
+
+  python3 - \
+    "$HOME/.agents" \
+    "${AGENTS_HOME:-}" \
+    "$CODEX_HOME_ROOT/.tmp/marketplaces/atlas-forge" \
+    "$CODEX_HOME_ROOT/plugins/cache/atlas-forge" \
+    "$LOCAL_PLUGIN_SOURCE" \
+    "$LOCAL_CACHE_ROOT" \
+    "$workflow_root" \
+    "$CODEX_HOME_ROOT/agents" \
+    "$local_bin_root" <<'PY'
+import sys
+from pathlib import Path
+
+legacy_home, agents_home, snapshot_root, release_cache_root, *raw_targets = sys.argv[1:]
+forbidden = [
+    Path(legacy_home).resolve(strict=False),
+    Path(snapshot_root).resolve(strict=False),
+    Path(release_cache_root).resolve(strict=False),
+]
+if agents_home:
+    forbidden.append(Path(agents_home).resolve(strict=False))
+
+def reject_existing_symlink_prefix(raw_path):
+    path = Path(raw_path).absolute()
+    cursor = Path(path.anchor)
+    for part in path.parts[1:]:
+        cursor /= part
+        if cursor.is_symlink():
+            raise SystemExit(f"managed Atlas development root must not traverse symlinks: {cursor}")
+        if not cursor.exists():
+            break
+
+for value in raw_targets:
+    reject_existing_symlink_prefix(value)
+
+targets = [Path(value).resolve(strict=False) for value in raw_targets]
+for target in targets:
+    for root in forbidden:
+        if target == root or root in target.parents:
+            raise SystemExit(f"managed Atlas development target is inside a forbidden runtime root: {target}")
+
+for index, left in enumerate(targets):
+    for right in targets[index + 1:]:
+        if left == right or left in right.parents or right in left.parents:
+            raise SystemExit(f"managed Atlas development roots must not overlap: {left} <-> {right}")
+PY
+
+  CODEX_HOME_ROOT="$CODEX_HOME_ROOT" \
+  CODEX_WORKFLOW_ROOT="$workflow_root" \
+  LOCAL_BIN_ROOT="$local_bin_root" \
+    "$ATLAS_SYNC_HELPER" --dry-run >/dev/null
+  log "validated Atlas-only sync sources and managed roots"
+}
 
 manifest_version() {
   python3 - "$PLUGIN_SOURCE/.codex-plugin/plugin.json" <<'PY'
@@ -90,33 +229,21 @@ print(version)
 PY
 }
 
-PLUGIN_VERSION="$(manifest_version)"
+validate_plugin() {
+  "$ATLAS_PLUGIN_INTEGRITY" manifest --plugin-root "$PLUGIN_SOURCE" >/dev/null
+  log "validated repo Atlas plugin integrity"
 
-run_cmd() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '+'
-    printf ' %q' "$@"
-    printf '\n'
-  else
-    "$@"
-  fi
-}
-
-sync_tree() {
-  local source="$1"
-  local target="$2"
-  local label="$3"
-
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would sync $label:"
-    log "  source: $source"
-    log "  target: $target"
+  if [[ "$SKIP_VALIDATE" -eq 1 ]]; then
+    log "skipped optional system plugin validation"
     return
   fi
 
-  mkdir -p "$target"
-  rsync -a --delete "$source/" "$target/"
-  log "synced $label: $target"
+  if [[ -f "$PLUGIN_CREATOR_VALIDATE_SCRIPT" ]]; then
+    python3 "$PLUGIN_CREATOR_VALIDATE_SCRIPT" "$PLUGIN_SOURCE"
+    log "validated repo Atlas plugin with system validator"
+  else
+    log "warning: optional system plugin validator not found, skipped: $PLUGIN_CREATOR_VALIDATE_SCRIPT"
+  fi
 }
 
 verify_tree() {
@@ -134,103 +261,160 @@ verify_tree() {
   log "verified $label"
 }
 
-validate_plugin() {
-  python3 -m json.tool "$PLUGIN_SOURCE/.codex-plugin/plugin.json" >/dev/null
+validate_supported_plugin_tree() {
+  local source="$1"
+  local label="$2"
+  local invalid_entry
 
-  if [[ "$SKIP_VALIDATE" -eq 1 ]]; then
-    log "skipped plugin validation"
-    return
-  fi
-
-  if [[ -f "$PLUGIN_CREATOR_VALIDATE_SCRIPT" ]]; then
-    run_cmd python3 "$PLUGIN_CREATOR_VALIDATE_SCRIPT" "$PLUGIN_SOURCE"
-  else
-    log "warning: plugin validator not found, skipped: $PLUGIN_CREATOR_VALIDATE_SCRIPT"
+  invalid_entry="$(find "$source" -mindepth 1 ! -type d ! -type f ! -type l -print -quit)"
+  if [[ -n "$invalid_entry" ]]; then
+    die "$label contains an unsupported entry: $invalid_entry"
   fi
 }
 
-refresh_local_cache() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would refresh installed local plugin cache: $LOCAL_CACHE_ROOT"
-    return
-  fi
-
-  if [[ ! -f "$LOCAL_MARKETPLACE_FILE" ]]; then
-    log "warning: local marketplace file missing, skipped local-atlas cache refresh: $LOCAL_MARKETPLACE_FILE"
-    return
-  fi
-
-  CODEX_HOME_ROOT="$CODEX_HOME_ROOT" "$REPO_ROOT/workflow/bin/codex-refresh-local-plugin" "$PLUGIN_NAME" >/dev/null
-  log "refreshed local-atlas installed cache: $LOCAL_CACHE_ROOT"
-}
-
-atlas_forge_cache_target() {
-  local version_target="$ATLAS_FORGE_CACHE_ROOT/$PLUGIN_VERSION"
-  local latest_target=""
-
-  if [[ -d "$version_target" ]]; then
-    printf '%s\n' "$version_target"
-    return
-  fi
-
-  latest_target="$(find "$ATLAS_FORGE_CACHE_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -1 || true)"
-  if [[ -n "$latest_target" ]]; then
-    printf '%s\n' "$latest_target"
-  fi
-}
-
-sync_atlas_forge_cache() {
-  local target
-
-  target="$(atlas_forge_cache_target)"
-  if [[ -z "$target" ]]; then
-    log "warning: atlas-forge installed cache not found, skipped: $ATLAS_FORGE_CACHE_ROOT"
-    return
-  fi
-
-  if [[ "$target" != "$ATLAS_FORGE_CACHE_ROOT/$PLUGIN_VERSION" ]]; then
-    log "warning: versioned atlas-forge cache missing for $PLUGIN_VERSION; using latest installed cache: $target"
-  fi
-
-  sync_tree "$PLUGIN_SOURCE" "$target" "atlas-forge installed plugin cache"
-  verify_tree "$PLUGIN_SOURCE" "$target" "atlas-forge installed plugin cache"
-}
-
-sync_native_codex_agents() {
-  local file
-  local target
-
-  if [[ ! -d "$CODEX_AGENT_SOURCE" ]]; then
-    log "warning: native Codex agent source missing, skipped: $CODEX_AGENT_SOURCE"
-    return
-  fi
+refresh_development_plugin_copies() {
+  local source_parent
+  local cache_parent
+  local source_stage=""
+  local cache_stage=""
+  local source_backup=""
+  local cache_backup=""
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would sync native Codex agents:"
-    log "  source: $CODEX_AGENT_SOURCE"
-    log "  target: $CODEX_AGENT_TARGET"
+    log "would sync atlas-workflow source to local plugin source:"
+    log "  source: $PLUGIN_SOURCE"
+    log "  target: $LOCAL_PLUGIN_SOURCE"
+    log "would verify local plugin source with diff -qr"
+    log "would refresh installed local plugin cache atomically: $LOCAL_CACHE_ROOT"
+    log "would verify local-atlas installed plugin cache with diff -qr"
     return
   fi
 
-  mkdir -p "$CODEX_AGENT_TARGET"
-  shopt -s nullglob
-  for file in "$CODEX_AGENT_SOURCE"/*.toml; do
-    cp -p "$file" "$CODEX_AGENT_TARGET/"
-    target="$CODEX_AGENT_TARGET/$(basename "$file")"
-    cmp -s "$file" "$target"
-  done
-  shopt -u nullglob
-  log "synced native Codex agents: $CODEX_AGENT_TARGET"
+  source_parent="$(dirname "$LOCAL_PLUGIN_SOURCE")"
+  cache_parent="$(dirname "$LOCAL_CACHE_ROOT")"
+  mkdir -p "$source_parent" "$cache_parent"
+  source_stage="$(mktemp -d "$source_parent/.${PLUGIN_NAME}.stage.XXXXXX")"
+  cache_stage="$(mktemp -d "$cache_parent/.local.stage.XXXXXX")"
+
+  if ! rsync -a --delete "$PLUGIN_SOURCE/" "$source_stage/"; then
+    rm -rf "$source_stage" "$cache_stage"
+    die "failed to stage local plugin source; existing source and cache were preserved"
+  fi
+  if ! diff -qr "$PLUGIN_SOURCE" "$source_stage" >/dev/null; then
+    rm -rf "$source_stage" "$cache_stage"
+    die "staged local plugin source failed equality verification; existing source and cache were preserved"
+  fi
+  validate_supported_plugin_tree "$source_stage" "staged local plugin source"
+
+  if ! rsync -a --delete "$source_stage/" "$cache_stage/"; then
+    rm -rf "$source_stage" "$cache_stage"
+    die "failed to stage local-atlas plugin cache; existing source and cache were preserved"
+  fi
+  if ! diff -qr "$source_stage" "$cache_stage" >/dev/null; then
+    rm -rf "$source_stage" "$cache_stage"
+    die "staged local-atlas plugin cache failed equality verification; existing source and cache were preserved"
+  fi
+
+  if [[ -e "$LOCAL_PLUGIN_SOURCE" || -L "$LOCAL_PLUGIN_SOURCE" ]]; then
+    DEV_SOURCE_EXISTED=1
+    source_backup="$(mktemp -d "$source_parent/.${PLUGIN_NAME}.backup.XXXXXX")"
+    rmdir "$source_backup"
+    if ! mv "$LOCAL_PLUGIN_SOURCE" "$source_backup"; then
+      rm -rf "$source_stage" "$cache_stage"
+      die "failed to preserve existing local plugin source"
+    fi
+  fi
+  if [[ -e "$LOCAL_CACHE_ROOT" || -L "$LOCAL_CACHE_ROOT" ]]; then
+    DEV_CACHE_EXISTED=1
+    cache_backup="$(mktemp -d "$cache_parent/.local.backup.XXXXXX")"
+    rmdir "$cache_backup"
+    if ! mv "$LOCAL_CACHE_ROOT" "$cache_backup"; then
+      if [[ -n "$source_backup" ]]; then
+        mv "$source_backup" "$LOCAL_PLUGIN_SOURCE" || true
+      fi
+      rm -rf "$source_stage" "$cache_stage"
+      die "failed to preserve existing local-atlas plugin cache; existing source was restored"
+    fi
+  fi
+
+  if ! mv "$source_stage" "$LOCAL_PLUGIN_SOURCE"; then
+    if [[ -n "$source_backup" ]]; then
+      mv "$source_backup" "$LOCAL_PLUGIN_SOURCE" || true
+    fi
+    if [[ -n "$cache_backup" ]]; then
+      mv "$cache_backup" "$LOCAL_CACHE_ROOT" || true
+    fi
+    rm -rf "$source_stage" "$cache_stage"
+    die "failed to install staged local plugin source; existing source and cache were restored"
+  fi
+
+  if ! mv "$cache_stage" "$LOCAL_CACHE_ROOT"; then
+    rm -rf "$LOCAL_PLUGIN_SOURCE"
+    if [[ -n "$source_backup" ]]; then
+      mv "$source_backup" "$LOCAL_PLUGIN_SOURCE" || true
+    fi
+    if [[ -n "$cache_backup" ]]; then
+      mv "$cache_backup" "$LOCAL_CACHE_ROOT" || true
+    fi
+    rm -rf "$cache_stage"
+    die "failed to install staged local-atlas plugin cache; existing source and cache were restored"
+  fi
+
+  DEV_SOURCE_BACKUP="$source_backup"
+  DEV_CACHE_BACKUP="$cache_backup"
+  DEV_COPY_TRANSACTION_ACTIVE=1
+  log "synced atlas-workflow source atomically: $LOCAL_PLUGIN_SOURCE"
+  log "refreshed local-atlas installed cache atomically: $LOCAL_CACHE_ROOT"
 }
+
+rollback_development_plugin_copies() {
+  if [[ "$DEV_COPY_TRANSACTION_ACTIVE" -ne 1 ]]; then
+    return
+  fi
+
+  rm -rf "$LOCAL_PLUGIN_SOURCE" "$LOCAL_CACHE_ROOT"
+  if [[ "$DEV_SOURCE_EXISTED" -eq 1 && -n "$DEV_SOURCE_BACKUP" ]]; then
+    mv "$DEV_SOURCE_BACKUP" "$LOCAL_PLUGIN_SOURCE" || true
+  fi
+  if [[ "$DEV_CACHE_EXISTED" -eq 1 && -n "$DEV_CACHE_BACKUP" ]]; then
+    mv "$DEV_CACHE_BACKUP" "$LOCAL_CACHE_ROOT" || true
+  fi
+  DEV_COPY_TRANSACTION_ACTIVE=0
+  log "restored previous local plugin source and local-atlas cache after downstream failure" >&2
+}
+
+commit_development_plugin_copies() {
+  if [[ "$DEV_COPY_TRANSACTION_ACTIVE" -ne 1 ]]; then
+    return
+  fi
+
+  [[ -z "$DEV_SOURCE_BACKUP" ]] || rm -rf "$DEV_SOURCE_BACKUP"
+  [[ -z "$DEV_CACHE_BACKUP" ]] || rm -rf "$DEV_CACHE_BACKUP"
+  DEV_COPY_TRANSACTION_ACTIVE=0
+  DEV_SOURCE_BACKUP=""
+  DEV_CACHE_BACKUP=""
+  log "committed local plugin source and local-atlas cache transaction"
+}
+
+trap rollback_development_plugin_copies EXIT
 
 sync_workflow_helpers() {
+  local args=()
+
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would sync workflow helpers and agent assets with scripts/sync-live-workflow.sh"
-    return
+    args+=(--dry-run)
+    log "would sync workflow helpers with scripts/sync-live-atlas-workflow.sh"
+    log "would sync native Codex agents with scripts/sync-live-atlas-workflow.sh"
   fi
 
-  CODEX_HOME_ROOT="$CODEX_HOME_ROOT" "$REPO_ROOT/scripts/sync-live-workflow.sh" >/dev/null
-  log "synced workflow helpers and command shims"
+  CODEX_HOME_ROOT="$CODEX_HOME_ROOT" \
+  CODEX_WORKFLOW_ROOT="${CODEX_WORKFLOW_ROOT:-$CODEX_HOME_ROOT/workflow}" \
+  LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-$HOME/.local/bin}" \
+    "$ATLAS_SYNC_HELPER" "${args[@]}"
+
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    log "synced Atlas workflow helpers, native Codex agents, and command shims"
+  fi
 }
 
 run_contract() {
@@ -239,36 +423,33 @@ run_contract() {
   fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would run workflow/tests/contract.sh"
+    log "dry-run: contract suite was not executed"
     return
   fi
 
-  "$REPO_ROOT/workflow/tests/contract.sh"
+  ATLAS_FORGE_ROOT="$REPO_ROOT" \
+    "$REPO_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
 }
 
-log "Atlas workflow plugin local update"
-log "repo:    $REPO_ROOT"
+log "Atlas workflow plugin development refresh"
+log "repo:  $REPO_ROOT"
+log "codex: $CODEX_HOME_ROOT"
+
+# This read-only gate must pass before any target directory is created or copied.
+preflight_local_marketplace
+preflight_managed_roots
+PLUGIN_VERSION="$(manifest_version)"
 log "version: $PLUGIN_VERSION"
-log "codex:   $CODEX_HOME_ROOT"
-
 validate_plugin
-sync_native_codex_agents
-sync_tree "$PLUGIN_SOURCE" "$LOCAL_PLUGIN_SOURCE" "atlas-workflow source to local plugin source"
-verify_tree "$PLUGIN_SOURCE" "$LOCAL_PLUGIN_SOURCE" "local plugin source"
-
-if [[ -d "$ATLAS_FORGE_SNAPSHOT" || "$DRY_RUN" -eq 1 ]]; then
-  sync_tree "$PLUGIN_SOURCE" "$ATLAS_FORGE_SNAPSHOT" "atlas-forge marketplace snapshot"
-  verify_tree "$PLUGIN_SOURCE" "$ATLAS_FORGE_SNAPSHOT" "atlas-forge marketplace snapshot"
-fi
-
-refresh_local_cache
-if [[ -d "$LOCAL_CACHE_ROOT" || "$DRY_RUN" -eq 1 ]]; then
-  verify_tree "$PLUGIN_SOURCE" "$LOCAL_CACHE_ROOT" "local-atlas installed plugin cache"
-fi
-
-sync_atlas_forge_cache
-sync_workflow_helpers
+validate_supported_plugin_tree "$PLUGIN_SOURCE" "repo plugin source"
 run_contract
 
-log "atlas-workflow local plugin update complete"
-log "Start a new Codex thread before relying on newly changed skills or agents."
+refresh_development_plugin_copies
+verify_tree "$PLUGIN_SOURCE" "$LOCAL_PLUGIN_SOURCE" "local plugin source"
+verify_tree "$PLUGIN_SOURCE" "$LOCAL_CACHE_ROOT" "local-atlas installed plugin cache"
+sync_workflow_helpers
+commit_development_plugin_copies
+
+log "atlas-workflow development refresh complete"
+log "No atlas-forge marketplace snapshot or release cache was changed."
+log "Start a new Codex task before relying on newly changed skills or agents."

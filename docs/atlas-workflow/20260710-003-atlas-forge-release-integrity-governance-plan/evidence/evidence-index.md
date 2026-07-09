@@ -34,3 +34,4 @@ workflow_id: `20260710-003-atlas-forge`
 
 - Phase 0 lifecycle/contract baseline: `./phase-0-conclusion.md`
 - Phase 1 manifest/release identity: `./phase-1-conclusion.md`
+- Phase 2A Atlas local development isolation: `./phase-2a-conclusion.md`
