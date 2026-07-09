@@ -182,6 +182,58 @@ codex-team-artifact-lint --task <task-id> --business-acceptance
 acceptance lint. Without `--business-acceptance`, existing artifact lint behavior
 must remain unchanged.
 
+## First Code Slice Guard
+
+Use the First Code Slice Guard for non-tiny implementation work that could spend
+early phases on contracts, scanners, fixtures, headless models, research, or
+evidence before changing the requested behavior. This guard is independent of
+Business Acceptance First Mode and the Operable UI Vertical Slice Gate: it proves
+the workflow has started a bounded, verifiable implementation slice before
+gate-only work expands.
+
+Ordering and safety rules:
+
+- The team decision, implementation contract, staffing, or gate checklist must
+  name the first implementation diff before execution starts.
+- Contract, scanner, fixture, and evidence-only preparation may unblock the
+  first code slice, but must be bounded by phase or step. It cannot remain the
+  only deliverable after the named stop point.
+- The first code slice may be fixture-backed, mocked, in-memory, or otherwise
+  intentionally thin, but it must change the product, runtime, API, CLI,
+  workflow, or contract-owned behavior under test. Docs-only artifacts,
+  scanner fixtures, analysis notes, and evidence bundles are not first code
+  slices by themselves.
+- For scanner/tooling tasks, implementing the scanner or tool behavior can be
+  the first code slice; adding fixtures or evidence around an unchanged scanner
+  cannot.
+- Hard safety gates remain blockers for acceptance and release. Starting a
+  bounded code slice never authorizes skipping, weakening, or backfilling named
+  safety gates.
+- If a safety or compliance constraint makes any implementation unsafe before a
+  gate lands, stop and return to clarify/team/user instead of continuing
+  gate-only work.
+
+When the guard applies, the team decision, implementation contract, staffing, or
+gate checklist must name:
+
+- `First-code guard: required | not_applicable`
+- `first_code_slice`
+- `first_code_owner`
+- `first_code_verification`
+- `allowed_contract_gate_only_until`
+- `stop_if_no_code_by_phase`
+- `gate_parallelization_or_deferral_plan`
+
+`not_applicable` is allowed for pure planning, review, audit, docs-only,
+non-implementation tasks, and tiny precise fixes whose acceptance path is
+already obvious.
+
+If the guard is required and `stop_if_no_code_by_phase` is omitted, default to
+stopping after at most one preparatory contract/gate-only phase before the first
+implementation diff, and always before release, perf, soak, or P0G-style
+evidence expansion. Return to clarify/team unless the user explicitly approves
+continued gate-only work.
+
 ## Operable UI Vertical Slice Gate
 
 Use the Operable UI Vertical Slice Gate for non-tiny user-facing product,

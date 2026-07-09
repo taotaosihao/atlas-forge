@@ -8,12 +8,16 @@ backend: native
 ## 结论
 
 Big Screen P0 跑偏的根因不是单个 slice 违规，而是 `atlas-workflow` 当前流程只有
-gate-first 的强约束，没有同等强度的“可操作 UI vertical slice”约束。P0F-05 的
-browser network-boundary evidence 是有效的安全证据，但不能证明产品 UI 可操作。
+gate-first 的强约束，没有同等强度的“首个代码切片”和“可操作 UI vertical slice”约束。
+P0F-05 的 browser network-boundary evidence 是有效的安全证据，但不能证明产品 UI 可操作，
+也不能证明实现已经进入可验证的产品闭环。
 
-`atlas-workflow` 应新增独立的 `Operable UI Vertical Slice Gate`：
+`atlas-workflow` 应新增两层互补护栏：
 
-- 对 non-tiny 的 UI/产品/browser workflow，必须尽早声明并验证真实 served UI entrypoint。
+- 对 non-tiny implementation workflow，必须声明 `First Code Slice Guard`，限制 contract/scanner/
+  fixture/evidence-only 阶段，尽早产生可验证实现 diff。
+- 对 non-tiny 的 UI/产品/browser workflow，必须声明 `Operable UI Vertical Slice Gate`，尽早验证真实
+  served UI entrypoint。
 - headless model、scanner、fixture、synthetic Playwright harness、`page.route` fulfilled document
   只能算安全/边界/模型证据，不能单独算 UI/product acceptance。
 - 安全 hard gates 仍然一票否决；UI vertical slice 与 `no-data-plane-direct`、`no-cloud-runtime`、
@@ -34,14 +38,18 @@ browser network-boundary evidence 是有效的安全证据，但不能证明产�
 
 第一批只做 guidance/template/contract-test 改动，但需要把 GLM5.2 与 Claude Sonnet 5 max 的补强意见纳入合同：
 
-1. 在 `$atlas-workflow:team`、`$atlas-workflow:clarify`、`$atlas-workflow:task` 写入排序原则：
+1. 在 `$atlas-workflow:team`、`$atlas-workflow:clarify`、`$atlas-workflow:task` 写入 first-code ordering：
+   contract/scanner/fixture/evidence-only 准备阶段必须有上限；若到达 `stop_if_no_code_by_phase` 仍无首个
+   implementation diff，应停止扩展 Gate 并返回 clarify/team/user。
+2. 在 `$atlas-workflow:team`、`$atlas-workflow:clarify`、`$atlas-workflow:task` 写入 UI 排序原则：
    served operable UI thin slice 先于 release/perf/soak/phase evidence expansion；同时 hard safety gates
    必须与 UI slice 共同满足，不能跳过、削弱或上线后补。
-2. 将核心必填收敛到 `browser_entrypoint`、`first_operable_user_flow`、`stop_if_no_ui_by_phase`，
+3. 将核心必填收敛到 `first_code_slice`、`first_code_verification`、`allowed_contract_gate_only_until`、
+   `stop_if_no_code_by_phase`、`browser_entrypoint`、`first_operable_user_flow`、`stop_if_no_ui_by_phase`，
    并保留 data/runtime 与 safety gate 字段作为补充说明。
-3. 在 implementation contract、staffing、gate checklist 中写死非证据清单和 served UI 证据要求。
-4. 在 `workflow/tests/contract.sh` 增加字段断言、非证据清单断言、UI/product acceptance 负向 evidence guard，
+4. 在 implementation contract、staffing、gate checklist 中写死 first-code guard、非证据清单和 served UI 证据要求。
+5. 在 `workflow/tests/contract.sh` 增加字段断言、非证据清单断言、UI/product acceptance 负向 evidence guard，
    以及 served UI 不能替代 hard safety gate evidence 的反向 guard。
-5. 刷新 plugin cache，并用 `cmp` 验证 source/cache 同步。
+6. 刷新 plugin cache，并用 `cmp` 验证 source/cache 同步。
 
 第二批再考虑 JSON/schema/lint 强制，不要在第一批直接破坏现有 business acceptance fixtures。

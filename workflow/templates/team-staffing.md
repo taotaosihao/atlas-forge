@@ -35,6 +35,22 @@ backend: native
 | --- | --- | --- | --- | --- | --- |
 |  |  |  |  |  |  |
 
+## First Code Slice Guard Staffing
+
+| Field | Owner | Evidence |
+| --- | --- | --- |
+| First-code guard classification |  |  |
+| first_code_slice |  |  |
+| first_code_owner |  |  |
+| first_code_verification |  |  |
+| allowed_contract_gate_only_until |  |  |
+| stop_if_no_code_by_phase |  |  |
+| gate_parallelization_or_deferral_plan |  |  |
+
+Contract, scanner, fixture, and evidence-only preparation must stay inside the
+named phase/step budget before the first implementation diff. Hard safety gates
+remain blockers for acceptance and release.
+
 ## Product/UI Gate Staffing
 
 | Field | Owner | Evidence |

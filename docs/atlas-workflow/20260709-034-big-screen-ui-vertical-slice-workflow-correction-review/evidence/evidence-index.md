@@ -26,4 +26,4 @@ date: 2026-07-09
 
 ## Evidence Boundary
 
-This index records durable planning and review evidence for the atlas-workflow correction. It does not claim that Big Screen UI has been implemented.
+This index records durable planning and review evidence for the atlas-workflow correction, including the follow-up first-code-slice concern. It does not claim that Big Screen UI has been implemented.

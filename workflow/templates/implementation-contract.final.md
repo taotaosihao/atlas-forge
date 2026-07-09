@@ -15,6 +15,22 @@ finalized: {{FINALIZED}}
 - Files or surfaces likely affected:
 - User-visible behavior:
 
+## First Code Slice Guard
+
+- First-code guard: required | not_applicable
+- first_code_slice:
+- first_code_owner:
+- first_code_verification:
+- allowed_contract_gate_only_until:
+- stop_if_no_code_by_phase:
+- gate_parallelization_or_deferral_plan:
+- Ordering rule: contract, scanner, fixture, and evidence-only preparation must be bounded before the first implementation diff; it cannot remain the only deliverable after the named stop point.
+- First-code rule: the first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
+- Gate-only non-completion: docs-only artifacts, scanner fixtures, analysis notes, and evidence bundles are not first code slices by themselves. For scanner/tooling tasks, implementing scanner/tool behavior may count; adding fixtures around unchanged behavior does not.
+- Safety rule: hard safety gates remain blockers for acceptance and release; starting a bounded code slice never authorizes skipping, weakening, or backfilling named safety gates.
+- Default stop: if `stop_if_no_code_by_phase` is omitted while this guard is required, stop after at most one preparatory contract/gate-only phase before the first implementation diff and before release, perf, soak, or P0G-style evidence expansion.
+- Not-applicable boundary: pure planning, review, audit, docs-only, non-implementation tasks, and tiny precise fixes whose acceptance path is already obvious.
+
 ## Product/UI Acceptance Gate
 
 - Product/UI gate: required | not_applicable

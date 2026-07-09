@@ -76,6 +76,22 @@ Follow this loop:
    - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
    - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
    - what failure or ambiguity should stop implementation and return to the user
+   - for non-tiny implementation work that could spend early phases on
+     contracts, scanners, fixtures, headless models, research, or evidence
+     before changing the requested behavior, whether `First-code guard` is
+     `required` or `not_applicable`
+   - when `First-code guard` is required, the contract must name
+     `first_code_slice`, `first_code_owner`, `first_code_verification`,
+     `allowed_contract_gate_only_until`, `stop_if_no_code_by_phase`, and
+     `gate_parallelization_or_deferral_plan`
+   - contract, scanner, fixture, and evidence-only preparation must be bounded
+     by phase or step; the first code slice may be fixture-backed, mocked, or
+     in-memory, but it must change the product, runtime, API, CLI, workflow, or
+     contract-owned behavior under test
+   - when `First-code guard` is required and `stop_if_no_code_by_phase` is
+     omitted, implementation should stop after at most one preparatory
+     contract/gate-only phase before the first implementation diff and before
+     release, perf, soak, or P0G-style evidence expansion
    - for non-tiny user-facing product, frontend, dashboard, editor, player,
      browser, GUI, or site work, whether `Product/UI gate` is `required` or
      `not_applicable`

@@ -2,7 +2,7 @@
 
 workflow_id: 20260709-034-big-screen-ui-vertical-slice-workflow-correction-review
 task_id: 20260709-034-big-screen-ui-vertical-slice-workflow-correction-review
-title: Operable UI Vertical Slice Gate for atlas-workflow
+title: First Code Slice and Operable UI Vertical Slice Gates for atlas-workflow
 contract_status: final
 current_authoritative_contract: ./implementation-contract.final.md
 created: 2026-07-09
@@ -11,7 +11,7 @@ advisor_reviewed: 2026-07-09
 
 ## Scope
 
-- Goal: add guidance/template/contract-test support for an `Operable UI Vertical Slice Gate` in `atlas-workflow`.
+- Goal: add guidance/template/contract-test support for `First Code Slice Guard` and `Operable UI Vertical Slice Gate` in `atlas-workflow`.
 - Non-goals:
   - Do not implement Big Screen UI.
   - Do not weaken `no-data-plane-direct`, `no-cloud-runtime`, Provider credential, or browser network hard gates.
@@ -26,7 +26,20 @@ advisor_reviewed: 2026-07-09
   - `workflow/templates/team-staffing.md`
   - optional: `workflow/templates/gate-checklist.md`
   - `workflow/tests/contract.sh`
-- User-visible behavior: future Atlas-guided UI/product tasks must declare whether Product/UI gate is required and cannot treat headless/browser-security evidence as UI/product acceptance.
+- User-visible behavior: future Atlas-guided implementation tasks must bound contract/scanner/evidence-only preparation before the first implementation diff; future UI/product tasks must also declare whether Product/UI gate is required and cannot treat headless/browser-security evidence as UI/product acceptance.
+
+## First Code Slice Guard
+
+- Ordering rule: for non-tiny implementation workflow tasks, contract/scanner/fixture/evidence-only preparation must be bounded before the first implementation diff; it cannot remain the only deliverable after the named stop point.
+- First-code guard: required when non-tiny implementation work could spend early phases on contracts, scanners, fixtures, headless models, research, or evidence before changing the requested behavior.
+- First code slice: must be named before execution when the guard is required.
+- First code verification: must name a command, browser/API/CLI action, or runtime check that proves the first implementation diff changed the requested behavior.
+- Allowed contract/gate-only work until: must be named when preparation precedes code.
+- Stop if no code by phase: if the named phase arrives without a first implementation diff, stop expanding contract/scanner/fixture/evidence-only work and return to clarify/team unless the user explicitly approves continued gate-only work. If omitted while the guard is required, default to stopping after at most one preparatory contract/gate-only phase and before release/perf/soak/P0G-style evidence.
+- Valid thin implementation: may be fixture-backed, mocked, in-memory, or intentionally narrow, but must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
+- Not acceptable as first code slice by itself: docs-only artifacts, scanner fixtures, analysis notes, generated workflow evidence, and evidence bundles.
+- Scanner/tooling exception: implementing scanner/tool behavior can count as the first code slice; adding fixtures or evidence around unchanged scanner/tool behavior cannot.
+- Safety rule: hard safety gates remain blockers for acceptance and release; starting a bounded code slice never authorizes skipping, weakening, or backfilling named safety gates.
 
 ## Product/UI Acceptance Gate
 
@@ -66,6 +79,7 @@ advisor_reviewed: 2026-07-09
 | AC-7 | plugin source and active cache remain synchronized | yes | `codex-refresh-local-plugin atlas-workflow` and `cmp` checks |
 | AC-8 | first patch includes a negative evidence guard for reports that claim UI/product acceptance using only synthetic/headless evidence, without rejecting correctly labeled safety evidence | yes | `rg -q "synthetic|page.setContent|page.route|served URL|browser_entrypoint|safety evidence" workflow/tests/contract.sh` |
 | AC-9 | first patch includes a reverse guard that served UI evidence does not replace required hard safety-gate evidence | yes | `rg -q "hard safety|no-data-plane-direct|no-cloud-runtime|Provider credential" workflow/tests/contract.sh` |
+| AC-10 | first patch includes a first-code guard that bounds contract/scanner/fixture/evidence-only preparation before the first implementation diff | yes | `rg -q "First Code Slice Guard|first_code_slice|allowed_contract_gate_only_until|stop_if_no_code_by_phase" workflow/tests/contract.sh && bash workflow/tests/contract.sh` |
 
 ## Real Validation Plan
 
@@ -85,6 +99,7 @@ advisor_reviewed: 2026-07-09
 - Treat the task as failed when:
   - UI gate weakens safety gates;
   - UI gate is only a suggestion and not represented in contract/staffing/gate templates;
+  - first-code guard is only a suggestion and not represented in contract/staffing/gate templates;
   - headless/browser-security evidence can still be labeled UI/product acceptance without an explicit deferral.
   - served UI evidence can replace missing or stale hard safety-gate evidence.
 - Safe fallback:

@@ -68,6 +68,24 @@ Follow this loop:
     - Required when the task changes user-visible behavior, touches multiple files, changes UI/API/CLI/background-job behavior, or has meaningful edge cases.
     - Tiny precise fixes may skip this when the acceptance path is obvious; say why in the working note or final reply.
     - The contract must name goal, non-goals, acceptance criteria, real validation command or browser/API/CLI action, evidence path, and stop conditions.
+    - For non-tiny implementation work that could spend early phases on
+      contracts, scanners, fixtures, headless models, research, or evidence
+      before changing the requested behavior, classify `First-code guard` as
+      `required` or `not_applicable`.
+    - When `First-code guard` is required, the contract must name
+      `first_code_slice`, `first_code_owner`, `first_code_verification`,
+      `allowed_contract_gate_only_until`, `stop_if_no_code_by_phase`, and
+      `gate_parallelization_or_deferral_plan`.
+    - Contract, scanner, fixture, and evidence-only preparation must be bounded
+      by phase or step. The first code slice may be fixture-backed, mocked, or
+      in-memory, but it must change the product, runtime, API, CLI, workflow, or
+      contract-owned behavior under test. For scanner/tooling tasks,
+      implementing scanner/tool behavior may count; adding fixtures around
+      unchanged behavior does not.
+    - If `First-code guard` is required and `stop_if_no_code_by_phase` is
+      omitted, stop after at most one preparatory contract/gate-only phase before
+      the first implementation diff and before release, perf, soak, or P0G-style
+      evidence expansion.
     - For non-tiny user-facing product, frontend, dashboard, editor, player,
       browser, GUI, or site work, the contract must classify
       `Product/UI gate` as `required` or `not_applicable`.
