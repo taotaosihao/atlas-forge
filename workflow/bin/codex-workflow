@@ -53,9 +53,22 @@ CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME_ROOT/config.toml}"
 CODEX_HOOKS_FILE="${CODEX_HOOKS_FILE:-$CODEX_HOME_ROOT/hooks.json}"
 PASEO_CONFIG_FILE="${PASEO_CONFIG_FILE:-$HOME/.paseo/config.json}"
 ATLAS_SOURCE_SKILLS_DIR="${ATLAS_SOURCE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/atlas-workflow/skills}"
+ATLAS_DOCTOR_STRICT_REQUESTED=false
+if [[ "${1:-}" == "doctor" ]]; then
+  for doctor_argument in "${@:2}"; do
+    if [[ "$doctor_argument" == "--strict" ]]; then
+      ATLAS_DOCTOR_STRICT_REQUESTED=true
+      break
+    fi
+  done
+fi
 if [[ -z "${ATLAS_CACHE_SKILLS_DIR:-}" ]]; then
-  ATLAS_CACHE_SKILLS_DIR="$(find "$CODEX_HOME_ROOT/plugins/cache/atlas-forge/atlas-workflow" -mindepth 2 -maxdepth 2 -type d -name skills 2>/dev/null | sort -V | tail -1 || true)"
-  ATLAS_CACHE_SKILLS_DIR="${ATLAS_CACHE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills}"
+  if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" == true ]]; then
+    ATLAS_CACHE_SKILLS_DIR="$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills"
+  else
+    ATLAS_CACHE_SKILLS_DIR="$(find "$CODEX_HOME_ROOT/plugins/cache/atlas-forge/atlas-workflow" -mindepth 2 -maxdepth 2 -type d -name skills 2>/dev/null | sort -V | tail -1 || true)"
+    ATLAS_CACHE_SKILLS_DIR="${ATLAS_CACHE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills}"
+  fi
 fi
 CODEX_BIN="${CODEX_BIN:-codex}"
 PASEO_BIN="${PASEO_BIN:-paseo}"
@@ -4528,6 +4541,495 @@ PY
   fi
 }
 
+strict_doctor_report() {
+  local output_format="${1:-text}"
+  local usage_error="${2:-}"
+  local marketplace="atlas-forge"
+  local source_plugin_root="$CODEX_HOME_ROOT/plugins/atlas-workflow"
+  local local_cache_plugin_root="$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local"
+  local snapshot_root="$CODEX_HOME_ROOT/.tmp/marketplaces/$marketplace"
+  local release_cache_root="$CODEX_HOME_ROOT/plugins/cache/$marketplace/atlas-workflow"
+  local config_file="$CODEX_HOME_ROOT/config.toml"
+  local hooks_file="$CODEX_HOME_ROOT/hooks.json"
+  local integrity_bin="$SCRIPT_DIR/atlas-plugin-integrity"
+
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$output_format" "$(timestamp_utc)" "$WORKFLOW_ROOT" "$CODEX_HOME_ROOT" "$TASKS_DIR" "$STATE_DIR" "$ARTIFACTS_DIR" "$HOOKS_DIR" "$SOURCE_HOOKS_DIR" "$config_file" "$hooks_file" "$source_plugin_root" "$local_cache_plugin_root" "$snapshot_root" "$release_cache_root" "$marketplace" "$integrity_bin" "$usage_error" <<'PY'
+from pathlib import Path
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tomllib
+
+output_format = sys.argv[1]
+generated_at = sys.argv[2]
+workflow_root = Path(sys.argv[3])
+codex_home = Path(sys.argv[4])
+tasks_dir = Path(sys.argv[5])
+state_dir = Path(sys.argv[6])
+artifacts_dir = Path(sys.argv[7])
+hooks_dir = Path(sys.argv[8])
+source_hooks_dir = Path(sys.argv[9])
+config_file = Path(sys.argv[10])
+hooks_file = Path(sys.argv[11])
+source_plugin_root = Path(sys.argv[12])
+local_cache_plugin_root = Path(sys.argv[13])
+snapshot_root = Path(sys.argv[14])
+release_cache_root = Path(sys.argv[15])
+marketplace = sys.argv[16]
+integrity_bin = Path(sys.argv[17])
+usage_error = sys.argv[18]
+
+STRICT_SECTIONS = (
+    "manifest_compatibility",
+    "source_local_cache",
+    "marketplace_snapshot",
+    "exact_release_cache",
+    "version_collision",
+    "release_downgrade",
+)
+FULL_SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+
+
+def path_info(path: Path) -> dict:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        mode = None
+    except OSError:
+        mode = None
+    return {
+        "path": str(path),
+        "exists": mode is not None,
+        "is_file": mode is not None and stat.S_ISREG(mode),
+        "is_dir": mode is not None and stat.S_ISDIR(mode),
+        "is_symlink": mode is not None and stat.S_ISLNK(mode),
+    }
+
+
+def structured_error(code: str, message: str, **details) -> dict:
+    return {"code": code, "message": message, **details}
+
+
+def not_run_sections(error: dict) -> dict:
+    return {
+        name: {
+            "status": "not_run",
+            "critical": True,
+            "reason": error["message"],
+            "errors": [error],
+        }
+        for name in STRICT_SECTIONS
+    }
+
+
+if usage_error:
+    error = structured_error("CLI_USAGE", usage_error)
+    sections = not_run_sections(error)
+    report = {
+        "schema_version": 1,
+        "tool": "codex-workflow-doctor",
+        "mode": "strict",
+        "strict": True,
+        "ok": False,
+        "strict_ok": False,
+        "strict_failures": list(STRICT_SECTIONS),
+        "generated_at": generated_at,
+        "current_task_id": "",
+        "install": {"status": "not_checked", "strict_relevant": False},
+        "source_cache": {"status": "not_checked", "strict_relevant": False},
+        "hooks_config": {"status": "not_checked", "strict_relevant": False},
+        "hooks_runtime": {"status": "not_checked", "strict_relevant": False},
+        "smoke": {"status": "not_checked", "strict_relevant": False},
+        **sections,
+        "errors": [error],
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    raise SystemExit(2)
+
+
+def safe_config() -> tuple[dict, list[dict]]:
+    errors = []
+    if config_file.is_symlink() or not config_file.is_file():
+        return {}, [structured_error(
+            "CONFIG_MISSING",
+            "strict doctor requires a real CODEX_HOME_ROOT/config.toml",
+            path=str(config_file),
+        )]
+    try:
+        data = tomllib.loads(config_file.read_text(encoding="utf-8"))
+    except Exception as error:
+        return {}, [structured_error(
+            "CONFIG_INVALID",
+            "config.toml is not valid UTF-8 TOML",
+            path=str(config_file),
+            detail=str(error),
+        )]
+    marketplaces = data.get("marketplaces")
+    entry = marketplaces.get(marketplace) if isinstance(marketplaces, dict) else None
+    if not isinstance(entry, dict):
+        errors.append(structured_error(
+            "MARKETPLACE_CONFIG_MISSING",
+            "atlas-forge marketplace config is missing",
+        ))
+        entry = {}
+    source_type = entry.get("source_type")
+    source = entry.get("source")
+    ref = entry.get("ref")
+    revision = entry.get("last_revision")
+    if source_type != "git" or not isinstance(source, str) or not source:
+        errors.append(structured_error(
+            "MARKETPLACE_SOURCE_INVALID",
+            "atlas-forge marketplace must use a non-empty Git source",
+            source_type=source_type,
+        ))
+    if not isinstance(ref, str) or not FULL_SHA.fullmatch(ref):
+        errors.append(structured_error(
+            "MARKETPLACE_REF_INVALID",
+            "marketplace ref must be a full immutable SHA string",
+            ref_type=type(ref).__name__,
+        ))
+    if not isinstance(revision, str) or not FULL_SHA.fullmatch(revision):
+        errors.append(structured_error(
+            "MARKETPLACE_REVISION_INVALID",
+            "marketplace last_revision must be a full immutable SHA string",
+            revision_type=type(revision).__name__,
+        ))
+    if isinstance(ref, str) and isinstance(revision, str) and ref.lower() != revision.lower():
+        errors.append(structured_error(
+            "MARKETPLACE_IDENTITY_MISMATCH",
+            "marketplace ref and last_revision must be identical",
+        ))
+    plugins = data.get("plugins")
+    selector = f"atlas-workflow@{marketplace}"
+    atlas_settings = plugins.get(selector) if isinstance(plugins, dict) else None
+    if not isinstance(atlas_settings, dict) or atlas_settings.get("enabled") is not True:
+        errors.append(structured_error(
+            "ATLAS_PLUGIN_NOT_ENABLED",
+            "strict doctor requires atlas-workflow@atlas-forge enabled=true",
+            selector=selector,
+        ))
+    other_enabled = []
+    if isinstance(plugins, dict):
+        suffix = f"@{marketplace}"
+        for candidate, settings in plugins.items():
+            if (
+                candidate.endswith(suffix)
+                and candidate != selector
+                and isinstance(settings, dict)
+                and settings.get("enabled") is True
+            ):
+                other_enabled.append(candidate)
+    features = data.get("features") if isinstance(data.get("features"), dict) else {}
+    return {
+        "source_type": source_type,
+        "source": source if isinstance(source, str) else "",
+        "ref": ref if isinstance(ref, str) else "",
+        "last_revision": revision if isinstance(revision, str) else "",
+        "atlas_enabled": isinstance(atlas_settings, dict) and atlas_settings.get("enabled") is True,
+        "other_enabled_plugins": sorted(other_enabled),
+        "features_hooks": features.get("hooks", "unset"),
+        "features_codex_hooks": features.get("codex_hooks", "unset"),
+    }, errors
+
+
+def build_source_cache(source_local_section: dict) -> dict:
+    section_status = source_local_section.get("status", "unknown")
+    if section_status == "ok":
+        status = "ok"
+    elif section_status in {"missing", "not_run"}:
+        status = "unknown"
+    else:
+        status = "mismatch"
+    return {
+        "status": status,
+        "source_dir": str(source_plugin_root / "skills"),
+        "cache_dir": str(local_cache_plugin_root / "skills"),
+        "derived_from": "source_local_cache",
+        "critical_status": section_status,
+        "critical_error_count": len(source_local_section.get("errors", [])),
+        "strict_relevant": False,
+    }
+
+
+def build_hooks_config(config: dict, config_errors: list[dict]) -> dict:
+    commands = []
+    hook_error = None
+    hooks_exists = False
+    try:
+        hooks_mode = os.lstat(hooks_file).st_mode
+        hooks_exists = True
+    except FileNotFoundError:
+        hooks_mode = None
+    except OSError as error:
+        hooks_mode = None
+        hook_error = f"hooks.json metadata is unavailable: {error}"
+    if hooks_mode is not None and (stat.S_ISLNK(hooks_mode) or not stat.S_ISREG(hooks_mode)):
+        hook_error = "hooks.json must be a regular file without symbolic links"
+    elif hooks_mode is not None:
+        try:
+            data = json.loads(hooks_file.read_text(encoding="utf-8"))
+            hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+            if isinstance(hooks, dict):
+                for entries in hooks.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        for hook in entry.get("hooks", []) if isinstance(entry, dict) else []:
+                            command = hook.get("command") if isinstance(hook, dict) else None
+                            if command:
+                                commands.append(str(command))
+        except Exception as error:
+            hook_error = str(error)
+    enabled = config.get("features_hooks") is True or config.get("features_codex_hooks") is True
+    target_hooks = path_info(hooks_dir / "pre-tool-use")["is_file"] and path_info(
+        hooks_dir / "post-tool-use"
+    )["is_file"]
+    configured = any("pre-tool-use" in command for command in commands) and any(
+        "post-tool-use" in command for command in commands
+    )
+    if hook_error or config_errors:
+        status = "error"
+    elif enabled and hooks_exists and target_hooks and configured:
+        status = "ok"
+    elif enabled or hooks_exists or target_hooks or configured:
+        status = "partial"
+    else:
+        status = "missing"
+    return {
+        "status": status,
+        "strict_relevant": False,
+        "features.hooks": config.get("features_hooks", "unknown"),
+        "features.codex_hooks": config.get("features_codex_hooks", "unknown"),
+        "hooks_json": path_info(hooks_file),
+        "target_hooks_exist": target_hooks,
+        "source_hooks_exist": path_info(source_hooks_dir / "pre-tool-use")["is_file"]
+        and path_info(source_hooks_dir / "post-tool-use")["is_file"],
+        "commands_configured": configured,
+        "command_count": len(commands),
+        "error": hook_error,
+    }
+
+
+codex_home_text = str(codex_home)
+boundary_errors = []
+try:
+    if not codex_home.is_absolute() or os.path.normpath(codex_home_text) != codex_home_text:
+        raise ValueError("CODEX_HOME_ROOT must be absolute and lexically canonical")
+    if codex_home.is_symlink() or not codex_home.is_dir() or str(codex_home.resolve(strict=True)) != codex_home_text:
+        raise ValueError("CODEX_HOME_ROOT must be a real canonical directory")
+    protected_roots = [
+        Path(os.environ.get("AGENTS_HOME", str(Path(os.environ.get("HOME", "")) / ".agents"))),
+        Path(os.environ.get("LOCAL_BIN_ROOT", str(Path(os.environ.get("HOME", "")) / ".local" / "bin"))),
+    ]
+    for protected in protected_roots:
+        protected_text = str(protected)
+        if not protected.is_absolute():
+            raise ValueError(f"protected ownership root is not absolute: {protected_text}")
+        codex_to_protected = os.path.relpath(protected_text, codex_home_text)
+        protected_to_codex = os.path.relpath(codex_home_text, protected_text)
+        if codex_to_protected == "." or not codex_to_protected.startswith(".." + os.sep) \
+                or not protected_to_codex.startswith(".." + os.sep):
+            raise ValueError(f"CODEX_HOME_ROOT overlaps protected ownership root: {protected_text}")
+except Exception as error:
+    boundary_errors.append(structured_error(
+        "CODEX_HOME_INVALID",
+        "strict doctor rejected CODEX_HOME_ROOT before reading installation state",
+        path=codex_home_text,
+        detail=str(error),
+    ))
+
+if boundary_errors:
+    config, config_errors = {}, boundary_errors
+else:
+    config, config_errors = safe_config()
+expected_commit = config.get("last_revision")
+expected_source = config.get("source")
+if not isinstance(expected_commit, str) or not FULL_SHA.fullmatch(expected_commit):
+    expected_commit = "0" * 40
+if not isinstance(expected_source, str) or not expected_source:
+    expected_source = "invalid://missing-marketplace-source"
+
+command = [
+    str(integrity_bin),
+    "doctor",
+    "--codex-home", str(codex_home),
+    "--source", str(source_plugin_root),
+    "--local-cache", str(local_cache_plugin_root),
+    "--snapshot-root", str(snapshot_root),
+    "--release-cache-root", str(release_cache_root),
+    "--expected-commit", expected_commit,
+    "--expected-source", expected_source,
+    "--marketplace", marketplace,
+]
+helper_envelope_errors = []
+helper_report_errors = []
+helper_exit = 2
+sections = {}
+try:
+    if boundary_errors:
+        raise RuntimeError("CODEX_HOME_ROOT failed strict ownership validation")
+    if integrity_bin.is_symlink() or not integrity_bin.is_file() or not os.access(integrity_bin, os.X_OK):
+        raise RuntimeError("fixed sibling atlas-plugin-integrity is missing or not executable")
+    environment = dict(os.environ)
+    for key in list(environment):
+        if key.startswith("GIT_") or key in {"SSH_AUTH_SOCK", "SSH_ASKPASS"}:
+            environment.pop(key, None)
+    environment["HOME"] = str(codex_home)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_ATTR_NOSYSTEM"] = "1"
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GIT_NO_LAZY_FETCH"] = "1"
+    environment["GIT_CEILING_DIRECTORIES"] = str(codex_home)
+    environment["GIT_ASKPASS"] = "/bin/false"
+    environment["SSH_ASKPASS"] = "/bin/false"
+    environment["GIT_SSH_COMMAND"] = "/bin/false"
+    result = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=environment,
+    )
+    helper_exit = result.returncode
+    helper = json.loads(result.stdout)
+    if (
+        not isinstance(helper, dict)
+        or helper.get("schema_version") != 1
+        or helper.get("tool") != "atlas-plugin-integrity"
+        or helper.get("mode") != "doctor"
+        or not isinstance(helper.get("checks"), dict)
+        or not isinstance(helper.get("ok"), bool)
+        or not isinstance(helper.get("errors"), list)
+    ):
+        raise RuntimeError("atlas-plugin-integrity returned an invalid doctor envelope")
+    for name in STRICT_SECTIONS:
+        section = helper["checks"].get(name)
+        if not isinstance(section, dict) or not isinstance(section.get("status"), str) or not isinstance(section.get("errors"), list):
+            raise RuntimeError(f"atlas-plugin-integrity omitted required section: {name}")
+        sections[name] = {**section, "critical": True}
+    helper_section_failures = [name for name in STRICT_SECTIONS if sections[name].get("status") != "ok"]
+    helper_consistent_ok = not helper_section_failures
+    if (
+        result.returncode not in {0, 1}
+        or helper.get("ok") is not helper_consistent_ok
+        or (result.returncode == 0) is not helper_consistent_ok
+        or (helper_consistent_ok and helper["errors"])
+        or (not helper_consistent_ok and not helper["errors"])
+    ):
+        raise RuntimeError("atlas-plugin-integrity exit code, ok flag, sections, and errors are inconsistent")
+    helper_report_errors = helper["errors"]
+except Exception as error:
+    helper_error = structured_error(
+        "INTEGRITY_HELPER_FAILED",
+        "strict doctor could not obtain a complete integrity report",
+        detail=str(error),
+    )
+    helper_envelope_errors.append(helper_error)
+    sections = not_run_sections(helper_error)
+    helper_exit = 2
+
+if config_errors:
+    marketplace_section = sections["marketplace_snapshot"]
+    marketplace_section["status"] = "invalid"
+    marketplace_section.setdefault("errors", []).extend(config_errors)
+    marketplace_section["config"] = {
+        "path": str(config_file),
+        "source_type": config.get("source_type"),
+        "ref_is_full_sha": isinstance(config.get("ref"), str) and bool(FULL_SHA.fullmatch(config.get("ref", ""))),
+        "revision_is_full_sha": isinstance(config.get("last_revision"), str)
+        and bool(FULL_SHA.fullmatch(config.get("last_revision", ""))),
+        "atlas_enabled": config.get("atlas_enabled", False),
+        "other_enabled_plugins": config.get("other_enabled_plugins", []),
+    }
+
+strict_failures = [name for name in STRICT_SECTIONS if sections[name].get("status") != "ok"]
+strict_ok = not strict_failures
+if helper_exit == 2 or helper_envelope_errors or any(
+    error["code"] in {"CONFIG_MISSING", "CONFIG_INVALID"} for error in config_errors
+):
+    exit_code = 2
+elif strict_ok:
+    exit_code = 0
+else:
+    exit_code = 1
+
+install = {
+    "status": "ok" if codex_home.is_dir() else "missing",
+    "strict_relevant": False,
+    "codex_home": str(codex_home),
+    "workflow_root": path_info(workflow_root),
+    "tasks_dir": path_info(tasks_dir),
+    "state_dir": path_info(state_dir),
+    "artifacts_dir": path_info(artifacts_dir),
+    "codex_login": "not_checked_in_strict_mode",
+    "paseo": "not_checked_in_strict_mode",
+}
+source_cache = build_source_cache(sections["source_local_cache"])
+hooks_config = build_hooks_config(config, config_errors)
+hooks_runtime = {
+    "status": "configured_unproven" if hooks_config["status"] in {"ok", "partial"} else "not_configured",
+    "strict_relevant": False,
+    "proof_event_count": 0,
+    "reason": "strict doctor does not read or mutate active task runtime",
+}
+smoke = {
+    "status": "no_proof",
+    "strict_relevant": False,
+    "reason": "strict doctor does not require or inspect smoke proof",
+}
+report = {
+    "schema_version": 1,
+    "tool": "codex-workflow-doctor",
+    "mode": "strict",
+    "strict": True,
+    "ok": strict_ok,
+    "strict_ok": strict_ok,
+    "strict_failures": strict_failures,
+    "generated_at": generated_at,
+    "current_task_id": "",
+    "install": install,
+    "source_cache": source_cache,
+    "hooks_config": hooks_config,
+    "hooks_runtime": hooks_runtime,
+    "smoke": smoke,
+    **sections,
+    "errors": [*helper_envelope_errors, *helper_report_errors, *config_errors],
+}
+
+if output_format == "json":
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+elif output_format == "text":
+    print(f"generated_at\t{generated_at}")
+    print("strict\ttrue")
+    print(f"strict_ok\t{str(strict_ok).lower()}")
+    print(f"strict_failures\t{json.dumps(strict_failures, ensure_ascii=False)}")
+    for name in ("install", "source_cache", "hooks_config", "hooks_runtime", "smoke", *STRICT_SECTIONS):
+        print(f"[{name}]")
+        print(f"status\t{report[name].get('status', '')}")
+        print(f"details\t{json.dumps(report[name], ensure_ascii=False, sort_keys=True)}")
+else:
+    print(json.dumps({
+        "schema_version": 1,
+        "tool": "codex-workflow-doctor",
+        "mode": "strict",
+        "strict": True,
+        "ok": False,
+        "errors": [structured_error("OUTPUT_FORMAT_INVALID", "invalid doctor output format")],
+        **not_run_sections(structured_error("OUTPUT_FORMAT_INVALID", "invalid doctor output format")),
+    }, ensure_ascii=False, sort_keys=True))
+    exit_code = 2
+
+raise SystemExit(exit_code)
+PY
+}
+
 task_excerpt() {
   local file="$1"
   python3 - "$file" <<'PY'
@@ -6082,10 +6584,15 @@ PY
 }
 
 cmd_doctor() {
-  local current_task_id output_format
+  local current_task_id output_format strict_mode
   output_format="text"
+  strict_mode=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --strict)
+        strict_mode=true
+        shift
+        ;;
       --json)
         output_format="json"
         shift
@@ -6095,11 +6602,19 @@ cmd_doctor() {
         shift
         ;;
       *)
-        echo 'usage: codex-workflow doctor [--json|--text]' >&2
+        if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" == true ]]; then
+          strict_doctor_report json "unknown strict doctor argument: $1"
+          return
+        fi
+        echo 'usage: codex-workflow doctor [--strict] [--json|--text]' >&2
         exit 1
         ;;
     esac
   done
+  if [[ "$strict_mode" == true ]]; then
+    strict_doctor_report "$output_format"
+    return
+  fi
   current_task_id="$(read_current_task_id || true)"
   if [[ -n "$current_task_id" ]]; then
     sync_task_runtime "$current_task_id"
@@ -7475,7 +7990,9 @@ cmd_team_promote() {
 }
 
 main() {
-  ensure_tasks_dir
+  if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" != true ]]; then
+    ensure_tasks_dir
+  fi
 
   case "${1:-}" in
     init-task)

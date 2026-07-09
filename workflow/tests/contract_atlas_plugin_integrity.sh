@@ -167,6 +167,17 @@ invalid_semver="$TMP_ROOT/manifest-invalid-semver"
 write_plugin "$invalid_semver" '01.0.0+codex.fixture' 3 8 x
 run_fail 'manifest rejects non-canonical SemVer' MANIFEST_VERSION_INVALID_SEMVER manifest --plugin-root "$invalid_semver"
 
+wrong_name="$TMP_ROOT/manifest-wrong-name"
+write_plugin "$wrong_name" '1.0.0+codex.fixture' 3 8 x
+node - "$wrong_name/.codex-plugin/plugin.json" <<'NODE'
+const fs = require("fs");
+const file = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+manifest.name = "not-atlas-workflow";
+fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+run_fail 'manifest rejects a non-Atlas plugin name' MANIFEST_NAME_INVALID manifest --plugin-root "$wrong_name"
+
 prompt_alias="$TMP_ROOT/manifest-prompt-alias"
 write_plugin "$prompt_alias" '1.0.0+codex.fixture' 3 8 x
 node - "$prompt_alias/.codex-plugin/plugin.json" <<'NODE'

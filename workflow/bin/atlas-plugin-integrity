@@ -11,6 +11,8 @@ const SCHEMA_VERSION = 1;
 const PLUGIN_PATH = "plugins/atlas-workflow";
 const MANIFEST_RELATIVE_PATH = ".codex-plugin/plugin.json";
 const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+const FULL_GIT_OID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
+const CODEX_BUILD_SEQUENCE = /^codex\.(0|[1-9]\d*)$/;
 
 class IntegrityError extends Error {
   constructor(code, message, details = {}) {
@@ -59,13 +61,26 @@ function parseOptions(mode, argv) {
       required: new Set(["source", "snapshot", "cache", "expected-version"]),
       optional: new Set(["expected-commit"]),
     },
+    doctor: {
+      required: new Set([
+        "codex-home",
+        "source",
+        "local-cache",
+        "snapshot-root",
+        "release-cache-root",
+        "expected-commit",
+        "expected-source",
+        "marketplace",
+      ]),
+      optional: new Set(),
+    },
   };
 
   const definition = modeOptions[mode];
   if (!definition) {
     throw new IntegrityError(
       "CLI_USAGE",
-      "mode must be one of: manifest, release, layout",
+      "mode must be one of: manifest, release, layout, doctor",
       { received_mode: mode || null },
     );
   }
@@ -198,6 +213,14 @@ function inspectManifest(pluginRoot, label) {
     }));
   }
 
+  if (loaded.manifest.name !== "atlas-workflow") {
+    errors.push(makeError("MANIFEST_NAME_INVALID", `${label} manifest name must be atlas-workflow`, {
+      path: loaded.manifestPath,
+      input: label,
+      actual_name: loaded.manifest.name ?? null,
+    }));
+  }
+
   let manifestInterface = null;
   if (!Object.prototype.hasOwnProperty.call(loaded.manifest, "interface")) {
     errors.push(makeError("MANIFEST_INTERFACE_MISSING", `${label} manifest interface must be present`, {
@@ -298,7 +321,27 @@ function inspectManifest(pluginRoot, label) {
 function runGit(repo, args, options = {}) {
   const result = spawnSync("git", ["-C", repo, ...args], {
     encoding: null,
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    env: options.env || { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    input: options.input,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) {
+    throw new IntegrityError("GIT_EXECUTION_FAILED", `git execution failed: ${result.error.message}`);
+  }
+  if (result.status !== 0 && !options.allowFailure) {
+    const stderr = result.stderr ? result.stderr.toString("utf8").trim() : "";
+    throw new IntegrityError("GIT_COMMAND_FAILED", stderr || `git exited with status ${result.status}`, {
+      git_args: args,
+    });
+  }
+  return result;
+}
+
+function runStandaloneGit(args, options = {}) {
+  const result = spawnSync("git", args, {
+    cwd: options.cwd,
+    encoding: null,
+    env: options.env || { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     input: options.input,
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -390,8 +433,8 @@ function canonicalTreeHash(entries, algorithmLabel) {
   };
 }
 
-function gitTreeEntriesAt(repo, commit) {
-  const result = runGit(repo, ["ls-tree", "-r", "-z", "--full-tree", commit, "--", PLUGIN_PATH]);
+function gitTreeEntriesAt(repo, commit, options = {}) {
+  const result = runGit(repo, ["ls-tree", "-r", "-z", "--full-tree", commit, "--", PLUGIN_PATH], options);
   const records = result.stdout.toString("utf8").split("\0").filter(Boolean);
   const prefix = `${PLUGIN_PATH}/`;
   return records.map((record) => {
@@ -410,8 +453,8 @@ function gitTreeEntriesAt(repo, commit) {
   });
 }
 
-function gitTreeHashAt(repo, commit) {
-  return canonicalTreeHash(gitTreeEntriesAt(repo, commit), "git-object-list-sha256-v1");
+function gitTreeHashAt(repo, commit, options = {}) {
+  return canonicalTreeHash(gitTreeEntriesAt(repo, commit, options), "git-object-list-sha256-v1");
 }
 
 function currentGitTreeEntries(repo) {
@@ -842,6 +885,994 @@ function runLayoutMode(options) {
   }, errors);
 }
 
+function parseReleaseVersion(value) {
+  const match = STRICT_SEMVER.exec(value);
+  if (!match) {
+    throw new IntegrityError("INSTALLED_VERSION_INVALID", "installed cache entry is not strict SemVer", {
+      version: value,
+    });
+  }
+  return {
+    raw: value,
+    core: [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])],
+    prerelease: match[4] ? match[4].split(".") : [],
+    build: match[5] || null,
+  };
+}
+
+function comparePrerelease(left, right) {
+  if (left.length === 0 && right.length === 0) return 0;
+  if (left.length === 0) return 1;
+  if (right.length === 0) return -1;
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    const leftItem = left[index];
+    const rightItem = right[index];
+    if (leftItem === rightItem) continue;
+    const leftNumeric = /^\d+$/.test(leftItem);
+    const rightNumeric = /^\d+$/.test(rightItem);
+    if (leftNumeric && rightNumeric) {
+      const leftValue = BigInt(leftItem);
+      const rightValue = BigInt(rightItem);
+      return leftValue > rightValue ? 1 : -1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftItem > rightItem ? 1 : -1;
+  }
+  return Math.sign(left.length - right.length);
+}
+
+function compareReleaseOrder(installedVersion, expectedVersion) {
+  const installed = parseReleaseVersion(installedVersion);
+  const expected = parseReleaseVersion(expectedVersion);
+  for (let index = 0; index < installed.core.length; index += 1) {
+    if (installed.core[index] !== expected.core[index]) {
+      return installed.core[index] > expected.core[index] ? 1 : -1;
+    }
+  }
+  const prerelease = comparePrerelease(installed.prerelease, expected.prerelease);
+  if (prerelease !== 0) return prerelease;
+  if (installedVersion === expectedVersion) return 0;
+  const installedSequence = CODEX_BUILD_SEQUENCE.exec(installed.build || "");
+  const expectedSequence = CODEX_BUILD_SEQUENCE.exec(expected.build || "");
+  if (installedSequence && expectedSequence) {
+    const left = BigInt(installedSequence[1]);
+    const right = BigInt(expectedSequence[1]);
+    return left === right ? 0 : (left > right ? 1 : -1);
+  }
+  throw new IntegrityError(
+    "VERSION_ORDER_UNPROVEN",
+    "equal SemVer precedence with different non-codex build metadata cannot be ordered safely",
+    { installed: installedVersion, expected: expectedVersion },
+  );
+}
+
+function canonicalOwnedPath(rawValue, codexHome, label) {
+  if (!path.isAbsolute(rawValue)) {
+    throw new IntegrityError("PATH_NOT_ABSOLUTE", `${label} must be absolute`, { path: rawValue });
+  }
+  const normalized = path.normalize(rawValue);
+  if (normalized !== rawValue) {
+    throw new IntegrityError("PATH_NOT_CANONICAL", `${label} must be lexically canonical`, { path: rawValue });
+  }
+  const relative = path.relative(codexHome, normalized);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new IntegrityError("PATH_OUTSIDE_CODEX_HOME", `${label} must be a descendant of CODEX_HOME_ROOT`, {
+      path: normalized,
+      codex_home: codexHome,
+    });
+  }
+  let cursor = path.parse(normalized).root;
+  for (const part of normalized.slice(cursor.length).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, part);
+    try {
+      if (fs.lstatSync(cursor).isSymbolicLink()) {
+        throw new IntegrityError("PATH_COMPONENT_SYMLINK_FORBIDDEN", `${label} must not traverse symbolic links`, {
+          path: normalized,
+          symlink_component: cursor,
+        });
+      }
+    } catch (error) {
+      if (error && error.code === "ENOENT") break;
+      throw error;
+    }
+  }
+  return normalized;
+}
+
+function doctorSection(status, checks = {}, errors = []) {
+  return { status, ...checks, errors };
+}
+
+function doctorContainedRegularFile(rootValue, relativeParts, label) {
+  const root = path.resolve(rootValue);
+  let cursor = root;
+  try {
+    const rootStat = fs.lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+      throw new IntegrityError("PATH_NOT_DIRECTORY", `${label} root must be a real directory`, { path: root });
+    }
+    for (let index = 0; index < relativeParts.length; index += 1) {
+      cursor = path.join(cursor, relativeParts[index]);
+      const stat = fs.lstatSync(cursor);
+      if (stat.isSymbolicLink()) {
+        throw new IntegrityError("PATH_COMPONENT_SYMLINK_FORBIDDEN", `${label} must not traverse symbolic links`, {
+          path: cursor,
+        });
+      }
+      const final = index === relativeParts.length - 1;
+      if ((final && !stat.isFile()) || (!final && !stat.isDirectory())) {
+        throw new IntegrityError("PATH_TYPE_INVALID", `${label} has an invalid filesystem type`, { path: cursor });
+      }
+    }
+    const real = fs.realpathSync(cursor);
+    const relative = path.relative(root, real);
+    if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new IntegrityError("PATH_ESCAPE_FORBIDDEN", `${label} must remain inside its plugin root`, {
+        path: cursor,
+        root,
+      });
+    }
+    return { path: cursor, error: null };
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return { path: cursor, error: makeError("PATH_NOT_FOUND", `${label} is missing`, { path: cursor }) };
+    }
+    return { path: cursor, error: errorFrom(error) };
+  }
+}
+
+function doctorRoot(value, label) {
+  const manifestFile = doctorContainedRegularFile(
+    value,
+    [".codex-plugin", "plugin.json"],
+    `${label} manifest`,
+  );
+  if (manifestFile.error) {
+    return {
+      path: path.resolve(value),
+      version: null,
+      name: null,
+      tree: null,
+      integrity: null,
+      errors: [manifestFile.error],
+    };
+  }
+  const inspected = inspectLayoutRoot(value, label);
+  return {
+    path: path.resolve(value),
+    version: inspected.manifest ? inspected.manifest.summary.version : null,
+    name: inspected.manifest ? inspected.manifest.summary.name : null,
+    tree: inspected.tree,
+    integrity: inspected.manifest ? inspected.manifest.summary : null,
+    errors: inspected.errors,
+  };
+}
+
+function readDoctorJsonFile(rootValue, relativeParts, label) {
+  const inspected = doctorContainedRegularFile(rootValue, relativeParts, label);
+  if (inspected.error) {
+    return { value: null, error: inspected.error };
+  }
+  try {
+    return { value: JSON.parse(fs.readFileSync(inspected.path, "utf8")), error: null };
+  } catch (error) {
+    return {
+      value: null,
+      error: makeError("JSON_INVALID", `${label} is not valid UTF-8 JSON`, {
+        path: inspected.path,
+        detail: error.message,
+      }),
+    };
+  }
+}
+
+function missingDoctorRoot(root) {
+  return root.errors.some((error) => ["PATH_NOT_FOUND", "MANIFEST_MISSING"].includes(error.code));
+}
+
+function identityErrors(source, target, prefix) {
+  const errors = [...source.errors, ...target.errors];
+  if (source.version !== null && target.version !== null && source.version !== target.version) {
+    errors.push(makeError(`${prefix}_VERSION_MISMATCH`, "Atlas plugin versions do not match", {
+      source_version: source.version,
+      target_version: target.version,
+    }));
+  }
+  if (source.tree && target.tree && source.tree.value !== target.tree.value) {
+    errors.push(makeError(`${prefix}_TREE_MISMATCH`, "Atlas plugin trees do not match", {
+      source_tree: source.tree.value,
+      target_tree: target.tree.value,
+    }));
+  }
+  return errors;
+}
+
+function doctorGitEnvironment(codexHome) {
+  return {
+    PATH: process.env.PATH || "/usr/bin:/bin",
+    HOME: codexHome,
+    LANG: "C",
+    LC_ALL: "C",
+    TZ: "UTC",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_ATTR_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_NO_LAZY_FETCH: "1",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_CEILING_DIRECTORIES: codexHome,
+    GIT_LITERAL_PATHSPECS: "1",
+    GIT_PAGER: "/bin/cat",
+    PAGER: "/bin/cat",
+    GIT_ASKPASS: "/bin/false",
+    SSH_ASKPASS: "/bin/false",
+    GIT_SSH_COMMAND: "/bin/false",
+    GIT_CONFIG_COUNT: "5",
+    GIT_CONFIG_KEY_0: "core.hooksPath",
+    GIT_CONFIG_VALUE_0: "/dev/null",
+    GIT_CONFIG_KEY_1: "core.fsmonitor",
+    GIT_CONFIG_VALUE_1: "false",
+    GIT_CONFIG_KEY_2: "maintenance.auto",
+    GIT_CONFIG_VALUE_2: "false",
+    GIT_CONFIG_KEY_3: "core.excludesFile",
+    GIT_CONFIG_VALUE_3: "/dev/null",
+    GIT_CONFIG_KEY_4: "core.attributesFile",
+    GIT_CONFIG_VALUE_4: "/dev/null",
+  };
+}
+
+function snapshotConfigKeyAllowed(key) {
+  const exact = new Set([
+    "core.repositoryformatversion",
+    "core.filemode",
+    "core.bare",
+    "core.logallrefupdates",
+    "core.symlinks",
+    "core.ignorecase",
+    "core.precomposeunicode",
+    "extensions.objectformat",
+    "extensions.compatobjectformat",
+    "extensions.refstorage",
+  ]);
+  return exact.has(key)
+    || /^remote\..+\.(?:url|fetch)$/.test(key)
+    || /^branch\..+\.(?:remote|merge)$/.test(key);
+}
+
+function inspectSnapshotGitConfig(configPath, codexHome, gitEnvironment) {
+  const list = runStandaloneGit([
+    "config",
+    "--no-includes",
+    "--file",
+    configPath,
+    "--null",
+    "--name-only",
+    "--list",
+  ], {
+    allowFailure: true,
+    cwd: codexHome,
+    env: gitEnvironment,
+  });
+  if (list.status !== 0) {
+    return {
+      originUrls: [],
+      errors: [makeError(
+        "SNAPSHOT_GIT_CONFIG_INVALID",
+        "snapshot Git config could not be parsed without following includes",
+      )],
+    };
+  }
+
+  const keys = list.stdout.toString("utf8").split("\0").filter(Boolean)
+    .map((key) => key.toLowerCase());
+  const forbiddenKeys = [...new Set(keys.filter((key) => !snapshotConfigKeyAllowed(key)))].sort(compareUtf8);
+  if (forbiddenKeys.length > 0) {
+    return {
+      originUrls: [],
+      errors: [makeError(
+        "SNAPSHOT_GIT_CONFIG_UNSAFE",
+        "snapshot Git config contains settings outside the strict read-only allowlist",
+        { forbidden_keys: forbiddenKeys },
+      )],
+    };
+  }
+
+  const origins = runStandaloneGit([
+    "config",
+    "--no-includes",
+    "--file",
+    configPath,
+    "--null",
+    "--get-all",
+    "remote.origin.url",
+  ], {
+    allowFailure: true,
+    cwd: codexHome,
+    env: gitEnvironment,
+  });
+  return {
+    originUrls: origins.status === 0
+      ? origins.stdout.toString("utf8").split("\0").filter(Boolean)
+      : [],
+    errors: [],
+  };
+}
+
+function hashSnapshotBlob(content, objectIdLength) {
+  const algorithm = objectIdLength === 64 ? "sha256" : "sha1";
+  const header = Buffer.from(`blob ${content.length}\0`, "utf8");
+  return crypto.createHash(algorithm).update(header).update(content).digest("hex");
+}
+
+function snapshotFilesystemGitEntries(pluginRoot, objectIdLength) {
+  const entries = [];
+  function visit(directory, relativeDirectory) {
+    for (const name of fs.readdirSync(directory).sort(compareUtf8)) {
+      const absolutePath = path.join(directory, name);
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${name}` : name;
+      const stat = fs.lstatSync(absolutePath);
+      if (name === ".git") {
+        throw new IntegrityError(
+          "SNAPSHOT_NESTED_GIT_METADATA_FORBIDDEN",
+          "snapshot Atlas tree must not contain nested Git metadata",
+          { path: absolutePath },
+        );
+      }
+      if (stat.isDirectory()) {
+        visit(absolutePath, relativePath);
+        continue;
+      }
+
+      let mode;
+      let content;
+      if (stat.isSymbolicLink()) {
+        mode = "120000";
+        content = Buffer.from(fs.readlinkSync(absolutePath), "utf8");
+      } else if (stat.isFile()) {
+        mode = stat.mode & 0o111 ? "100755" : "100644";
+        content = fs.readFileSync(absolutePath);
+      } else {
+        throw new IntegrityError("TREE_UNSUPPORTED_ENTRY", "snapshot Atlas tree contains an unsupported entry", {
+          path: absolutePath,
+        });
+      }
+      entries.push({
+        mode,
+        oid: hashSnapshotBlob(content, objectIdLength),
+        path: relativePath,
+      });
+    }
+  }
+  visit(pluginRoot, "");
+  return entries;
+}
+
+function snapshotTreeBindingErrors(snapshotRoot, pluginRoot, expectedCommit, gitEnvironment) {
+  try {
+    const committedEntries = gitTreeEntriesAt(snapshotRoot, expectedCommit, { env: gitEnvironment });
+    const gitlinks = committedEntries.filter((entry) => entry.mode === "160000").map((entry) => entry.path);
+    if (gitlinks.length > 0) {
+      return [makeError(
+        "SNAPSHOT_GITLINK_FORBIDDEN",
+        "snapshot Atlas tree must not contain Git links",
+        { paths: gitlinks },
+      )];
+    }
+    const committed = canonicalTreeHash(committedEntries, "git-object-list-sha256-v1");
+    const filesystem = canonicalTreeHash(
+      snapshotFilesystemGitEntries(pluginRoot, expectedCommit.length),
+      "git-object-list-sha256-v1",
+    );
+    if (committed.value !== filesystem.value) {
+      return [makeError(
+        "SNAPSHOT_HEAD_TREE_MISMATCH",
+        "snapshot Atlas filesystem tree does not exactly match the configured commit",
+        { committed_tree: committed.value, filesystem_tree: filesystem.value },
+      )];
+    }
+    return [];
+  } catch (error) {
+    return [errorFrom(error)];
+  }
+}
+
+function snapshotFileBindingErrors(snapshotRoot, expectedCommit, relativePath, gitEnvironment) {
+  try {
+    const committed = runGit(snapshotRoot, [
+      "ls-tree",
+      "-z",
+      "--full-tree",
+      expectedCommit,
+      "--",
+      relativePath,
+    ], { env: gitEnvironment });
+    const records = committed.stdout.toString("utf8").split("\0").filter(Boolean);
+    if (records.length !== 1) {
+      throw new IntegrityError(
+        "SNAPSHOT_COMMITTED_FILE_MISSING",
+        "configured commit must contain exactly one canonical marketplace file",
+        { path: relativePath },
+      );
+    }
+    const match = /^(\d+) ([^ ]+) ([0-9a-f]+)\t([\s\S]+)$/.exec(records[0]);
+    if (!match || match[4] !== relativePath || match[2] !== "blob") {
+      throw new IntegrityError("SNAPSHOT_COMMITTED_FILE_INVALID", "configured marketplace entry is not a blob", {
+        path: relativePath,
+      });
+    }
+    const absolutePath = path.join(snapshotRoot, ...relativePath.split("/"));
+    const stat = fs.lstatSync(absolutePath);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new IntegrityError("SNAPSHOT_FILE_INVALID", "snapshot marketplace file must be a regular file", {
+        path: absolutePath,
+      });
+    }
+    const mode = stat.mode & 0o111 ? "100755" : "100644";
+    const oid = hashSnapshotBlob(fs.readFileSync(absolutePath), expectedCommit.length);
+    if (mode !== match[1] || oid !== match[3]) {
+      return [makeError(
+        "SNAPSHOT_MARKETPLACE_HEAD_MISMATCH",
+        "snapshot marketplace file does not exactly match the configured commit",
+        { path: relativePath },
+      )];
+    }
+    return [];
+  } catch (error) {
+    return [errorFrom(error)];
+  }
+}
+
+function findMetadataSymlinks(root) {
+  const symlinks = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const directory = stack.pop();
+    for (const name of fs.readdirSync(directory)) {
+      const candidate = path.join(directory, name);
+      const stat = fs.lstatSync(candidate);
+      if (stat.isSymbolicLink()) {
+        symlinks.push(candidate);
+      } else if (stat.isDirectory()) {
+        stack.push(candidate);
+      }
+    }
+  }
+  return symlinks.sort(compareUtf8);
+}
+
+function snapshotDoctorErrors(
+  snapshotRoot,
+  snapshotPlugin,
+  expectedCommit,
+  expectedSource,
+  marketplaceName,
+  codexHome,
+  gitEnvironment,
+) {
+  const errors = [];
+  const gitMetadata = path.join(snapshotRoot, ".git");
+  let ownsGitMetadata = false;
+  let originUrls = [];
+  try {
+    const metadataStat = fs.lstatSync(gitMetadata);
+    if (metadataStat.isSymbolicLink() || !metadataStat.isDirectory()) {
+      errors.push(makeError("SNAPSHOT_GIT_METADATA_INVALID", "marketplace snapshot must own a real .git directory", {
+        path: gitMetadata,
+      }));
+    } else {
+      ownsGitMetadata = true;
+    }
+  } catch (error) {
+    errors.push(makeError("SNAPSHOT_GIT_METADATA_INVALID", "marketplace snapshot .git directory is missing", {
+      path: gitMetadata,
+    }));
+  }
+  if (ownsGitMetadata) {
+    try {
+      const metadataSymlinks = findMetadataSymlinks(gitMetadata);
+      if (metadataSymlinks.length > 0) {
+        errors.push(makeError(
+          "SNAPSHOT_GIT_METADATA_SYMLINK_FORBIDDEN",
+          "snapshot Git metadata must not contain symbolic links",
+          { paths: metadataSymlinks },
+        ));
+        ownsGitMetadata = false;
+      }
+    } catch (error) {
+      errors.push(makeError(
+        "SNAPSHOT_GIT_METADATA_INVALID",
+        "snapshot Git metadata could not be inspected safely",
+        { detail: error.message },
+      ));
+      ownsGitMetadata = false;
+    }
+  }
+  if (ownsGitMetadata) {
+    const gitConfig = doctorContainedRegularFile(snapshotRoot, [".git", "config"], "snapshot Git config");
+    const gitHead = doctorContainedRegularFile(snapshotRoot, [".git", "HEAD"], "snapshot Git HEAD");
+    for (const inspected of [gitConfig, gitHead]) {
+      if (inspected.error) {
+        errors.push(inspected.error);
+        ownsGitMetadata = false;
+      }
+    }
+    const objectsPath = path.join(gitMetadata, "objects");
+    try {
+      const objectsStat = fs.lstatSync(objectsPath);
+      if (objectsStat.isSymbolicLink() || !objectsStat.isDirectory()) {
+        throw new Error("objects path is not a real directory");
+      }
+    } catch (error) {
+      errors.push(makeError("SNAPSHOT_GIT_METADATA_INVALID", "snapshot Git objects path must be a real directory", {
+        path: objectsPath,
+      }));
+      ownsGitMetadata = false;
+    }
+  }
+  if (ownsGitMetadata) {
+    const configInspection = inspectSnapshotGitConfig(
+      path.join(gitMetadata, "config"),
+      codexHome,
+      gitEnvironment,
+    );
+    errors.push(...configInspection.errors);
+    originUrls = configInspection.originUrls;
+    if (configInspection.errors.length > 0) {
+      ownsGitMetadata = false;
+    }
+    for (const relative of [
+      ["commondir"],
+      ["config.worktree"],
+      ["objects", "info", "alternates"],
+      ["objects", "info", "http-alternates"],
+      ["info", "grafts"],
+      ["refs", "replace"],
+    ]) {
+      const candidate = path.join(gitMetadata, ...relative);
+      if (fs.existsSync(candidate)) {
+        errors.push(makeError(
+          "SNAPSHOT_GIT_EXTERNAL_REFERENCE_FORBIDDEN",
+          "snapshot Git metadata must not use external object or worktree references",
+          { path: candidate },
+        ));
+        ownsGitMetadata = false;
+      }
+    }
+    const packedRefs = path.join(gitMetadata, "packed-refs");
+    if (fs.existsSync(packedRefs)) {
+      try {
+        const packed = fs.readFileSync(packedRefs, "utf8");
+        if (/(?:^|\n)[0-9a-f]+ refs\/replace\//i.test(packed)) {
+          errors.push(makeError(
+            "SNAPSHOT_GIT_REPLACE_REF_FORBIDDEN",
+            "snapshot Git metadata must not contain packed replacement refs",
+          ));
+          ownsGitMetadata = false;
+        }
+      } catch (error) {
+        errors.push(makeError(
+          "SNAPSHOT_GIT_METADATA_INVALID",
+          "snapshot packed refs could not be inspected safely",
+        ));
+        ownsGitMetadata = false;
+      }
+    }
+  }
+
+  if (ownsGitMetadata) {
+    const top = gitText(snapshotRoot, ["rev-parse", "--show-toplevel"], {
+      allowFailure: true,
+      env: gitEnvironment,
+    });
+    if (top.status !== 0 || path.resolve(top.stdout.trim() || path.sep) !== snapshotRoot) {
+      errors.push(makeError("SNAPSHOT_GIT_ROOT_MISMATCH", "marketplace snapshot must be its own Git worktree root", {
+        expected: snapshotRoot,
+        actual: top.stdout.trim() || null,
+      }));
+      ownsGitMetadata = false;
+    }
+  }
+  if (ownsGitMetadata) {
+    const head = gitText(snapshotRoot, ["rev-parse", "HEAD"], { allowFailure: true, env: gitEnvironment });
+    const actualCommit = head.status === 0 ? head.stdout.trim().toLowerCase() : null;
+    if (actualCommit !== expectedCommit.toLowerCase()) {
+      errors.push(makeError("SNAPSHOT_COMMIT_MISMATCH", "snapshot HEAD does not match configured revision", {
+        expected_commit: expectedCommit,
+        actual_commit: actualCommit,
+      }));
+    }
+    errors.push(...snapshotTreeBindingErrors(snapshotRoot, snapshotPlugin, expectedCommit, gitEnvironment));
+    errors.push(...snapshotFileBindingErrors(
+      snapshotRoot,
+      expectedCommit,
+      ".agents/plugins/marketplace.json",
+      gitEnvironment,
+    ));
+    if (originUrls.length !== 1 || originUrls[0] !== expectedSource) {
+      errors.push(makeError(
+        "SNAPSHOT_ORIGIN_MISMATCH",
+        "snapshot origin must exactly match the configured marketplace source",
+        { configured_source_matches_origin: false, origin_count: originUrls.length },
+      ));
+    }
+  }
+
+  const sidecarResult = readDoctorJsonFile(
+    snapshotRoot,
+    [".codex-marketplace-install.json"],
+    "marketplace sidecar",
+  );
+  if (sidecarResult.error) {
+    errors.push(sidecarResult.error);
+  } else {
+    const sidecar = sidecarResult.value;
+    const expected = {
+      source_type: "git",
+      source: expectedSource,
+      ref_name: expectedCommit,
+      revision: expectedCommit,
+      sparse_paths: [],
+    };
+    const mismatches = {};
+    for (const [key, expectedValue] of Object.entries(expected)) {
+      if (JSON.stringify(sidecar[key]) !== JSON.stringify(expectedValue)) {
+        mismatches[key] = key === "source"
+          ? { matches_configured_source: false }
+          : { expected: expectedValue, actual: sidecar[key] ?? null };
+      }
+    }
+    if (Object.keys(mismatches).length > 0) {
+      errors.push(makeError("SIDECAR_MISMATCH", "marketplace sidecar does not match configured release identity", {
+        mismatches,
+      }));
+    }
+  }
+
+  const marketplacePath = path.join(snapshotRoot, ".agents", "plugins", "marketplace.json");
+  const marketplaceResult = readDoctorJsonFile(
+    snapshotRoot,
+    [".agents", "plugins", "marketplace.json"],
+    "snapshot marketplace",
+  );
+  if (marketplaceResult.error) {
+    errors.push(marketplaceResult.error);
+  } else {
+    const marketplace = marketplaceResult.value;
+    const plugins = marketplace && Array.isArray(marketplace.plugins) ? marketplace.plugins : [];
+    const atlasEntries = plugins.filter((item) => item && item.name === "atlas-workflow");
+    const atlas = atlasEntries.length === 1 ? atlasEntries[0] : null;
+    const source = atlas && atlas.source;
+    if (
+      !marketplace
+      || marketplace.name !== marketplaceName
+      || !atlas
+      || atlas.name !== "atlas-workflow"
+      || !source
+      || source.source !== "local"
+      || source.path !== "./plugins/atlas-workflow"
+    ) {
+      errors.push(makeError("MARKETPLACE_CONTRACT_INVALID", "snapshot marketplace must contain one canonical local Atlas entry", {
+        path: marketplacePath,
+        marketplace: marketplace && marketplace.name ? marketplace.name : null,
+        atlas_entry_count: atlasEntries.length,
+      }));
+    }
+  }
+
+  try {
+    const pluginStat = fs.lstatSync(snapshotPlugin);
+    if (pluginStat.isSymbolicLink() || !pluginStat.isDirectory()) {
+      errors.push(makeError("SNAPSHOT_PLUGIN_INVALID", "snapshot Atlas plugin must be a real directory", {
+        path: snapshotPlugin,
+      }));
+    }
+  } catch (error) {
+    errors.push(makeError("SNAPSHOT_PLUGIN_INVALID", "snapshot Atlas plugin is missing", {
+      path: snapshotPlugin,
+    }));
+  }
+  const nestedPluginGit = path.join(snapshotPlugin, ".git");
+  if (fs.existsSync(nestedPluginGit) || (() => {
+    try {
+      return fs.lstatSync(nestedPluginGit).isSymbolicLink();
+    } catch (error) {
+      return false;
+    }
+  })()) {
+    errors.push(makeError(
+      "SNAPSHOT_PLUGIN_GIT_METADATA_FORBIDDEN",
+      "snapshot Atlas plugin must not contain nested Git metadata",
+      { path: nestedPluginGit },
+    ));
+  }
+  return errors;
+}
+
+function runDoctorMode(options) {
+  const sectionNames = [
+    "manifest_compatibility",
+    "source_local_cache",
+    "marketplace_snapshot",
+    "exact_release_cache",
+    "version_collision",
+    "release_downgrade",
+  ];
+  const checks = Object.fromEntries(sectionNames.map((name) => [
+    name,
+    doctorSection("not_run", {}, [makeError("DOCTOR_NOT_RUN", "section was not evaluated")]),
+  ]));
+
+  let codexHome;
+  let sourcePath;
+  let localCachePath;
+  let snapshotRoot;
+  let releaseCacheRoot;
+  let snapshotPlugin;
+  try {
+    if (!path.isAbsolute(options["codex-home"]) || path.normalize(options["codex-home"]) !== options["codex-home"]) {
+      throw new IntegrityError("CODEX_HOME_INVALID", "CODEX_HOME_ROOT must be absolute and lexically canonical", {
+        path: options["codex-home"],
+      });
+    }
+    codexHome = options["codex-home"];
+    const codexStat = fs.lstatSync(codexHome);
+    if (codexStat.isSymbolicLink() || !codexStat.isDirectory() || fs.realpathSync(codexHome) !== codexHome) {
+      throw new IntegrityError("CODEX_HOME_INVALID", "CODEX_HOME_ROOT must be a real directory", { path: codexHome });
+    }
+    sourcePath = canonicalOwnedPath(options.source, codexHome, "source plugin");
+    localCachePath = canonicalOwnedPath(options["local-cache"], codexHome, "local Atlas cache");
+    snapshotRoot = canonicalOwnedPath(options["snapshot-root"], codexHome, "marketplace snapshot");
+    releaseCacheRoot = canonicalOwnedPath(options["release-cache-root"], codexHome, "release cache root");
+    snapshotPlugin = canonicalOwnedPath(path.join(snapshotRoot, PLUGIN_PATH), codexHome, "snapshot Atlas plugin");
+    if (!FULL_GIT_OID.test(options["expected-commit"])) {
+      throw new IntegrityError("EXPECTED_COMMIT_INVALID", "expected commit must be a full 40 or 64 digit SHA", {
+        expected_commit: options["expected-commit"],
+      });
+    }
+    if (typeof options["expected-source"] !== "string" || options["expected-source"].length === 0) {
+      throw new IntegrityError("EXPECTED_SOURCE_INVALID", "expected marketplace source must be non-empty");
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(options.marketplace)) {
+      throw new IntegrityError("MARKETPLACE_NAME_INVALID", "marketplace must be a safe path segment", {
+        marketplace: options.marketplace,
+      });
+    }
+    const distinctRoots = [sourcePath, localCachePath, snapshotPlugin, releaseCacheRoot];
+    for (let left = 0; left < distinctRoots.length; left += 1) {
+      for (let right = left + 1; right < distinctRoots.length; right += 1) {
+        const relative = path.relative(distinctRoots[left], distinctRoots[right]);
+        const reverse = path.relative(distinctRoots[right], distinctRoots[left]);
+        const overlaps = relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+          || (!reverse.startsWith(`..${path.sep}`) && reverse !== ".." && !path.isAbsolute(reverse));
+        if (overlaps) {
+          throw new IntegrityError("DOCTOR_ROOT_OVERLAP", "doctor plugin roots must not overlap", {
+            left: distinctRoots[left],
+            right: distinctRoots[right],
+          });
+        }
+      }
+    }
+  } catch (error) {
+    const structured = errorFrom(error);
+    for (const name of sectionNames) {
+      checks[name] = doctorSection("invalid", {}, [structured]);
+    }
+    emit("doctor", checks, [structured], 2);
+    return;
+  }
+
+  const source = doctorRoot(sourcePath, "source");
+  const sourceStatus = source.errors.length === 0 ? "ok" : (missingDoctorRoot(source) ? "missing" : "invalid");
+  checks.manifest_compatibility = doctorSection(sourceStatus, {
+    source_root: source.path,
+    name: source.name,
+    version: source.version,
+    tree: source.tree,
+    integrity: source.integrity,
+  }, source.errors);
+
+  const localCache = doctorRoot(localCachePath, "local-cache");
+  const localErrors = identityErrors(source, localCache, "SOURCE_LOCAL_CACHE");
+  checks.source_local_cache = doctorSection(
+    localErrors.length === 0 ? "ok" : (missingDoctorRoot(localCache) ? "missing" : "mismatch"),
+    {
+      source_root: source.path,
+      local_cache_root: localCache.path,
+      source_version: source.version,
+      cache_version: localCache.version,
+      source_tree: source.tree,
+      cache_tree: localCache.tree,
+    },
+    localErrors,
+  );
+
+  const snapshot = doctorRoot(snapshotPlugin, "snapshot");
+  const snapshotErrors = [
+    ...identityErrors(source, snapshot, "MARKETPLACE_SNAPSHOT"),
+    ...snapshotDoctorErrors(
+      snapshotRoot,
+      snapshotPlugin,
+      options["expected-commit"],
+      options["expected-source"],
+      options.marketplace,
+      codexHome,
+      doctorGitEnvironment(codexHome),
+    ),
+  ];
+  checks.marketplace_snapshot = doctorSection(
+    snapshotErrors.length === 0 ? "ok" : (missingDoctorRoot(snapshot) ? "missing" : "mismatch"),
+    {
+      snapshot_root: snapshotRoot,
+      plugin_root: snapshot.path,
+      expected_commit: options["expected-commit"],
+      source_version: source.version,
+      snapshot_version: snapshot.version,
+      source_tree: source.tree,
+      snapshot_tree: snapshot.tree,
+    },
+    snapshotErrors,
+  );
+
+  const exactPath = source.version && STRICT_SEMVER.test(source.version)
+    ? path.join(releaseCacheRoot, source.version)
+    : path.join(releaseCacheRoot, "__invalid_source_version__");
+  let exact;
+  try {
+    canonicalOwnedPath(exactPath, codexHome, "exact release cache");
+    exact = doctorRoot(exactPath, "cache");
+  } catch (error) {
+    exact = {
+      path: exactPath,
+      version: null,
+      name: null,
+      tree: null,
+      integrity: null,
+      errors: [errorFrom(error)],
+    };
+  }
+  const exactErrors = [
+    ...identityErrors(source, exact, "EXACT_RELEASE_CACHE"),
+    ...identityErrors(snapshot, exact, "EXACT_RELEASE_SNAPSHOT"),
+  ];
+  checks.exact_release_cache = doctorSection(
+    exactErrors.length === 0 ? "ok" : (missingDoctorRoot(exact) ? "missing" : "mismatch"),
+    {
+      expected_version: source.version,
+      path: exact.path,
+      present: fs.existsSync(exactPath),
+      source_tree: source.tree,
+      snapshot_tree: snapshot.tree,
+      cache_tree: exact.tree,
+      cache_version: exact.version,
+    },
+    exactErrors,
+  );
+
+  const versionAssociations = new Map();
+  function addVersionAssociation(label, root) {
+    if (!root.version || !root.tree) return;
+    if (!versionAssociations.has(root.version)) versionAssociations.set(root.version, []);
+    versionAssociations.get(root.version).push({ label, tree: root.tree.value });
+  }
+  addVersionAssociation("source", source);
+  addVersionAssociation("local-cache", localCache);
+  addVersionAssociation("snapshot", snapshot);
+  addVersionAssociation("exact-release-cache", exact);
+
+  const installedVersions = [];
+  const downgradeErrors = [];
+  const newerVersions = [];
+  if (!source.version || !STRICT_SEMVER.test(source.version)) {
+    downgradeErrors.push(makeError("EXPECTED_VERSION_INVALID", "source manifest version is unavailable or invalid", {
+      expected_version: source.version,
+    }));
+  } else if (fs.existsSync(releaseCacheRoot)) {
+    let entries = [];
+    try {
+      const rootStat = fs.lstatSync(releaseCacheRoot);
+      if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+        downgradeErrors.push(makeError("RELEASE_CACHE_ROOT_INVALID", "release cache root must be a real directory", {
+          path: releaseCacheRoot,
+        }));
+      } else {
+        entries = fs.readdirSync(releaseCacheRoot, { withFileTypes: true })
+          .sort((left, right) => compareUtf8(left.name, right.name));
+      }
+    } catch (error) {
+      downgradeErrors.push(errorFrom(error));
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(releaseCacheRoot, entry.name);
+      if (entry.name === "latest") {
+        downgradeErrors.push(makeError("LATEST_FALLBACK_FORBIDDEN", "latest release cache entry is forbidden", {
+          path: entryPath,
+        }));
+        continue;
+      }
+      let entryStat;
+      try {
+        entryStat = fs.lstatSync(entryPath);
+      } catch (error) {
+        downgradeErrors.push(errorFrom(error));
+        continue;
+      }
+      if (entryStat.isSymbolicLink() || !entryStat.isDirectory()) {
+        downgradeErrors.push(makeError("INSTALLED_CACHE_ENTRY_INVALID", "installed cache entry must be a real directory", {
+          path: entryPath,
+        }));
+        continue;
+      }
+      let relation;
+      try {
+        parseReleaseVersion(entry.name);
+        const installed = doctorRoot(entryPath, "installed-cache");
+        if (installed.errors.length > 0) {
+          downgradeErrors.push(makeError("INSTALLED_CACHE_MANIFEST_INVALID", "installed cache manifest is invalid", {
+            path: entryPath,
+            causes: installed.errors,
+          }));
+          continue;
+        }
+        if (installed.version !== entry.name) {
+          downgradeErrors.push(makeError("INSTALLED_CACHE_VERSION_MISMATCH", "cache directory name must equal manifest version", {
+            path: entryPath,
+            directory_version: entry.name,
+            manifest_version: installed.version,
+          }));
+          continue;
+        }
+        addVersionAssociation(`release-cache:${entry.name}`, installed);
+        relation = compareReleaseOrder(entry.name, source.version);
+        installedVersions.push({ version: entry.name, relation_to_expected: relation });
+        if (relation > 0) newerVersions.push(entry.name);
+      } catch (error) {
+        downgradeErrors.push(errorFrom(error));
+      }
+    }
+  }
+  if (newerVersions.length > 0) {
+    downgradeErrors.push(makeError("RELEASE_DOWNGRADE", "newer installed Atlas versions would be downgraded", {
+      expected_version: source.version,
+      newer_versions: newerVersions,
+    }));
+  }
+  checks.release_downgrade = doctorSection(
+    downgradeErrors.length === 0 ? "ok" : (newerVersions.length > 0 ? "downgrade" : "invalid"),
+    {
+      expected_version: source.version,
+      installed_versions: installedVersions,
+      newer_versions: newerVersions,
+    },
+    downgradeErrors,
+  );
+
+  const collisionErrors = [];
+  const versions = [...versionAssociations.entries()].map(([version, associations]) => {
+    const treeHashes = [...new Set(associations.map((association) => association.tree))];
+    if (treeHashes.length > 1) {
+      collisionErrors.push(makeError("VERSION_TREE_COLLISION", "one Atlas version is associated with multiple installed trees", {
+        version,
+        tree_hashes: treeHashes,
+        roots: associations,
+      }));
+    }
+    return { version, roots: associations, tree_hashes: treeHashes };
+  });
+  checks.version_collision = doctorSection(collisionErrors.length === 0 ? "ok" : "collision", {
+    versions,
+    detected: collisionErrors.length > 0,
+  }, collisionErrors);
+
+  const failingSections = sectionNames.filter((name) => checks[name].status !== "ok");
+  const errors = failingSections.map((name) => makeError("DOCTOR_SECTION_FAILED", `doctor section failed: ${name}`, {
+    section: name,
+    status: checks[name].status,
+  }));
+  emit("doctor", checks, errors);
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const mode = argv.shift() || null;
@@ -851,8 +1882,10 @@ function main() {
       runManifestMode(options);
     } else if (mode === "release") {
       runReleaseMode(options);
-    } else {
+    } else if (mode === "layout") {
       runLayoutMode(options);
+    } else {
+      runDoctorMode(options);
     }
   } catch (error) {
     emit(mode, {}, [errorFrom(error)], error instanceof IntegrityError && error.code === "CLI_USAGE" ? 2 : 1);

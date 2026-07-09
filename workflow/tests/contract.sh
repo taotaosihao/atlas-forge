@@ -52,6 +52,10 @@ bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
 bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
 pass "atlas plugin integrity contract"
 
+bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
+bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_doctor.sh"
+pass "atlas strict doctor contract"
+
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"
 expect_fail "done without verification" "$BIN" done "$done_id"
