@@ -2,64 +2,478 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CODEX_HOME_ROOT="${CODEX_HOME_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-MARKETPLACE_FILE="${CODEX_PLUGIN_MARKETPLACE_FILE:-$CODEX_HOME_ROOT/.agents/plugins/marketplace.json}"
-CACHE_ROOT="${CODEX_PLUGIN_CACHE_ROOT:-$CODEX_HOME_ROOT/plugins/cache}"
-
-usage() {
-  cat <<'EOF'
-Usage:
-  ~/.codex/workflow/bin/codex-refresh-local-plugin <plugin-name>
-
-Example:
-  ~/.codex/workflow/bin/codex-refresh-local-plugin atlas-workflow
-EOF
-}
-
-if [[ $# -ne 1 ]]; then
-  usage >&2
-  exit 1
+if [[ -n "${CODEX_HOME_ROOT:-}" ]]; then
+  RESOLVED_CODEX_HOME_ROOT="$CODEX_HOME_ROOT"
+elif [[ -n "${CODEX_HOME:-}" ]]; then
+  RESOLVED_CODEX_HOME_ROOT="$CODEX_HOME"
+else
+  RESOLVED_CODEX_HOME_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
 
-PLUGIN_NAME="$1"
-
-python3 - "$MARKETPLACE_FILE" "$CODEX_HOME_ROOT" "$CACHE_ROOT" "$PLUGIN_NAME" <<'PY'
+exec python3 - "$SCRIPT_DIR" "$RESOLVED_CODEX_HOME_ROOT" "$@" <<'PY'
+import hashlib
 import json
+import os
 import shutil
+import signal
+import stat
+import subprocess
 import sys
+import tempfile
+import time
+import uuid
 from pathlib import Path
 
-marketplace_file, codex_home_root, cache_root, plugin_name = sys.argv[1:5]
-marketplace_path = Path(marketplace_file)
-if not marketplace_path.exists():
-    raise SystemExit(f"missing marketplace file: {marketplace_path}")
+TOOL = "codex-refresh-local-plugin"
+SCHEMA_VERSION = 1
+PLUGIN_NAME = "atlas-workflow"
+MARKETPLACE_NAME = "local-atlas"
+MARKETPLACE_SOURCE_PATH = "./plugins/atlas-workflow"
 
-data = json.loads(marketplace_path.read_text(encoding="utf-8"))
-marketplace_name = data.get("name")
-plugins = data.get("plugins", [])
-plugin = next((item for item in plugins if item.get("name") == plugin_name), None)
-if plugin is None:
-    raise SystemExit(f"plugin not found in marketplace: {plugin_name}")
 
-source = plugin.get("source", {})
-if source.get("source") != "local":
-    raise SystemExit(f"plugin is not a local source plugin: {plugin_name}")
+class RefreshError(Exception):
+    def __init__(self, code, message, **details):
+        super().__init__(message)
+        self.code = code
+        self.details = details
 
-source_path = source.get("path")
-if not isinstance(source_path, str) or not source_path:
-    raise SystemExit(f"plugin source path missing for: {plugin_name}")
 
-source_dir = (Path(codex_home_root) / source_path).resolve()
-if not source_dir.exists():
-    raise SystemExit(f"plugin source directory missing: {source_dir}")
+def error_payload(error):
+    if isinstance(error, RefreshError):
+        return {"code": error.code, "message": str(error), **error.details}
+    return {"code": "INTERNAL_ERROR", "message": str(error)}
 
-cache_dir = (Path(cache_root) / marketplace_name / plugin_name / "local").resolve()
-cache_dir.parent.mkdir(parents=True, exist_ok=True)
-if cache_dir.exists():
-    shutil.rmtree(cache_dir)
-shutil.copytree(source_dir, cache_dir)
 
-print(f"marketplace: {marketplace_name}")
-print(f"source: {source_dir}")
-print(f"installed_copy: {cache_dir}")
+def emit(ok, action, checks, errors, exit_code):
+    print(json.dumps({
+        "schema_version": SCHEMA_VERSION,
+        "tool": TOOL,
+        "ok": ok,
+        "action": action,
+        "changed": action == "refreshed",
+        "checks": checks,
+        "errors": errors,
+    }, indent=2, sort_keys=True))
+    raise SystemExit(exit_code)
+
+
+def interrupt(signum, _frame):
+    raise RefreshError("REFRESH_INTERRUPTED", "cache refresh was interrupted", signal=signum)
+
+
+def absolute_path(raw, label):
+    path = Path(raw)
+    if not path.is_absolute():
+        raise RefreshError("PATH_NOT_ABSOLUTE", f"{label} must be an absolute path", path=raw)
+    if os.path.normpath(raw) != raw:
+        raise RefreshError("PATH_NOT_CANONICAL", f"{label} must use a canonical lexical path", path=raw)
+    return path
+
+
+def reject_symlink_components(path, label):
+    path = path.absolute()
+    cursor = Path(path.anchor)
+    for part in path.parts[1:]:
+        cursor /= part
+        if cursor.is_symlink():
+            raise RefreshError(
+                "PATH_COMPONENT_SYMLINK_FORBIDDEN",
+                f"{label} must not traverse symbolic links",
+                path=str(path),
+                symlink_component=str(cursor),
+            )
+        if not cursor.exists():
+            break
+
+
+def is_within(path, root):
+    return path == root or root in path.parents
+
+
+def tree_manifest(root, label):
+    if root.is_symlink() or not root.is_dir():
+        raise RefreshError("TREE_ROOT_INVALID", f"{label} must be a real directory", path=str(root))
+
+    entries = []
+
+    def visit(directory, relative):
+        directory_stat = directory.stat(follow_symlinks=False)
+        entries.append({
+            "path": relative or ".",
+            "type": "directory",
+            "mode": stat.S_IMODE(directory_stat.st_mode),
+        })
+        for child in sorted(directory.iterdir(), key=lambda item: os.fsencode(item.name)):
+            child_relative = f"{relative}/{child.name}" if relative else child.name
+            child_stat = child.lstat()
+            if stat.S_ISDIR(child_stat.st_mode):
+                visit(child, child_relative)
+            elif stat.S_ISREG(child_stat.st_mode):
+                digest = hashlib.sha256()
+                with child.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                entries.append({
+                    "path": child_relative,
+                    "type": "file",
+                    "mode": stat.S_IMODE(child_stat.st_mode),
+                    "size": child_stat.st_size,
+                    "sha256": digest.hexdigest(),
+                })
+            else:
+                raise RefreshError(
+                    "TREE_ENTRY_TYPE_FORBIDDEN",
+                    f"{label} contains a non-regular entry",
+                    path=str(child),
+                    mode=oct(child_stat.st_mode),
+                )
+
+    visit(root, "")
+    encoded = json.dumps(entries, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return {
+        "entries": entries,
+        "entry_count": len(entries),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def manifest_summary(value):
+    return {"entry_count": value["entry_count"], "sha256": value["sha256"]}
+
+
+def load_json_regular(path, label):
+    reject_symlink_components(path, label)
+    if path.is_symlink() or not path.is_file():
+        raise RefreshError("JSON_FILE_INVALID", f"{label} must be a regular non-symlink file", path=str(path))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RefreshError("JSON_INVALID", f"{label} is not valid UTF-8 JSON", path=str(path), detail=str(error))
+
+
+def validate_marketplace(path):
+    data = load_json_regular(path, "local marketplace")
+    if not isinstance(data, dict):
+        raise RefreshError("MARKETPLACE_NOT_OBJECT", "local marketplace JSON must be an object")
+    if data.get("name") != MARKETPLACE_NAME:
+        raise RefreshError("MARKETPLACE_NAME_INVALID", f"marketplace name must be exactly {MARKETPLACE_NAME}")
+    plugins = data.get("plugins")
+    if not isinstance(plugins, list):
+        raise RefreshError("MARKETPLACE_PLUGINS_INVALID", "marketplace plugins must be an array")
+    matches = [item for item in plugins if isinstance(item, dict) and item.get("name") == PLUGIN_NAME]
+    if len(matches) != 1:
+        raise RefreshError("MARKETPLACE_ATLAS_ENTRY_COUNT", "marketplace must contain exactly one atlas-workflow entry", actual=len(matches))
+    source = matches[0].get("source")
+    if not isinstance(source, dict) or source.get("source") != "local":
+        raise RefreshError("MARKETPLACE_SOURCE_INVALID", "atlas-workflow marketplace source must be local")
+    if source.get("path") != MARKETPLACE_SOURCE_PATH:
+        raise RefreshError(
+            "MARKETPLACE_SOURCE_PATH_INVALID",
+            f"atlas-workflow source path must be exactly {MARKETPLACE_SOURCE_PATH}",
+            actual=source.get("path"),
+        )
+    return data
+
+
+def validate_atlas_manifest(source, integrity_bin):
+    manifest_path = source / ".codex-plugin" / "plugin.json"
+    manifest = load_json_regular(manifest_path, "Atlas plugin manifest")
+    if not isinstance(manifest, dict) or manifest.get("name") != PLUGIN_NAME:
+        raise RefreshError("PLUGIN_MANIFEST_NAME_INVALID", "plugin manifest name must be exactly atlas-workflow")
+    if not integrity_bin.is_file() or integrity_bin.is_symlink() or not os.access(integrity_bin, os.X_OK):
+        raise RefreshError("INTEGRITY_HELPER_INVALID", "Atlas integrity helper must be an executable regular file", path=str(integrity_bin))
+    result = subprocess.run(
+        [str(integrity_bin), "manifest", "--plugin-root", str(source)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RefreshError("INTEGRITY_OUTPUT_INVALID", "Atlas integrity helper did not return JSON", detail=str(error))
+    if result.returncode != 0 or payload.get("ok") is not True:
+        raise RefreshError(
+            "PLUGIN_MANIFEST_INVALID",
+            "Atlas plugin manifest failed repo integrity validation",
+            integrity_errors=payload.get("errors", []),
+        )
+    return {"name": manifest.get("name"), "version": manifest.get("version")}
+
+
+def main():
+    script_dir = Path(sys.argv[1]).absolute()
+    codex_home_root = absolute_path(sys.argv[2], "CODEX_HOME_ROOT")
+    arguments = sys.argv[3:]
+    if len(arguments) != 1:
+        raise RefreshError("CLI_USAGE", "usage: codex-refresh-local-plugin atlas-workflow")
+    if arguments[0] != PLUGIN_NAME:
+        raise RefreshError("PLUGIN_SELECTOR_FORBIDDEN", "only atlas-workflow may be refreshed", selector=arguments[0])
+
+    reject_symlink_components(codex_home_root, "CODEX_HOME_ROOT")
+    canonical_cache_root = codex_home_root / "plugins" / "cache"
+    cache_override = os.environ.get("CODEX_PLUGIN_CACHE_ROOT")
+    if cache_override:
+        if cache_override != str(canonical_cache_root):
+            raise RefreshError(
+                "CACHE_ROOT_OVERRIDE_FORBIDDEN",
+                "CODEX_PLUGIN_CACHE_ROOT must exactly equal the canonical Codex cache root",
+                expected=str(canonical_cache_root),
+                actual=cache_override,
+            )
+        cache_root = absolute_path(cache_override, "CODEX_PLUGIN_CACHE_ROOT")
+    else:
+        cache_root = canonical_cache_root
+
+    canonical_marketplace_file = codex_home_root / ".agents" / "plugins" / "marketplace.json"
+    marketplace_override = os.environ.get("CODEX_PLUGIN_MARKETPLACE_FILE")
+    if marketplace_override:
+        if marketplace_override != str(canonical_marketplace_file):
+            raise RefreshError(
+                "MARKETPLACE_FILE_OVERRIDE_FORBIDDEN",
+                "CODEX_PLUGIN_MARKETPLACE_FILE must exactly equal the canonical local marketplace path",
+                expected=str(canonical_marketplace_file),
+                actual=marketplace_override,
+            )
+        marketplace_file = absolute_path(marketplace_override, "CODEX_PLUGIN_MARKETPLACE_FILE")
+    else:
+        marketplace_file = canonical_marketplace_file
+
+    source = codex_home_root / "plugins" / PLUGIN_NAME
+    target = cache_root / MARKETPLACE_NAME / PLUGIN_NAME / "local"
+    integrity_bin = script_dir / "atlas-plugin-integrity"
+
+    for path, label in (
+        (cache_root, "cache root"),
+        (marketplace_file, "marketplace file"),
+        (source, "plugin source"),
+        (target, "plugin cache target"),
+    ):
+        reject_symlink_components(path, label)
+
+    anchors = [codex_home_root]
+    if os.environ.get("CODEX_HOME"):
+        anchors.append(absolute_path(os.environ["CODEX_HOME"], "CODEX_HOME"))
+    if os.environ.get("HOME"):
+        anchors.append(absolute_path(os.environ["HOME"], "HOME") / ".codex")
+    legacy_roots = []
+    if os.environ.get("HOME"):
+        legacy_roots.append(absolute_path(os.environ["HOME"], "HOME") / ".agents")
+    if os.environ.get("AGENTS_HOME"):
+        legacy_roots.append(absolute_path(os.environ["AGENTS_HOME"], "AGENTS_HOME"))
+    forbidden = list(legacy_roots)
+    for anchor in anchors:
+        forbidden.extend([
+            anchor / ".tmp" / "marketplaces" / "atlas-forge",
+            anchor / "plugins" / "cache" / "atlas-forge",
+        ])
+    forbidden = [path.resolve(strict=False) for path in forbidden]
+    for candidate, label in (
+        (codex_home_root, "CODEX_HOME_ROOT"),
+        (marketplace_file, "marketplace"),
+        (source, "source"),
+        (target, "target"),
+    ):
+        resolved = candidate.resolve(strict=False)
+        for root in forbidden:
+            if is_within(resolved, root):
+                raise RefreshError("FORBIDDEN_RUNTIME_ROOT", f"{label} is inside a forbidden runtime root", path=str(resolved), forbidden_root=str(root))
+    for candidate, label in ((marketplace_file, "marketplace"), (source, "source"), (target, "target")):
+        resolved = candidate.resolve(strict=False)
+        for root in forbidden:
+            if is_within(root, resolved):
+                raise RefreshError(
+                    "FORBIDDEN_RUNTIME_OVERLAP",
+                    f"{label} contains a forbidden runtime root",
+                    path=str(resolved),
+                    forbidden_root=str(root),
+                )
+    resolved_codex_home = codex_home_root.resolve(strict=False)
+    for root in legacy_roots:
+        resolved_root = root.resolve(strict=False)
+        if is_within(resolved_root, resolved_codex_home):
+            raise RefreshError(
+                "LEGACY_RUNTIME_OVERLAP",
+                "CODEX_HOME_ROOT contains a legacy agent root",
+                path=str(resolved_codex_home),
+                legacy_root=str(resolved_root),
+            )
+
+    resolved_source = source.resolve(strict=False)
+    resolved_target = target.resolve(strict=False)
+    if is_within(resolved_source, resolved_target) or is_within(resolved_target, resolved_source):
+        raise RefreshError("SOURCE_TARGET_OVERLAP", "plugin source and cache target must not overlap")
+    resolved_marketplace = marketplace_file.resolve(strict=False)
+    if is_within(resolved_marketplace, resolved_source) or is_within(resolved_marketplace, resolved_target):
+        raise RefreshError("MARKETPLACE_TARGET_OVERLAP", "marketplace file must not be inside source or target")
+
+    managed_roots = [
+        ("CODEX_AGENT_TARGET", str(codex_home_root / "agents")),
+        ("CODEX_WORKFLOW_ROOT", os.environ.get("CODEX_WORKFLOW_ROOT", str(codex_home_root / "workflow"))),
+    ]
+    if os.environ.get("LOCAL_BIN_ROOT"):
+        managed_roots.append(("LOCAL_BIN_ROOT", os.environ["LOCAL_BIN_ROOT"]))
+    elif os.environ.get("HOME"):
+        managed_roots.append(("LOCAL_BIN_ROOT", str(absolute_path(os.environ["HOME"], "HOME") / ".local" / "bin")))
+
+    for environment_name, raw in managed_roots:
+        managed_root = absolute_path(raw, environment_name)
+        reject_symlink_components(managed_root, environment_name)
+        resolved_managed = managed_root.resolve(strict=False)
+        for candidate, label in ((resolved_source, "source"), (resolved_target, "target")):
+            if is_within(candidate, resolved_managed) or is_within(resolved_managed, candidate):
+                raise RefreshError(
+                    "MANAGED_ROOT_OVERLAP",
+                    f"{label} must not overlap {environment_name}",
+                    path=str(candidate),
+                    managed_root=str(resolved_managed),
+                )
+
+    marketplace_bytes_before = marketplace_file.read_bytes() if marketplace_file.is_file() else None
+    validate_marketplace(marketplace_file)
+    if source.is_symlink() or not source.is_dir():
+        raise RefreshError("PLUGIN_SOURCE_INVALID", "canonical Atlas plugin source must be a real directory", path=str(source))
+    plugin_manifest = validate_atlas_manifest(source, integrity_bin)
+    source_tree = tree_manifest(source, "plugin source")
+
+    testing = os.environ.get("CODEX_REFRESH_LOCAL_PLUGIN_TESTING") == "1"
+    failpoint = os.environ.get("CODEX_REFRESH_LOCAL_PLUGIN_TEST_FAILPOINT", "")
+    if failpoint and not testing:
+        raise RefreshError("TEST_FAILPOINT_FORBIDDEN", "test failpoint requires CODEX_REFRESH_LOCAL_PLUGIN_TESTING=1")
+    if failpoint not in ("", "copy", "install", "postverify"):
+        raise RefreshError("TEST_FAILPOINT_INVALID", "unknown test failpoint", failpoint=failpoint)
+    pause_after_backup = os.environ.get("CODEX_REFRESH_LOCAL_PLUGIN_TEST_PAUSE_AFTER_BACKUP", "")
+    if pause_after_backup and not testing:
+        raise RefreshError("TEST_PAUSE_FORBIDDEN", "test pause requires CODEX_REFRESH_LOCAL_PLUGIN_TESTING=1")
+    if pause_after_backup:
+        try:
+            pause_seconds = float(pause_after_backup)
+        except ValueError:
+            raise RefreshError("TEST_PAUSE_INVALID", "test pause must be a positive number")
+        if not 0 < pause_seconds <= 60:
+            raise RefreshError("TEST_PAUSE_INVALID", "test pause must be greater than zero and at most 60 seconds")
+    else:
+        pause_seconds = 0
+
+    target_existed = target.exists() or target.is_symlink()
+    target_tree_before = None
+    if target_existed:
+        if target.is_symlink() or not target.is_dir():
+            raise RefreshError("CACHE_TARGET_INVALID", "existing cache target must be a real directory", path=str(target))
+        target_tree_before = tree_manifest(target, "existing cache target")
+        if target_tree_before["entries"] == source_tree["entries"]:
+            emit(True, "noop", {
+                "marketplace": str(marketplace_file),
+                "source": str(source),
+                "target": str(target),
+                "plugin_manifest": plugin_manifest,
+                "source_tree": manifest_summary(source_tree),
+                "target_tree": manifest_summary(target_tree_before),
+            }, [], 0)
+
+    target_parent = target.parent
+    stage_container = None
+    stage_tree = None
+    backup = None
+    installed_new_target = False
+    transaction_succeeded = False
+    created_parents = []
+    try:
+        cursor = target_parent
+        while not cursor.exists():
+            created_parents.append(cursor)
+            cursor = cursor.parent
+        target_parent.mkdir(parents=True, exist_ok=True)
+        reject_symlink_components(target_parent, "cache target parent")
+        stage_container = Path(tempfile.mkdtemp(prefix=".local.stage.", dir=target_parent))
+        stage_tree = stage_container / "tree"
+        if failpoint == "copy":
+            raise RefreshError("TEST_COPY_FAILURE", "injected stage copy failure")
+        shutil.copytree(source, stage_tree, copy_function=shutil.copy2)
+        staged_manifest = tree_manifest(stage_tree, "staged cache")
+        if staged_manifest["entries"] != source_tree["entries"]:
+            raise RefreshError("STAGE_TREE_MISMATCH", "staged cache does not match source")
+        if tree_manifest(source, "plugin source recheck")["entries"] != source_tree["entries"]:
+            raise RefreshError("SOURCE_CHANGED_DURING_REFRESH", "plugin source changed during staging")
+        if marketplace_file.read_bytes() != marketplace_bytes_before:
+            raise RefreshError("MARKETPLACE_CHANGED_DURING_REFRESH", "marketplace file changed during staging")
+        if target_existed:
+            if not target.exists() or target.is_symlink() or tree_manifest(target, "cache target recheck")["entries"] != target_tree_before["entries"]:
+                raise RefreshError("CACHE_TARGET_CHANGED_DURING_REFRESH", "cache target changed during staging")
+        elif target.exists() or target.is_symlink():
+            raise RefreshError("CACHE_TARGET_APPEARED_DURING_REFRESH", "cache target appeared during staging")
+
+        if target_existed:
+            backup = target_parent / f".local.backup.{uuid.uuid4().hex}"
+            os.replace(target, backup)
+        if pause_seconds:
+            time.sleep(pause_seconds)
+        if failpoint == "install":
+            raise RefreshError("TEST_INSTALL_FAILURE", "injected install failure")
+        os.replace(stage_tree, target)
+        installed_new_target = True
+        installed_manifest = tree_manifest(target, "installed cache")
+        if installed_manifest["entries"] != source_tree["entries"]:
+            raise RefreshError("POSTVERIFY_TREE_MISMATCH", "installed cache does not match source")
+        if failpoint == "postverify":
+            raise RefreshError("TEST_POSTVERIFY_FAILURE", "injected postverify failure")
+        if backup is not None:
+            shutil.rmtree(backup)
+            backup = None
+        transaction_succeeded = True
+        emit(True, "refreshed", {
+            "marketplace": str(marketplace_file),
+            "source": str(source),
+            "target": str(target),
+            "plugin_manifest": plugin_manifest,
+            "source_tree": manifest_summary(source_tree),
+            "target_tree": manifest_summary(installed_manifest),
+            "replaced_existing": target_existed,
+        }, [], 0)
+    except Exception as error:
+        rollback_errors = []
+        try:
+            if installed_new_target and (target.exists() or target.is_symlink()):
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            if backup is not None and backup.exists():
+                os.replace(backup, target)
+                backup = None
+            if target_existed:
+                restored = tree_manifest(target, "restored cache target")
+                if restored["entries"] != target_tree_before["entries"]:
+                    raise RefreshError("ROLLBACK_VERIFY_FAILED", "restored cache target differs from original")
+            elif target.exists() or target.is_symlink():
+                raise RefreshError("ROLLBACK_VERIFY_FAILED", "cache target should be absent after rollback")
+        except Exception as rollback_error:
+            rollback_errors.append(error_payload(rollback_error))
+        if rollback_errors:
+            original = error_payload(error)
+            original["rollback_errors"] = rollback_errors
+            if backup is not None:
+                original["recovery_backup"] = str(backup)
+            raise RefreshError("ROLLBACK_FAILED", "cache refresh failed and rollback was incomplete", cause=original)
+        raise
+    finally:
+        if stage_container is not None and stage_container.exists():
+            shutil.rmtree(stage_container)
+        if not transaction_succeeded:
+            for directory in created_parents:
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+
+signal.signal(signal.SIGINT, interrupt)
+signal.signal(signal.SIGTERM, interrupt)
+
+try:
+    main()
+except RefreshError as error:
+    code = 2 if error.code in ("CLI_USAGE", "PLUGIN_SELECTOR_FORBIDDEN") else 1
+    emit(False, "none", {}, [error_payload(error)], code)
+except Exception as error:
+    emit(False, "none", {}, [error_payload(error)], 1)
 PY
