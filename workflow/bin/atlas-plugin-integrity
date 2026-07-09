@@ -1,0 +1,862 @@
+#!/usr/bin/env node
+"use strict";
+
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+
+const TOOL = "atlas-plugin-integrity";
+const SCHEMA_VERSION = 1;
+const PLUGIN_PATH = "plugins/atlas-workflow";
+const MANIFEST_RELATIVE_PATH = ".codex-plugin/plugin.json";
+const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+class IntegrityError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = "IntegrityError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function makeError(code, message, details = {}) {
+  return { code, message, ...details };
+}
+
+function errorFrom(error) {
+  if (error instanceof IntegrityError) {
+    return makeError(error.code, error.message, error.details);
+  }
+  return makeError("INTERNAL_ERROR", error && error.message ? error.message : String(error));
+}
+
+function emit(mode, checks, errors, exitCode = 1) {
+  const payload = {
+    schema_version: SCHEMA_VERSION,
+    tool: TOOL,
+    mode,
+    ok: errors.length === 0,
+    checks,
+    errors,
+  };
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+  process.exitCode = errors.length === 0 ? 0 : exitCode;
+}
+
+function parseOptions(mode, argv) {
+  const modeOptions = {
+    manifest: {
+      required: new Set(["plugin-root"]),
+      optional: new Set(),
+    },
+    release: {
+      required: new Set(["repo", "base"]),
+      optional: new Set(),
+    },
+    layout: {
+      required: new Set(["source", "snapshot", "cache", "expected-version"]),
+      optional: new Set(["expected-commit"]),
+    },
+  };
+
+  const definition = modeOptions[mode];
+  if (!definition) {
+    throw new IntegrityError(
+      "CLI_USAGE",
+      "mode must be one of: manifest, release, layout",
+      { received_mode: mode || null },
+    );
+  }
+
+  const allowed = new Set([...definition.required, ...definition.optional]);
+  const options = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (!argument.startsWith("--")) {
+      throw new IntegrityError("CLI_USAGE", `unexpected positional argument: ${argument}`);
+    }
+
+    const equalsIndex = argument.indexOf("=");
+    const key = argument.slice(2, equalsIndex === -1 ? undefined : equalsIndex);
+    let value;
+    if (equalsIndex === -1) {
+      if (index + 1 >= argv.length) {
+        throw new IntegrityError("CLI_USAGE", `missing value for --${key}`);
+      }
+      value = argv[++index];
+    } else {
+      value = argument.slice(equalsIndex + 1);
+    }
+
+    if (!allowed.has(key)) {
+      throw new IntegrityError("CLI_USAGE", `unknown option for ${mode}: --${key}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(options, key)) {
+      throw new IntegrityError("CLI_USAGE", `duplicate option: --${key}`);
+    }
+    if (value.length === 0) {
+      throw new IntegrityError("CLI_USAGE", `empty value for --${key}`);
+    }
+    options[key] = value;
+  }
+
+  for (const key of definition.required) {
+    if (!Object.prototype.hasOwnProperty.call(options, key)) {
+      throw new IntegrityError("CLI_USAGE", `missing required option: --${key}`);
+    }
+  }
+  return options;
+}
+
+function requireDirectory(value, label) {
+  const resolved = path.resolve(value);
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (error) {
+    throw new IntegrityError("PATH_NOT_FOUND", `${label} does not exist: ${resolved}`, {
+      path: resolved,
+      input: label,
+    });
+  }
+  if (!stat.isDirectory()) {
+    throw new IntegrityError("PATH_NOT_DIRECTORY", `${label} is not a directory: ${resolved}`, {
+      path: resolved,
+      input: label,
+    });
+  }
+  return resolved;
+}
+
+function loadManifest(pluginRoot, label) {
+  const root = requireDirectory(pluginRoot, label);
+  const manifestPath = path.join(root, MANIFEST_RELATIVE_PATH);
+  let content;
+  try {
+    content = fs.readFileSync(manifestPath, "utf8");
+  } catch (error) {
+    throw new IntegrityError("MANIFEST_MISSING", `${label} manifest is missing: ${manifestPath}`, {
+      path: manifestPath,
+      input: label,
+    });
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(content);
+  } catch (error) {
+    throw new IntegrityError("MANIFEST_INVALID_JSON", `${label} manifest is not valid JSON`, {
+      path: manifestPath,
+      input: label,
+    });
+  }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new IntegrityError("MANIFEST_INVALID_SHAPE", `${label} manifest must be a JSON object`, {
+      path: manifestPath,
+      input: label,
+    });
+  }
+  return { root, manifestPath, manifest };
+}
+
+function promptMetrics(prompt, index) {
+  return {
+    index,
+    code_points: Array.from(prompt).length,
+    utf16_code_units: prompt.length,
+    utf8_bytes: Buffer.byteLength(prompt, "utf8"),
+  };
+}
+
+function compareUtf8(left, right) {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function inspectManifest(pluginRoot, label) {
+  const loaded = loadManifest(pluginRoot, label);
+  const errors = [];
+  const version = typeof loaded.manifest.version === "string"
+    ? loaded.manifest.version.trim()
+    : "";
+  if (!version) {
+    errors.push(makeError("MANIFEST_VERSION_MISSING", `${label} manifest version must be a non-empty string`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  } else if (version !== loaded.manifest.version) {
+    errors.push(makeError("MANIFEST_VERSION_INVALID", `${label} manifest version must not contain surrounding whitespace`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  } else if (!STRICT_SEMVER.test(version)) {
+    errors.push(makeError("MANIFEST_VERSION_INVALID_SEMVER", `${label} manifest version must use strict SemVer syntax`, {
+      path: loaded.manifestPath,
+      input: label,
+      version,
+    }));
+  }
+
+  let manifestInterface = null;
+  if (!Object.prototype.hasOwnProperty.call(loaded.manifest, "interface")) {
+    errors.push(makeError("MANIFEST_INTERFACE_MISSING", `${label} manifest interface must be present`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  } else if (
+    !loaded.manifest.interface
+    || typeof loaded.manifest.interface !== "object"
+    || Array.isArray(loaded.manifest.interface)
+  ) {
+    errors.push(makeError("MANIFEST_INTERFACE_INVALID", `${label} manifest interface must be a JSON object`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  } else {
+    manifestInterface = loaded.manifest.interface;
+  }
+  if (manifestInterface && Object.prototype.hasOwnProperty.call(manifestInterface, "default_prompt")) {
+    errors.push(makeError(
+      "DEFAULT_PROMPT_ALIAS_FORBIDDEN",
+      `${label} interface.default_prompt is not supported; use interface.defaultPrompt`,
+      {
+        path: loaded.manifestPath,
+        input: label,
+      },
+    ));
+  }
+  if (manifestInterface && !Object.prototype.hasOwnProperty.call(manifestInterface, "defaultPrompt")) {
+    errors.push(makeError("DEFAULT_PROMPT_MISSING", `${label} interface.defaultPrompt must be present`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  }
+  const promptValue = manifestInterface ? manifestInterface.defaultPrompt : undefined;
+  let prompts = [];
+  if (promptValue !== undefined && !Array.isArray(promptValue)) {
+    errors.push(makeError("DEFAULT_PROMPT_NOT_ARRAY", `${label} interface.defaultPrompt must be an array when present`, {
+      path: loaded.manifestPath,
+      input: label,
+    }));
+  } else if (Array.isArray(promptValue)) {
+    prompts = promptValue;
+  }
+
+  if (prompts.length > 3) {
+    errors.push(makeError("DEFAULT_PROMPT_COUNT_EXCEEDED", `${label} interface.defaultPrompt has ${prompts.length} entries; maximum is 3`, {
+      path: loaded.manifestPath,
+      input: label,
+      actual: prompts.length,
+      maximum: 3,
+    }));
+  }
+
+  const metrics = [];
+  for (let index = 0; index < prompts.length; index += 1) {
+    const prompt = prompts[index];
+    if (typeof prompt !== "string") {
+      errors.push(makeError("DEFAULT_PROMPT_NOT_STRING", `${label} interface.defaultPrompt[${index}] must be a string`, {
+        path: loaded.manifestPath,
+        input: label,
+        index,
+      }));
+      continue;
+    }
+    const itemMetrics = promptMetrics(prompt, index);
+    metrics.push(itemMetrics);
+    if (itemMetrics.code_points > 128) {
+      errors.push(makeError("DEFAULT_PROMPT_TOO_LONG", `${label} interface.defaultPrompt[${index}] has ${itemMetrics.code_points} Unicode code points; maximum is 128`, {
+        path: loaded.manifestPath,
+        input: label,
+        index,
+        actual_code_points: itemMetrics.code_points,
+        maximum_code_points: 128,
+      }));
+    }
+  }
+
+  return {
+    loaded,
+    errors,
+    summary: {
+      root: loaded.root,
+      manifest: loaded.manifestPath,
+      name: typeof loaded.manifest.name === "string" ? loaded.manifest.name : null,
+      version: version || null,
+      default_prompt: {
+        count: prompts.length,
+        maximum_count: 3,
+        length_unit: "unicode_code_points",
+        maximum_code_points: 128,
+        entries: metrics,
+      },
+    },
+  };
+}
+
+function runGit(repo, args, options = {}) {
+  const result = spawnSync("git", ["-C", repo, ...args], {
+    encoding: null,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    input: options.input,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.error) {
+    throw new IntegrityError("GIT_EXECUTION_FAILED", `git execution failed: ${result.error.message}`);
+  }
+  if (result.status !== 0 && !options.allowFailure) {
+    const stderr = result.stderr ? result.stderr.toString("utf8").trim() : "";
+    throw new IntegrityError("GIT_COMMAND_FAILED", stderr || `git exited with status ${result.status}`, {
+      git_args: args,
+    });
+  }
+  return result;
+}
+
+function gitText(repo, args, options = {}) {
+  const result = runGit(repo, args, options);
+  return {
+    status: result.status,
+    stdout: result.stdout ? result.stdout.toString("utf8") : "",
+    stderr: result.stderr ? result.stderr.toString("utf8") : "",
+  };
+}
+
+function gitRepoRoot(repoInput) {
+  const candidate = requireDirectory(repoInput, "repo");
+  const result = gitText(candidate, ["rev-parse", "--show-toplevel"], { allowFailure: true });
+  if (result.status !== 0) {
+    throw new IntegrityError("NOT_A_GIT_REPOSITORY", `repo is not a Git worktree: ${candidate}`, {
+      path: candidate,
+    });
+  }
+  return fs.realpathSync(result.stdout.trim());
+}
+
+function resolveCommit(repo, ref) {
+  const result = gitText(repo, ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], {
+    allowFailure: true,
+  });
+  if (result.status !== 0) {
+    throw new IntegrityError("BASE_COMMIT_NOT_FOUND", `base does not resolve to a commit: ${ref}`, {
+      base: ref,
+    });
+  }
+  return result.stdout.trim();
+}
+
+function resolveHeadCommit(repo) {
+  const result = gitText(repo, ["rev-parse", "--verify", "HEAD^{commit}"], {
+    allowFailure: true,
+  });
+  if (result.status !== 0) {
+    throw new IntegrityError("HEAD_COMMIT_NOT_FOUND", "repository HEAD does not resolve to a commit");
+  }
+  return result.stdout.trim();
+}
+
+function isCommitAncestor(repo, ancestor, descendant) {
+  const result = gitText(repo, ["merge-base", "--is-ancestor", ancestor, descendant], {
+    allowFailure: true,
+  });
+  if (result.status === 0) {
+    return true;
+  }
+  if (result.status === 1) {
+    return false;
+  }
+  throw new IntegrityError("GIT_COMMAND_FAILED", result.stderr.trim() || "git merge-base failed", {
+    git_args: ["merge-base", "--is-ancestor", ancestor, descendant],
+  });
+}
+
+function canonicalTreeHash(entries, algorithmLabel) {
+  const hash = crypto.createHash("sha256");
+  hash.update("atlas-plugin-tree-v1\0", "utf8");
+  const seen = new Set();
+  for (const entry of [...entries].sort((left, right) => compareUtf8(left.path, right.path))) {
+    if (seen.has(entry.path)) {
+      throw new IntegrityError("TREE_DUPLICATE_PATH", `tree contains duplicate path: ${entry.path}`);
+    }
+    seen.add(entry.path);
+    const pathBytes = Buffer.byteLength(entry.path, "utf8");
+    hash.update(`${entry.mode}\0${entry.oid}\0${pathBytes}\0${entry.path}\0`, "utf8");
+  }
+  return {
+    algorithm: algorithmLabel,
+    value: `sha256:${hash.digest("hex")}`,
+    file_count: entries.length,
+  };
+}
+
+function gitTreeEntriesAt(repo, commit) {
+  const result = runGit(repo, ["ls-tree", "-r", "-z", "--full-tree", commit, "--", PLUGIN_PATH]);
+  const records = result.stdout.toString("utf8").split("\0").filter(Boolean);
+  const prefix = `${PLUGIN_PATH}/`;
+  return records.map((record) => {
+    const match = /^(\d+) ([^ ]+) ([0-9a-f]+)\t([\s\S]+)$/.exec(record);
+    if (!match) {
+      throw new IntegrityError("GIT_TREE_INVALID", `unable to parse git tree record: ${record}`);
+    }
+    if (!match[4].startsWith(prefix)) {
+      throw new IntegrityError("GIT_TREE_INVALID", `git tree path is outside Atlas plugin: ${match[4]}`);
+    }
+    return {
+      mode: match[1],
+      oid: match[3],
+      path: match[4].slice(prefix.length),
+    };
+  });
+}
+
+function gitTreeHashAt(repo, commit) {
+  return canonicalTreeHash(gitTreeEntriesAt(repo, commit), "git-object-list-sha256-v1");
+}
+
+function currentGitTreeEntries(repo) {
+  const result = runGit(repo, [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+    "--",
+    PLUGIN_PATH,
+  ]);
+  const prefix = `${PLUGIN_PATH}/`;
+  const paths = [...new Set(result.stdout.toString("utf8").split("\0").filter(Boolean))];
+  const entries = [];
+  for (const repoRelativePath of paths) {
+    if (!repoRelativePath.startsWith(prefix)) {
+      throw new IntegrityError("GIT_TREE_INVALID", `working tree path is outside Atlas plugin: ${repoRelativePath}`);
+    }
+    const absolutePath = path.join(repo, ...repoRelativePath.split("/"));
+    let stat;
+    try {
+      stat = fs.lstatSync(absolutePath);
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+
+    let mode;
+    let content;
+    if (stat.isSymbolicLink()) {
+      mode = "120000";
+      content = Buffer.from(fs.readlinkSync(absolutePath), "utf8");
+    } else if (stat.isFile()) {
+      mode = stat.mode & 0o111 ? "100755" : "100644";
+      content = fs.readFileSync(absolutePath);
+    } else {
+      throw new IntegrityError("TREE_UNSUPPORTED_ENTRY", `unsupported working tree entry: ${repoRelativePath}`, {
+        path: repoRelativePath,
+      });
+    }
+
+    const hashResult = gitText(repo, ["hash-object", "--no-filters", "--stdin"], {
+      input: content,
+    });
+    entries.push({
+      mode,
+      oid: hashResult.stdout.trim(),
+      path: repoRelativePath.slice(prefix.length),
+    });
+  }
+  return entries;
+}
+
+function currentGitTreeHash(repo) {
+  return canonicalTreeHash(currentGitTreeEntries(repo), "git-object-list-sha256-v1");
+}
+
+function manifestAtCommit(repo, commit, required = false) {
+  const manifestPath = `${PLUGIN_PATH}/${MANIFEST_RELATIVE_PATH}`;
+  const result = gitText(repo, ["show", `${commit}:${manifestPath}`], { allowFailure: true });
+  if (result.status !== 0) {
+    if (required) {
+      throw new IntegrityError("BASE_MANIFEST_MISSING", `base manifest is missing at ${commit}:${manifestPath}`, {
+        commit,
+        path: manifestPath,
+      });
+    }
+    return null;
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new IntegrityError("BASE_MANIFEST_INVALID_JSON", `manifest is invalid JSON at ${commit}:${manifestPath}`, {
+      commit,
+      path: manifestPath,
+    });
+  }
+  const version = manifest && typeof manifest.version === "string" ? manifest.version.trim() : "";
+  if (!version) {
+    throw new IntegrityError("BASE_VERSION_MISSING", `manifest version is missing at ${commit}:${manifestPath}`, {
+      commit,
+      path: manifestPath,
+    });
+  }
+  if (version !== manifest.version || !STRICT_SEMVER.test(version)) {
+    throw new IntegrityError("BASE_VERSION_INVALID_SEMVER", `manifest version is not strict SemVer at ${commit}:${manifestPath}`, {
+      commit,
+      path: manifestPath,
+      version,
+    });
+  }
+  return { manifest, version };
+}
+
+function versionHistory(repo, headCommit, currentVersion) {
+  const result = gitText(repo, ["rev-list", headCommit, "--", PLUGIN_PATH]);
+  const commits = result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const byTree = new Map();
+  for (const commit of commits) {
+    const manifest = manifestAtCommit(repo, commit, false);
+    if (!manifest || manifest.version !== currentVersion) {
+      continue;
+    }
+    const tree = gitTreeHashAt(repo, commit);
+    if (!byTree.has(tree.value)) {
+      byTree.set(tree.value, { tree, commits: [] });
+    }
+    byTree.get(tree.value).commits.push(commit);
+  }
+  return [...byTree.values()].map((entry) => ({
+    tree_hash: entry.tree.value,
+    file_count: entry.tree.file_count,
+    commits: entry.commits,
+  }));
+}
+
+function filesystemEntries(root, options = {}) {
+  const entries = [];
+  function visit(directory, relativeDirectory) {
+    const names = fs.readdirSync(directory).sort(compareUtf8);
+    for (const name of names) {
+      if (options.ignoreRootGitMetadata && relativeDirectory === "" && name === ".git") {
+        continue;
+      }
+      const absolutePath = path.join(directory, name);
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${name}` : name;
+      const stat = fs.lstatSync(absolutePath);
+      if (stat.isDirectory()) {
+        visit(absolutePath, relativePath);
+      } else if (stat.isSymbolicLink()) {
+        const content = Buffer.from(fs.readlinkSync(absolutePath), "utf8");
+        entries.push({
+          mode: "120000",
+          oid: `sha256:${crypto.createHash("sha256").update(content).digest("hex")}`,
+          path: relativePath,
+        });
+      } else if (stat.isFile()) {
+        const content = fs.readFileSync(absolutePath);
+        entries.push({
+          mode: stat.mode & 0o111 ? "100755" : "100644",
+          oid: `sha256:${crypto.createHash("sha256").update(content).digest("hex")}`,
+          path: relativePath,
+        });
+      } else {
+        throw new IntegrityError("TREE_UNSUPPORTED_ENTRY", `unsupported filesystem entry: ${absolutePath}`, {
+          path: absolutePath,
+        });
+      }
+    }
+  }
+  visit(root, "");
+  return entries;
+}
+
+function filesystemTreeHash(root, options = {}) {
+  return canonicalTreeHash(filesystemEntries(root, options), "content-sha256-list-v1");
+}
+
+function runManifestMode(options) {
+  const inspected = inspectManifest(options["plugin-root"], "plugin-root");
+  emit("manifest", { manifest: inspected.summary }, inspected.errors);
+}
+
+function runReleaseMode(options) {
+  const repo = gitRepoRoot(options.repo);
+  const baseCommit = resolveCommit(repo, options.base);
+  const headCommit = resolveHeadCommit(repo);
+  if (!isCommitAncestor(repo, baseCommit, headCommit)) {
+    emit("release", {
+      repo,
+      plugin_path: PLUGIN_PATH,
+      base: options.base,
+      base_commit: baseCommit,
+      head_commit: headCommit,
+      history_scope: "head_ancestry",
+      reuse_history_scope: "base_ancestry",
+    }, [makeError(
+      "BASE_NOT_HEAD_ANCESTOR",
+      "base commit must be an ancestor of repository HEAD",
+      {
+        base_commit: baseCommit,
+        head_commit: headCommit,
+      },
+    )]);
+    return;
+  }
+  const pluginRoot = path.join(repo, ...PLUGIN_PATH.split("/"));
+  const currentManifest = inspectManifest(pluginRoot, "current plugin");
+  const errors = [...currentManifest.errors];
+  if (!currentManifest.summary.version) {
+    emit("release", {
+      repo,
+      base: options.base,
+      base_commit: baseCommit,
+      head_commit: headCommit,
+      history_scope: "head_ancestry",
+      reuse_history_scope: "base_ancestry",
+      current_manifest: currentManifest.summary,
+    }, errors);
+    return;
+  }
+
+  const baseManifest = manifestAtCommit(repo, baseCommit, true);
+  const baseTree = gitTreeHashAt(repo, baseCommit);
+  const currentTree = currentGitTreeHash(repo);
+  const treeChanged = baseTree.value !== currentTree.value;
+  const versionChanged = baseManifest.version !== currentManifest.summary.version;
+  const headAssociations = versionHistory(repo, headCommit, currentManifest.summary.version);
+  const baseAssociations = versionHistory(repo, baseCommit, currentManifest.summary.version);
+  const collisions = headAssociations.filter((association) => association.tree_hash !== currentTree.value);
+
+  if (treeChanged && !versionChanged) {
+    errors.push(makeError(
+      "PLUGIN_TREE_CHANGED_WITHOUT_VERSION_BUMP",
+      "Atlas plugin tree changed relative to base but manifest version did not change",
+      {
+        base_version: baseManifest.version,
+        current_version: currentManifest.summary.version,
+        base_tree_hash: baseTree.value,
+        current_tree_hash: currentTree.value,
+      },
+    ));
+  }
+  if (collisions.length > 0) {
+    errors.push(makeError(
+      "VERSION_TREE_COLLISION",
+      "current manifest version is already associated with a different Atlas plugin tree",
+      {
+        current_version: currentManifest.summary.version,
+        current_tree_hash: currentTree.value,
+        conflicting_tree_hashes: collisions.map((entry) => entry.tree_hash),
+      },
+    ));
+  }
+  if (versionChanged && baseAssociations.length > 0) {
+    errors.push(makeError(
+      "VERSION_REUSE_FORBIDDEN",
+      "a previously committed Atlas plugin version cannot be reused; publish restored content with a new version",
+      {
+        current_version: currentManifest.summary.version,
+        associated_tree_hashes: baseAssociations.map((entry) => entry.tree_hash),
+      },
+    ));
+  }
+
+  emit("release", {
+    repo,
+    plugin_path: PLUGIN_PATH,
+    base: options.base,
+    base_commit: baseCommit,
+    head_commit: headCommit,
+    history_scope: "head_ancestry",
+    reuse_history_scope: "base_ancestry",
+    base_version: baseManifest.version,
+    current_version: currentManifest.summary.version,
+    base_tree: baseTree,
+    current_tree: currentTree,
+    tree_changed: treeChanged,
+    version_changed: versionChanged,
+    current_version_history: headAssociations,
+    current_version_base_history: baseAssociations,
+    current_manifest: currentManifest.summary,
+  }, errors);
+}
+
+function inspectLayoutRoot(value, label) {
+  try {
+    const manifest = inspectManifest(value, label);
+    let tree = null;
+    try {
+      tree = filesystemTreeHash(manifest.loaded.root, {
+        ignoreRootGitMetadata: label === "snapshot",
+      });
+    } catch (error) {
+      return { manifest, tree, errors: [...manifest.errors, errorFrom(error)] };
+    }
+    return { manifest, tree, errors: [...manifest.errors] };
+  } catch (error) {
+    return { manifest: null, tree: null, errors: [errorFrom(error)] };
+  }
+}
+
+function snapshotCommitCheck(snapshotRoot, expectedCommit) {
+  const errors = [];
+  const result = {
+    expected: expectedCommit,
+    actual: null,
+    clean: null,
+  };
+  if (!/^[0-9a-fA-F]{7,64}$/.test(expectedCommit)) {
+    errors.push(makeError("EXPECTED_COMMIT_INVALID", "expected commit must be a 7-64 digit hexadecimal Git object id", {
+      expected_commit: expectedCommit,
+    }));
+    return { result, errors };
+  }
+
+  const rootCheck = gitText(snapshotRoot, ["rev-parse", "--show-toplevel"], { allowFailure: true });
+  if (rootCheck.status !== 0) {
+    errors.push(makeError("SNAPSHOT_NOT_GIT_CHECKOUT", "snapshot is not inside a Git worktree", {
+      snapshot: snapshotRoot,
+    }));
+    return { result, errors };
+  }
+  const head = gitText(snapshotRoot, ["rev-parse", "HEAD"]);
+  result.actual = head.stdout.trim();
+  if (!result.actual.toLowerCase().startsWith(expectedCommit.toLowerCase())) {
+    errors.push(makeError("SNAPSHOT_COMMIT_MISMATCH", "snapshot HEAD does not match expected commit", {
+      snapshot: snapshotRoot,
+      expected_commit: expectedCommit,
+      actual_commit: result.actual,
+    }));
+  }
+
+  const status = gitText(snapshotRoot, ["status", "--porcelain=v1", "--untracked-files=all", "--", "."]);
+  result.clean = status.stdout.trim().length === 0;
+  if (!result.clean) {
+    errors.push(makeError("SNAPSHOT_DIRTY", "snapshot contains tracked or untracked changes", {
+      snapshot: snapshotRoot,
+    }));
+  }
+  return { result, errors };
+}
+
+function runLayoutMode(options) {
+  const expectedVersion = options["expected-version"];
+  const errors = [];
+  const cacheArgument = path.resolve(options.cache);
+  let cachePathIsSymlink = false;
+  if (
+    expectedVersion.trim().length === 0
+    || expectedVersion !== expectedVersion.trim()
+    || expectedVersion === "."
+    || expectedVersion === ".."
+    || expectedVersion.includes("/")
+    || expectedVersion.includes("\\")
+  ) {
+    errors.push(makeError("EXPECTED_VERSION_INVALID", "expected version must be a non-empty exact path segment", {
+      expected_version: expectedVersion,
+    }));
+  } else if (!STRICT_SEMVER.test(expectedVersion)) {
+    errors.push(makeError("EXPECTED_VERSION_INVALID_SEMVER", "expected version must use strict SemVer syntax", {
+      expected_version: expectedVersion,
+    }));
+  }
+
+  try {
+    cachePathIsSymlink = fs.lstatSync(cacheArgument).isSymbolicLink();
+  } catch (error) {
+    if (!error || error.code !== "ENOENT") {
+      errors.push(errorFrom(error));
+    }
+  }
+  if (cachePathIsSymlink) {
+    errors.push(makeError(
+      "CACHE_PATH_SYMLINK_FORBIDDEN",
+      "cache exact-version path must be a real directory, not a symbolic link",
+      { cache: cacheArgument },
+    ));
+  }
+
+  const roots = {
+    source: inspectLayoutRoot(options.source, "source"),
+    snapshot: inspectLayoutRoot(options.snapshot, "snapshot"),
+    cache: inspectLayoutRoot(options.cache, "cache"),
+  };
+  for (const root of Object.values(roots)) {
+    errors.push(...root.errors);
+  }
+
+  if (path.basename(cacheArgument) !== expectedVersion) {
+    errors.push(makeError("CACHE_PATH_NOT_EXACT_VERSION", "cache path basename must exactly equal expected version", {
+      cache: cacheArgument,
+      expected_version: expectedVersion,
+      actual_basename: path.basename(cacheArgument),
+    }));
+  }
+
+  for (const [label, root] of Object.entries(roots)) {
+    const actualVersion = root.manifest ? root.manifest.summary.version : null;
+    if (actualVersion !== null && actualVersion !== expectedVersion) {
+      errors.push(makeError("LAYOUT_VERSION_MISMATCH", `${label} manifest version does not equal expected version`, {
+        input: label,
+        expected_version: expectedVersion,
+        actual_version: actualVersion,
+      }));
+    }
+  }
+
+  const availableTrees = Object.entries(roots).filter(([, root]) => root.tree !== null);
+  if (availableTrees.length === 3) {
+    const distinctTrees = new Set(availableTrees.map(([, root]) => root.tree.value));
+    if (distinctTrees.size !== 1) {
+      errors.push(makeError("LAYOUT_TREE_MISMATCH", "source, snapshot, and exact cache plugin trees must match", {
+        source_tree_hash: roots.source.tree.value,
+        snapshot_tree_hash: roots.snapshot.tree.value,
+        cache_tree_hash: roots.cache.tree.value,
+      }));
+    }
+  }
+
+  let commit = null;
+  if (options["expected-commit"] && roots.snapshot.manifest) {
+    const commitCheck = snapshotCommitCheck(roots.snapshot.manifest.loaded.root, options["expected-commit"]);
+    commit = commitCheck.result;
+    errors.push(...commitCheck.errors);
+  }
+
+  const rootSummary = {};
+  for (const [label, root] of Object.entries(roots)) {
+    rootSummary[label] = {
+      path: root.manifest ? root.manifest.loaded.root : path.resolve(options[label]),
+      manifest: root.manifest ? root.manifest.summary : null,
+      tree: root.tree,
+    };
+  }
+
+  emit("layout", {
+    expected_version: expectedVersion,
+    expected_commit: options["expected-commit"] || null,
+    exact_cache_path: path.basename(cacheArgument) === expectedVersion && !cachePathIsSymlink,
+    cache_path_symlink: cachePathIsSymlink,
+    roots: rootSummary,
+    snapshot_commit: commit,
+  }, errors);
+}
+
+function main() {
+  const argv = process.argv.slice(2);
+  const mode = argv.shift() || null;
+  try {
+    const options = parseOptions(mode, argv);
+    if (mode === "manifest") {
+      runManifestMode(options);
+    } else if (mode === "release") {
+      runReleaseMode(options);
+    } else {
+      runLayoutMode(options);
+    }
+  } catch (error) {
+    emit(mode, {}, [errorFrom(error)], error instanceof IntegrityError && error.code === "CLI_USAGE" ? 2 : 1);
+  }
+}
+
+main();

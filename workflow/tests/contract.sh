@@ -48,6 +48,10 @@ setup_repo() {
 
 bash -n "$BIN"
 
+bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
+bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
+pass "atlas plugin integrity contract"
+
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"
 expect_fail "done without verification" "$BIN" done "$done_id"
@@ -527,13 +531,13 @@ rg -q "Goal B business UI acceptance closure" "$ATLAS_FORGE_ROOT/workflow/templa
 rg -q "Dual-goal rule" "$ATLAS_FORGE_ROOT/workflow/templates/business-verdict.md"
 rg -q "evidence_rules" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Raw Run Artifacts" "$ATLAS_FORGE_ROOT/workflow/templates/design-review-report.md"
-rg -q "phase evidence concise" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json"
+rg -q "Concise Phase Evidence" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q "Workflow Artifact Categories" "$source_skills_root/team/SKILL.md"
 rg -q "workflow working notes" "$source_skills_root/team/SKILL.md"
 rg -q "workflow working notes by default" "$source_skills_root/intake/SKILL.md"
 rg -q "classify process docs before mirroring" "$source_skills_root/clarify/SKILL.md"
 rg -q "artifact_categories" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
-rg -q "Classify Atlas process docs" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json"
+rg -q "Classify Atlas process docs" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q "scaffold-intake" "$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow"
 rg -q "scaffold-brainstorm" "$source_skills_root/brainstorm/SKILL.md"
 rg -q "scaffold-clarify" "$source_skills_root/clarify/SKILL.md"
