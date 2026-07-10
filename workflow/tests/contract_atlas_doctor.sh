@@ -609,7 +609,9 @@ setup_case inconsistent-helper-envelope
 tool_copy="$CASE_ROOT/tool-copy"
 mkdir -p "$tool_copy"
 cp "$BIN" "$tool_copy/codex-workflow"
-chmod 755 "$tool_copy/codex-workflow"
+cp "$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow-legacy" "$tool_copy/codex-workflow-legacy"
+cp -a "$ATLAS_FORGE_ROOT/workflow/bin/lib" "$tool_copy/lib"
+chmod 755 "$tool_copy/codex-workflow" "$tool_copy/codex-workflow-legacy"
 python3 - "$tool_copy/atlas-plugin-integrity" <<'PY'
 from pathlib import Path
 import stat
