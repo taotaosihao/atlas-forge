@@ -16,6 +16,7 @@ evidence_status: mvp-implemented
 | Phase 3 结论 | [phase-3-conclusion.md](./phase-3-conclusion.md) | evidence-bound outcome marker 与 latency report |
 | Phase 4A 结论 | [phase-4a-conclusion.md](./phase-4a-conclusion.md) | artifact scaffold、routing、checkpoint、source 与 prompt planning 迁移 |
 | Phase 4B 结论 | [phase-4b-conclusion.md](./phase-4b-conclusion.md) | readiness、verify/record、gate metrics 与 generic feedback 迁移 |
+| Phase 5 领域决策 | [phase-5-domain-decisions.md](./phase-5-domain-decisions.md) | native team migrate 与其余领域 keep-shell/retire 边界 |
 
 ## 本轮只读事实
 

@@ -25,6 +25,7 @@ supporting_evidence:
 - phase_3_conclusion: ./evidence/phase-3-conclusion.md
 - phase_4a_conclusion: ./evidence/phase-4a-conclusion.md
 - phase_4b_conclusion: ./evidence/phase-4b-conclusion.md
+- phase_5_domain_decisions: ./evidence/phase-5-domain-decisions.md
 - workflow_team_decision: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/decision.md
 - workflow_team_staffing: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/staffing.md
 - prior_release_bundle: ../20260710-003-atlas-forge-release-integrity-governance-plan/contract-index.md

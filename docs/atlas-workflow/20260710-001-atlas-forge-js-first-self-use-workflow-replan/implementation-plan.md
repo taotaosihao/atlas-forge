@@ -333,31 +333,38 @@ Phase 4 共完成 artifact、verification 与 feedback 三个 CommonJS 域；4B 
 
 ## 9. Phase 5：剩余领域的 migrate/retire/keep-shell 决策
 
-phase_status: pending
+phase_status: in-progress
+
+authoritative_decision: ./evidence/phase-5-domain-decisions.md
 
 ### 9.1 Memory
 
-- `learn/dream/recall` 已是 legacy fallback；先通过实际使用检查决定是否退役。
-- 若保留，再迁移 search/index/Markdown generation；不改变历史 memory 文件格式。
-- 不为完成 JS 行数指标而迁移无人使用的 legacy command。
+- [x] `learn/dream/recall` 决定 keep-shell；它们是非默认 legacy fallback。
+- [x] retire task mutation 后的隐式 memory sync，使高频 task command 可直接走 JS。
+- [x] 不改变或删除历史 memory 文件；显式 `dream/learn` 继续运行既有 sync。
 
 ### 9.2 Team
 
-- native team record/status/promote 优先，因为它们主要是状态与 artifact 写入。
+- [ ] native team record/finalize/loop-record/status/stop/promote 迁入 CommonJS。
 - plugin 内已有 Node team tools 继续复用，不复制实现。
-- team-v1 `team-start/team-loop` 涉及 process、timeout、signal，最后处理；可选择保留薄 Shell launcher 或正式退役。
+- [x] team-v1 `team-start/team-loop` 涉及 process、timeout、signal，决定 keep-shell。
 - 不运行或修改 Multica team/router/listener。
 
 ### 9.3 Doctor/install/release
 
-- doctor 的纯解析/JSON report 可以迁移，但必须与 strict doctor 既有行为兼容。
-- `codex-refresh-local-plugin`、sync/install wrappers 可以继续 Bash；只有出现真实维护成本时再迁移。
+- [x] doctor/smoke/self-test/install-hooks 决定 keep-shell，避免重写稳定 host/process 合同。
+- [x] `codex-refresh-local-plugin`、sync/install/release wrappers 继续 Bash/trigger-only。
 - `atlas-plugin-integrity` 已是 JS，不重写。
 - marketplace mutation、Atlas-only marketplace、exact-SHA rotation 不属于本 phase。
 
-### 9.4 决策门
+### 9.4 Multica-facing commands
 
-每个领域进入实现前写一页 migrate/retire/keep-shell 决策。若保留 Shell 的实现足够薄且稳定，该领域可以直接关闭，不追求形式上的全 JS。
+- [x] handoff/result ingest/curated packet/Multica feedback 标记 planned-deprecation keep-shell。
+- [x] 不迁移、不删除、不运行对应 Multica plugin/router/listener/tests/runtime。
+
+### 9.5 决策门
+
+领域决策已记录在 [phase-5-domain-decisions.md](./evidence/phase-5-domain-decisions.md)。Phase 5 唯一代码 slice 是 native team；其余领域以明确 keep-shell/retire 决定关闭，不追求形式上的全 JS。
 
 ## 10. Phase 6：公开入口收缩与最终回归
 
