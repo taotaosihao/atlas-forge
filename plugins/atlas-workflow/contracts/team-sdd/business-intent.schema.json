@@ -1,55 +1,124 @@
 {
-  "type": "object",
-  "required": [
-    "schema_version",
-    "task_id",
-    "business_goal",
-    "agent_responsibility",
-    "excluded_scope",
-    "stakeholders",
-    "success_definition",
-    "risk_boundaries"
-  ],
-  "properties": {
-    "schema_version": {
-      "type": "integer",
-      "enum": [
-        1
-      ]
+  "oneOf": [
+    {
+      "title": "Business intent v1 (historical)",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "task_id",
+        "business_goal",
+        "agent_responsibility",
+        "excluded_scope",
+        "stakeholders",
+        "success_definition",
+        "risk_boundaries"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "business_goal": {
+          "type": "string"
+        },
+        "agent_responsibility": {
+          "type": "string"
+        },
+        "excluded_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stakeholders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "success_definition": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risk_boundaries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
-    "task_id": {
-      "type": "string"
-    },
-    "business_goal": {
-      "type": "string"
-    },
-    "agent_responsibility": {
-      "type": "string"
-    },
-    "excluded_scope": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "stakeholders": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "success_definition": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "risk_boundaries": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+    {
+      "title": "Business intent v2",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "task_id",
+        "closure_mode",
+        "business_goal",
+        "agent_responsibility",
+        "excluded_scope",
+        "stakeholders",
+        "success_definition",
+        "risk_boundaries"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            2
+          ]
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "closure_mode": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "dual_goal"
+          ]
+        },
+        "business_goal": {
+          "type": "string"
+        },
+        "agent_responsibility": {
+          "type": "string"
+        },
+        "excluded_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stakeholders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "success_definition": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risk_boundaries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  ]
 }

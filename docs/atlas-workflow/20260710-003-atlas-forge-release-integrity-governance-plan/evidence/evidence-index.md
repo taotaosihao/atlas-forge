@@ -43,3 +43,4 @@ workflow_id: `20260710-003-atlas-forge`
 - Phase 3 plugin-scoped strict doctor: `./phase-3-conclusion.md`
 - Phase 4 hermetic contracts and Atlas-only CI: `./phase-4-conclusion.md`
 - Phase 5 implementation contract semantic gate: `./phase-5-conclusion.md`
+- Phase 6 BAF v2 dual-goal semantic gate: `./phase-6-conclusion.md`

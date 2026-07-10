@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "verdict": "blocked",
+  "technical_gate_status": "blocked",
+  "business_acceptance_status": "blocked",
+  "required_followups": [
+    "Retry later"
+  ],
+  "blockers": [],
+  "goal_a": {
+    "status": "blocked",
+    "evidence_refs": [],
+    "integration_path_id": null,
+    "integration_mode": "not_run"
+  },
+  "goal_b": {
+    "status": "not_run",
+    "evidence_refs": [],
+    "integration_path_id": null,
+    "integration_mode": "not_run"
+  }
+}

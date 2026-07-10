@@ -3,6 +3,8 @@
 task_id: {{TASK_ID}}
 created: {{CREATED}}
 title: {{TITLE}}
+schema_version: 2
+closure_mode: standard | dual_goal
 
 ## Business Goal
 
@@ -16,6 +18,9 @@ title: {{TITLE}}
 - Excluded workflow slice:
 - Primary actor:
 - Secondary actors:
+- Goal A protocol/device integration scope:
+- Goal B business UI acceptance scope:
+- Shared integration path expectation:
 
 ## Source Of Truth
 

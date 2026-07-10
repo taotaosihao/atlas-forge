@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "closure_mode": "standard",
+  "business_goal": "Close a standard business workflow with evidence-backed acceptance.",
+  "agent_responsibility": "Collect business artifacts and preserve technical hard gates.",
+  "excluded_scope": [
+    "Protocol and UI dual-goal closure"
+  ],
+  "stakeholders": [
+    "operator",
+    "reviewer"
+  ],
+  "success_definition": [
+    "Accepted verdict maps to scenario evidence"
+  ],
+  "risk_boundaries": [
+    "Technical gate failure blocks acceptance"
+  ]
+}

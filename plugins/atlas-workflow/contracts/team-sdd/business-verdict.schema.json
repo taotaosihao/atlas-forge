@@ -1,56 +1,188 @@
 {
-  "type": "object",
-  "required": [
-    "schema_version",
-    "task_id",
-    "verdict",
-    "technical_gate_status",
-    "business_acceptance_status",
-    "required_followups"
-  ],
-  "properties": {
-    "schema_version": {
-      "type": "integer",
-      "enum": [
-        1
-      ]
-    },
-    "task_id": {
-      "type": "string"
-    },
-    "verdict": {
-      "type": "string",
-      "enum": [
-        "accepted",
-        "conditionally_accepted",
-        "rejected",
-        "blocked"
-      ]
-    },
-    "technical_gate_status": {
-      "type": "string",
-      "enum": [
-        "passed",
-        "failed",
-        "blocked",
-        "not_run"
-      ]
-    },
-    "business_acceptance_status": {
-      "type": "string",
-      "enum": [
-        "passed",
-        "failed",
-        "blocked",
-        "not_run"
-      ]
-    },
-    "required_followups": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+  "definitions": {
+    "goal": {
+      "type": "object",
+      "required": [
+        "status",
+        "evidence_refs",
+        "integration_path_id",
+        "integration_mode"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked",
+            "not_run"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "integration_path_id": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "integration_mode": {
+          "type": "string",
+          "enum": [
+            "real",
+            "approved_simulator",
+            "mock",
+            "synthetic",
+            "not_run"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "oneOf": [
+    {
+      "title": "Business verdict v1 (historical)",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "task_id",
+        "verdict",
+        "technical_gate_status",
+        "business_acceptance_status",
+        "required_followups"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "conditionally_accepted",
+            "rejected",
+            "blocked"
+          ]
+        },
+        "technical_gate_status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked",
+            "not_run"
+          ]
+        },
+        "business_acceptance_status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked",
+            "not_run"
+          ]
+        },
+        "required_followups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "title": "Business verdict v2",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "task_id",
+        "verdict",
+        "technical_gate_status",
+        "business_acceptance_status",
+        "required_followups",
+        "blockers"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            2
+          ]
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "conditionally_accepted",
+            "rejected",
+            "blocked"
+          ]
+        },
+        "technical_gate_status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked",
+            "not_run"
+          ]
+        },
+        "business_acceptance_status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "blocked",
+            "not_run"
+          ]
+        },
+        "required_followups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "goal_a": {
+          "$ref": "#/definitions/goal"
+        },
+        "goal_b": {
+          "$ref": "#/definitions/goal"
+        }
+      },
+      "dependencies": {
+        "goal_a": [
+          "goal_b"
+        ],
+        "goal_b": [
+          "goal_a"
+        ]
+      },
+      "additionalProperties": false
+    }
+  ]
 }

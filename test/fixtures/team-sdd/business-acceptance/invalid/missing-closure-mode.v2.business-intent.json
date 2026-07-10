@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "business_goal": "Close both business goals.",
+  "agent_responsibility": "Collect business acceptance evidence.",
+  "excluded_scope": [],
+  "stakeholders": [
+    "operator"
+  ],
+  "success_definition": [
+    "Both goals pass"
+  ],
+  "risk_boundaries": [
+    "Technical gates remain blocking"
+  ]
+}

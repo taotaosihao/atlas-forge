@@ -57,7 +57,7 @@ function readJson(file, errors) {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
     errors.push(`${file}: invalid JSON: ${error.message}`);
-    return null;
+    return undefined;
   }
 }
 
@@ -232,57 +232,110 @@ function lintForbiddenTerms(sddDir, errors) {
 
 function validateJsonFile(file, validate, errors) {
   const value = readJson(file, errors);
-  if (!value) {
+  if (value === undefined) {
     return null;
   }
   const validation = validate(value);
   if (validation.length > 0) {
     errors.push(`${file}: ${validation.join("; ")}`);
+    return null;
   }
   return value;
 }
 
-function ensureArtifactRelativePath(artifactRoot, rawPath, label, errors) {
+function ensureArtifactRelativePath(artifactRoot, rawPath, label, errors, v2) {
   if (typeof rawPath !== "string" || rawPath.length === 0) {
-    errors.push(`${label}: path must be a non-empty string`);
+    errors.push(`${label}: EVIDENCE_PATH_INVALID path must be a non-empty string`);
     return null;
   }
   if (path.isAbsolute(rawPath)) {
-    errors.push(`${label}: local evidence path must be artifact-root-relative`);
+    errors.push(`${label}: EVIDENCE_PATH_INVALID local evidence path must be artifact-root-relative`);
     return null;
   }
   const resolved = path.resolve(artifactRoot, rawPath);
   const relative = path.relative(artifactRoot, resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    errors.push(`${label}: local evidence path must not escape artifact root`);
+    errors.push(`${label}: EVIDENCE_PATH_INVALID local evidence path must not escape artifact root`);
     return null;
   }
   if (!fs.existsSync(resolved)) {
-    errors.push(`${label}: local evidence path does not exist: ${rawPath}`);
+    errors.push(`${label}: EVIDENCE_PATH_INVALID local evidence path does not exist: ${rawPath}`);
+    return null;
   }
-  return resolved;
+  if (!v2) {
+    return resolved;
+  }
+  const stat = fs.lstatSync(resolved);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    errors.push(`${label}: EVIDENCE_PATH_INVALID local evidence path must be a regular non-symlink file: ${rawPath}`);
+    return null;
+  }
+  const canonicalRoot = fs.realpathSync(artifactRoot);
+  const canonical = fs.realpathSync(resolved);
+  const canonicalRelative = path.relative(canonicalRoot, canonical);
+  if (canonicalRelative.startsWith("..") || path.isAbsolute(canonicalRelative)) {
+    errors.push(`${label}: EVIDENCE_PATH_INVALID local evidence path must not escape artifact root: ${rawPath}`);
+    return null;
+  }
+  return canonical;
 }
 
-function lintEvidenceMap(artifactRoot, evidenceMap, errors) {
+function lintEvidenceMap(artifactRoot, evidenceMap, errors, v2) {
+  const evidenceIndex = new Map();
   if (!evidenceMap || !Array.isArray(evidenceMap.evidence_refs)) {
-    return;
+    return evidenceIndex;
   }
-  evidenceMap.evidence_refs.forEach((ref, index) => {
+  evidenceMap.evidence_refs.forEach((ref, itemIndex) => {
     if (!ref || typeof ref !== "object") {
       return;
     }
-    const label = `business-evidence-map.evidence_refs[${index}]`;
+    const label = `business-evidence-map.evidence_refs[${itemIndex}]`;
+    let identity = null;
     if (ref.source_type === "local") {
-      ensureArtifactRelativePath(artifactRoot, ref.evidence_path, label, errors);
+      const canonical = ensureArtifactRelativePath(artifactRoot, ref.evidence_path, label, errors, v2);
+      if (v2 && canonical) {
+        const stat = fs.statSync(canonical);
+        identity = `local:${stat.dev}:${stat.ino}`;
+      }
     } else if (["external", "manual"].includes(ref.source_type)) {
-      if (typeof ref.description !== "string" || ref.description.length === 0) {
+      const description = typeof ref.description === "string" ? ref.description.trim() : "";
+      const evidencePath = typeof ref.evidence_path === "string" ? ref.evidence_path.trim() : "";
+      if ((!v2 && typeof ref.description === "string" && ref.description.length === 0)
+        || (v2 && description.length === 0)) {
         errors.push(`${label}: external/manual evidence requires description`);
       }
+      if (v2) {
+        try {
+          const canonical = new URL(evidencePath);
+          const validExternal = ref.source_type === "external"
+            && ["http:", "https:"].includes(canonical.protocol)
+            && canonical.hostname.length > 0
+            && !canonical.username
+            && !canonical.password;
+          const validManual = ref.source_type === "manual"
+            && canonical.protocol === "manual:"
+            && canonical.href.length > "manual:".length;
+          if (!validExternal && !validManual) {
+            errors.push(`${label}: EVIDENCE_PATH_INVALID external evidence requires credential-free HTTP(S), and manual evidence requires manual:`);
+          } else {
+            canonical.hash = "";
+            identity = `nonlocal:${canonical.href}`;
+          }
+        } catch (_error) {
+          errors.push(`${label}: EVIDENCE_PATH_INVALID external/manual evidence URI is invalid`);
+        }
+      }
+    }
+    if (v2 && evidenceIndex.has(ref.evidence_id)) {
+      errors.push(`${label}: EVIDENCE_ID_DUPLICATE duplicate evidence_id: ${ref.evidence_id}`);
+    } else {
+      evidenceIndex.set(ref.evidence_id, { ref, identity });
     }
   });
+  return evidenceIndex;
 }
 
-function lintDeviationLog(file, errors) {
+function lintDeviationLog(file, errors, taskId) {
   if (!fs.existsSync(file)) {
     return;
   }
@@ -301,11 +354,127 @@ function lintDeviationLog(file, errors) {
     const validation = validateBusinessDeviationLog(value);
     if (validation.length > 0) {
       errors.push(`${file}:${index + 1}: ${validation.join("; ")}`);
+    } else if (taskId && value.task_id !== taskId) {
+      errors.push(`${file}:${index + 1}: TASK_ID_MISMATCH expected ${taskId}, got ${value.task_id}`);
     }
   });
 }
 
-function lintBusinessAcceptance(artifactRoot, errors) {
+function lintBusinessTaskId(value, label, taskId, errors) {
+  if (value && value.task_id !== taskId) {
+    errors.push(`${label}: TASK_ID_MISMATCH expected ${taskId}, got ${value.task_id}`);
+  }
+}
+
+function lintGoalEvidence(goalLabel, goal, evidenceIndex, scenarioIds, errors) {
+  const identities = new Set();
+  if (!goal || !Array.isArray(goal.evidence_refs)) {
+    return identities;
+  }
+  for (const evidenceId of goal.evidence_refs) {
+    const indexed = evidenceIndex.get(evidenceId);
+    if (!indexed) {
+      errors.push(`${goalLabel}: EVIDENCE_REF_NOT_FOUND ${evidenceId}`);
+      continue;
+    }
+    if (goal.status === "passed" && indexed.ref.result !== "passed") {
+      errors.push(`${goalLabel}: EVIDENCE_REF_NOT_PASSED ${evidenceId}`);
+    }
+    if (!scenarioIds.has(indexed.ref.scenario_id)) {
+      errors.push(`${goalLabel}: EVIDENCE_SCENARIO_NOT_FOUND ${indexed.ref.scenario_id}`);
+    }
+    if (indexed.identity) {
+      identities.add(indexed.identity);
+    }
+  }
+  return identities;
+}
+
+function lintBusinessAcceptanceV2(context, errors) {
+  const {
+    intent,
+    verdict,
+    evidenceMap,
+    evidenceIndex,
+    acceptanceReport,
+    scenarioIds,
+  } = context;
+  if (!verdict) {
+    return;
+  }
+
+  const hasGoalA = Object.prototype.hasOwnProperty.call(verdict, "goal_a");
+  const hasGoalB = Object.prototype.hasOwnProperty.call(verdict, "goal_b");
+  if (intent.closure_mode === "standard") {
+    if (hasGoalA || hasGoalB) {
+      errors.push("DUAL_GOAL_FORBIDDEN standard closure_mode must not contain goal_a or goal_b");
+    }
+  } else if (!hasGoalA || !hasGoalB) {
+    errors.push("DUAL_GOAL_REQUIRED dual_goal closure_mode requires goal_a and goal_b");
+    return;
+  }
+
+  const accepted = ["accepted", "conditionally_accepted"].includes(verdict.verdict);
+  if (accepted) {
+    if (verdict.technical_gate_status !== "passed") {
+      errors.push("TECHNICAL_GATE_NOT_PASSED accepted/conditionally_accepted requires technical_gate_status passed");
+    }
+    if (verdict.business_acceptance_status !== "passed") {
+      errors.push("BUSINESS_ACCEPTANCE_NOT_PASSED accepted/conditionally_accepted requires business_acceptance_status passed");
+    }
+    if (!evidenceMap) {
+      errors.push("accepted/conditionally_accepted requires a valid business-evidence-map.json");
+    }
+    if (!acceptanceReport) {
+      errors.push("accepted/conditionally_accepted requires a valid business-acceptance-report.json");
+    } else {
+      if (acceptanceReport.rating.blocking_technical_gate_failed === true
+        || acceptanceReport.technical_gate_summary.blocking_failure_count !== 0
+        || acceptanceReport.technical_gate_summary.failed_gates.length !== 0) {
+        errors.push("TECHNICAL_GATE_NOT_PASSED acceptance report contains a blocking technical gate failure");
+      }
+      if (acceptanceReport.technical_gate_summary.blocking_failure_count
+        !== acceptanceReport.technical_gate_summary.failed_gates.length) {
+        errors.push("TECHNICAL_GATE_SUMMARY_MISMATCH blocking_failure_count must match failed_gates length");
+      }
+      if (acceptanceReport.scenario_results.some((result) => result.technical_gate_result !== "passed")) {
+        errors.push("TECHNICAL_GATE_NOT_PASSED accepted/conditionally_accepted requires every scenario technical gate passed");
+      }
+      if (acceptanceReport.scenario_results.some((result) => result.business_result !== "passed")) {
+        errors.push("BUSINESS_ACCEPTANCE_NOT_PASSED accepted/conditionally_accepted requires every scenario business result passed");
+      }
+      if (acceptanceReport.scenario_results.length === 0) {
+        errors.push("BUSINESS_ACCEPTANCE_NOT_PASSED accepted/conditionally_accepted requires at least one scenario result");
+      }
+      const reportScenarioIds = acceptanceReport.scenario_results.map((result) => result.scenario_id);
+      const uniqueReportScenarioIds = new Set(reportScenarioIds);
+      if (uniqueReportScenarioIds.size !== reportScenarioIds.length) {
+        errors.push("BUSINESS_ACCEPTANCE_REPORT_INVALID scenario_results must not contain duplicate scenario_id values");
+      }
+      if (reportScenarioIds.some((scenarioId) => !scenarioIds.has(scenarioId))) {
+        errors.push("BUSINESS_ACCEPTANCE_REPORT_INVALID scenario_results references a missing scenario card");
+      }
+      if (scenarioIds.size !== uniqueReportScenarioIds.size
+        || [...scenarioIds].some((scenarioId) => !uniqueReportScenarioIds.has(scenarioId))) {
+        errors.push("BUSINESS_ACCEPTANCE_REPORT_INVALID accepted/conditionally_accepted must cover every scenario card exactly once");
+      }
+      if (acceptanceReport.rating.level !== verdict.verdict) {
+        errors.push("business-acceptance-report rating.level must match business-verdict.verdict");
+      }
+    }
+  }
+
+  if (intent.closure_mode !== "dual_goal" || !hasGoalA || !hasGoalB) {
+    return;
+  }
+  const goalAIdentities = lintGoalEvidence("goal_a", verdict.goal_a, evidenceIndex, scenarioIds, errors);
+  const goalBIdentities = lintGoalEvidence("goal_b", verdict.goal_b, evidenceIndex, scenarioIds, errors);
+  if ([...goalAIdentities].some((identity) => goalBIdentities.has(identity))) {
+    errors.push("EVIDENCE_SUBSTITUTION goal_a and goal_b must not use the same canonical evidence identity");
+  }
+}
+
+function lintBusinessAcceptance(artifactRoot, taskId, errors, warnings, strict) {
   const acceptanceDir = path.join(artifactRoot, "team", "acceptance");
   const intentFile = path.join(acceptanceDir, "business-intent.json");
   const scenariosDir = path.join(acceptanceDir, "scenarios");
@@ -313,11 +482,12 @@ function lintBusinessAcceptance(artifactRoot, errors) {
   const acceptanceReportFile = path.join(acceptanceDir, "business-acceptance-report.json");
   const verdictFile = path.join(acceptanceDir, "business-verdict.json");
   const deviationLogFile = path.join(acceptanceDir, "business-deviation-log.jsonl");
+  let intent = null;
 
   if (!fs.existsSync(intentFile)) {
     errors.push("missing team/acceptance/business-intent.json");
   } else {
-    validateJsonFile(intentFile, validateBusinessIntent, errors);
+    intent = validateJsonFile(intentFile, validateBusinessIntent, errors);
   }
 
   const scenarioFiles = fs.existsSync(scenariosDir)
@@ -329,9 +499,9 @@ function lintBusinessAcceptance(artifactRoot, errors) {
   if (scenarioFiles.length === 0) {
     errors.push("missing team/acceptance/scenarios/business-scenario-card.*.json");
   }
-  for (const file of scenarioFiles) {
-    validateJsonFile(file, validateBusinessScenarioCard, errors);
-  }
+  const scenarios = scenarioFiles
+    .map((file) => validateJsonFile(file, validateBusinessScenarioCard, errors))
+    .filter(Boolean);
 
   const evidenceMap = fs.existsSync(evidenceMapFile)
     ? validateJsonFile(evidenceMapFile, validateBusinessEvidenceMap, errors)
@@ -343,8 +513,40 @@ function lintBusinessAcceptance(artifactRoot, errors) {
     ? validateJsonFile(verdictFile, validateBusinessVerdict, errors)
     : null;
 
-  lintDeviationLog(deviationLogFile, errors);
-  lintEvidenceMap(artifactRoot, evidenceMap, errors);
+  const v2Intent = intent && intent.schema_version === 2;
+  const scenarioIdValues = scenarios.map((scenario) => scenario.scenario_id);
+  const scenarioIds = new Set(scenarioIdValues);
+  if (v2Intent && scenarioIds.size !== scenarioIdValues.length) {
+    errors.push("BUSINESS_SCENARIO_DUPLICATE scenario cards must not contain duplicate scenario_id values");
+  }
+  lintDeviationLog(deviationLogFile, errors, v2Intent ? taskId : null);
+  const evidenceIndex = lintEvidenceMap(artifactRoot, evidenceMap, errors, v2Intent);
+
+  if (v2Intent) {
+    lintBusinessTaskId(intent, "business-intent", taskId, errors);
+    scenarios.forEach((scenario) => lintBusinessTaskId(
+      scenario,
+      `business-scenario-card.${scenario.scenario_id}`,
+      taskId,
+      errors,
+    ));
+    lintBusinessTaskId(evidenceMap, "business-evidence-map", taskId, errors);
+    lintBusinessTaskId(acceptanceReport, "business-acceptance-report", taskId, errors);
+    lintBusinessTaskId(verdict, "business-verdict", taskId, errors);
+  }
+
+  if (intent && intent.schema_version === 1 && (!verdict || verdict.schema_version === 1)) {
+    warnings.push("LEGACY_BAF_V1 historical business acceptance artifact; migrate intent and verdict to schema_version 2");
+  }
+  if (strict && intent && intent.schema_version !== 2) {
+    errors.push("BAF_V2_REQUIRED strict business acceptance requires business-intent schema_version 2");
+  }
+  if (strict && verdict && verdict.schema_version !== 2) {
+    errors.push("BAF_V2_REQUIRED strict business acceptance requires business-verdict schema_version 2");
+  }
+  if (intent && verdict && intent.schema_version !== verdict.schema_version) {
+    errors.push(`BAF_VERSION_MISMATCH intent v${intent.schema_version} cannot be combined with verdict v${verdict.schema_version}`);
+  }
 
   if (!verdict) {
     return;
@@ -356,14 +558,30 @@ function lintBusinessAcceptance(artifactRoot, errors) {
   if (acceptedVerdicts.includes(verdict.verdict) && !fs.existsSync(acceptanceReportFile)) {
     errors.push("business-verdict accepted/conditionally_accepted requires business-acceptance-report.json");
   }
-  if (acceptedVerdicts.includes(verdict.verdict) && ["failed", "blocked"].includes(verdict.technical_gate_status)) {
+  const v2Bundle = intent
+    && intent.schema_version === 2
+    && verdict.schema_version === 2;
+  if (!v2Bundle
+    && acceptedVerdicts.includes(verdict.verdict)
+    && ["failed", "blocked"].includes(verdict.technical_gate_status)) {
     errors.push("business-verdict accepted/conditionally_accepted is forbidden when technical_gate_status is failed or blocked");
   }
-  if (acceptedVerdicts.includes(verdict.verdict)
+  if (!v2Bundle
+    && acceptedVerdicts.includes(verdict.verdict)
     && acceptanceReport
     && acceptanceReport.rating
     && acceptanceReport.rating.blocking_technical_gate_failed === true) {
     errors.push("business-verdict accepted/conditionally_accepted is forbidden when blocking_technical_gate_failed is true");
+  }
+  if (v2Bundle) {
+    lintBusinessAcceptanceV2({
+      intent,
+      verdict,
+      evidenceMap,
+      evidenceIndex,
+      acceptanceReport,
+      scenarioIds,
+    }, errors);
   }
 }
 
@@ -374,6 +592,7 @@ function lint(options) {
   const sddDir = path.join(teamDir, "sdd");
   const slicesDir = path.join(sddDir, "slices");
   const errors = [];
+  const warnings = [];
   if (!fs.existsSync(sddDir)) {
     errors.push("missing team/sdd artifact directory");
   }
@@ -381,7 +600,7 @@ function lint(options) {
     errors.push("missing team/sdd/slices directory");
   }
   if (errors.length > 0) {
-    return errors;
+    return { errors, warnings };
   }
   const events = lintLedger(sddDir, errors);
   const sliceDirs = fs.readdirSync(slicesDir)
@@ -398,9 +617,9 @@ function lint(options) {
   lintPlaceholderArtifacts(teamDir, errors, options.strict);
   lintForbiddenTerms(sddDir, errors);
   if (options.businessAcceptance) {
-    lintBusinessAcceptance(artifactRoot, errors);
+    lintBusinessAcceptance(artifactRoot, options.task, errors, warnings, options.strict);
   }
-  return errors;
+  return { errors, warnings };
 }
 
 function main() {
@@ -413,7 +632,10 @@ function main() {
     if (!options.task) {
       throw new Error("--task is required");
     }
-    const errors = lint(options);
+    const { errors, warnings } = lint(options);
+    for (const warning of warnings) {
+      console.error(`lint warning: ${warning}`);
+    }
     if (errors.length > 0) {
       for (const error of errors) {
         console.error(`lint: ${error}`);

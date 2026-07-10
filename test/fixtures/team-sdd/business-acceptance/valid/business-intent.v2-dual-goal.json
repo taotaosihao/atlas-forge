@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "closure_mode": "dual_goal",
+  "business_goal": "Close protocol integration and the operator UI on one integration path.",
+  "agent_responsibility": "Collect independent Goal A and Goal B evidence without replacing technical gates.",
+  "excluded_scope": [
+    "Unapproved synthetic integration"
+  ],
+  "stakeholders": [
+    "operator",
+    "integration-reviewer"
+  ],
+  "success_definition": [
+    "Both goals pass on the same evidence-backed integration path"
+  ],
+  "risk_boundaries": [
+    "Mock output cannot prove either accepted goal"
+  ]
+}

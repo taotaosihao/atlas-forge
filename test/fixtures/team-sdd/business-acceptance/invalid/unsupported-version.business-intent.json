@@ -1,0 +1,16 @@
+{
+  "schema_version": 3,
+  "task_id": "fixture",
+  "business_goal": "Close a business workflow.",
+  "agent_responsibility": "Collect business acceptance evidence.",
+  "excluded_scope": [],
+  "stakeholders": [
+    "operator"
+  ],
+  "success_definition": [
+    "The workflow passes"
+  ],
+  "risk_boundaries": [
+    "Technical gates remain blocking"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "verdict": "blocked",
+  "technical_gate_status": "blocked",
+  "business_acceptance_status": "blocked",
+  "required_followups": [
+    "Capture the operator UI flow after the integration service is restored"
+  ],
+  "blockers": [
+    "The operator UI cannot reach the integration-backed state"
+  ],
+  "goal_a": {
+    "status": "passed",
+    "evidence_refs": [
+      "ev-protocol"
+    ],
+    "integration_path_id": "primary-integration",
+    "integration_mode": "real"
+  },
+  "goal_b": {
+    "status": "blocked",
+    "evidence_refs": [],
+    "integration_path_id": null,
+    "integration_mode": "not_run"
+  }
+}

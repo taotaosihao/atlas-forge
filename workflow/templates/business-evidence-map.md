@@ -15,15 +15,16 @@ title: {{TITLE}}
 
 - Goal A protocol/device integration closure:
   - Status:
-  - Evidence reference:
-  - Real integration path observed:
+  - Evidence IDs (`goal_a.evidence_refs`):
+  - `integration_path_id` observed:
+  - `integration_mode` observed:
   - Mock/simulator boundary:
 - Goal B business UI acceptance closure:
   - Status:
-  - Evidence reference:
+  - Evidence IDs (`goal_b.evidence_refs`):
   - UI workflow observed:
-  - Same integration-backed path confirmed:
-- Substitution check: Goal A evidence does not replace Goal B evidence, and Goal B evidence is not backed only by mock protocol logs.
+  - Same `integration_path_id` and `integration_mode` confirmed:
+- Substitution check: Goal A/B use distinct evidence IDs and canonical evidence targets; Goal B is not backed only by mock protocol logs.
 
 ## Evidence Links
 

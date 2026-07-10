@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "verdict": "rejected",
+  "technical_gate_status": "passed",
+  "business_acceptance_status": "failed",
+  "required_followups": [
+    "Repair protocol persistence before repeating both goal checks"
+  ],
+  "blockers": [
+    "Goal A did not persist the expected integration-backed state"
+  ],
+  "goal_a": {
+    "status": "failed",
+    "evidence_refs": [
+      "ev-protocol"
+    ],
+    "integration_path_id": "primary-integration",
+    "integration_mode": "real"
+  },
+  "goal_b": {
+    "status": "not_run",
+    "evidence_refs": [],
+    "integration_path_id": null,
+    "integration_mode": "not_run"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "verdict": "accepted",
+  "technical_gate_status": "passed",
+  "business_acceptance_status": "passed",
+  "required_followups": [],
+  "blockers": [],
+  "goal_a": {
+    "status": "passed",
+    "evidence_refs": [],
+    "integration_path_id": "primary-integration",
+    "integration_mode": "real"
+  },
+  "goal_b": {
+    "status": "passed",
+    "evidence_refs": [
+      "ev-ui"
+    ],
+    "integration_path_id": "primary-integration",
+    "integration_mode": "real"
+  }
+}

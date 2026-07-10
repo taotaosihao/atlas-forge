@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "task_id": "fixture",
+  "verdict": "conditionally_accepted",
+  "technical_gate_status": "passed",
+  "business_acceptance_status": "passed",
+  "required_followups": [
+    "Repeat the approved simulator review after the next protocol revision"
+  ],
+  "blockers": [],
+  "goal_a": {
+    "status": "passed",
+    "evidence_refs": [
+      "ev-protocol"
+    ],
+    "integration_path_id": "approved-simulator-path",
+    "integration_mode": "approved_simulator"
+  },
+  "goal_b": {
+    "status": "passed",
+    "evidence_refs": [
+      "ev-ui"
+    ],
+    "integration_path_id": "approved-simulator-path",
+    "integration_mode": "approved_simulator"
+  }
+}
