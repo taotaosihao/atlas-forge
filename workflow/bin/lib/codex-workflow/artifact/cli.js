@@ -1,6 +1,17 @@
 "use strict";
 
 const { TaskRepositoryError } = require("../task/repository");
+const { CHECKPOINT_USAGE, parseCheckpointArgs, writeCheckpoint } = require("./checkpoint");
+const {
+  PROMPT_USAGE,
+  SOURCE_USAGE,
+  parsePromptArgs,
+  parseSourceArgs,
+  writePromptBundle,
+  writeSourceSnapshot,
+} = require("./provenance");
+const { ROUTE_USAGE, parseRouteArgs, writeRouteDecision } = require("./routing");
+const { ArtifactError } = require("./runtime");
 const {
   ArtifactScaffoldError,
   scaffoldBrainstorm,
@@ -16,6 +27,10 @@ const USAGE = {
   "scaffold-clarify": "usage: codex-workflow scaffold-clarify <task-id>",
   "scaffold-team": "usage: codex-workflow scaffold-team <task-id>",
   "scaffold-phase": "usage: codex-workflow scaffold-phase <task-id> <phase-id>",
+  "route-decision": ROUTE_USAGE,
+  checkpoint: CHECKPOINT_USAGE,
+  "source-snapshot": SOURCE_USAGE,
+  "prompt-bundle": PROMPT_USAGE,
 };
 
 class ArtifactCliError extends Error {
@@ -49,6 +64,23 @@ function runScaffold(command, argv, environment = process.env) {
   writeLines(handlers[command](argv[0], { environment }));
 }
 
+function runPlanning(command, argv, environment = process.env) {
+  if (command === "route-decision") {
+    const parsed = parseRouteArgs(argv);
+    if (parsed.help) {
+      process.stderr.write(`${ROUTE_USAGE}\n`);
+      return;
+    }
+    writeLines(writeRouteDecision(parsed, { environment }));
+  } else if (command === "checkpoint") {
+    writeLines(writeCheckpoint(parseCheckpointArgs(argv), { environment }));
+  } else if (command === "source-snapshot") {
+    writeLines(writeSourceSnapshot(parseSourceArgs(argv), { environment }));
+  } else if (command === "prompt-bundle") {
+    writeLines(writePromptBundle(parsePromptArgs(argv), { environment }));
+  }
+}
+
 function main(argv) {
   try {
     const command = argv[0];
@@ -57,11 +89,16 @@ function main(argv) {
         "usage: codex-workflow {scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase}",
       );
     }
-    runScaffold(command, argv.slice(1));
+    if (command.startsWith("scaffold-")) {
+      runScaffold(command, argv.slice(1));
+    } else {
+      runPlanning(command, argv.slice(1));
+    }
     return 0;
   } catch (error) {
     if (
       !(error instanceof ArtifactCliError) &&
+      !(error instanceof ArtifactError) &&
       !(error instanceof ArtifactScaffoldError) &&
       !(error instanceof TaskRepositoryError)
     ) {
@@ -81,5 +118,6 @@ module.exports = {
   ArtifactCliError,
   USAGE,
   main,
+  runPlanning,
   runScaffold,
 };

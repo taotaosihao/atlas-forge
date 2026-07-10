@@ -6,7 +6,7 @@ const { atomicWriteFile } = require("../core/atomic-file");
 const { resolvePaths, taskArtifactDir } = require("../core/paths");
 const { localDay } = require("../task/lifecycle");
 const { requireTaskFile, validateTaskFile } = require("../task/repository");
-const { taskRuntimeFile, timestampSeconds } = require("../task/runtime");
+const { appendLegacyRuntimeEvent } = require("./runtime");
 
 const TEAM_DECISION_PLACEHOLDER = "# Team Decision\n\nPending discussion.\n";
 const TEAM_STAFFING_PLACEHOLDER = "# Staffing\n\nPending discussion.\n";
@@ -71,15 +71,6 @@ function scaffoldWriteFile(templateName, outputFile, taskId, options = {}) {
   return `created\t${outputFile}`;
 }
 
-function appendLegacyRuntimeEvent(paths, taskId, detail, clock) {
-  const row =
-    `{"kind": "scaffold", "detail": ${JSON.stringify(detail)}, ` +
-    `"created_at": ${JSON.stringify(timestampSeconds(clock))}}\n`;
-  const file = taskRuntimeFile(paths, taskId);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, row, "utf8");
-}
-
 function scaffoldSingle(taskId, kind, templateName, fileName, options = {}) {
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
@@ -89,7 +80,7 @@ function scaffoldSingle(taskId, kind, templateName, fileName, options = {}) {
   const lines = [
     scaffoldWriteFile(templateName, outputFile, taskId, { paths, clock }),
   ];
-  appendLegacyRuntimeEvent(paths, taskId, kind, clock);
+  appendLegacyRuntimeEvent(paths, taskId, "scaffold", kind, clock);
   return lines;
 }
 
@@ -129,7 +120,7 @@ function scaffoldTeam(taskId, options = {}) {
       placeholder: TEAM_STAFFING_PLACEHOLDER,
     }),
   ];
-  appendLegacyRuntimeEvent(paths, taskId, "team", clock);
+  appendLegacyRuntimeEvent(paths, taskId, "scaffold", "team", clock);
   return lines;
 }
 
@@ -153,7 +144,7 @@ function scaffoldPhase(taskId, phaseId, options = {}) {
       phaseId,
     }),
   );
-  appendLegacyRuntimeEvent(paths, taskId, `phase:${phaseId}`, clock);
+  appendLegacyRuntimeEvent(paths, taskId, "scaffold", `phase:${phaseId}`, clock);
   return lines;
 }
 

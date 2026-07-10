@@ -49,8 +49,8 @@ function taskArtifactDir(paths, taskId) {
   return path.join(paths.artifactsDir, taskId);
 }
 
-function taskArtifactDirRelative(paths, taskId) {
-  const artifactDir = path.resolve(taskArtifactDir(paths, taskId));
+function relativeToCodeHome(paths, target) {
+  const artifactDir = path.resolve(target);
   const codeHome = path.resolve(paths.codeHome);
   const relative = path.relative(codeHome, artifactDir);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
@@ -59,9 +59,14 @@ function taskArtifactDirRelative(paths, taskId) {
   return relative.split(path.sep).join("/");
 }
 
+function taskArtifactDirRelative(paths, taskId) {
+  return relativeToCodeHome(paths, taskArtifactDir(paths, taskId));
+}
+
 module.exports = {
   codexHomeRoot,
   moduleWorkflowRoot,
+  relativeToCodeHome,
   resolvePaths,
   taskArtifactDir,
   taskArtifactDirRelative,
