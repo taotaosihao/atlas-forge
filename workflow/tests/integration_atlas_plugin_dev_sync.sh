@@ -162,6 +162,8 @@ run_success_case() {
   for directory_name in bin hooks templates tests; do
     diff -qr "$ATLAS_FORGE_ROOT/workflow/$directory_name" "$workflow_root/$directory_name" >/dev/null
   done
+  [[ -x "$workflow_root/bin/codex-workflow" ]]
+  [[ -x "$workflow_root/bin/codex-workflow-legacy" ]]
   cmp -s "$ATLAS_FORGE_ROOT/workflow/README.md" "$workflow_root/README.md"
   [[ "$(<"$workflow_root/source-root")" == "$ATLAS_FORGE_ROOT" ]]
   pass 'Atlas workflow helpers are synchronized without replacing workflow state roots'

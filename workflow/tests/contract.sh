@@ -19,6 +19,7 @@ if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 && "${ATLAS_CONTRACT_LEGACY_HOST
 fi
 
 BIN="${CODEX_WORKFLOW_BIN:-$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow}"
+LEGACY_BIN="$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow-legacy"
 REAL_CODEX_HOME="${CODEX_HOME_REAL:-${CODEX_HOME:-$HOME/.codex}}"
 REAL_AGENTS_HOME="${AGENTS_HOME_REAL:-$HOME/.agents}"
 TMP_ROOT="${ATLAS_CONTRACT_TMP_ROOT:-$(mktemp -d)}"
@@ -63,6 +64,9 @@ setup_repo() {
 }
 
 bash -n "$BIN"
+bash -n "$LEGACY_BIN"
+test -x "$BIN"
+test -x "$LEGACY_BIN"
 node --test "$ATLAS_FORGE_ROOT"/workflow/tests/js/*.test.js >/dev/null
 pass "workflow JavaScript contracts"
 
@@ -691,7 +695,7 @@ rg -q "workflow working notes by default" "$source_skills_root/intake/SKILL.md"
 rg -q "classify process docs before mirroring" "$source_skills_root/clarify/SKILL.md"
 rg -q "artifact_categories" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Classify Atlas process docs" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
-rg -q "scaffold-intake" "$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow"
+rg -q '"scaffold-intake"' "$ATLAS_FORGE_ROOT/workflow/bin/lib/codex-workflow/cli.js"
 rg -q "scaffold-brainstorm" "$source_skills_root/brainstorm/SKILL.md"
 rg -q "scaffold-clarify" "$source_skills_root/clarify/SKILL.md"
 rg -q "scaffold-team" "$source_skills_root/team/SKILL.md"

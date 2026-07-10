@@ -1,0 +1,4775 @@
+#!/usr/bin/env bash
+
+# Internal compatibility launcher. Use the public codex-workflow façade.
+
+if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+  if [[ -z "${CODEX_WORKFLOW_BASH_REEXECED:-}" ]]; then
+    for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+      if [[ -x "$candidate" ]]; then
+        major="$("$candidate" -c 'printf "%s" "${BASH_VERSINFO[0]:-0}"' 2>/dev/null || true)"
+        case "$major" in
+          ''|*[!0-9]*)
+            continue
+            ;;
+        esac
+        if [[ "$major" -ge 4 ]]; then
+          export CODEX_WORKFLOW_BASH_REEXECED=1
+          exec "$candidate" "$0" "$@"
+        fi
+      fi
+    done
+  fi
+
+  echo "codex-workflow requires Bash 4+; install a newer bash or put it earlier in PATH" >&2
+  exit 1
+fi
+
+unset CODEX_WORKFLOW_BASH_REEXECED
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_CODEX_HOME_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEFAULT_WORKFLOW_ROOT="$DEFAULT_CODEX_HOME_ROOT/workflow"
+DEFAULT_LEARNINGS_DIR="${HOME}/Documents/note/codex-memory/learnings"
+WORKFLOW_ROOT="${CODEX_WORKFLOW_ROOT:-$DEFAULT_WORKFLOW_ROOT}"
+if [[ -n "${CODEX_HOME_ROOT:-}" ]]; then
+  CODEX_HOME_ROOT="$CODEX_HOME_ROOT"
+elif [[ -n "${CODEX_HOME:-}" ]]; then
+  CODEX_HOME_ROOT="$CODEX_HOME"
+elif [[ -n "${CODEX_WORKFLOW_ROOT:-}" ]]; then
+  CODEX_HOME_ROOT="$(dirname "$CODEX_WORKFLOW_ROOT")"
+else
+  CODEX_HOME_ROOT="$DEFAULT_CODEX_HOME_ROOT"
+fi
+TASKS_DIR="$WORKFLOW_ROOT/tasks"
+STATE_DIR="$WORKFLOW_ROOT/state"
+ARTIFACTS_DIR="$WORKFLOW_ROOT/artifacts"
+HOOKS_DIR="$WORKFLOW_ROOT/hooks"
+SOURCE_HOOKS_DIR="$SCRIPT_DIR/../hooks"
+TEMPLATE_DIR="${CODEX_WORKFLOW_TEMPLATE_DIR:-$SCRIPT_DIR/../templates}"
+LEARNING_TEMPLATE="$TEMPLATE_DIR/learning.md"
+CURRENT_TASK_FILE="$STATE_DIR/current-task.json"
+CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME_ROOT/config.toml}"
+CODEX_HOOKS_FILE="${CODEX_HOOKS_FILE:-$CODEX_HOME_ROOT/hooks.json}"
+PASEO_CONFIG_FILE="${PASEO_CONFIG_FILE:-$HOME/.paseo/config.json}"
+ATLAS_SOURCE_SKILLS_DIR="${ATLAS_SOURCE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/atlas-workflow/skills}"
+ATLAS_DOCTOR_STRICT_REQUESTED=false
+if [[ "${1:-}" == "doctor" ]]; then
+  for doctor_argument in "${@:2}"; do
+    if [[ "$doctor_argument" == "--strict" ]]; then
+      ATLAS_DOCTOR_STRICT_REQUESTED=true
+      break
+    fi
+  done
+fi
+if [[ -z "${ATLAS_CACHE_SKILLS_DIR:-}" ]]; then
+  if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" == true ]]; then
+    ATLAS_CACHE_SKILLS_DIR="$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills"
+  else
+    ATLAS_CACHE_SKILLS_DIR="$(find "$CODEX_HOME_ROOT/plugins/cache/atlas-forge/atlas-workflow" -mindepth 2 -maxdepth 2 -type d -name skills 2>/dev/null | sort -V | tail -1 || true)"
+    ATLAS_CACHE_SKILLS_DIR="${ATLAS_CACHE_SKILLS_DIR:-$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local/skills}"
+  fi
+fi
+CODEX_BIN="${CODEX_BIN:-codex}"
+PASEO_BIN="${PASEO_BIN:-paseo}"
+if [[ -n "${CODEX_LEARNINGS_DIR:-}" ]]; then
+  LEARNINGS_DIR="$CODEX_LEARNINGS_DIR"
+elif [[ "$WORKFLOW_ROOT" != "$DEFAULT_WORKFLOW_ROOT" ]]; then
+  LEARNINGS_DIR="$(dirname "$WORKFLOW_ROOT")/learnings"
+else
+  LEARNINGS_DIR="$DEFAULT_LEARNINGS_DIR"
+fi
+LEARNING_INDEX="$LEARNINGS_DIR/index.md"
+LEARNING_SEARCH_INDEX="$LEARNINGS_DIR/search.jsonl"
+MEMORY_DIR="${CODEX_MEMORY_DIR:-$(dirname "$LEARNINGS_DIR")}"
+MEMORY_INDEX="$MEMORY_DIR/MEMORY.md"
+TASK_MEMORY_INDEX="$MEMORY_DIR/tasks.md"
+RECENT_LEARNINGS_INDEX="$LEARNINGS_DIR/RECENT.md"
+MEMORY_SEARCH_INDEX="$MEMORY_DIR/memory.jsonl"
+MEMORY_RECENT_DAYS="${CODEX_MEMORY_RECENT_DAYS:-7}"
+LEARNING_LOCK_DIR="${TMPDIR:-/tmp}/codex-workflow-learning-locks"
+TEAM_LOCK_DIR="${TMPDIR:-/tmp}/codex-workflow-team-locks"
+LOCK_DIRS=()
+
+release_all_locks() {
+  local lock_dir
+  local held_locks=()
+
+  set +u
+  held_locks=("${LOCK_DIRS[@]}")
+  set -u
+
+  if ((${#held_locks[@]})); then
+    for lock_dir in "${held_locks[@]}"; do
+      rmdir "$lock_dir" 2>/dev/null || true
+    done
+  fi
+}
+
+trap release_all_locks EXIT
+trap 'release_all_locks; exit 130' INT
+trap 'release_all_locks; exit 143' TERM
+
+today() {
+  date +%F
+}
+
+timestamp_utc() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+timestamp_token() {
+  date -u +%Y%m%dT%H%M%S%N
+}
+
+trimmed_preview() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+
+text = path.read_text(encoding="utf-8", errors="replace")
+lines = text.splitlines()
+if len(lines) > 80:
+    lines = lines[:80] + [f"... ({len(text.splitlines()) - 80} more lines omitted)"]
+preview = "\n".join(lines)
+if len(preview) > 6000:
+    preview = preview[:6000].rstrip() + "\n... (output truncated)"
+sys.stdout.write(preview)
+PY
+}
+
+slugify() {
+  printf '%s' "$1" |
+    tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g'
+}
+
+validate_title() {
+  local title="$1"
+  if [[ -z "$title" || "$title" == *$'\n'* || "$title" == *$'\r'* || "$title" == *$'\t'* || "$title" =~ ^[[:space:]]*$ ]]; then
+    echo "unsafe title: titles must be a single line" >&2
+    exit 1
+  fi
+}
+
+validate_query() {
+  local query="$1"
+  if [[ -z "$query" || "$query" == *$'\n'* || "$query" == *$'\r'* || "$query" =~ ^[[:space:]]*$ ]]; then
+    echo "unsafe query: query must be a single non-empty line" >&2
+    exit 1
+  fi
+}
+
+validate_single_line_reason() {
+  local label="$1"
+  local reason="$2"
+  if [[ -z "$reason" || "$reason" == *$'\n'* || "$reason" == *$'\r'* || "$reason" == *$'\t'* || "$reason" =~ ^[[:space:]]*$ ]]; then
+    echo "unsafe $label: reason must be a single non-empty line" >&2
+    exit 1
+  fi
+}
+
+validate_positive_integer() {
+  local value="$1"
+  local label="$2"
+
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "invalid $label: $value" >&2
+    exit 1
+  fi
+}
+
+duration_to_seconds() {
+  local value="$1"
+  python3 - "$value" <<'PY'
+import re
+import sys
+
+value = sys.argv[1].strip()
+match = re.fullmatch(r"([1-9][0-9]*)([smhd]?)", value)
+if not match:
+    print(f"invalid duration: {value}", file=sys.stderr)
+    raise SystemExit(1)
+
+amount = int(match.group(1))
+unit = match.group(2) or "s"
+multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+print(amount * multiplier)
+PY
+}
+
+team_loop_remaining_seconds() {
+  local deadline="$1"
+  local now
+  now="$(date +%s)"
+  echo $((deadline - now))
+}
+
+team_loop_timeout_bin() {
+  if command -v timeout >/dev/null 2>&1 && timeout --help 2>&1 | grep -q -- '--kill-after'; then
+    printf '%s\n' timeout
+    return 0
+  fi
+
+  if command -v gtimeout >/dev/null 2>&1 && gtimeout --help 2>&1 | grep -q -- '--kill-after'; then
+    printf '%s\n' gtimeout
+    return 0
+  fi
+
+  return 1
+}
+
+team_loop_run_with_deadline() {
+  local deadline="$1"
+  shift
+  local remaining timeout_bin
+  remaining="$(team_loop_remaining_seconds "$deadline")"
+  if (( remaining <= 0 )); then
+    return 124
+  fi
+
+  timeout_bin="$(team_loop_timeout_bin || true)"
+  if [[ -n "$timeout_bin" ]]; then
+    "$timeout_bin" --kill-after=5s "${remaining}s" "$@"
+    return
+  fi
+
+  # Stock macOS does not include GNU timeout; keep bounded loops portable.
+  python3 - "$remaining" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+remaining = int(sys.argv[1])
+argv = sys.argv[2:]
+deadline = time.monotonic() + remaining
+
+try:
+    proc = subprocess.Popen(argv, start_new_session=True)
+except FileNotFoundError:
+    print(f"{argv[0]}: command not found", file=sys.stderr)
+    raise SystemExit(127)
+except OSError as exc:
+    print(f"failed to start {argv[0]}: {exc}", file=sys.stderr)
+    raise SystemExit(126)
+
+while True:
+    status = proc.poll()
+    if status is not None:
+        if status < 0:
+            raise SystemExit(128 + abs(status))
+        raise SystemExit(status)
+
+    now = time.monotonic()
+    if now >= deadline:
+        break
+    time.sleep(min(0.1, max(0.0, deadline - now)))
+
+try:
+    os.killpg(proc.pid, signal.SIGTERM)
+except ProcessLookupError:
+    pass
+
+kill_deadline = time.monotonic() + 5
+while time.monotonic() < kill_deadline:
+    if proc.poll() is not None:
+        raise SystemExit(124)
+    time.sleep(0.1)
+
+try:
+    os.killpg(proc.pid, signal.SIGKILL)
+except ProcessLookupError:
+    pass
+
+proc.wait()
+raise SystemExit(124)
+PY
+}
+
+team_loop_verifier_sentinel() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+if not path.exists():
+    print("missing")
+    raise SystemExit(0)
+
+for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    stripped = line.strip()
+    if not stripped:
+        continue
+    match = re.fullmatch(r"done\s*[:=]\s*(true|false)", stripped, flags=re.IGNORECASE)
+    print(match.group(1).lower() if match else "invalid")
+    raise SystemExit(0)
+
+print("missing")
+PY
+}
+
+title_token() {
+  local title="$1"
+  local slug token
+
+  slug="$(slugify "$title")"
+  if [[ -n "$slug" ]]; then
+    printf '%s\n' "$slug"
+    return
+  fi
+
+  token="$(printf '%s' "$title" | cksum | awk '{print $1}')"
+  printf 'u%s\n' "$token"
+}
+
+title_checksum() {
+  printf '%s' "$1" | cksum | awk '{print $1}'
+}
+
+task_file() {
+  printf '%s/%s.md' "$TASKS_DIR" "$1"
+}
+
+ensure_tasks_dir() {
+  mkdir -p "$TASKS_DIR"
+}
+
+ensure_learning_template() {
+  if [[ ! -f "$LEARNING_TEMPLATE" ]]; then
+    echo "missing learning template: $LEARNING_TEMPLATE" >&2
+    exit 1
+  fi
+}
+
+ensure_learnings_dir() {
+  if ! mkdir -p "$LEARNINGS_DIR" 2>/dev/null; then
+    echo "unable to prepare learnings directory: $LEARNINGS_DIR" >&2
+    exit 1
+  fi
+  if [[ ! -d "$LEARNINGS_DIR" ]]; then
+    echo "learnings path is not a directory: $LEARNINGS_DIR" >&2
+    exit 1
+  fi
+  if [[ ! -w "$LEARNINGS_DIR" ]]; then
+    echo "learnings directory is not writable: $LEARNINGS_DIR" >&2
+    exit 1
+  fi
+  if ! touch "$LEARNING_INDEX" 2>/dev/null; then
+    echo "unable to write learnings index: $LEARNING_INDEX" >&2
+    exit 1
+  fi
+}
+
+ensure_learning_lock_dir() {
+  if ! mkdir -p "$LEARNING_LOCK_DIR" 2>/dev/null; then
+    echo "unable to prepare learning lock directory: $LEARNING_LOCK_DIR" >&2
+    exit 1
+  fi
+}
+
+ensure_memory_dir() {
+  if ! mkdir -p "$MEMORY_DIR" 2>/dev/null; then
+    echo "unable to prepare codex memory directory: $MEMORY_DIR" >&2
+    exit 1
+  fi
+  if [[ ! -d "$MEMORY_DIR" ]]; then
+    echo "codex memory path is not a directory: $MEMORY_DIR" >&2
+    exit 1
+  fi
+  if [[ ! -w "$MEMORY_DIR" ]]; then
+    echo "codex memory directory is not writable: $MEMORY_DIR" >&2
+    exit 1
+  fi
+}
+
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR"
+}
+
+ensure_artifacts_dir() {
+  mkdir -p "$ARTIFACTS_DIR"
+}
+
+ensure_hooks_dir() {
+  mkdir -p "$HOOKS_DIR"
+}
+
+ensure_team_lock_dir() {
+  if ! mkdir -p "$TEAM_LOCK_DIR" 2>/dev/null; then
+    echo "unable to prepare team lock directory: $TEAM_LOCK_DIR" >&2
+    exit 1
+  fi
+}
+
+learning_lock_file() {
+  printf '%s/%s.lock\n' "$LEARNING_LOCK_DIR" "$(title_checksum "$LEARNINGS_DIR")"
+}
+
+team_lock_file() {
+  printf '%s/%s.lock\n' "$TEAM_LOCK_DIR" "$(title_checksum "$1")"
+}
+
+acquire_lock() {
+  local lock_file="$1"
+  local lock_dir="${lock_file}.dir"
+
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    sleep 0.05
+  done
+
+  LOCK_DIRS+=("$lock_dir")
+}
+
+release_lock() {
+  local lock_file="$1"
+  local lock_dir="${lock_file}.dir"
+  local remaining=()
+  local held_locks=()
+  local held
+
+  rmdir "$lock_dir" 2>/dev/null || true
+
+  set +u
+  held_locks=("${LOCK_DIRS[@]}")
+  set -u
+
+  if ((${#held_locks[@]})); then
+    for held in "${held_locks[@]}"; do
+      if [[ "$held" != "$lock_dir" ]]; then
+        remaining+=("$held")
+      fi
+    done
+  fi
+  if ((${#remaining[@]})); then
+    LOCK_DIRS=("${remaining[@]}")
+  else
+    LOCK_DIRS=()
+  fi
+}
+
+path_relative_to_codex_home() {
+  python3 - "$CODEX_HOME_ROOT" "$1" <<'PY'
+from pathlib import Path
+import sys
+
+home = Path(sys.argv[1]).resolve()
+target = Path(sys.argv[2]).resolve()
+try:
+    print(target.relative_to(home).as_posix())
+except ValueError:
+    print(str(target))
+PY
+}
+
+task_artifact_dir() {
+  printf '%s/%s\n' "$ARTIFACTS_DIR" "$1"
+}
+
+task_artifact_dir_rel() {
+  path_relative_to_codex_home "$(task_artifact_dir "$1")"
+}
+
+task_state_file() {
+  printf '%s/state.json\n' "$(task_artifact_dir "$1")"
+}
+
+task_handoff_envelope_file() {
+  printf '%s/multica-handoff-envelope.md\n' "$(task_artifact_dir "$1")"
+}
+
+task_result_ingest_file() {
+  printf '%s/multica-result-ingest.md\n' "$(task_artifact_dir "$1")"
+}
+
+task_curated_packet_file() {
+  printf '%s/multica-memory-packet.md\n' "$(task_artifact_dir "$1")"
+}
+
+
+task_multica_feedback_file() {
+  printf '%s/multica-feedback.md\n' "$(task_artifact_dir "$1")"
+}
+
+task_multica_feedback_json_file() {
+  printf '%s/multica-feedback.json\n' "$(task_artifact_dir "$1")"
+}
+
+
+
+
+write_handoff_envelope() {
+  local task_id="$1"
+  local prd_path="$2"
+  local repo_path="$3"
+  local base_branch="$4"
+  local title="$5"
+  local packet_path="$6"
+  local generated_at="$7"
+  local acceptance_count="$8"
+  shift 8
+  local acceptance_rows=("${@:1:$acceptance_count}")
+  shift "$acceptance_count"
+  local validation_count="$1"
+  shift
+  local validation_rows=("${@:1:$validation_count}")
+  local artifact_dir envelope_file
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  envelope_file="$(task_handoff_envelope_file "$task_id")"
+  python3 - "$task_id" "$artifact_dir" "$envelope_file" "$prd_path" "$repo_path" "$base_branch" "$title" "$packet_path" "$generated_at" "$acceptance_count" "${acceptance_rows[@]}" "$validation_count" "${validation_rows[@]}" <<'PY'
+from pathlib import Path
+import hashlib
+import subprocess
+import sys
+
+task_id = sys.argv[1]
+artifact_dir = Path(sys.argv[2])
+envelope_file = Path(sys.argv[3])
+prd_raw = sys.argv[4]
+repo_raw = sys.argv[5]
+base_branch = sys.argv[6]
+title = sys.argv[7]
+packet_raw = sys.argv[8]
+generated_at = sys.argv[9]
+acceptance_count = int(sys.argv[10])
+idx = 11
+acceptance_raw = sys.argv[idx : idx + acceptance_count]
+idx += acceptance_count
+validation_count = int(sys.argv[idx])
+idx += 1
+validation_raw = sys.argv[idx : idx + validation_count]
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+def require_single_line(value: str, label: str) -> str:
+    if not value or any(ch in value for ch in "\n\r\t") or not value.strip():
+        fail(f"invalid {label}: must be a single non-empty line")
+    return value.strip()
+
+def parse_row(raw: str, field_count: int, label: str):
+    require_single_line(raw, f"{label} row")
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) != field_count or any(not part for part in parts):
+        fail(f"invalid {label} row: {raw}")
+    priority = parts[-1] if label == "acceptance" else parts[2]
+    if priority not in {"required", "advisory"}:
+        fail(f"invalid {label} priority: {priority}")
+    return parts
+
+base_branch = require_single_line(base_branch, "base branch")
+title = title.strip() if title.strip() else ""
+if title:
+    title = require_single_line(title, "title")
+
+prd_path = Path(prd_raw).expanduser()
+if not prd_path.exists() or not prd_path.is_file():
+    fail(f"missing PRD file: {prd_raw}")
+prd_path = prd_path.resolve()
+suffix = prd_path.suffix.lower()
+if suffix not in {".md", ".markdown", ".html", ".htm"}:
+    fail(f"unsupported PRD extension: {prd_path.suffix}")
+prd_format = "HTML" if suffix in {".html", ".htm"} else "Markdown"
+prd_sha = hashlib.sha256(prd_path.read_bytes()).hexdigest()
+
+repo_path = Path(repo_raw).expanduser()
+if not repo_path.exists() or not repo_path.is_dir():
+    fail(f"missing repo directory: {repo_raw}")
+repo_path = repo_path.resolve()
+
+packet_path = None
+if packet_raw:
+    packet_path = Path(packet_raw).expanduser()
+    if not packet_path.exists() or not packet_path.is_file():
+        fail(f"missing curated packet file: {packet_raw}")
+    packet_path = packet_path.resolve()
+
+if acceptance_count < 1:
+    fail("at least one acceptance row is required")
+if validation_count < 1:
+    fail("at least one validation row is required")
+
+acceptance_rows = [parse_row(row, 3, "acceptance") for row in acceptance_raw]
+validation_rows = [parse_row(row, 4, "validation") for row in validation_raw]
+
+def git_value(*args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return "unknown"
+    value = result.stdout.strip()
+    return value or "unknown"
+
+repo_name = git_value("rev-parse", "--show-toplevel")
+repo_name = Path(repo_name).name if repo_name != "unknown" else repo_path.name
+repo_sha = git_value("rev-parse", "HEAD")
+
+try:
+    prd_rel = prd_path.relative_to(repo_path).as_posix()
+except ValueError:
+    prd_rel = str(prd_path)
+
+if packet_path is not None:
+    try:
+        packet_display = packet_path.relative_to(repo_path).as_posix()
+    except ValueError:
+        packet_display = str(packet_path)
+else:
+    packet_display = "-"
+
+if not title:
+    title = f"Multica handoff: {prd_path.stem}"
+
+def table(rows, headers):
+    out = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for row in rows:
+        out.append("| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |")
+    return "\n".join(out)
+
+artifact_dir.mkdir(parents=True, exist_ok=True)
+envelope = f"""# Multica Handoff Envelope
+
+Generated: {generated_at}
+Atlas task: {task_id}
+Title: {title}
+
+## Canonical PRD
+
+- Format: {prd_format}
+- PRD path: `{prd_rel}`
+- PRD absolute path: `{prd_path}`
+- PRD SHA256: `{prd_sha}`
+
+The PRD file is the source of truth. If this envelope, a curated memory packet, or an issue summary conflicts with the PRD, Multica must stop and report a PRD fidelity blocker before implementation.
+
+## Target Repository
+
+- Repository: {repo_name}
+- Repo path: `{repo_path}`
+- Base branch: `{base_branch}`
+- Submitter commit SHA: `{repo_sha}`
+
+Prefer the local repository path above when it exists and is a git work tree. Use a dedicated worktree and branch for `>100 lines` or `unknown` code delta estimates.
+
+## Acceptance Matrix
+
+{table(acceptance_rows, ["ID", "Requirement", "Priority"])}
+
+Required rows cannot be skipped. Advisory rows should inform implementation and review but do not override the canonical PRD.
+
+## Validation Lanes
+
+{table(validation_rows, ["ID", "Surface", "Priority", "Evidence"])}
+
+Required validation must produce real evidence appropriate to the changed surface. UI work needs screenshots and interaction/responsive evidence when relevant. Backend/API/worker/data/library work needs runtime command output, request/response, logs, migrations, integration tests, or data assertions.
+
+## Curated Memory Packet
+
+- Packet: `{packet_display}`
+- Precedence: advisory_prd_wins
+
+The curated packet is advisory context only. It must not contain raw transcripts, raw logs, secrets, or global memory dumps, and it never overrides the PRD.
+
+## Multica Execution Contract
+
+1. PREFLIGHT: repo, base branch, runtimes, permissions, readable PRD, PRD fidelity, and approved staffing plan when one is required.
+2. PLAN: implementation plan from PRD acceptance criteria, including code delta estimate and worktree decision.
+3. IMPLEMENT: scoped changes only; use a dedicated worktree for `>100 lines` or `unknown` estimates.
+4. VALIDATE: review and E2E against the current commit SHA.
+5. REPAIR: high-priority findings, failed required validation, and missing required evidence must be repaired until cleared.
+6. PR-READY-GATE: every required acceptance and validation row has evidence.
+7. OUTPUT: draft PR or blocker report only.
+
+Forbidden actions: do not merge, deploy, perform production changes, or clean up an unmerged Multica worktree.
+
+## Suggested Submit Command
+
+If an approved Multica agent/staffing plan exists, attach it with `--staffing-plan`. If staffing is still unclear, use `multica-agent-plan` before submitting.
+
+```bash
+~/.agents/bin/multica-prd-submit --repo {str(repo_path)!r} --title {title!r} {str(prd_path)!r}
+```
+"""
+envelope_file.write_text(envelope, encoding="utf-8")
+
+print(
+    "\t".join(
+        [
+            str(envelope_file),
+            str(prd_path),
+            prd_sha,
+            str(repo_path),
+            base_branch,
+            repo_sha,
+            str(packet_path) if packet_path is not None else "-",
+            str(acceptance_count),
+            str(validation_count),
+            title,
+        ]
+    )
+)
+PY
+}
+
+write_result_ingest() {
+  local task_id="$1"
+  local issue="$2"
+  local outcome="$3"
+  local draft_pr="$4"
+  local blocker="$5"
+  local commit_sha="$6"
+  local worktree="$7"
+  local summary="$8"
+  local ingested_at="$9"
+  local evidence_count="${10}"
+  shift 10
+  local evidence_items=("${@:1:$evidence_count}")
+  shift "$evidence_count"
+  local lesson_count="$1"
+  shift
+  local lesson_items=("${@:1:$lesson_count}")
+  local artifact_dir result_file
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  result_file="$(task_result_ingest_file "$task_id")"
+  python3 - "$task_id" "$artifact_dir" "$result_file" "$issue" "$outcome" "$draft_pr" "$blocker" "$commit_sha" "$worktree" "$summary" "$ingested_at" "$evidence_count" "${evidence_items[@]}" "$lesson_count" "${lesson_items[@]}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+task_id = sys.argv[1]
+artifact_dir = Path(sys.argv[2])
+result_file = Path(sys.argv[3])
+issue = sys.argv[4]
+outcome = sys.argv[5]
+draft_pr = sys.argv[6]
+blocker = sys.argv[7]
+commit_sha = sys.argv[8]
+worktree = sys.argv[9]
+summary = sys.argv[10]
+ingested_at = sys.argv[11]
+evidence_count = int(sys.argv[12])
+idx = 13
+evidence_items = sys.argv[idx : idx + evidence_count]
+idx += evidence_count
+lesson_count = int(sys.argv[idx])
+idx += 1
+lesson_items = sys.argv[idx : idx + lesson_count]
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+def require_single_line(value: str, label: str, allow_empty: bool = False) -> str:
+    if any(ch in value for ch in "\n\r\t"):
+        fail(f"invalid {label}: must be a single line")
+    stripped = value.strip()
+    if not allow_empty and not stripped:
+        fail(f"invalid {label}: must be non-empty")
+    return stripped
+
+issue = require_single_line(issue, "issue")
+outcome = require_single_line(outcome, "outcome")
+draft_pr = require_single_line(draft_pr, "draft PR", allow_empty=True)
+blocker = require_single_line(blocker, "blocker", allow_empty=True)
+commit_sha = require_single_line(commit_sha, "commit")
+worktree = require_single_line(worktree, "worktree")
+summary = require_single_line(summary, "summary", allow_empty=True)
+
+if outcome not in {"draft-pr", "blocker"}:
+    fail(f"invalid outcome: {outcome}")
+if commit_sha != "unknown" and not re.fullmatch(r"[0-9a-fA-F]{7,64}", commit_sha):
+    fail("invalid commit: expected 7-64 hex characters or unknown")
+if outcome == "draft-pr":
+    if not draft_pr:
+        fail("draft-pr outcome requires --draft-pr")
+    if blocker:
+        fail("draft-pr outcome cannot include --blocker")
+if outcome == "blocker":
+    if not blocker:
+        fail("blocker outcome requires --blocker")
+    if draft_pr:
+        fail("blocker outcome cannot include --draft-pr")
+if evidence_count < 1:
+    fail("at least one evidence item is required")
+
+evidence_items = [require_single_line(item, "evidence") for item in evidence_items]
+lesson_items = [require_single_line(item, "lesson") for item in lesson_items]
+
+if not summary:
+    summary = "Multica returned a draft PR." if outcome == "draft-pr" else "Multica returned a blocker report."
+
+artifact_dir.mkdir(parents=True, exist_ok=True)
+evidence_md = "\n".join(f"- `{item}`" for item in evidence_items)
+lesson_md = "\n".join(f"- {item}" for item in lesson_items) if lesson_items else "- None recorded."
+
+result_md = f"""# Multica Result Ingest
+
+Ingested: {ingested_at}
+Atlas task: {task_id}
+Outcome: {outcome}
+Summary: {summary}
+
+## Multica Pointers
+
+- Issue: `{issue}`
+- Draft PR: `{draft_pr or '-'}`
+- Blocker: `{blocker or '-'}`
+- Commit SHA: `{commit_sha}`
+- Worktree: `{worktree}`
+
+## Evidence
+
+{evidence_md}
+
+## Lesson Candidates
+
+{lesson_md}
+
+## Atlas Boundary
+
+Atlas records this result for recovery and follow-up planning. Atlas does not merge, deploy, clean a Multica worktree before merge, or silently promote lesson candidates into permanent memory.
+"""
+result_file.write_text(result_md, encoding="utf-8")
+
+print(
+    "\t".join(
+        [
+            str(result_file),
+            issue,
+            outcome,
+            draft_pr or "-",
+            blocker or "-",
+            commit_sha,
+            worktree,
+            str(evidence_count),
+            str(lesson_count),
+            summary,
+            " ;; ".join(evidence_items),
+            " ;; ".join(lesson_items) if lesson_items else "-",
+        ]
+    )
+)
+PY
+}
+
+lint_curated_packet_file() {
+  local packet_file="$1"
+  python3 - "$packet_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+packet_path = Path(sys.argv[1]).expanduser()
+
+REQUIRED_METADATA = {
+    "packet_version",
+    "atlas_task_id",
+    "generated_at",
+    "prd_path",
+    "prd_sha256",
+    "target_repo",
+    "base_branch",
+    "precedence",
+}
+RISK_PATTERNS = [
+    r"AKIA[0-9A-Z]{16}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    r"BEGIN OPENSSH PRIVATE KEY",
+    r"(?i)\b(password|passwd|pwd)\s*[:=]",
+    r"(?i)\b(token|api[_-]?key|secret|cookie)\s*[:=]",
+    r"(?im)^#+\s*raw transcript",
+    r"(?im)^#+\s*raw logs?",
+    r"(?i)raw transcript dump",
+    r"(?i)raw log dump",
+    r"(?i)raw session dump",
+    r"(?i)global memory dump",
+    r"\.codex/sessions",
+    r"logs_2\.sqlite",
+]
+
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+if not packet_path.exists() or not packet_path.is_file():
+    fail(f"missing packet file: {packet_path}")
+
+text = packet_path.read_text(encoding="utf-8", errors="replace")
+lines = text.splitlines()
+if len(lines) > 250:
+    fail(f"packet too large: {len(lines)} lines > 250")
+
+metadata = {}
+for raw in lines:
+    if not raw.strip():
+        continue
+    if raw.startswith("#"):
+        continue
+    match = re.match(r"^([A-Za-z0-9_.-]+):\s*(.*)$", raw)
+    if match:
+        metadata.setdefault(match.group(1), match.group(2).strip())
+
+missing = sorted(REQUIRED_METADATA - set(metadata))
+if missing:
+    fail(f"packet missing metadata: {', '.join(missing)}")
+if metadata.get("precedence") != "advisory_prd_wins":
+    fail("packet precedence must be advisory_prd_wins")
+if "## Sources" not in text:
+    fail("packet missing Sources section")
+if "## Curated Context" not in text:
+    fail("packet missing Curated Context section")
+
+for pattern in RISK_PATTERNS:
+    if re.search(pattern, text):
+        fail(f"packet contains risky marker: {pattern}")
+
+print("\t".join(["ok", str(packet_path), str(len(lines)), metadata.get("atlas_task_id", ""), metadata.get("prd_sha256", "")]))
+PY
+}
+
+write_curated_packet() {
+  local task_id="$1"
+  local prd_path="$2"
+  local repo_path="$3"
+  local base_branch="$4"
+  local generated_at="$5"
+  local source_count="$6"
+  shift 6
+  local source_paths=("$@")
+  local artifact_dir packet_file
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  packet_file="$(task_curated_packet_file "$task_id")"
+  python3 - "$task_id" "$artifact_dir" "$packet_file" "$prd_path" "$repo_path" "$base_branch" "$generated_at" "$source_count" "${source_paths[@]}" <<'PY'
+from pathlib import Path
+import hashlib
+import re
+import sys
+
+task_id = sys.argv[1]
+artifact_dir = Path(sys.argv[2])
+packet_file = Path(sys.argv[3])
+prd_raw = sys.argv[4]
+repo_raw = sys.argv[5]
+base_branch = sys.argv[6]
+generated_at = sys.argv[7]
+source_count = int(sys.argv[8])
+source_raw = sys.argv[9 : 9 + source_count]
+
+RISK_PATTERNS = [
+    r"AKIA[0-9A-Z]{16}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    r"BEGIN OPENSSH PRIVATE KEY",
+    r"(?i)\b(password|passwd|pwd)\s*[:=]",
+    r"(?i)\b(token|api[_-]?key|secret|cookie)\s*[:=]",
+    r"(?im)^#+\s*raw transcript",
+    r"(?im)^#+\s*raw logs?",
+    r"(?i)raw transcript dump",
+    r"(?i)raw log dump",
+    r"(?i)raw session dump",
+    r"(?i)global memory dump",
+    r"\.codex/sessions",
+    r"logs_2\.sqlite",
+]
+
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def require_single_line(value: str, label: str) -> str:
+    if not value or any(ch in value for ch in "\n\r\t") or not value.strip():
+        fail(f"invalid {label}: must be a single non-empty line")
+    return value.strip()
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def display(path: Path, repo=None) -> str:
+    if repo is not None:
+        try:
+            return path.relative_to(repo).as_posix()
+        except ValueError:
+            pass
+    return str(path)
+
+
+def reject_risky_text(text: str, label: str) -> None:
+    for pattern in RISK_PATTERNS:
+        if re.search(pattern, text):
+            fail(f"{label} contains risky marker: {pattern}")
+
+
+base_branch = require_single_line(base_branch, "base branch")
+prd_path = Path(prd_raw).expanduser()
+if not prd_path.exists() or not prd_path.is_file():
+    fail(f"missing PRD file: {prd_raw}")
+prd_path = prd_path.resolve()
+if prd_path.suffix.lower() not in {".md", ".markdown", ".html", ".htm"}:
+    fail(f"unsupported PRD extension: {prd_path.suffix}")
+prd_sha = sha256(prd_path)
+
+repo_path = Path(repo_raw).expanduser()
+if not repo_path.exists() or not repo_path.is_dir():
+    fail(f"missing repo directory: {repo_raw}")
+repo_path = repo_path.resolve()
+
+if source_count < 1:
+    fail("at least one curated source is required")
+
+sources = []
+for raw in source_raw:
+    require_single_line(raw, "source")
+    path = Path(raw).expanduser()
+    if not path.exists() or not path.is_file():
+        fail(f"missing source file: {raw}")
+    path = path.resolve()
+    text = path.read_text(encoding="utf-8", errors="replace")
+    reject_risky_text(text, f"source {path}")
+    excerpt_lines = []
+    for line in text.splitlines():
+        stripped = line.rstrip()
+        if len(stripped) > 220:
+            stripped = stripped[:217].rstrip() + "..."
+        excerpt_lines.append(stripped)
+        if len(excerpt_lines) >= 36:
+            excerpt_lines.append("... (source excerpt truncated)")
+            break
+    excerpt = "\n".join(excerpt_lines).strip() or "(empty source)"
+    sources.append(
+        {
+            "path": path,
+            "display": display(path, repo_path),
+            "sha": sha256(path),
+            "lines": len(excerpt.splitlines()),
+            "excerpt": excerpt,
+        }
+    )
+
+artifact_dir.mkdir(parents=True, exist_ok=True)
+source_rows = [
+    "| ID | Path | SHA256 | Lines Included |",
+    "| --- | --- | --- | --- |",
+]
+for idx, source in enumerate(sources, 1):
+    source_rows.append(
+        f"| S{idx} | `{source['display']}` | `{source['sha']}` | {source['lines']} |"
+    )
+
+context_sections = []
+for idx, source in enumerate(sources, 1):
+    context_sections.extend(
+        [
+            f"### S{idx}: {source['display']}",
+            "",
+            "```text",
+            source["excerpt"],
+            "```",
+            "",
+        ]
+    )
+
+packet_lines = [
+    "# Multica Memory Packet",
+    "",
+    "packet_version: 1",
+    f"atlas_task_id: {task_id}",
+    f"generated_at: {generated_at}",
+    f"prd_path: {display(prd_path, repo_path)}",
+    f"prd_sha256: {prd_sha}",
+    f"target_repo: {repo_path}",
+    f"base_branch: {base_branch}",
+    "precedence: advisory_prd_wins",
+    "",
+    "## Precedence",
+    "",
+    "This packet is advisory context only. The PRD is canonical. If this packet conflicts with the PRD, Multica must stop with a PRD fidelity blocker.",
+    "",
+    "## Scope",
+    "",
+    "- Task-scoped facts, decisions, constraints, risks, and validation hints only.",
+    "- No broad memory exports or sensitive raw materials.",
+    "",
+    "## Sources",
+    "",
+    *source_rows,
+    "",
+    "## Curated Context",
+    "",
+    *context_sections,
+    "## Multica Instructions",
+    "",
+    "- Treat this packet as low-priority advisory context.",
+    "- Do not override the canonical PRD.",
+    "- If packet context appears stale or conflicting, report a PRD fidelity blocker.",
+    "",
+]
+
+packet_text = "\n".join(packet_lines)
+actual_line_count = len(packet_text.splitlines())
+if actual_line_count > 250:
+    fail(f"generated packet too large: {actual_line_count} lines > 250")
+reject_risky_text(packet_text, "generated packet")
+packet_file.write_text(packet_text, encoding="utf-8")
+print(
+    "\t".join(
+        [
+            str(packet_file),
+            str(prd_path),
+            prd_sha,
+            str(repo_path),
+            base_branch,
+            str(source_count),
+            str(actual_line_count),
+        ]
+    )
+)
+PY
+}
+
+
+write_multica_feedback() {
+  local task_id="$1"
+  local issue="$2"
+  local commit_sha="$3"
+  local round="$4"
+  local status="$5"
+  local evidence_manifest="$6"
+  local recorded_at="$7"
+  local review_count="$8"
+  shift 8
+  local reviews=("${@:1:$review_count}")
+  shift "$review_count"
+  local e2e_count="$1"
+  shift
+  local e2es=("${@:1:$e2e_count}")
+  shift "$e2e_count"
+  local scorecard_count="$1"
+  shift
+  local scorecards=("${@:1:$scorecard_count}")
+  shift "$scorecard_count"
+  local finding_count="$1"
+  shift
+  local findings=("${@:1:$finding_count}")
+  local artifact_dir feedback_file feedback_json
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  feedback_file="$(task_multica_feedback_file "$task_id")"
+  feedback_json="$(task_multica_feedback_json_file "$task_id")"
+  python3 - "$task_id" "$artifact_dir" "$feedback_file" "$feedback_json" "$issue" "$commit_sha" "$round" "$status" "$evidence_manifest" "$recorded_at" "$review_count" "${reviews[@]}" "$e2e_count" "${e2es[@]}" "$scorecard_count" "${scorecards[@]}" "$finding_count" "${findings[@]}" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+task_id = sys.argv[1]
+artifact_dir = Path(sys.argv[2])
+feedback_file = Path(sys.argv[3])
+feedback_json = Path(sys.argv[4])
+issue = sys.argv[5]
+commit_sha = sys.argv[6]
+round_no = sys.argv[7]
+status = sys.argv[8]
+evidence_manifest = sys.argv[9]
+recorded_at = sys.argv[10]
+idx = 11
+review_count = int(sys.argv[idx]); idx += 1
+reviews = sys.argv[idx : idx + review_count]; idx += review_count
+e2e_count = int(sys.argv[idx]); idx += 1
+e2es = sys.argv[idx : idx + e2e_count]; idx += e2e_count
+scorecard_count = int(sys.argv[idx]); idx += 1
+scorecards = sys.argv[idx : idx + scorecard_count]; idx += scorecard_count
+finding_count = int(sys.argv[idx]); idx += 1
+findings = sys.argv[idx : idx + finding_count]
+
+VALID_STATUS = {"clean", "repair-needed", "blocked"}
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+def one_line(value: str, label: str, allow_empty: bool = True) -> str:
+    if any(ch in value for ch in "\n\r\t"):
+        fail(f"invalid {label}: must be a single line")
+    value = value.strip()
+    if not allow_empty and not value:
+        fail(f"invalid {label}: must be non-empty")
+    return value
+
+issue = one_line(issue, "issue", allow_empty=False)
+commit_sha = one_line(commit_sha, "commit", allow_empty=False)
+round_no = one_line(round_no, "round", allow_empty=False)
+status = one_line(status, "status", allow_empty=False)
+evidence_manifest = one_line(evidence_manifest, "evidence manifest")
+if status not in VALID_STATUS:
+    fail(f"invalid status: {status}")
+if not round_no.isdigit() or int(round_no) < 1:
+    fail(f"invalid round: {round_no}")
+if commit_sha != "unknown" and not re.fullmatch(r"[0-9a-fA-F]{7,64}", commit_sha):
+    fail("invalid commit: expected 7-64 hex characters or unknown")
+reviews = [one_line(item, "review", allow_empty=False) for item in reviews]
+e2es = [one_line(item, "e2e", allow_empty=False) for item in e2es]
+scorecards = [one_line(item, "scorecard", allow_empty=False) for item in scorecards]
+findings = [one_line(item, "blocking finding", allow_empty=False) for item in findings]
+if status in {"repair-needed", "blocked"} and not findings:
+    fail(f"{status} status requires at least one --blocking-finding")
+
+artifact_dir.mkdir(parents=True, exist_ok=True)
+payload = {
+    "task_id": task_id,
+    "recorded_at": recorded_at,
+    "issue": issue,
+    "commit": commit_sha,
+    "round": int(round_no),
+    "status": status,
+    "reviews": reviews,
+    "e2e": e2es,
+    "scorecards": scorecards,
+    "evidence_manifest": evidence_manifest or "-",
+    "blocking_findings": findings,
+}
+feedback_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+def bullets(items):
+    return "\n".join(f"- `{item}`" for item in items) if items else "- None recorded."
+
+feedback_file.write_text(
+    "\n".join(
+        [
+            "# Multica Feedback",
+            "",
+            f"Recorded: {recorded_at}",
+            f"Atlas task: {task_id}",
+            "",
+            "## Status",
+            "",
+            f"- Issue: `{issue}`",
+            f"- Commit: `{commit_sha}`",
+            f"- Round: {round_no}",
+            f"- Status: {status}",
+            f"- Evidence manifest: `{evidence_manifest or '-'}`",
+            "",
+            "## Review Evidence",
+            "",
+            bullets(reviews),
+            "",
+            "## E2E Evidence",
+            "",
+            bullets(e2es),
+            "",
+            "## Scorecards",
+            "",
+            bullets(scorecards),
+            "",
+            "## Blocking Findings",
+            "",
+            bullets(findings),
+            "",
+            "## Atlas Boundary",
+            "",
+            "Atlas records Multica feedback and next planning state. Atlas does not execute Multica repair loops.",
+            "",
+        ]
+    ),
+    encoding="utf-8",
+)
+
+event = {
+    "kind": "multica-feedback",
+    "created_at": recorded_at,
+    "status": status,
+    "issue": issue,
+    "commit": commit_sha,
+    "round": int(round_no),
+    "blocking_findings": findings,
+}
+if status in {"repair-needed", "blocked"}:
+    event["phase"] = "repair" if status == "repair-needed" else "blocked"
+with (artifact_dir / "ledger.jsonl").open("a", encoding="utf-8") as fh:
+    fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+print("\t".join([str(feedback_file), str(feedback_json), issue, commit_sha, round_no, status, str(len(findings))]))
+PY
+}
+
+task_verification_dir() {
+  printf '%s/verification\n' "$(task_artifact_dir "$1")"
+}
+
+task_team_dir() {
+  printf '%s/team\n' "$(task_artifact_dir "$1")"
+}
+
+task_team_decision_file() {
+  printf '%s/decision.md\n' "$(task_team_dir "$1")"
+}
+
+task_team_staffing_file() {
+  printf '%s/staffing.md\n' "$(task_team_dir "$1")"
+}
+
+task_team_claude_review_file() {
+  printf '%s/claude-review.md\n' "$(task_team_dir "$1")"
+}
+
+task_hook_failures_dir() {
+  printf '%s/hook-failures\n' "$(task_artifact_dir "$1")"
+}
+
+task_runtime_file() {
+  printf '%s/runtime.jsonl\n' "$(task_artifact_dir "$1")"
+}
+
+read_current_task_id() {
+  python3 - "$CURRENT_TASK_FILE" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except json.JSONDecodeError:
+    raise SystemExit(0)
+task_id = data.get("task_id", "")
+if task_id:
+    print(task_id)
+PY
+}
+
+list_task_ids() {
+  find "$TASKS_DIR" -maxdepth 1 -name '*.md' -printf '%f\n' 2>/dev/null | sort | sed 's/\.md$//'
+}
+
+get_field() {
+  local file="$1"
+  local field="$2"
+  awk -v want="$field" '
+    BEGIN {
+      in_header = 1
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (in_header) {
+        if (line ~ "^" want ": ") {
+          sub("^" want ": ", "", line)
+          print line
+          exit
+        } else if (line ~ /^$/ || line ~ /^##[[:space:]]/ || line ~ /^#[[:space:]]/) {
+          in_header = 0
+        } else if (line ~ /^[A-Za-z0-9_.-]+: /) {
+          # Keep unknown metadata lines in the header.
+        } else {
+          in_header = 0
+        }
+      }
+    }
+  ' "$file" | head -n 1
+}
+
+get_learning_field() {
+  local file="$1"
+  local field="$2"
+
+  awk -v want="$field" '
+    BEGIN {
+      in_header = 1
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (in_header) {
+        if (line ~ "^" want ": ") {
+          sub("^" want ": ", "", line)
+          print line
+          exit
+        } else if (line ~ /^##[[:space:]]/ || line ~ /^$/) {
+          in_header = 0
+        }
+      }
+    }
+  ' "$file" | head -n 1
+}
+
+upsert_task_fields() {
+  local file="$1"
+  shift
+  python3 - "$file" "$@" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+updates = []
+for raw in sys.argv[2:]:
+    key, value = raw.split("=", 1)
+    updates.append((key, value))
+
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines(keepends=True)
+
+header_end = len(lines)
+for idx, line in enumerate(lines):
+    stripped = line.rstrip("\r\n")
+    if stripped == "" or stripped.startswith("## ") or stripped.startswith("# "):
+        header_end = idx
+        break
+    if re.match(r"^[A-Za-z0-9_.-]+: ", stripped):
+        continue
+    header_end = idx
+    break
+
+header = [line.rstrip("\r\n") for line in lines[:header_end]]
+body = "".join(lines[header_end:])
+keys = [key for key, _ in updates]
+done = set()
+
+for idx, line in enumerate(header):
+    for key, value in updates:
+        if key in done:
+            continue
+        if re.match(rf"^{re.escape(key)}: ", line):
+            header[idx] = f"{key}: {value}"
+            done.add(key)
+            break
+
+for key, value in updates:
+    if key not in done:
+        header.append(f"{key}: {value}")
+
+header_text = "\n".join(header)
+if header_text:
+    header_text += "\n"
+if body:
+    if not body.startswith("\n"):
+      header_text += "\n"
+    header_text += body.lstrip("\n")
+
+path.write_text(header_text, encoding="utf-8")
+PY
+}
+
+ensure_task_runtime_scaffold() {
+  local task_id="$1"
+  local title="$2"
+  local artifact_dir verification_dir team_dir hook_failures_dir
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  verification_dir="$(task_verification_dir "$task_id")"
+  team_dir="$(task_team_dir "$task_id")"
+  hook_failures_dir="$(task_hook_failures_dir "$task_id")"
+  mkdir -p "$artifact_dir" "$verification_dir" "$team_dir" "$hook_failures_dir"
+  if [[ ! -f "$artifact_dir/context.md" ]]; then
+    printf '# Context\n\nTask: %s\nTitle: %s\n' "$task_id" "$title" > "$artifact_dir/context.md"
+  fi
+  if [[ ! -f "$artifact_dir/spec.md" ]]; then
+    printf '# Spec\n\nTask: %s\n' "$task_id" > "$artifact_dir/spec.md"
+  fi
+  if [[ ! -f "$artifact_dir/analysis.md" ]]; then
+    printf '# Analysis\n\nTask: %s\n' "$task_id" > "$artifact_dir/analysis.md"
+  fi
+  if [[ ! -f "$(task_team_decision_file "$task_id")" ]]; then
+    printf '# Team Decision\n\nPending discussion.\n' > "$(task_team_decision_file "$task_id")"
+  fi
+  if [[ ! -f "$(task_team_staffing_file "$task_id")" ]]; then
+    printf '# Staffing\n\nPending discussion.\n' > "$(task_team_staffing_file "$task_id")"
+  fi
+}
+
+write_task_state_json() {
+  local task_id="$1"
+  local task_file artifact_dir_rel state_file
+  task_file="$(require_task "$task_id")"
+  artifact_dir_rel="$(task_artifact_dir_rel "$task_id")"
+  state_file="$(task_state_file "$task_id")"
+  python3 - "$task_file" "$state_file" "$artifact_dir_rel" "$(timestamp_utc)" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+task_file = Path(sys.argv[1])
+state_file = Path(sys.argv[2])
+artifact_dir = sys.argv[3]
+now = sys.argv[4]
+text = task_file.read_text(encoding="utf-8")
+
+def get_field(name: str) -> str:
+    match = re.search(rf"^{re.escape(name)}: ?(.*)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+state = {}
+if state_file.exists():
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        state = {}
+
+active_team = state.get("active_team", {})
+active_team["backend"] = get_field("active_team_backend") or active_team.get("backend", "")
+active_team["mode"] = get_field("active_team_mode") or active_team.get("mode", "")
+active_team["status"] = get_field("active_team_status") or active_team.get("status", "")
+active_team["decision"] = get_field("active_team_decision") or active_team.get("decision", "")
+
+state.update(
+    {
+        "task_id": get_field("id") or task_file.stem,
+        "title": get_field("title"),
+        "status": get_field("status"),
+        "artifact_dir": artifact_dir,
+        "last_verified_at": get_field("last_verified_at"),
+        "updated_at": now,
+    }
+)
+state["active_team"] = active_team
+state_file.parent.mkdir(parents=True, exist_ok=True)
+state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+set_task_state_fields() {
+  local task_id="$1"
+  shift
+  local state_file
+  state_file="$(task_state_file "$task_id")"
+  python3 - "$state_file" "$(timestamp_utc)" "$@" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+state_path = Path(sys.argv[1])
+now = sys.argv[2]
+pairs = sys.argv[3:]
+
+state = {}
+if state_path.exists():
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        state = {}
+
+for pair in pairs:
+    key, value = pair.split("=", 1)
+    if value == "__TRUE__":
+        cast = True
+    elif value == "__FALSE__":
+        cast = False
+    elif value == "__NULL__":
+        cast = None
+    elif value.isdigit():
+        cast = int(value)
+    else:
+        cast = value
+    cursor = state
+    parts = key.split(".")
+    for part in parts[:-1]:
+        cursor = cursor.setdefault(part, {})
+    cursor[parts[-1]] = cast
+
+state["updated_at"] = now
+state_path.parent.mkdir(parents=True, exist_ok=True)
+state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+append_task_runtime_event() {
+  local task_id="$1"
+  local kind="$2"
+  local detail="$3"
+  local runtime_file
+  runtime_file="$(task_runtime_file "$task_id")"
+  python3 - "$runtime_file" "$kind" "$detail" "$(timestamp_utc)" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+kind = sys.argv[2]
+detail = sys.argv[3]
+created = sys.argv[4]
+path.parent.mkdir(parents=True, exist_ok=True)
+with path.open("a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"kind": kind, "detail": detail, "created_at": created}, ensure_ascii=False) + "\n")
+PY
+}
+
+sync_task_runtime() {
+  local task_id="$1"
+  local task_file title artifact_dir_rel last_verified_at active_team_backend active_team_mode active_team_status active_team_decision
+  task_file="$(require_task "$task_id")"
+  title="$(get_field "$task_file" title)"
+  artifact_dir_rel="$(task_artifact_dir_rel "$task_id")"
+  last_verified_at="$(get_field "$task_file" last_verified_at)"
+  active_team_backend="$(get_field "$task_file" active_team_backend)"
+  active_team_mode="$(get_field "$task_file" active_team_mode)"
+  active_team_status="$(get_field "$task_file" active_team_status)"
+  active_team_decision="$(get_field "$task_file" active_team_decision)"
+  ensure_state_dir
+  ensure_artifacts_dir
+  ensure_task_runtime_scaffold "$task_id" "$title"
+  upsert_task_fields "$task_file" \
+    "artifact_dir=$artifact_dir_rel" \
+    "last_verified_at=$last_verified_at" \
+    "active_team_backend=$active_team_backend" \
+    "active_team_mode=$active_team_mode" \
+    "active_team_status=$active_team_status" \
+    "active_team_decision=$active_team_decision"
+  write_task_state_json "$task_id"
+}
+
+header_field_count() {
+  local file="$1"
+  local field="$2"
+
+  awk -v want="$field" '
+    BEGIN {
+      in_header = 1
+      count = 0
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (in_header) {
+        if (line ~ "^" want ": ") {
+          count++
+        } else if (line ~ /^$/ || line ~ /^##[[:space:]]/ || line ~ /^#[[:space:]]/) {
+          in_header = 0
+        } else if (line ~ /^[A-Za-z0-9_.-]+: /) {
+          # Keep unknown metadata lines in the header.
+        } else {
+          in_header = 0
+        }
+      }
+    }
+    END {
+      print count
+    }
+  ' "$file" | head -n 1
+}
+
+render_learning() {
+  local file="$1"
+  local task_id="$2"
+  local title="$3"
+  local lesson="$4"
+  local now="${5:-}"
+
+  if [[ -z "$now" ]]; then
+    now="$(today)"
+  fi
+  TASK_ID="$task_id" \
+  TITLE="$title" \
+  CREATED="$now" \
+  LESSON="$lesson" \
+  perl -pe 's/\{\{(TASK_ID|TITLE|CREATED|LESSON)\}\}/$ENV{$1}/ge' \
+    "$LEARNING_TEMPLATE" > "$file"
+}
+
+learning_basename() {
+  local task_id="$1"
+  local title="$2"
+  local token checksum
+
+  token="$(title_token "$title")"
+  if [[ "$token" =~ ^u[0-9]+$ ]]; then
+    printf '%s-%s\n' "$task_id" "$token"
+    return
+  fi
+
+  checksum="$(title_checksum "$title")"
+  printf '%s-%s-%s\n' "$task_id" "$token" "$checksum"
+}
+
+update_learning_index() {
+  local basename="$1"
+  local title="$2"
+  local task_id="$3"
+  local entry
+
+  if [[ ! -s "$LEARNING_INDEX" ]]; then
+    printf '# Learnings\n\n' > "$LEARNING_INDEX"
+  fi
+
+  entry="- [[${basename}]] title: ${title} | source task: ${task_id}"
+  if ! grep -Fqx -- "$entry" "$LEARNING_INDEX" 2>/dev/null; then
+    printf '%s\n' "$entry" >> "$LEARNING_INDEX"
+  fi
+}
+
+update_learning_search_index() {
+  local basename="$1"
+  local title="$2"
+  local task_id="$3"
+  local created="$4"
+  local lesson="$5"
+
+  python3 - "$LEARNING_SEARCH_INDEX" "$basename" "$title" "$task_id" "$created" "$lesson" <<'PY'
+import json
+import os
+import sys
+import tempfile
+
+path, learning_id, title, task_id, created, lesson = sys.argv[1:]
+rows = []
+
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if row.get("id") != learning_id:
+                rows.append(row)
+
+rows.append({
+    "id": learning_id,
+    "title": title,
+    "task_id": task_id,
+    "created": created,
+    "lesson": lesson,
+})
+
+directory = os.path.dirname(path) or "."
+fd, tmp = tempfile.mkstemp(prefix="codex-memory-", suffix=".jsonl", dir=directory)
+os.close(fd)
+with open(tmp, "w", encoding="utf-8") as fh:
+    for row in rows:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+os.replace(tmp, path)
+PY
+}
+
+sync_codex_memory() {
+  validate_positive_integer "$MEMORY_RECENT_DAYS" "memory recent days"
+  ensure_tasks_dir
+  ensure_learnings_dir
+  ensure_memory_dir
+
+  python3 - "$TASKS_DIR" "$LEARNINGS_DIR" "$MEMORY_INDEX" "$TASK_MEMORY_INDEX" "$RECENT_LEARNINGS_INDEX" "$MEMORY_SEARCH_INDEX" "$MEMORY_RECENT_DAYS" <<'PY'
+import json
+import os
+import re
+import sys
+import tempfile
+from datetime import date, timedelta
+from pathlib import Path
+
+tasks_dir = Path(sys.argv[1])
+learnings_dir = Path(sys.argv[2])
+memory_index_path = Path(sys.argv[3])
+task_memory_path = Path(sys.argv[4])
+recent_learnings_path = Path(sys.argv[5])
+memory_search_index_path = Path(sys.argv[6])
+recent_days = int(sys.argv[7])
+today = date.today()
+cutoff = today - timedelta(days=recent_days - 1)
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def get_field(text: str, field: str) -> str:
+    match = re.search(rf"^{re.escape(field)}: (.*)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def get_section(text: str, heading: str) -> str:
+    marker = f"## {heading}\n"
+    if marker not in text:
+        return ""
+    tail = text.split(marker, 1)[1]
+    split = re.split(r"\n##[ ]|\n#[ ]", tail, maxsplit=1)
+    return split[0].strip()
+
+
+def normalize(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip())
+
+
+def excerpt(value: str, limit: int = 160) -> str:
+    compact = normalize(value)
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def parse_iso_day(value: str):
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def parse_task(path: Path) -> dict:
+    text = read_text(path)
+    return {
+        "kind": "task",
+        "id": get_field(text, "id") or path.stem,
+        "title": get_field(text, "title"),
+        "status": get_field(text, "status"),
+        "created": get_field(text, "created"),
+        "updated": get_field(text, "updated"),
+        "success_criteria": normalize(get_section(text, "Success Criteria")),
+        "path": str(path),
+    }
+
+
+def parse_learning(path: Path) -> dict:
+    text = read_text(path)
+    return {
+        "kind": "learning",
+        "id": path.stem,
+        "title": get_field(text, "title"),
+        "task_id": get_field(text, "source-task-id"),
+        "created": get_field(text, "created"),
+        "lesson": normalize(get_section(text, "Lesson")),
+        "path": str(path),
+    }
+
+
+def task_sort_key(row: dict):
+    status_order = {"doing": 0, "todo": 1, "done": 2}
+    return (status_order.get(row.get("status", ""), 9), row.get("id", ""))
+
+
+def day_sort_key(row: dict, field: str):
+    parsed = parse_iso_day(row.get(field, ""))
+    return (parsed or date.min, row.get("id", ""))
+
+
+def write_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="codex-memory-", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+tasks = [parse_task(path) for path in sorted(tasks_dir.glob("*.md"))]
+learnings = []
+for path in sorted(learnings_dir.glob("*.md")):
+    if path.name in {"index.md", "RECENT.md"}:
+        continue
+    learnings.append(parse_learning(path))
+
+active_tasks = sorted(
+    [row for row in tasks if row.get("status") in {"todo", "doing"}],
+    key=task_sort_key,
+)
+recent_done_tasks = [
+    row
+    for row in tasks
+    if row.get("status") == "done"
+    and (parse_iso_day(row.get("updated", "")) or date.min) >= cutoff
+]
+recent_done_tasks.sort(key=lambda row: day_sort_key(row, "updated"), reverse=True)
+recent_learnings = sorted(learnings, key=lambda row: day_sort_key(row, "created"), reverse=True)
+
+memory_rows = []
+for row in tasks:
+    memory_rows.append(
+        {
+            "kind": "task",
+            "id": row.get("id", ""),
+            "title": row.get("title", ""),
+            "status": row.get("status", ""),
+            "created": row.get("created", ""),
+            "updated": row.get("updated", ""),
+            "success_criteria": row.get("success_criteria", ""),
+            "path": row.get("path", ""),
+        }
+    )
+for row in learnings:
+    memory_rows.append(
+        {
+            "kind": "learning",
+            "id": row.get("id", ""),
+            "title": row.get("title", ""),
+            "task_id": row.get("task_id", ""),
+            "created": row.get("created", ""),
+            "lesson": row.get("lesson", ""),
+            "path": row.get("path", ""),
+        }
+    )
+memory_rows.sort(
+    key=lambda row: (
+        row.get("updated", row.get("created", "")),
+        row.get("kind", ""),
+        row.get("id", ""),
+    ),
+    reverse=True,
+)
+
+memory_lines = [
+    "# Codex Memory",
+    "",
+    f"Updated: {today.isoformat()}",
+    "",
+    "## Snapshot",
+    f"- Open tasks: {len(active_tasks)}",
+    f"- Recent completed tasks ({recent_days} days): {len(recent_done_tasks)}",
+    f"- Saved learnings: {len(learnings)}",
+    "",
+    "## Active Tasks",
+]
+if active_tasks:
+    for row in active_tasks[:10]:
+        memory_lines.append(
+            f"- [{row.get('status', '')}] {row.get('id', '')} | {row.get('title', '')} | updated {row.get('updated', '')}"
+        )
+        if row.get("success_criteria"):
+            memory_lines.append(f"  Success: {excerpt(row['success_criteria'])}")
+else:
+    memory_lines.append("- No open tasks.")
+
+memory_lines.extend(["", f"## Recent Completions ({recent_days} Days)"])
+if recent_done_tasks:
+    for row in recent_done_tasks[:10]:
+        memory_lines.append(
+            f"- {row.get('id', '')} | {row.get('title', '')} | updated {row.get('updated', '')}"
+        )
+else:
+    memory_lines.append("- No recent completions.")
+
+memory_lines.extend(["", "## Recent Learnings"])
+if recent_learnings:
+    for row in recent_learnings[:10]:
+        memory_lines.append(
+            f"- {row.get('title', '')} | source task {row.get('task_id', '')} | created {row.get('created', '')}"
+        )
+        if row.get("lesson"):
+            memory_lines.append(f"  Lesson: {excerpt(row['lesson'])}")
+else:
+    memory_lines.append("- No saved learnings yet.")
+
+memory_lines.extend(
+    [
+        "",
+        "## Files",
+        "- [Task Summary](tasks.md)",
+        "- [Recent Learnings](learnings/RECENT.md)",
+        "- [Full Learning Index](learnings/index.md)",
+        "- Structured memory: `memory.jsonl`",
+        "",
+    ]
+)
+
+task_lines = [
+    "# Task Memory",
+    "",
+    f"Updated: {today.isoformat()}",
+    "",
+    "## Open Tasks",
+]
+if active_tasks:
+    for row in active_tasks:
+        task_lines.append(f"- [{row.get('status', '')}] {row.get('id', '')} | {row.get('title', '')}")
+        task_lines.append(
+            f"  Created: {row.get('created', '')} | Updated: {row.get('updated', '')}"
+        )
+        if row.get("success_criteria"):
+            task_lines.append(f"  Success: {excerpt(row['success_criteria'], 220)}")
+else:
+    task_lines.append("- No open tasks.")
+
+task_lines.extend(["", f"## Recent Completions ({recent_days} Days)"])
+if recent_done_tasks:
+    for row in recent_done_tasks[:20]:
+        task_lines.append(f"- {row.get('id', '')} | {row.get('title', '')}")
+        task_lines.append(
+            f"  Created: {row.get('created', '')} | Updated: {row.get('updated', '')}"
+        )
+        if row.get("success_criteria"):
+            task_lines.append(f"  Success: {excerpt(row['success_criteria'], 220)}")
+else:
+    task_lines.append("- No recent completions.")
+task_lines.append("")
+
+learning_lines = [
+    "# Recent Learnings",
+    "",
+    f"Updated: {today.isoformat()}",
+    "",
+    "## Latest Entries",
+]
+if recent_learnings:
+    for row in recent_learnings[:20]:
+        learning_lines.append(
+            f"- {row.get('title', '')} | source task {row.get('task_id', '')} | created {row.get('created', '')}"
+        )
+        if row.get("lesson"):
+            learning_lines.append(f"  Lesson: {excerpt(row['lesson'], 220)}")
+else:
+    learning_lines.append("- No saved learnings yet.")
+learning_lines.extend(["", "## Full Index", "- See `index.md` for the complete learning list.", ""])
+
+write_atomic(memory_index_path, "\n".join(memory_lines))
+write_atomic(task_memory_path, "\n".join(task_lines))
+write_atomic(recent_learnings_path, "\n".join(learning_lines))
+write_atomic(
+    memory_search_index_path,
+    "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in memory_rows),
+)
+PY
+}
+
+require_task() {
+  local id="$1"
+  local file
+  file="$(task_file "$id")"
+  if [[ ! -f "$file" ]]; then
+    echo "unknown task: $id" >&2
+    if ids="$(list_task_ids)" && [[ -n "$ids" ]]; then
+      echo "known tasks:" >&2
+      printf '%s\n' "$ids" >&2
+    fi
+    exit 1
+  fi
+  printf '%s\n' "$file"
+}
+
+validate_task_for_update() {
+  local file="$1"
+  local missing=()
+  local duplicate=()
+  local expected_id task_id title status created updated
+  local id_count title_count status_count created_count updated_count
+
+  expected_id="$(basename "$file" .md)"
+  id_count="$(header_field_count "$file" id)"
+  title_count="$(header_field_count "$file" title)"
+  status_count="$(header_field_count "$file" status)"
+  created_count="$(header_field_count "$file" created)"
+  updated_count="$(header_field_count "$file" updated)"
+
+  if [[ "$id_count" -eq 0 ]]; then missing+=("id"); elif [[ "$id_count" -gt 1 ]]; then duplicate+=("id"); fi
+  if [[ "$title_count" -eq 0 ]]; then missing+=("title"); elif [[ "$title_count" -gt 1 ]]; then duplicate+=("title"); fi
+  if [[ "$status_count" -eq 0 ]]; then missing+=("status"); elif [[ "$status_count" -gt 1 ]]; then duplicate+=("status"); fi
+  if [[ "$created_count" -eq 0 ]]; then missing+=("created"); elif [[ "$created_count" -gt 1 ]]; then duplicate+=("created"); fi
+  if [[ "$updated_count" -eq 0 ]]; then missing+=("updated"); elif [[ "$updated_count" -gt 1 ]]; then duplicate+=("updated"); fi
+
+  if ((${#missing[@]} > 0)); then
+    echo "malformed task file: $file missing ${missing[*]}" >&2
+    exit 1
+  fi
+
+  if ((${#duplicate[@]} > 0)); then
+    echo "malformed task file: $file duplicate ${duplicate[*]}" >&2
+    exit 1
+  fi
+
+  task_id="$(get_field "$file" id)"
+  title="$(get_field "$file" title)"
+  status="$(get_field "$file" status)"
+  created="$(get_field "$file" created)"
+  updated="$(get_field "$file" updated)"
+
+  if [[ "$task_id" != "$expected_id" ]]; then
+    echo "malformed task file: $file filename/id mismatch ($expected_id != $task_id)" >&2
+    exit 1
+  fi
+
+  case "$status" in
+    todo|doing|blocked|done|archived)
+      ;;
+    *)
+      echo "malformed task file: $file invalid status $status" >&2
+      exit 1
+      ;;
+  esac
+}
+
+set_config_feature() {
+  local file="$1"
+  local feature="$2"
+  local value="$3"
+  python3 - "$file" "$feature" "$value" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+feature = sys.argv[2]
+value = sys.argv[3].lower()
+text = path.read_text(encoding="utf-8") if path.exists() else ""
+lines = text.splitlines()
+
+features_start = None
+features_end = None
+for idx, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped == "[features]":
+        features_start = idx
+        features_end = len(lines)
+        for follow in range(idx + 1, len(lines)):
+            if lines[follow].startswith("[") and lines[follow].endswith("]"):
+                features_end = follow
+                break
+        break
+
+if features_start is None:
+    if lines and lines[-1] != "":
+        lines.append("")
+    lines.extend(["[features]", f"{feature} = {value}"])
+else:
+    replaced = False
+    for idx in range(features_start + 1, features_end):
+        if re.match(rf"^{re.escape(feature)}\s*=", lines[idx].strip()):
+            lines[idx] = f"{feature} = {value}"
+            replaced = True
+            break
+    if not replaced:
+        lines.insert(features_end, f"{feature} = {value}")
+
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+PY
+}
+
+merge_workflow_hooks_json() {
+  local file="$1"
+  local pre_hook="$2"
+  local post_hook="$3"
+  python3 - "$file" "$pre_hook" "$post_hook" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+path = Path(sys.argv[1])
+pre_hook = sys.argv[2]
+post_hook = sys.argv[3]
+
+try:
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+except json.JSONDecodeError:
+    data = {}
+
+hooks = data.setdefault("hooks", {})
+
+def ensure_entry(name: str, command: str) -> None:
+    entries = hooks.setdefault(name, [])
+    for entry in entries:
+        for hook in entry.get("hooks", []):
+            if hook.get("type") == "command" and hook.get("command") == command:
+                return
+    entries.append(
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": command,
+                }
+            ],
+        }
+    )
+
+ensure_entry("PreToolUse", pre_hook)
+ensure_entry("PostToolUse", post_hook)
+
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+install_workflow_hook_script() {
+  local name="$1"
+  local source="$SOURCE_HOOKS_DIR/$name"
+  local target="$HOOKS_DIR/$name"
+  if [[ ! -f "$source" ]]; then
+    echo "missing workflow hook source: $source" >&2
+    exit 1
+  fi
+  ensure_hooks_dir
+  if [[ "$source" != "$target" ]]; then
+    cp "$source" "$target"
+  fi
+  chmod +x "$target"
+  printf '%s\n' "$target"
+}
+
+write_verification_record() {
+  node "$SCRIPT_DIR/lib/codex-workflow/verification/record-cli.js" "$@"
+}
+
+config_feature_value() {
+  python3 - "$CODEX_CONFIG_FILE" "$1" <<'PY'
+from pathlib import Path
+import sys
+
+feature = sys.argv[2]
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+
+current_section = ""
+for raw in path.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if line.startswith("[") and line.endswith("]"):
+        current_section = line
+        continue
+    if current_section == "[features]" and line.startswith(feature):
+        _, value = line.split("=", 1)
+        print(value.strip())
+        break
+PY
+}
+
+config_network_summary() {
+  python3 - "$CODEX_CONFIG_FILE" <<'PY'
+from pathlib import Path
+import json
+import os
+import re
+import sys
+
+path = Path(sys.argv[1])
+items = []
+if path.exists():
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if re.search(r"base_url|baseURL|proxy", raw, re.IGNORECASE):
+            items.append(raw.strip())
+for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+    value = os.environ.get(key)
+    if value:
+        items.append(f"{key}={value}")
+print("; ".join(items[:8]))
+PY
+}
+
+doctor_report() {
+  local current_task_id="${1:-}"
+  local output_format="${2:-text}"
+  local codex_path login_output hooks_value legacy_hooks_value network_summary paseo_path paseo_summary
+  codex_path="$(command -v "$CODEX_BIN" 2>/dev/null || true)"
+  if [[ -n "$codex_path" ]]; then
+    login_output="$("$CODEX_BIN" login status 2>&1 || true)"
+  else
+    login_output="missing codex executable"
+  fi
+  hooks_value="$(config_feature_value hooks)"
+  legacy_hooks_value="$(config_feature_value codex_hooks)"
+  network_summary="$(config_network_summary)"
+  paseo_path="$(command -v "$PASEO_BIN" 2>/dev/null || true)"
+  if [[ -n "$paseo_path" ]]; then
+    paseo_summary="$("$PASEO_BIN" provider ls --json 2>/dev/null | tr '\n' ' ' || true)"
+  else
+    paseo_summary=""
+  fi
+
+  python3 - "$output_format" "$current_task_id" "$(timestamp_utc)" "$WORKFLOW_ROOT" "$CODEX_HOME_ROOT" "$TASKS_DIR" "$STATE_DIR" "$ARTIFACTS_DIR" "$HOOKS_DIR" "$SOURCE_HOOKS_DIR" "$CODEX_CONFIG_FILE" "$CODEX_HOOKS_FILE" "$ATLAS_SOURCE_SKILLS_DIR" "$ATLAS_CACHE_SKILLS_DIR" "$CURRENT_TASK_FILE" "${codex_path:-missing}" "${login_output:-unknown}" "${hooks_value:-unset}" "${legacy_hooks_value:-unset}" "${network_summary:-none}" "${paseo_path:-missing}" "$paseo_summary" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+output_format = sys.argv[1]
+current_task_id = sys.argv[2]
+generated_at = sys.argv[3]
+workflow_root = Path(sys.argv[4])
+codex_home = Path(sys.argv[5])
+tasks_dir = Path(sys.argv[6])
+state_dir = Path(sys.argv[7])
+artifacts_dir = Path(sys.argv[8])
+hooks_dir = Path(sys.argv[9])
+source_hooks_dir = Path(sys.argv[10])
+config_file = Path(sys.argv[11])
+hooks_file = Path(sys.argv[12])
+source_skills_dir = Path(sys.argv[13])
+cache_skills_dir = Path(sys.argv[14])
+current_task_file = Path(sys.argv[15])
+codex_path = sys.argv[16]
+login_output = sys.argv[17]
+hooks_value = sys.argv[18]
+legacy_hooks_value = sys.argv[19]
+network_summary = sys.argv[20]
+paseo_path = sys.argv[21]
+paseo_summary = sys.argv[22]
+
+
+def path_info(path: Path) -> dict:
+    return {
+        "path": str(path),
+        "exists": path.exists(),
+        "is_file": path.is_file(),
+        "is_dir": path.is_dir(),
+    }
+
+
+def read_json(path: Path):
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def read_runtime_events(task_id: str) -> list:
+    if not task_id:
+        return []
+    runtime_file = artifacts_dir / task_id / "runtime.jsonl"
+    rows = []
+    if not runtime_file.exists():
+        return rows
+    for raw in runtime_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            rows.append(json.loads(raw))
+        except json.JSONDecodeError:
+            rows.append({"kind": "invalid-jsonl", "raw": raw[:200]})
+    return rows
+
+
+def build_install() -> dict:
+    required_dirs = {
+        "workflow_root": path_info(workflow_root),
+        "tasks_dir": path_info(tasks_dir),
+        "state_dir": path_info(state_dir),
+        "artifacts_dir": path_info(artifacts_dir),
+    }
+    missing_dirs = [name for name, info in required_dirs.items() if not info["exists"]]
+    status = "ok"
+    if missing_dirs:
+        status = "missing"
+    elif codex_path == "missing":
+        status = "warn"
+    return {
+        "status": status,
+        "codex_executable": codex_path,
+        "codex_login": login_output,
+        "codex_home": str(codex_home),
+        "config_toml": str(config_file),
+        "network_summary": network_summary,
+        "paseo": paseo_path,
+        "paseo_providers": paseo_summary,
+        "paths": required_dirs,
+    }
+
+
+def build_source_cache() -> dict:
+    source_info = path_info(source_skills_dir)
+    cache_info = path_info(cache_skills_dir)
+    checked = []
+    missing = []
+    mismatches = []
+    if source_skills_dir.is_dir() and cache_skills_dir.is_dir():
+        for source_skill in sorted(source_skills_dir.glob("*/SKILL.md")):
+            skill_name = source_skill.parent.name
+            cache_skill = cache_skills_dir / skill_name / "SKILL.md"
+            if not cache_skill.exists():
+                missing.append(skill_name)
+                continue
+            checked.append(skill_name)
+            if source_skill.read_bytes() != cache_skill.read_bytes():
+                mismatches.append(skill_name)
+    status = "unknown"
+    if not source_info["exists"] or not cache_info["exists"]:
+        status = "unknown"
+    elif missing or mismatches:
+        status = "mismatch"
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "source_dir": str(source_skills_dir),
+        "cache_dir": str(cache_skills_dir),
+        "checked": checked,
+        "missing": missing,
+        "mismatches": mismatches,
+    }
+
+
+def hook_commands() -> list:
+    data = read_json(hooks_file)
+    commands = []
+    if not isinstance(data, dict):
+        return commands
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return commands
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            for hook in entry.get("hooks", []) if isinstance(entry, dict) else []:
+                command = hook.get("command") if isinstance(hook, dict) else None
+                if command:
+                    commands.append(str(command))
+    return commands
+
+
+def build_hooks_config() -> dict:
+    target_pre = hooks_dir / "pre-tool-use"
+    target_post = hooks_dir / "post-tool-use"
+    source_pre = source_hooks_dir / "pre-tool-use"
+    source_post = source_hooks_dir / "post-tool-use"
+    commands = hook_commands()
+    target_hooks_exist = target_pre.exists() and target_post.exists()
+    source_hooks_exist = source_pre.exists() and source_post.exists()
+    commands_configured = any("pre-tool-use" in item for item in commands) and any("post-tool-use" in item for item in commands)
+    enabled = hooks_value.lower() == "true" or legacy_hooks_value.lower() == "true"
+    if enabled and hooks_file.exists() and target_hooks_exist and commands_configured:
+        status = "ok"
+    elif enabled or hooks_file.exists() or target_hooks_exist or commands_configured:
+        status = "partial"
+    else:
+        status = "missing"
+    return {
+        "status": status,
+        "features.hooks": hooks_value,
+        "features.codex_hooks": legacy_hooks_value,
+        "hooks_json": path_info(hooks_file),
+        "target_pre_hook": path_info(target_pre),
+        "target_post_hook": path_info(target_post),
+        "source_hooks_exist": source_hooks_exist,
+        "target_hooks_exist": target_hooks_exist,
+        "commands_configured": commands_configured,
+        "commands": commands,
+    }
+
+
+def build_hooks_runtime(hooks_config_status: str) -> dict:
+    events = read_runtime_events(current_task_id)
+    proof_events = [
+        row for row in events
+        if row.get("kind") in {"pre-tool-risk", "post-tool-failure"}
+    ]
+    failure_dir = artifacts_dir / current_task_id / "hook-failures" if current_task_id else None
+    failure_files = sorted(failure_dir.glob("*.json")) if failure_dir and failure_dir.exists() else []
+    if proof_events or failure_files:
+        status = "proven"
+    elif hooks_config_status in {"ok", "partial"}:
+        status = "configured_unproven"
+    else:
+        status = "not_configured"
+    latest_event = proof_events[-1] if proof_events else {}
+    return {
+        "status": status,
+        "current_task_id": current_task_id,
+        "runtime_file": str(artifacts_dir / current_task_id / "runtime.jsonl") if current_task_id else "",
+        "proof_event_count": len(proof_events),
+        "hook_failure_count": len(failure_files),
+        "latest_proof_event": latest_event,
+        "latest_failure": str(failure_files[-1]) if failure_files else "",
+    }
+
+
+def build_smoke() -> dict:
+    state_path = artifacts_dir / current_task_id / "state.json" if current_task_id else None
+    state = read_json(state_path) if state_path else {}
+    if not isinstance(state, dict):
+        state = {}
+    verification = state.get("verification") if isinstance(state.get("verification"), dict) else {}
+    last_record = verification.get("last_record", "")
+    last_exit_code = verification.get("last_exit_code", "")
+    last_verified_at = state.get("last_verified_at", "")
+    verification_dir = artifacts_dir / current_task_id / "verification" if current_task_id else None
+    records = sorted(verification_dir.glob("*.md")) if verification_dir and verification_dir.exists() else []
+    if last_exit_code == 0 or str(last_exit_code) == "0":
+        status = "passed"
+    elif last_record or last_verified_at or records:
+        status = "failed_or_unknown"
+    else:
+        status = "no_proof"
+    events = read_runtime_events(current_task_id)
+    smoke_events = [row for row in events if row.get("kind") == "smoke"]
+    return {
+        "status": status,
+        "current_task_id": current_task_id,
+        "last_verified_at": last_verified_at,
+        "last_exit_code": last_exit_code,
+        "last_record": last_record or (str(records[-1]) if records else ""),
+        "smoke_event_count": len(smoke_events),
+        "latest_smoke_event": smoke_events[-1] if smoke_events else {},
+    }
+
+
+install = build_install()
+source_cache = build_source_cache()
+hooks_config = build_hooks_config()
+hooks_runtime = build_hooks_runtime(hooks_config["status"])
+smoke = build_smoke()
+report = {
+    "generated_at": generated_at,
+    "current_task_id": current_task_id,
+    "install": install,
+    "source_cache": source_cache,
+    "hooks_config": hooks_config,
+    "hooks_runtime": hooks_runtime,
+    "smoke": smoke,
+}
+
+if output_format == "json":
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+elif output_format == "text":
+    sections = [
+        ("install", install),
+        ("source-cache", source_cache),
+        ("hooks-config", hooks_config),
+        ("hooks-runtime", hooks_runtime),
+        ("smoke", smoke),
+    ]
+    print(f"generated_at\t{generated_at}")
+    if current_task_id:
+        print(f"current_task_id\t{current_task_id}")
+    for name, section in sections:
+        print(f"[{name}]")
+        print(f"status\t{section.get('status', '')}")
+        for key, value in section.items():
+            if key == "status":
+                continue
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            print(f"{key}\t{value}")
+else:
+    print(f"invalid doctor output format: {output_format}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+  if [[ -n "$current_task_id" ]]; then
+    append_task_runtime_event "$current_task_id" "doctor" "ran doctor checks"
+  fi
+}
+
+strict_doctor_report() {
+  local output_format="${1:-text}"
+  local usage_error="${2:-}"
+  local marketplace="atlas-forge"
+  local source_plugin_root="$CODEX_HOME_ROOT/plugins/atlas-workflow"
+  local local_cache_plugin_root="$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local"
+  local snapshot_root="$CODEX_HOME_ROOT/.tmp/marketplaces/$marketplace"
+  local release_cache_root="$CODEX_HOME_ROOT/plugins/cache/$marketplace/atlas-workflow"
+  local config_file="$CODEX_HOME_ROOT/config.toml"
+  local hooks_file="$CODEX_HOME_ROOT/hooks.json"
+  local integrity_bin="$SCRIPT_DIR/atlas-plugin-integrity"
+
+  PYTHONDONTWRITEBYTECODE=1 python3 - "$output_format" "$(timestamp_utc)" "$WORKFLOW_ROOT" "$CODEX_HOME_ROOT" "$TASKS_DIR" "$STATE_DIR" "$ARTIFACTS_DIR" "$HOOKS_DIR" "$SOURCE_HOOKS_DIR" "$config_file" "$hooks_file" "$source_plugin_root" "$local_cache_plugin_root" "$snapshot_root" "$release_cache_root" "$marketplace" "$integrity_bin" "$usage_error" <<'PY'
+from pathlib import Path
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tomllib
+
+output_format = sys.argv[1]
+generated_at = sys.argv[2]
+workflow_root = Path(sys.argv[3])
+codex_home = Path(sys.argv[4])
+tasks_dir = Path(sys.argv[5])
+state_dir = Path(sys.argv[6])
+artifacts_dir = Path(sys.argv[7])
+hooks_dir = Path(sys.argv[8])
+source_hooks_dir = Path(sys.argv[9])
+config_file = Path(sys.argv[10])
+hooks_file = Path(sys.argv[11])
+source_plugin_root = Path(sys.argv[12])
+local_cache_plugin_root = Path(sys.argv[13])
+snapshot_root = Path(sys.argv[14])
+release_cache_root = Path(sys.argv[15])
+marketplace = sys.argv[16]
+integrity_bin = Path(sys.argv[17])
+usage_error = sys.argv[18]
+
+STRICT_SECTIONS = (
+    "manifest_compatibility",
+    "source_local_cache",
+    "marketplace_snapshot",
+    "exact_release_cache",
+    "version_collision",
+    "release_downgrade",
+)
+FULL_SHA = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+
+
+def path_info(path: Path) -> dict:
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        mode = None
+    except OSError:
+        mode = None
+    return {
+        "path": str(path),
+        "exists": mode is not None,
+        "is_file": mode is not None and stat.S_ISREG(mode),
+        "is_dir": mode is not None and stat.S_ISDIR(mode),
+        "is_symlink": mode is not None and stat.S_ISLNK(mode),
+    }
+
+
+def structured_error(code: str, message: str, **details) -> dict:
+    return {"code": code, "message": message, **details}
+
+
+def not_run_sections(error: dict) -> dict:
+    return {
+        name: {
+            "status": "not_run",
+            "critical": True,
+            "reason": error["message"],
+            "errors": [error],
+        }
+        for name in STRICT_SECTIONS
+    }
+
+
+if usage_error:
+    error = structured_error("CLI_USAGE", usage_error)
+    sections = not_run_sections(error)
+    report = {
+        "schema_version": 1,
+        "tool": "codex-workflow-doctor",
+        "mode": "strict",
+        "strict": True,
+        "ok": False,
+        "strict_ok": False,
+        "strict_failures": list(STRICT_SECTIONS),
+        "generated_at": generated_at,
+        "current_task_id": "",
+        "install": {"status": "not_checked", "strict_relevant": False},
+        "source_cache": {"status": "not_checked", "strict_relevant": False},
+        "hooks_config": {"status": "not_checked", "strict_relevant": False},
+        "hooks_runtime": {"status": "not_checked", "strict_relevant": False},
+        "smoke": {"status": "not_checked", "strict_relevant": False},
+        **sections,
+        "errors": [error],
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    raise SystemExit(2)
+
+
+def safe_config() -> tuple[dict, list[dict]]:
+    errors = []
+    if config_file.is_symlink() or not config_file.is_file():
+        return {}, [structured_error(
+            "CONFIG_MISSING",
+            "strict doctor requires a real CODEX_HOME_ROOT/config.toml",
+            path=str(config_file),
+        )]
+    try:
+        data = tomllib.loads(config_file.read_text(encoding="utf-8"))
+    except Exception as error:
+        return {}, [structured_error(
+            "CONFIG_INVALID",
+            "config.toml is not valid UTF-8 TOML",
+            path=str(config_file),
+            detail=str(error),
+        )]
+    marketplaces = data.get("marketplaces")
+    entry = marketplaces.get(marketplace) if isinstance(marketplaces, dict) else None
+    if not isinstance(entry, dict):
+        errors.append(structured_error(
+            "MARKETPLACE_CONFIG_MISSING",
+            "atlas-forge marketplace config is missing",
+        ))
+        entry = {}
+    source_type = entry.get("source_type")
+    source = entry.get("source")
+    ref = entry.get("ref")
+    revision = entry.get("last_revision")
+    if source_type != "git" or not isinstance(source, str) or not source:
+        errors.append(structured_error(
+            "MARKETPLACE_SOURCE_INVALID",
+            "atlas-forge marketplace must use a non-empty Git source",
+            source_type=source_type,
+        ))
+    if not isinstance(ref, str) or not FULL_SHA.fullmatch(ref):
+        errors.append(structured_error(
+            "MARKETPLACE_REF_INVALID",
+            "marketplace ref must be a full immutable SHA string",
+            ref_type=type(ref).__name__,
+        ))
+    if not isinstance(revision, str) or not FULL_SHA.fullmatch(revision):
+        errors.append(structured_error(
+            "MARKETPLACE_REVISION_INVALID",
+            "marketplace last_revision must be a full immutable SHA string",
+            revision_type=type(revision).__name__,
+        ))
+    if isinstance(ref, str) and isinstance(revision, str) and ref.lower() != revision.lower():
+        errors.append(structured_error(
+            "MARKETPLACE_IDENTITY_MISMATCH",
+            "marketplace ref and last_revision must be identical",
+        ))
+    plugins = data.get("plugins")
+    selector = f"atlas-workflow@{marketplace}"
+    atlas_settings = plugins.get(selector) if isinstance(plugins, dict) else None
+    if not isinstance(atlas_settings, dict) or atlas_settings.get("enabled") is not True:
+        errors.append(structured_error(
+            "ATLAS_PLUGIN_NOT_ENABLED",
+            "strict doctor requires atlas-workflow@atlas-forge enabled=true",
+            selector=selector,
+        ))
+    other_enabled = []
+    if isinstance(plugins, dict):
+        suffix = f"@{marketplace}"
+        for candidate, settings in plugins.items():
+            if (
+                candidate.endswith(suffix)
+                and candidate != selector
+                and isinstance(settings, dict)
+                and settings.get("enabled") is True
+            ):
+                other_enabled.append(candidate)
+    features = data.get("features") if isinstance(data.get("features"), dict) else {}
+    return {
+        "source_type": source_type,
+        "source": source if isinstance(source, str) else "",
+        "ref": ref if isinstance(ref, str) else "",
+        "last_revision": revision if isinstance(revision, str) else "",
+        "atlas_enabled": isinstance(atlas_settings, dict) and atlas_settings.get("enabled") is True,
+        "other_enabled_plugins": sorted(other_enabled),
+        "features_hooks": features.get("hooks", "unset"),
+        "features_codex_hooks": features.get("codex_hooks", "unset"),
+    }, errors
+
+
+def build_source_cache(source_local_section: dict) -> dict:
+    section_status = source_local_section.get("status", "unknown")
+    if section_status == "ok":
+        status = "ok"
+    elif section_status in {"missing", "not_run"}:
+        status = "unknown"
+    else:
+        status = "mismatch"
+    return {
+        "status": status,
+        "source_dir": str(source_plugin_root / "skills"),
+        "cache_dir": str(local_cache_plugin_root / "skills"),
+        "derived_from": "source_local_cache",
+        "critical_status": section_status,
+        "critical_error_count": len(source_local_section.get("errors", [])),
+        "strict_relevant": False,
+    }
+
+
+def build_hooks_config(config: dict, config_errors: list[dict]) -> dict:
+    commands = []
+    hook_error = None
+    hooks_exists = False
+    try:
+        hooks_mode = os.lstat(hooks_file).st_mode
+        hooks_exists = True
+    except FileNotFoundError:
+        hooks_mode = None
+    except OSError as error:
+        hooks_mode = None
+        hook_error = f"hooks.json metadata is unavailable: {error}"
+    if hooks_mode is not None and (stat.S_ISLNK(hooks_mode) or not stat.S_ISREG(hooks_mode)):
+        hook_error = "hooks.json must be a regular file without symbolic links"
+    elif hooks_mode is not None:
+        try:
+            data = json.loads(hooks_file.read_text(encoding="utf-8"))
+            hooks = data.get("hooks", {}) if isinstance(data, dict) else {}
+            if isinstance(hooks, dict):
+                for entries in hooks.values():
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
+                        for hook in entry.get("hooks", []) if isinstance(entry, dict) else []:
+                            command = hook.get("command") if isinstance(hook, dict) else None
+                            if command:
+                                commands.append(str(command))
+        except Exception as error:
+            hook_error = str(error)
+    enabled = config.get("features_hooks") is True or config.get("features_codex_hooks") is True
+    target_hooks = path_info(hooks_dir / "pre-tool-use")["is_file"] and path_info(
+        hooks_dir / "post-tool-use"
+    )["is_file"]
+    configured = any("pre-tool-use" in command for command in commands) and any(
+        "post-tool-use" in command for command in commands
+    )
+    if hook_error or config_errors:
+        status = "error"
+    elif enabled and hooks_exists and target_hooks and configured:
+        status = "ok"
+    elif enabled or hooks_exists or target_hooks or configured:
+        status = "partial"
+    else:
+        status = "missing"
+    return {
+        "status": status,
+        "strict_relevant": False,
+        "features.hooks": config.get("features_hooks", "unknown"),
+        "features.codex_hooks": config.get("features_codex_hooks", "unknown"),
+        "hooks_json": path_info(hooks_file),
+        "target_hooks_exist": target_hooks,
+        "source_hooks_exist": path_info(source_hooks_dir / "pre-tool-use")["is_file"]
+        and path_info(source_hooks_dir / "post-tool-use")["is_file"],
+        "commands_configured": configured,
+        "command_count": len(commands),
+        "error": hook_error,
+    }
+
+
+codex_home_text = str(codex_home)
+boundary_errors = []
+try:
+    if not codex_home.is_absolute() or os.path.normpath(codex_home_text) != codex_home_text:
+        raise ValueError("CODEX_HOME_ROOT must be absolute and lexically canonical")
+    if codex_home.is_symlink() or not codex_home.is_dir() or str(codex_home.resolve(strict=True)) != codex_home_text:
+        raise ValueError("CODEX_HOME_ROOT must be a real canonical directory")
+    protected_roots = [
+        Path(os.environ.get("AGENTS_HOME", str(Path(os.environ.get("HOME", "")) / ".agents"))),
+        Path(os.environ.get("LOCAL_BIN_ROOT", str(Path(os.environ.get("HOME", "")) / ".local" / "bin"))),
+    ]
+    for protected in protected_roots:
+        protected_text = str(protected)
+        if not protected.is_absolute():
+            raise ValueError(f"protected ownership root is not absolute: {protected_text}")
+        codex_to_protected = os.path.relpath(protected_text, codex_home_text)
+        protected_to_codex = os.path.relpath(codex_home_text, protected_text)
+        if codex_to_protected == "." or not codex_to_protected.startswith(".." + os.sep) \
+                or not protected_to_codex.startswith(".." + os.sep):
+            raise ValueError(f"CODEX_HOME_ROOT overlaps protected ownership root: {protected_text}")
+except Exception as error:
+    boundary_errors.append(structured_error(
+        "CODEX_HOME_INVALID",
+        "strict doctor rejected CODEX_HOME_ROOT before reading installation state",
+        path=codex_home_text,
+        detail=str(error),
+    ))
+
+if boundary_errors:
+    config, config_errors = {}, boundary_errors
+else:
+    config, config_errors = safe_config()
+expected_commit = config.get("last_revision")
+expected_source = config.get("source")
+if not isinstance(expected_commit, str) or not FULL_SHA.fullmatch(expected_commit):
+    expected_commit = "0" * 40
+if not isinstance(expected_source, str) or not expected_source:
+    expected_source = "invalid://missing-marketplace-source"
+
+command = [
+    str(integrity_bin),
+    "doctor",
+    "--codex-home", str(codex_home),
+    "--source", str(source_plugin_root),
+    "--local-cache", str(local_cache_plugin_root),
+    "--snapshot-root", str(snapshot_root),
+    "--release-cache-root", str(release_cache_root),
+    "--expected-commit", expected_commit,
+    "--expected-source", expected_source,
+    "--marketplace", marketplace,
+]
+helper_envelope_errors = []
+helper_report_errors = []
+helper_exit = 2
+sections = {}
+try:
+    if boundary_errors:
+        raise RuntimeError("CODEX_HOME_ROOT failed strict ownership validation")
+    if integrity_bin.is_symlink() or not integrity_bin.is_file() or not os.access(integrity_bin, os.X_OK):
+        raise RuntimeError("fixed sibling atlas-plugin-integrity is missing or not executable")
+    environment = dict(os.environ)
+    for key in list(environment):
+        if key.startswith("GIT_") or key in {"SSH_AUTH_SOCK", "SSH_ASKPASS"}:
+            environment.pop(key, None)
+    environment["HOME"] = str(codex_home)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_ATTR_NOSYSTEM"] = "1"
+    environment["GIT_TERMINAL_PROMPT"] = "0"
+    environment["GIT_NO_LAZY_FETCH"] = "1"
+    environment["GIT_CEILING_DIRECTORIES"] = str(codex_home)
+    environment["GIT_ASKPASS"] = "/bin/false"
+    environment["SSH_ASKPASS"] = "/bin/false"
+    environment["GIT_SSH_COMMAND"] = "/bin/false"
+    result = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=environment,
+    )
+    helper_exit = result.returncode
+    helper = json.loads(result.stdout)
+    if (
+        not isinstance(helper, dict)
+        or helper.get("schema_version") != 1
+        or helper.get("tool") != "atlas-plugin-integrity"
+        or helper.get("mode") != "doctor"
+        or not isinstance(helper.get("checks"), dict)
+        or not isinstance(helper.get("ok"), bool)
+        or not isinstance(helper.get("errors"), list)
+    ):
+        raise RuntimeError("atlas-plugin-integrity returned an invalid doctor envelope")
+    for name in STRICT_SECTIONS:
+        section = helper["checks"].get(name)
+        if not isinstance(section, dict) or not isinstance(section.get("status"), str) or not isinstance(section.get("errors"), list):
+            raise RuntimeError(f"atlas-plugin-integrity omitted required section: {name}")
+        sections[name] = {**section, "critical": True}
+    helper_section_failures = [name for name in STRICT_SECTIONS if sections[name].get("status") != "ok"]
+    helper_consistent_ok = not helper_section_failures
+    if (
+        result.returncode not in {0, 1}
+        or helper.get("ok") is not helper_consistent_ok
+        or (result.returncode == 0) is not helper_consistent_ok
+        or (helper_consistent_ok and helper["errors"])
+        or (not helper_consistent_ok and not helper["errors"])
+    ):
+        raise RuntimeError("atlas-plugin-integrity exit code, ok flag, sections, and errors are inconsistent")
+    helper_report_errors = helper["errors"]
+except Exception as error:
+    helper_error = structured_error(
+        "INTEGRITY_HELPER_FAILED",
+        "strict doctor could not obtain a complete integrity report",
+        detail=str(error),
+    )
+    helper_envelope_errors.append(helper_error)
+    sections = not_run_sections(helper_error)
+    helper_exit = 2
+
+if config_errors:
+    marketplace_section = sections["marketplace_snapshot"]
+    marketplace_section["status"] = "invalid"
+    marketplace_section.setdefault("errors", []).extend(config_errors)
+    marketplace_section["config"] = {
+        "path": str(config_file),
+        "source_type": config.get("source_type"),
+        "ref_is_full_sha": isinstance(config.get("ref"), str) and bool(FULL_SHA.fullmatch(config.get("ref", ""))),
+        "revision_is_full_sha": isinstance(config.get("last_revision"), str)
+        and bool(FULL_SHA.fullmatch(config.get("last_revision", ""))),
+        "atlas_enabled": config.get("atlas_enabled", False),
+        "other_enabled_plugins": config.get("other_enabled_plugins", []),
+    }
+
+strict_failures = [name for name in STRICT_SECTIONS if sections[name].get("status") != "ok"]
+strict_ok = not strict_failures
+if helper_exit == 2 or helper_envelope_errors or any(
+    error["code"] in {"CONFIG_MISSING", "CONFIG_INVALID"} for error in config_errors
+):
+    exit_code = 2
+elif strict_ok:
+    exit_code = 0
+else:
+    exit_code = 1
+
+install = {
+    "status": "ok" if codex_home.is_dir() else "missing",
+    "strict_relevant": False,
+    "codex_home": str(codex_home),
+    "workflow_root": path_info(workflow_root),
+    "tasks_dir": path_info(tasks_dir),
+    "state_dir": path_info(state_dir),
+    "artifacts_dir": path_info(artifacts_dir),
+    "codex_login": "not_checked_in_strict_mode",
+    "paseo": "not_checked_in_strict_mode",
+}
+source_cache = build_source_cache(sections["source_local_cache"])
+hooks_config = build_hooks_config(config, config_errors)
+hooks_runtime = {
+    "status": "configured_unproven" if hooks_config["status"] in {"ok", "partial"} else "not_configured",
+    "strict_relevant": False,
+    "proof_event_count": 0,
+    "reason": "strict doctor does not read or mutate active task runtime",
+}
+smoke = {
+    "status": "no_proof",
+    "strict_relevant": False,
+    "reason": "strict doctor does not require or inspect smoke proof",
+}
+report = {
+    "schema_version": 1,
+    "tool": "codex-workflow-doctor",
+    "mode": "strict",
+    "strict": True,
+    "ok": strict_ok,
+    "strict_ok": strict_ok,
+    "strict_failures": strict_failures,
+    "generated_at": generated_at,
+    "current_task_id": "",
+    "install": install,
+    "source_cache": source_cache,
+    "hooks_config": hooks_config,
+    "hooks_runtime": hooks_runtime,
+    "smoke": smoke,
+    **sections,
+    "errors": [*helper_envelope_errors, *helper_report_errors, *config_errors],
+}
+
+if output_format == "json":
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+elif output_format == "text":
+    print(f"generated_at\t{generated_at}")
+    print("strict\ttrue")
+    print(f"strict_ok\t{str(strict_ok).lower()}")
+    print(f"strict_failures\t{json.dumps(strict_failures, ensure_ascii=False)}")
+    for name in ("install", "source_cache", "hooks_config", "hooks_runtime", "smoke", *STRICT_SECTIONS):
+        print(f"[{name}]")
+        print(f"status\t{report[name].get('status', '')}")
+        print(f"details\t{json.dumps(report[name], ensure_ascii=False, sort_keys=True)}")
+else:
+    print(json.dumps({
+        "schema_version": 1,
+        "tool": "codex-workflow-doctor",
+        "mode": "strict",
+        "strict": True,
+        "ok": False,
+        "errors": [structured_error("OUTPUT_FORMAT_INVALID", "invalid doctor output format")],
+        **not_run_sections(structured_error("OUTPUT_FORMAT_INVALID", "invalid doctor output format")),
+    }, ensure_ascii=False, sort_keys=True))
+    exit_code = 2
+
+raise SystemExit(exit_code)
+PY
+}
+
+task_excerpt() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+if not path.exists():
+    raise SystemExit(0)
+text = path.read_text(encoding="utf-8", errors="replace").strip()
+if len(text) > 3000:
+    text = text[:3000].rstrip() + "\n... (truncated)"
+sys.stdout.write(text)
+PY
+}
+
+team_role_names() {
+  local mode="$1"
+  local agents="$2"
+  local -a base_roles=()
+  local i
+  case "$mode" in
+    discuss)
+      base_roles=(architect critic verifier)
+      ;;
+    execute)
+      base_roles=(executor verifier reviewer)
+      ;;
+    *)
+      echo "invalid team mode: $mode" >&2
+      exit 1
+      ;;
+  esac
+  for ((i = 0; i < agents; i++)); do
+    if (( i < ${#base_roles[@]} )); then
+      printf '%s\n' "${base_roles[$i]}"
+    else
+      printf 'lane-%d\n' "$((i + 1))"
+    fi
+  done
+}
+
+claude_provider_available() {
+  local output
+  if ! command -v "$PASEO_BIN" >/dev/null 2>&1; then
+    return 1
+  fi
+  output="$("$PASEO_BIN" provider ls --json 2>/dev/null || true)"
+  python3 - "$output" <<'PY'
+import json
+import sys
+
+try:
+    rows = json.loads(sys.argv[1] or "[]")
+except json.JSONDecodeError:
+    raise SystemExit(1)
+
+for row in rows:
+    provider = str(row.get("provider", "")).lower()
+    status = str(row.get("status", "")).lower()
+    if provider == "claude" and status == "available":
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+cmd_init_task() {
+  local id
+  id="$(node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" init-task "$@")" || return $?
+  sync_codex_memory
+  printf '%s\n' "$id"
+}
+
+cmd_task_mutation() {
+  node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" "$@" || return $?
+  sync_codex_memory
+}
+
+cmd_handoff_envelope() {
+  local task_id="$1"
+  shift
+  local prd_path repo_path base_branch title packet_path generated_at metadata
+  local envelope_path prd_abs prd_sha repo_abs repo_sha packet_abs acceptance_count validation_count envelope_rel packet_value
+  local acceptance_rows=()
+  local validation_rows=()
+  prd_path=""
+  repo_path=""
+  base_branch=""
+  title=""
+  packet_path=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prd)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        prd_path="$2"
+        shift 2
+        ;;
+      --prd=*)
+        prd_path="${1#--prd=}"
+        shift
+        ;;
+      --repo)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        repo_path="$2"
+        shift 2
+        ;;
+      --repo=*)
+        repo_path="${1#--repo=}"
+        shift
+        ;;
+      --base)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        base_branch="$2"
+        shift 2
+        ;;
+      --base=*)
+        base_branch="${1#--base=}"
+        shift
+        ;;
+      --title)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        title="$2"
+        shift 2
+        ;;
+      --title=*)
+        title="${1#--title=}"
+        shift
+        ;;
+      --packet)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        packet_path="$2"
+        shift 2
+        ;;
+      --packet=*)
+        packet_path="${1#--packet=}"
+        shift
+        ;;
+      --acceptance)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        acceptance_rows+=("$2")
+        shift 2
+        ;;
+      --acceptance=*)
+        acceptance_rows+=("${1#--acceptance=}")
+        shift
+        ;;
+      --validation)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+        validation_rows+=("$2")
+        shift 2
+        ;;
+      --validation=*)
+        validation_rows+=("${1#--validation=}")
+        shift
+        ;;
+      *)
+        echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  [[ -n "$prd_path" ]] || { echo "missing required argument: --prd" >&2; exit 1; }
+  [[ -n "$repo_path" ]] || { echo "missing required argument: --repo" >&2; exit 1; }
+  [[ -n "$base_branch" ]] || { echo "missing required argument: --base" >&2; exit 1; }
+
+  require_task "$task_id" >/dev/null
+  sync_task_runtime "$task_id"
+  generated_at="$(timestamp_utc)"
+  metadata="$(write_handoff_envelope "$task_id" "$prd_path" "$repo_path" "$base_branch" "$title" "$packet_path" "$generated_at" "${#acceptance_rows[@]}" "${acceptance_rows[@]}" "${#validation_rows[@]}" "${validation_rows[@]}")"
+  IFS=$'\t' read -r envelope_path prd_abs prd_sha repo_abs base_branch repo_sha packet_abs acceptance_count validation_count title <<<"$metadata"
+  envelope_rel="$(path_relative_to_codex_home "$envelope_path")"
+  packet_value="$packet_abs"
+  if [[ "$packet_abs" != "-" ]]; then
+    packet_value="$(path_relative_to_codex_home "$packet_abs")"
+  fi
+
+  upsert_task_fields "$(require_task "$task_id")" \
+    "handoff_envelope=$envelope_rel" \
+    "handoff_generated_at=$generated_at" \
+    "handoff_prd_path=$prd_abs" \
+    "handoff_prd_sha256=$prd_sha" \
+    "handoff_repo=$repo_abs" \
+    "handoff_base=$base_branch" \
+    "handoff_repo_sha=$repo_sha" \
+    "handoff_packet=$packet_value" \
+    "handoff_acceptance_rows=$acceptance_count" \
+    "handoff_validation_rows=$validation_count"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "handoff.envelope=$envelope_rel" \
+    "handoff.generated_at=$generated_at" \
+    "handoff.prd_path=$prd_abs" \
+    "handoff.prd_sha256=$prd_sha" \
+    "handoff.repo=$repo_abs" \
+    "handoff.base=$base_branch" \
+    "handoff.repo_sha=$repo_sha" \
+    "handoff.packet=$packet_value" \
+    "handoff.acceptance_rows=$acceptance_count" \
+    "handoff.validation_rows=$validation_count"
+  append_task_runtime_event "$task_id" "handoff-envelope" "$envelope_rel"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'envelope: %s\n' "$envelope_path"
+  printf 'prd_sha256: %s\n' "$prd_sha"
+  printf 'repo: %s\n' "$repo_abs"
+  printf 'base: %s\n' "$base_branch"
+  printf 'acceptance_rows: %s\n' "$acceptance_count"
+  printf 'validation_rows: %s\n' "$validation_count"
+  printf 'packet: %s\n' "$packet_value"
+}
+
+cmd_result_ingest() {
+  local task_id="$1"
+  shift
+  local issue outcome draft_pr blocker commit_sha worktree summary ingested_at metadata
+  local result_path result_rel evidence_count lesson_count evidence_joined lessons_joined
+  local evidence_items=()
+  local lesson_items=()
+  issue=""
+  outcome=""
+  draft_pr=""
+  blocker=""
+  commit_sha=""
+  worktree=""
+  summary=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issue)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        issue="$2"
+        shift 2
+        ;;
+      --issue=*)
+        issue="${1#--issue=}"
+        shift
+        ;;
+      --outcome)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        outcome="$2"
+        shift 2
+        ;;
+      --outcome=*)
+        outcome="${1#--outcome=}"
+        shift
+        ;;
+      --draft-pr)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        draft_pr="$2"
+        shift 2
+        ;;
+      --draft-pr=*)
+        draft_pr="${1#--draft-pr=}"
+        shift
+        ;;
+      --blocker)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        blocker="$2"
+        shift 2
+        ;;
+      --blocker=*)
+        blocker="${1#--blocker=}"
+        shift
+        ;;
+      --commit)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        commit_sha="$2"
+        shift 2
+        ;;
+      --commit=*)
+        commit_sha="${1#--commit=}"
+        shift
+        ;;
+      --worktree)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        worktree="$2"
+        shift 2
+        ;;
+      --worktree=*)
+        worktree="${1#--worktree=}"
+        shift
+        ;;
+      --evidence)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        evidence_items+=("$2")
+        shift 2
+        ;;
+      --evidence=*)
+        evidence_items+=("${1#--evidence=}")
+        shift
+        ;;
+      --summary)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        summary="$2"
+        shift 2
+        ;;
+      --summary=*)
+        summary="${1#--summary=}"
+        shift
+        ;;
+      --lesson)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+        lesson_items+=("$2")
+        shift 2
+        ;;
+      --lesson=*)
+        lesson_items+=("${1#--lesson=}")
+        shift
+        ;;
+      *)
+        echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  [[ -n "$issue" ]] || { echo "missing required argument: --issue" >&2; exit 1; }
+  [[ -n "$outcome" ]] || { echo "missing required argument: --outcome" >&2; exit 1; }
+  [[ -n "$commit_sha" ]] || { echo "missing required argument: --commit" >&2; exit 1; }
+  [[ -n "$worktree" ]] || { echo "missing required argument: --worktree" >&2; exit 1; }
+
+  require_task "$task_id" >/dev/null
+  sync_task_runtime "$task_id"
+  ingested_at="$(timestamp_utc)"
+  metadata="$(write_result_ingest "$task_id" "$issue" "$outcome" "$draft_pr" "$blocker" "$commit_sha" "$worktree" "$summary" "$ingested_at" "${#evidence_items[@]}" "${evidence_items[@]}" "${#lesson_items[@]}" "${lesson_items[@]}")"
+  IFS=$'\t' read -r result_path issue outcome draft_pr blocker commit_sha worktree evidence_count lesson_count summary evidence_joined lessons_joined <<<"$metadata"
+  result_rel="$(path_relative_to_codex_home "$result_path")"
+
+  upsert_task_fields "$(require_task "$task_id")" \
+    "result_ingest=$result_rel" \
+    "result_ingested_at=$ingested_at" \
+    "result_issue=$issue" \
+    "result_outcome=$outcome" \
+    "result_draft_pr=$draft_pr" \
+    "result_blocker=$blocker" \
+    "result_commit=$commit_sha" \
+    "result_worktree=$worktree" \
+    "result_evidence_count=$evidence_count" \
+    "result_lesson_candidates=$lesson_count"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "result.artifact=$result_rel" \
+    "result.ingested_at=$ingested_at" \
+    "result.issue=$issue" \
+    "result.outcome=$outcome" \
+    "result.draft_pr=$draft_pr" \
+    "result.blocker=$blocker" \
+    "result.commit=$commit_sha" \
+    "result.worktree=$worktree" \
+    "result.evidence_count=$evidence_count" \
+    "result.lesson_candidates=$lesson_count" \
+    "result.summary=$summary" \
+    "result.evidence=$evidence_joined" \
+    "result.lessons=$lessons_joined"
+  append_task_runtime_event "$task_id" "result-ingest" "$outcome $result_rel"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'artifact: %s\n' "$result_path"
+  printf 'issue: %s\n' "$issue"
+  printf 'outcome: %s\n' "$outcome"
+  printf 'draft_pr: %s\n' "$draft_pr"
+  printf 'blocker: %s\n' "$blocker"
+  printf 'commit: %s\n' "$commit_sha"
+  printf 'worktree: %s\n' "$worktree"
+  printf 'evidence_count: %s\n' "$evidence_count"
+  printf 'lesson_candidates: %s\n' "$lesson_count"
+}
+
+cmd_curated_packet() {
+  if [[ $# -ge 2 && ( "$1" == "--lint" || "$1" == "--lint="* ) ]]; then
+    local lint_file lint_result lint_status lint_path lint_lines lint_task lint_prd_sha
+    if [[ "$1" == "--lint" ]]; then
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow curated-packet --lint <file>' >&2; exit 1; }
+      lint_file="$2"
+    else
+      [[ $# -eq 1 ]] || { echo 'usage: codex-workflow curated-packet --lint <file>' >&2; exit 1; }
+      lint_file="${1#--lint=}"
+    fi
+    lint_result="$(lint_curated_packet_file "$lint_file")"
+    IFS=$'\t' read -r lint_status lint_path lint_lines lint_task lint_prd_sha <<<"$lint_result"
+    printf 'packet: %s\n' "$lint_path"
+    printf 'status: %s\n' "$lint_status"
+    printf 'lines: %s\n' "$lint_lines"
+    printf 'atlas_task_id: %s\n' "$lint_task"
+    printf 'prd_sha256: %s\n' "$lint_prd_sha"
+    return 0
+  fi
+
+  local task_id="$1"
+  shift
+  local prd_path repo_path base_branch skip_reason skip_requested generated_at metadata lint_result
+  local packet_path packet_rel prd_abs prd_sha repo_abs source_count packet_lines
+  local source_paths=()
+  prd_path=""
+  repo_path=""
+  base_branch=""
+  skip_reason=""
+  skip_requested="0"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prd)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2; exit 1; }
+        prd_path="$2"
+        shift 2
+        ;;
+      --prd=*)
+        prd_path="${1#--prd=}"
+        shift
+        ;;
+      --repo)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2; exit 1; }
+        repo_path="$2"
+        shift 2
+        ;;
+      --repo=*)
+        repo_path="${1#--repo=}"
+        shift
+        ;;
+      --base)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2; exit 1; }
+        base_branch="$2"
+        shift 2
+        ;;
+      --base=*)
+        base_branch="${1#--base=}"
+        shift
+        ;;
+      --source)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2; exit 1; }
+        source_paths+=("$2")
+        shift 2
+        ;;
+      --source=*)
+        source_paths+=("${1#--source=}")
+        shift
+        ;;
+      --skip)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2; exit 1; }
+        skip_reason="$2"
+        skip_requested="1"
+        shift 2
+        ;;
+      --skip=*)
+        skip_reason="${1#--skip=}"
+        skip_requested="1"
+        shift
+        ;;
+      *)
+        echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"]' >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  require_task "$task_id" >/dev/null
+  sync_task_runtime "$task_id"
+
+  if [[ "$skip_requested" == "1" ]]; then
+    validate_single_line_reason "curated packet skip reason" "$skip_reason"
+    generated_at="$(timestamp_utc)"
+    upsert_task_fields "$(require_task "$task_id")" \
+      "packet_status=skipped" \
+      "packet_skipped_at=$generated_at" \
+      "packet_skip_reason=$skip_reason"
+    write_task_state_json "$task_id"
+    set_task_state_fields "$task_id" \
+      "packet.status=skipped" \
+      "packet.skipped_at=$generated_at" \
+      "packet.skip_reason=$skip_reason"
+    append_task_runtime_event "$task_id" "curated-packet-skip" "$skip_reason"
+    printf 'task_id: %s\n' "$task_id"
+    printf 'status: skipped\n'
+    printf 'reason: %s\n' "$skip_reason"
+    return 0
+  fi
+
+  [[ -n "$prd_path" ]] || { echo "missing required argument: --prd" >&2; exit 1; }
+  [[ -n "$repo_path" ]] || { echo "missing required argument: --repo" >&2; exit 1; }
+  [[ -n "$base_branch" ]] || { echo "missing required argument: --base" >&2; exit 1; }
+  [[ "${#source_paths[@]}" -gt 0 ]] || { echo "missing required argument: --source" >&2; exit 1; }
+
+  generated_at="$(timestamp_utc)"
+  metadata="$(write_curated_packet "$task_id" "$prd_path" "$repo_path" "$base_branch" "$generated_at" "${#source_paths[@]}" "${source_paths[@]}")"
+  IFS=$'\t' read -r packet_path prd_abs prd_sha repo_abs base_branch source_count packet_lines <<<"$metadata"
+  lint_result="$(lint_curated_packet_file "$packet_path")"
+  packet_rel="$(path_relative_to_codex_home "$packet_path")"
+
+  upsert_task_fields "$(require_task "$task_id")" \
+    "packet_status=generated" \
+    "packet_file=$packet_rel" \
+    "packet_generated_at=$generated_at" \
+    "packet_prd_path=$prd_abs" \
+    "packet_prd_sha256=$prd_sha" \
+    "packet_repo=$repo_abs" \
+    "packet_base=$base_branch" \
+    "packet_sources=$source_count" \
+    "packet_lines=$packet_lines" \
+    "packet_skip_reason=-"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "packet.status=generated" \
+    "packet.file=$packet_rel" \
+    "packet.generated_at=$generated_at" \
+    "packet.prd_path=$prd_abs" \
+    "packet.prd_sha256=$prd_sha" \
+    "packet.repo=$repo_abs" \
+    "packet.base=$base_branch" \
+    "packet.sources=$source_count" \
+    "packet.lines=$packet_lines" \
+    "packet.lint=passed"
+  append_task_runtime_event "$task_id" "curated-packet" "$packet_rel"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'packet: %s\n' "$packet_path"
+  printf 'status: generated\n'
+  printf 'lint: passed\n'
+  printf 'prd_sha256: %s\n' "$prd_sha"
+  printf 'sources: %s\n' "$source_count"
+  printf 'lines: %s\n' "$packet_lines"
+}
+
+
+cmd_multica_feedback() {
+  local task_id="$1"
+  shift
+  local issue commit_sha round status evidence_manifest recorded_at metadata feedback_path feedback_json finding_count
+  local reviews=()
+  local e2es=()
+  local scorecards=()
+  local findings=()
+  issue=""
+  commit_sha=""
+  round=""
+  status=""
+  evidence_manifest=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issue) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked [--review <path-or-url>]... [--e2e <path-or-url>]... [--scorecard <path-or-url>]... [--evidence-manifest <path-or-url>] [--blocking-finding "<id|summary>"]...' >&2; exit 1; }; issue="$2"; shift 2 ;;
+      --issue=*) issue="${1#--issue=}"; shift ;;
+      --commit) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked ...' >&2; exit 1; }; commit_sha="$2"; shift 2 ;;
+      --commit=*) commit_sha="${1#--commit=}"; shift ;;
+      --round) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked ...' >&2; exit 1; }; round="$2"; shift 2 ;;
+      --round=*) round="${1#--round=}"; shift ;;
+      --status) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked ...' >&2; exit 1; }; status="$2"; shift 2 ;;
+      --status=*) status="${1#--status=}"; shift ;;
+      --review) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> ... [--review <path-or-url>]...' >&2; exit 1; }; reviews+=("$2"); shift 2 ;;
+      --review=*) reviews+=("${1#--review=}"); shift ;;
+      --e2e) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> ... [--e2e <path-or-url>]...' >&2; exit 1; }; e2es+=("$2"); shift 2 ;;
+      --e2e=*) e2es+=("${1#--e2e=}"); shift ;;
+      --scorecard) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> ... [--scorecard <path-or-url>]...' >&2; exit 1; }; scorecards+=("$2"); shift 2 ;;
+      --scorecard=*) scorecards+=("${1#--scorecard=}"); shift ;;
+      --evidence-manifest) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> ... [--evidence-manifest <path-or-url>]' >&2; exit 1; }; evidence_manifest="$2"; shift 2 ;;
+      --evidence-manifest=*) evidence_manifest="${1#--evidence-manifest=}"; shift ;;
+      --blocking-finding) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> ... [--blocking-finding "<id|summary>"]...' >&2; exit 1; }; findings+=("$2"); shift 2 ;;
+      --blocking-finding=*) findings+=("${1#--blocking-finding=}"); shift ;;
+      *) echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked [--review <path-or-url>]... [--e2e <path-or-url>]... [--scorecard <path-or-url>]... [--evidence-manifest <path-or-url>] [--blocking-finding "<id|summary>"]...' >&2; exit 1 ;;
+    esac
+  done
+  [[ -n "$issue" ]] || { echo "missing required argument: --issue" >&2; exit 1; }
+  [[ -n "$commit_sha" ]] || { echo "missing required argument: --commit" >&2; exit 1; }
+  [[ -n "$round" ]] || { echo "missing required argument: --round" >&2; exit 1; }
+  [[ -n "$status" ]] || { echo "missing required argument: --status" >&2; exit 1; }
+  require_task "$task_id" >/dev/null
+  sync_task_runtime "$task_id"
+  recorded_at="$(timestamp_utc)"
+  metadata="$(write_multica_feedback "$task_id" "$issue" "$commit_sha" "$round" "$status" "$evidence_manifest" "$recorded_at" "${#reviews[@]}" "${reviews[@]}" "${#e2es[@]}" "${e2es[@]}" "${#scorecards[@]}" "${scorecards[@]}" "${#findings[@]}" "${findings[@]}")"
+  IFS=$'\t' read -r feedback_path feedback_json issue commit_sha round status finding_count <<<"$metadata"
+  upsert_task_fields "$(require_task "$task_id")" "multica_feedback=$(path_relative_to_codex_home "$feedback_path")" "multica_feedback_status=$status" "multica_feedback_round=$round" "multica_feedback_findings=$finding_count"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" "multica_feedback.artifact=$(path_relative_to_codex_home "$feedback_path")" "multica_feedback.json=$(path_relative_to_codex_home "$feedback_json")" "multica_feedback.status=$status" "multica_feedback.round=$round" "multica_feedback.blocking_findings=$finding_count"
+  if [[ "$status" == "repair-needed" ]]; then
+    set_task_state_fields "$task_id" "current_phase=repair" "latest_feedback_route=repair"
+  elif [[ "$status" == "blocked" ]]; then
+    set_task_state_fields "$task_id" "current_phase=blocked" "latest_feedback_route=blocker"
+  fi
+  append_task_runtime_event "$task_id" "multica-feedback" "$status round $round"
+  printf 'task_id: %s\nartifact: %s\njson: %s\nstatus: %s\nround: %s\nblocking_findings: %s\n' "$task_id" "$feedback_path" "$feedback_json" "$status" "$round" "$finding_count"
+}
+
+cmd_learn() {
+  local task_id title lesson task_file basename file tmp existing_created created current lock_file
+
+  task_id="$1"
+  title="$2"
+  lesson="$3"
+
+  validate_title "$title"
+  task_file="$(require_task "$task_id")"
+  validate_task_for_update "$task_file"
+  current="$(get_field "$task_file" status)"
+  if [[ "$current" != "done" ]]; then
+    echo "task must be done before learn: $task_id" >&2
+    exit 1
+  fi
+  ensure_learning_template
+  ensure_learnings_dir
+  ensure_learning_lock_dir
+
+  basename="$(learning_basename "$task_id" "$title")"
+  file="$LEARNINGS_DIR/$basename.md"
+  lock_file="$(learning_lock_file)"
+  acquire_lock "$lock_file"
+  if [[ -n "${CODEX_WORKFLOW_TEST_LEARN_PAUSE_BEFORE_WRITE:-}" ]]; then
+    sleep "$CODEX_WORKFLOW_TEST_LEARN_PAUSE_BEFORE_WRITE"
+  fi
+  tmp="$(mktemp)"
+  if [[ -f "$file" ]]; then
+    existing_created="$(get_learning_field "$file" created)"
+    render_learning "$tmp" "$task_id" "$title" "$lesson" "$existing_created"
+    if ! cmp -s "$file" "$tmp"; then
+      rm -f "$tmp"
+      release_lock "$lock_file"
+      echo "learning already exists with different content: $file" >&2
+      exit 1
+    fi
+  else
+    render_learning "$tmp" "$task_id" "$title" "$lesson"
+    mv "$tmp" "$file"
+    tmp=""
+  fi
+  rm -f "$tmp"
+  update_learning_index "$basename" "$title" "$task_id"
+  created="$(get_learning_field "$file" created)"
+  update_learning_search_index "$basename" "$title" "$task_id" "$created" "$lesson"
+  release_lock "$lock_file"
+  sync_codex_memory
+  printf '%s\n' "$basename"
+}
+
+cmd_dream() {
+  sync_codex_memory
+  printf '%s\n' "$MEMORY_INDEX"
+}
+
+cmd_recall() {
+  local query="$1"
+
+  validate_query "$query"
+  ensure_learnings_dir
+
+  python3 - "$LEARNING_SEARCH_INDEX" "$LEARNINGS_DIR" "$query" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+index_path = Path(sys.argv[1])
+learnings_dir = Path(sys.argv[2])
+query = sys.argv[3].casefold()
+terms = [part for part in query.split() if part]
+
+def score_text(text: str) -> int:
+    lowered = text.casefold()
+    return sum(lowered.count(term) for term in terms)
+
+rows = []
+if index_path.exists():
+    with index_path.open(encoding="utf-8") as fh:
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            score = score_text(row.get("title", "")) * 3 + score_text(row.get("lesson", ""))
+            if score > 0:
+                row["_score"] = score
+                rows.append(row)
+else:
+    for path in sorted(learnings_dir.glob("*.md")):
+        if path.name == "index.md":
+            continue
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        title = next((line[7:] for line in lines if line.startswith("title: ")), "")
+        task_id = next((line[16:] for line in lines if line.startswith("source-task-id: ")), "")
+        marker = "## Lesson\n"
+        lesson = text.split(marker, 1)[1].strip() if marker in text else ""
+        score = score_text(title) * 3 + score_text(lesson)
+        if score > 0:
+            rows.append({
+                "id": path.stem,
+                "title": title,
+                "task_id": task_id,
+                "lesson": lesson,
+                "_score": score,
+            })
+
+rows.sort(key=lambda row: (-row["_score"], row.get("id", "")))
+for row in rows[:5]:
+    excerpt = row.get("lesson", "").replace("\n", " ").strip()
+    excerpt = excerpt[:120]
+    print(f'{row.get("id", "")}\t{row.get("title", "")}\t{row.get("task_id", "")}\t{excerpt}')
+PY
+}
+
+cmd_doctor() {
+  local current_task_id output_format strict_mode
+  output_format="text"
+  strict_mode=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict)
+        strict_mode=true
+        shift
+        ;;
+      --json)
+        output_format="json"
+        shift
+        ;;
+      --text)
+        output_format="text"
+        shift
+        ;;
+      *)
+        if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" == true ]]; then
+          strict_doctor_report json "unknown strict doctor argument: $1"
+          return
+        fi
+        echo 'usage: codex-workflow doctor [--strict] [--json|--text]' >&2
+        exit 1
+        ;;
+    esac
+  done
+  if [[ "$strict_mode" == true ]]; then
+    strict_doctor_report "$output_format"
+    return
+  fi
+  current_task_id="$(read_current_task_id || true)"
+  if [[ -n "$current_task_id" ]]; then
+    sync_task_runtime "$current_task_id"
+  fi
+  doctor_report "$current_task_id" "$output_format"
+}
+
+cmd_smoke() {
+  local task_id last_message_file stdout_file stderr_file message exit_code verdict record_file verified_at
+  task_id="$(read_current_task_id || true)"
+  if [[ -z "$task_id" ]]; then
+    echo "no active task: run codex-workflow start <task-id> first" >&2
+    exit 1
+  fi
+  sync_task_runtime "$task_id"
+  last_message_file="$(mktemp)"
+  stdout_file="$(mktemp)"
+  stderr_file="$(mktemp)"
+  set +e
+  "$CODEX_BIN" exec --skip-git-repo-check -C "$PWD" --output-last-message "$last_message_file" "Reply with exactly CODEX-SMOKE-OK" >"$stdout_file" 2>"$stderr_file"
+  exit_code=$?
+  set -e
+  message="$(tr -d '\r' < "$last_message_file" 2>/dev/null | sed 's/[[:space:]]*$//')"
+  if [[ -n "$message" ]]; then
+    printf '%s\n' "$message" >>"$stdout_file"
+  fi
+  verdict="failed"
+  if [[ "$exit_code" -eq 0 && "$message" == "CODEX-SMOKE-OK" ]]; then
+    verdict="passed"
+  fi
+  record_file="$(task_verification_dir "$task_id")/$(timestamp_token)-smoke.md"
+  write_verification_record "$record_file" "smoke" "$task_id" "$CODEX_BIN exec --skip-git-repo-check -C $PWD --output-last-message <tmp> \"Reply with exactly CODEX-SMOKE-OK\"" "$PWD" "$exit_code" "$verdict" "$stdout_file" "$stderr_file" "$(timestamp_utc)" "$verdict" "smoke-only" "local-command" "" 0
+  verified_at="$(timestamp_utc)"
+  upsert_task_fields "$(require_task "$task_id")" "last_verified_at=$verified_at"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "last_verified_at=$verified_at" \
+    "verification.last_record=$(path_relative_to_codex_home "$record_file")" \
+    "verification.last_exit_code=$exit_code"
+  append_task_runtime_event "$task_id" "smoke" "$verdict"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'record: %s\n' "$record_file"
+  printf 'message: %s\n' "$message"
+  rm -f "$last_message_file" "$stdout_file" "$stderr_file"
+  if [[ "$verdict" != "passed" ]]; then
+    exit 1
+  fi
+}
+
+
+cmd_self_test() {
+  local contract_script="$SCRIPT_DIR/../tests/contract.sh"
+  local source_root_file="$SCRIPT_DIR/../source-root"
+  local atlas_forge_root="${ATLAS_FORGE_ROOT:-}"
+
+  if [[ ! -x "$contract_script" ]]; then
+    echo "missing executable contract test script: $contract_script" >&2
+    exit 1
+  fi
+  if [[ -z "$atlas_forge_root" && -f "$source_root_file" ]]; then
+    read -r atlas_forge_root < "$source_root_file" || atlas_forge_root=""
+    if [[ ! -d "$atlas_forge_root" ]]; then
+      atlas_forge_root=""
+    fi
+  fi
+  if [[ -n "$atlas_forge_root" ]]; then
+    (
+      cd "$atlas_forge_root"
+      ATLAS_FORGE_ROOT="$atlas_forge_root" CODEX_WORKFLOW_BIN="$SCRIPT_DIR/codex-workflow" "$contract_script"
+    )
+  else
+    CODEX_WORKFLOW_BIN="$SCRIPT_DIR/codex-workflow" "$contract_script"
+  fi
+}
+
+cmd_install_hooks() {
+  local pre_hook post_hook current_task_id
+  pre_hook="$(install_workflow_hook_script pre-tool-use)"
+  post_hook="$(install_workflow_hook_script post-tool-use)"
+  set_config_feature "$CODEX_CONFIG_FILE" hooks true
+  merge_workflow_hooks_json "$CODEX_HOOKS_FILE" "$pre_hook" "$post_hook"
+  current_task_id="$(read_current_task_id || true)"
+  if [[ -n "$current_task_id" ]]; then
+    sync_task_runtime "$current_task_id"
+    append_task_runtime_event "$current_task_id" "hooks" "installed workflow hooks"
+  fi
+  printf 'config: %s\n' "$CODEX_CONFIG_FILE"
+  printf 'hooks_json: %s\n' "$CODEX_HOOKS_FILE"
+  printf 'pre_hook: %s\n' "$pre_hook"
+  printf 'post_hook: %s\n' "$post_hook"
+}
+
+cmd_team_start() {
+  local task_id="$1"
+  local objective="$2"
+  shift 2
+  local mode="discuss"
+  local agents="3"
+  local claude_review="0"
+  local arg
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --mode)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-start <task-id> "<objective>" [--mode discuss|execute] [--agents N] [--claude-review]' >&2; exit 1; }
+        mode="$2"
+        shift 2
+        ;;
+      --mode=*)
+        mode="${1#--mode=}"
+        shift
+        ;;
+      --agents)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-start <task-id> "<objective>" [--mode discuss|execute] [--agents N] [--claude-review]' >&2; exit 1; }
+        agents="$2"
+        shift 2
+        ;;
+      --agents=*)
+        agents="${1#--agents=}"
+        shift
+        ;;
+      --claude-review)
+        claude_review="1"
+        shift
+        ;;
+      *)
+        echo "unknown team-start option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  validate_positive_integer "$agents" "agents"
+  case "$mode" in
+    discuss|execute) ;;
+    *)
+      echo "invalid team mode: $mode" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$claude_review" == "1" ]] && ! claude_provider_available; then
+    sync_task_runtime "$task_id"
+    upsert_task_fields "$(require_task "$task_id")" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=error" "active_team_decision=$(path_relative_to_codex_home "$(task_team_decision_file "$task_id")")"
+    write_task_state_json "$task_id"
+    set_task_state_fields "$task_id" "active_team.backend=legacy" "active_team.status=error" "active_team.error=claude provider unavailable"
+    echo "claude review requested but paseo claude provider is unavailable" >&2
+    exit 1
+  fi
+
+  local task_file title artifact_dir team_dir decision_file staffing_file round_file decision_rel staffing_rel round_rel
+  local context_text spec_text analysis_text tmpdir role prompt status_any_fail="0"
+  local roles_display team_interrupted="0" wait_status
+  local -a roles=()
+  local -a pids=()
+  declare -A lane_message_files lane_stdout_files lane_stderr_files lane_statuses
+
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  title="$(get_field "$task_file" title)"
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  team_dir="$(task_team_dir "$task_id")"
+  decision_file="$(task_team_decision_file "$task_id")"
+  staffing_file="$(task_team_staffing_file "$task_id")"
+  round_file="$team_dir/round-$(timestamp_token).md"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+  round_rel="$(path_relative_to_codex_home "$round_file")"
+  context_text="$(task_excerpt "$artifact_dir/context.md")"
+  spec_text="$(task_excerpt "$artifact_dir/spec.md")"
+  analysis_text="$(task_excerpt "$artifact_dir/analysis.md")"
+
+  ensure_team_lock_dir
+  local team_lock
+  team_lock="$(team_lock_file "$task_id")"
+  acquire_lock "$team_lock"
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=running" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
+    "active_team.mode=$mode" \
+    "active_team.status=running" \
+    "active_team.decision=$decision_rel" \
+    "active_team.objective=$objective" \
+    "active_team.agents=$agents" \
+    "active_team.claude_review=$( [[ "$claude_review" == "1" ]] && printf '__TRUE__' || printf '__FALSE__' )"
+  release_lock "$team_lock"
+
+  append_task_runtime_event "$task_id" "team-start" "$mode / $objective"
+  mapfile -t roles < <(team_role_names "$mode" "$agents")
+  tmpdir="$(mktemp -d)"
+  roles_display="$(IFS=,; printf '%s' "${roles[*]}")"
+  {
+    printf '# Team Round\n\n'
+    printf 'Pending lane completion.\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- mode: %s\n' "$mode"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- roles: %s\n' "$roles_display"
+    printf -- '- temp_dir: %s\n' "$tmpdir"
+  } > "$round_file"
+  set_task_state_fields "$task_id" \
+    "active_team.round_file=$round_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.temp_dir=$tmpdir" \
+    "active_team.roles=$roles_display"
+  append_task_runtime_event "$task_id" "team-lanes-started" "roles=$roles_display temp_dir=$tmpdir round=$round_rel"
+
+  team_start_interrupt() {
+    team_interrupted="1"
+    status_any_fail="1"
+    local pid
+    for pid in "${pids[@]}"; do
+      kill -INT "$pid" 2>/dev/null || true
+    done
+  }
+  trap team_start_interrupt INT TERM
+
+  for role in "${roles[@]}"; do
+    lane_message_files["$role"]="$tmpdir/$role.message"
+    lane_stdout_files["$role"]="$tmpdir/$role.stdout"
+    lane_stderr_files["$role"]="$tmpdir/$role.stderr"
+    prompt="$(cat <<EOF
+You are the $role lane in an Atlas workflow team round.
+
+Task: $task_id
+Title: $title
+Mode: $mode
+Objective: $objective
+
+Current task file:
+$(sed -n '1,80p' "$task_file")
+
+Context:
+$context_text
+
+Spec:
+$spec_text
+
+Analysis:
+$analysis_text
+
+Respond in markdown with exactly these sections:
+## Evidence
+## Inference
+## Unknown
+## Recommendation
+EOF
+)"
+    "$CODEX_BIN" exec --skip-git-repo-check -C "$PWD" --output-last-message "${lane_message_files[$role]}" "$prompt" >"${lane_stdout_files[$role]}" 2>"${lane_stderr_files[$role]}" &
+    pids+=("$!")
+  done
+
+  local idx=0
+  for role in "${roles[@]}"; do
+    set +e
+    wait "${pids[$idx]}"
+    wait_status="$?"
+    lane_statuses["$role"]="$wait_status"
+    set -e
+    if [[ "${lane_statuses[$role]}" -ne 0 ]]; then
+      status_any_fail="1"
+    fi
+    idx=$((idx + 1))
+  done
+  trap 'release_all_locks; exit 130' INT
+  trap 'release_all_locks; exit 143' TERM
+
+  {
+    printf '# Team Round\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- mode: %s\n' "$mode"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- roles: %s\n' "$roles_display"
+    printf -- '- temp_dir: %s\n' "$tmpdir"
+    printf -- '- interrupted: %s\n' "$team_interrupted"
+    printf -- '- created_at: %s\n\n' "$(timestamp_utc)"
+    for role in "${roles[@]}"; do
+      printf '## %s\n\n' "$role"
+      printf -- '- exit_code: %s\n\n' "${lane_statuses[$role]:-not-collected}"
+      printf '### Message\n\n```markdown\n'
+      trimmed_preview "${lane_message_files[$role]}"
+      printf '\n```\n\n'
+      printf '### Stdout\n\n```text\n'
+      trimmed_preview "${lane_stdout_files[$role]}"
+      printf '\n```\n\n'
+      printf '### Stderr\n\n```text\n'
+      trimmed_preview "${lane_stderr_files[$role]}"
+      printf '\n```\n\n'
+    done
+  } > "$round_file"
+
+  local claude_review_status="0"
+  local claude_stdout_file="$tmpdir/claude-review.stdout"
+  local claude_stderr_file="$tmpdir/claude-review.stderr"
+  if [[ "$claude_review" == "1" ]]; then
+    set +e
+    "$PASEO_BIN" run --provider claude --cwd "$PWD" "Review the following Atlas team round and highlight the strongest plan, major risks, and decision recommendation.\n\n$(cat "$round_file")" >"$claude_stdout_file" 2>"$claude_stderr_file"
+    claude_review_status="$?"
+    set -e
+    {
+      printf '# Claude Review\n\n'
+      printf -- '- task_id: %s\n' "$task_id"
+      printf -- '- created_at: %s\n' "$(timestamp_utc)"
+      printf -- '- exit_code: %s\n\n' "$claude_review_status"
+      printf '## Stdout\n\n```text\n'
+      trimmed_preview "$claude_stdout_file"
+      printf '\n```\n\n'
+      printf '## Stderr\n\n```text\n'
+      trimmed_preview "$claude_stderr_file"
+      printf '\n```\n'
+    } > "$(task_team_claude_review_file "$task_id")"
+    if [[ "$claude_review_status" -ne 0 ]]; then
+      status_any_fail="1"
+    fi
+  fi
+
+  {
+    printf '# Team Decision\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- title: %s\n' "$title"
+    printf -- '- mode: %s\n' "$mode"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- round_file: %s\n' "$round_rel"
+    if [[ "$team_interrupted" == "1" ]]; then
+      printf -- '- status: interrupted\n'
+    fi
+    if [[ "$claude_review" == "1" ]]; then
+      printf -- '- claude_review: %s\n' "$(path_relative_to_codex_home "$(task_team_claude_review_file "$task_id")")"
+    fi
+    printf '\n## Primary Decision\n\n'
+    if [[ "$team_interrupted" == "1" ]]; then
+      printf 'Team round was interrupted before every lane completed. Inspect the partial round file and rerun `codex-workflow team-start %s "<objective>"` if a complete decision is required.\n\n' "$task_id"
+    elif [[ "$status_any_fail" == "1" ]]; then
+      printf 'Team round failed. Inspect the round file before using this decision for promotion.\n\n'
+    elif [[ "$mode" == "discuss" ]]; then
+      printf 'Use `codex-workflow team-promote %s --to execute` when the discussion outcome is ready for implementation.\n\n' "$task_id"
+    else
+      printf 'Use `codex-workflow team-promote %s --to worktree` for higher-risk execution, or `--to finish` when the implementation is ready for final acceptance.\n\n' "$task_id"
+    fi
+    printf '## Lane Summaries\n\n'
+    for role in "${roles[@]}"; do
+      printf '### %s\n\n' "$role"
+      trimmed_preview "${lane_message_files[$role]}"
+      printf '\n\n'
+    done
+    if [[ "$claude_review" == "1" ]]; then
+      printf '## Claude Review Summary\n\n'
+      trimmed_preview "$claude_stdout_file"
+      printf '\n'
+    fi
+  } > "$decision_file"
+
+  {
+    printf '# Staffing\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- mode: %s\n' "$mode"
+    printf -- '- decision_file: %s\n\n' "$decision_rel"
+    printf '## Suggested Ownership\n\n'
+    for role in "${roles[@]}"; do
+      case "$role" in
+        architect) printf -- '- architect: refine implementation path and decision boundaries.\n' ;;
+        critic) printf -- '- critic: keep regression, risk, and boundary checks active through execution.\n' ;;
+        verifier) printf -- '- verifier: own repo evidence checks and final verification commands.\n' ;;
+        executor) printf -- '- executor: own primary implementation changes and command execution.\n' ;;
+        reviewer) printf -- '- reviewer: challenge regressions and confirm acceptance coverage.\n' ;;
+        *) printf -- '- %s: take a bounded slice defined by the decision file.\n' "$role" ;;
+      esac
+    done
+  } > "$staffing_file"
+
+  if [[ "$team_interrupted" == "1" ]]; then
+    upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=interrupted" "active_team_decision=$decision_rel"
+    write_task_state_json "$task_id"
+    set_task_state_fields "$task_id" \
+      "active_team.backend=legacy" \
+      "active_team.status=interrupted" \
+      "active_team.round_file=$round_rel" \
+      "active_team.staffing=$staffing_rel" \
+      "active_team.temp_dir=$tmpdir"
+    append_task_runtime_event "$task_id" "team-complete" "interrupted"
+    echo "team round interrupted: partial output in $round_file" >&2
+    printf 'task_id: %s\n' "$task_id"
+    printf 'mode: %s\n' "$mode"
+    printf 'status: interrupted\n'
+    printf 'decision: %s\n' "$decision_file"
+    printf 'staffing: %s\n' "$staffing_file"
+    printf 'round: %s\n' "$round_file"
+    printf 'temp_dir: %s\n' "$tmpdir"
+    exit 130
+  fi
+
+  if [[ "$status_any_fail" == "1" ]]; then
+    upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=failed" "active_team_decision=$decision_rel"
+    write_task_state_json "$task_id"
+    set_task_state_fields "$task_id" \
+      "active_team.backend=legacy" \
+      "active_team.status=failed" \
+      "active_team.round_file=$round_rel" \
+      "active_team.staffing=$staffing_rel" \
+      "active_team.temp_dir=$tmpdir"
+    append_task_runtime_event "$task_id" "team-complete" "failed"
+    echo "team round failed: inspect $round_file" >&2
+    exit 1
+  fi
+
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=$mode" "active_team_status=complete" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
+    "active_team.status=complete" \
+    "active_team.round_file=$round_rel" \
+    "active_team.staffing=$staffing_rel"
+  append_task_runtime_event "$task_id" "team-complete" "$mode"
+  printf 'task_id: %s\n' "$task_id"
+  printf 'mode: %s\n' "$mode"
+  printf 'decision: %s\n' "$decision_file"
+  printf 'staffing: %s\n' "$staffing_file"
+  printf 'round: %s\n' "$round_file"
+}
+
+cmd_team_loop() {
+  local task_id="$1"
+  local objective="$2"
+  shift 2
+  local agents="3"
+  local max_iterations="5"
+  local max_time="1h"
+  local archive="0"
+  local name=""
+  local verify_prompt_extra=""
+  local arg
+  local -a verify_checks=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agents)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check <command>]... [--verify "<prompt>"] [--archive] [--name <name>]' >&2; exit 1; }
+        agents="$2"
+        shift 2
+        ;;
+      --agents=*)
+        agents="${1#--agents=}"
+        shift
+        ;;
+      --max-iterations)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--max-iterations N]' >&2; exit 1; }
+        max_iterations="$2"
+        shift 2
+        ;;
+      --max-iterations=*)
+        max_iterations="${1#--max-iterations=}"
+        shift
+        ;;
+      --max-time)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--max-time <duration>]' >&2; exit 1; }
+        max_time="$2"
+        shift 2
+        ;;
+      --max-time=*)
+        max_time="${1#--max-time=}"
+        shift
+        ;;
+      --verify-check)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--verify-check <command>]...' >&2; exit 1; }
+        verify_checks+=("$2")
+        shift 2
+        ;;
+      --verify-check=*)
+        verify_checks+=("${1#--verify-check=}")
+        shift
+        ;;
+      --archive)
+        archive="1"
+        shift
+        ;;
+      --verify)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--verify "<prompt>"]' >&2; exit 1; }
+        verify_prompt_extra="$2"
+        shift 2
+        ;;
+      --verify=*)
+        verify_prompt_extra="${1#--verify=}"
+        shift
+        ;;
+      --name)
+        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--name <name>]' >&2; exit 1; }
+        name="$2"
+        shift 2
+        ;;
+      --name=*)
+        name="${1#--name=}"
+        shift
+        ;;
+      *)
+        echo "unknown team-loop option: $1" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  validate_positive_integer "$agents" "agents"
+  validate_positive_integer "$max_iterations" "max iterations"
+  validate_query "$objective"
+  validate_single_line_reason "max time" "$max_time"
+  if [[ -n "$name" ]]; then
+    validate_single_line_reason "loop name" "$name"
+  fi
+  for arg in "${verify_checks[@]}"; do
+    validate_single_line_reason "verify check" "$arg"
+  done
+
+  if [[ -n "$verify_prompt_extra" ]]; then
+    validate_single_line_reason "verify prompt" "$verify_prompt_extra"
+  fi
+
+  if ! command -v "$CODEX_BIN" >/dev/null 2>&1; then
+    echo "codex CLI is required for team-loop verifier but was not found: $CODEX_BIN" >&2
+    exit 1
+  fi
+  command -v python3 >/dev/null 2>&1 || { echo "python3 is required for bounded team-loop execution" >&2; exit 1; }
+
+  local task_file title artifact_dir team_dir decision_file staffing_file decision_rel staffing_rel
+  local max_time_seconds start_epoch deadline loop_token loop_file loop_rel loop_status iteration iterations_completed workflow_cmd
+  local workflow_cmd_q task_id_q objective_q agents_q workflow_root_q codex_home_q team_command
+  local iter_dir team_stdout team_stderr team_status checks_pass check_index check_stdout check_stderr check_status
+  local verifier_prompt verifier_message verifier_stdout verifier_stderr verifier_status verifier_done verifier_sentinel now
+
+  max_time_seconds="$(duration_to_seconds "$max_time")"
+
+  sync_task_runtime "$task_id"
+  task_file="$(require_task "$task_id")"
+  title="$(get_field "$task_file" title)"
+  artifact_dir="$(task_artifact_dir "$task_id")"
+  team_dir="$(task_team_dir "$task_id")"
+  decision_file="$(task_team_decision_file "$task_id")"
+  staffing_file="$(task_team_staffing_file "$task_id")"
+  decision_rel="$(path_relative_to_codex_home "$decision_file")"
+  staffing_rel="$(path_relative_to_codex_home "$staffing_file")"
+  name="${name:-atlas-team-loop-$task_id}"
+  loop_token="$(timestamp_token)"
+  loop_file="$team_dir/loop-$loop_token.md"
+  loop_rel="$(path_relative_to_codex_home "$loop_file")"
+  start_epoch="$(date +%s)"
+  deadline=$((start_epoch + max_time_seconds))
+  workflow_cmd="$SCRIPT_DIR/codex-workflow"
+  printf -v workflow_cmd_q '%q' "$workflow_cmd"
+  printf -v task_id_q '%q' "$task_id"
+  printf -v objective_q '%q' "$objective"
+  printf -v agents_q '%q' "$agents"
+  printf -v workflow_root_q '%q' "$WORKFLOW_ROOT"
+  printf -v codex_home_q '%q' "$CODEX_HOME_ROOT"
+  team_command="CODEX_WORKFLOW_ROOT=$workflow_root_q CODEX_HOME_ROOT=$codex_home_q $workflow_cmd_q team-start $task_id_q $objective_q --mode execute --agents $agents_q"
+
+  {
+    printf '# Team Loop\n\n'
+    printf -- '- task_id: %s\n' "$task_id"
+    printf -- '- title: %s\n' "$title"
+    printf -- '- objective: %s\n' "$objective"
+    printf -- '- name: %s\n' "$name"
+    printf -- '- agents: %s\n' "$agents"
+    printf -- '- max_iterations: %s\n' "$max_iterations"
+    printf -- '- max_time: %s\n' "$max_time"
+    printf -- '- archive_requested: %s\n' "$archive"
+    printf -- '- team_command: `%s`\n' "$team_command"
+    printf -- '- created_at: %s\n\n' "$(timestamp_utc)"
+  } > "$loop_file"
+
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_mode=execute" "active_team_status=loop-running" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
+    "active_team.mode=execute" \
+    "active_team.status=loop-running" \
+    "active_team.objective=$objective" \
+    "active_team.agents=$agents" \
+    "active_team.decision=$decision_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.loop.status=loop-running" \
+    "active_team.loop.name=$name" \
+    "active_team.loop.file=$loop_rel" \
+    "active_team.loop.iteration=0" \
+    "active_team.loop.max_iterations=$max_iterations" \
+    "active_team.loop.max_time=$max_time"
+  append_task_runtime_event "$task_id" "team-loop-start" "name=$name max_iterations=$max_iterations max_time=$max_time loop=$loop_rel"
+
+  iteration=1
+  while (( iteration <= max_iterations )); do
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      loop_status="loop-timeout"
+      {
+        printf '\n## Timeout\n\n'
+        printf -- '- iteration_before_start: %s\n' "$iteration"
+        printf -- '- max_time: %s\n' "$max_time"
+        printf -- '- created_at: %s\n' "$(timestamp_utc)"
+      } >> "$loop_file"
+      break
+    fi
+
+    iter_dir="$team_dir/loop-$loop_token-iteration-$iteration"
+    mkdir -p "$iter_dir"
+    team_stdout="$iter_dir/team-start.stdout"
+    team_stderr="$iter_dir/team-start.stderr"
+    checks_pass="1"
+
+    set_task_state_fields "$task_id" \
+      "active_team.status=loop-running" \
+      "active_team.loop.status=loop-running" \
+      "active_team.loop.iteration=$iteration" \
+      "active_team.loop.file=$loop_rel"
+    append_task_runtime_event "$task_id" "team-loop-iteration-start" "$iteration"
+
+    set +e
+    team_loop_run_with_deadline "$deadline" env \
+      CODEX_WORKFLOW_ROOT="$WORKFLOW_ROOT" \
+      CODEX_HOME_ROOT="$CODEX_HOME_ROOT" \
+      CODEX_BIN="$CODEX_BIN" \
+      PASEO_BIN="$PASEO_BIN" \
+      PASEO_CONFIG_FILE="$PASEO_CONFIG_FILE" \
+      CODEX_CONFIG_FILE="$CODEX_CONFIG_FILE" \
+      CODEX_HOOKS_FILE="$CODEX_HOOKS_FILE" \
+      "$workflow_cmd" team-start "$task_id" "$objective" --mode execute --agents "$agents" >"$team_stdout" 2>"$team_stderr"
+    team_status="$?"
+    set -e
+
+    {
+      printf '\n## Iteration %s\n\n' "$iteration"
+      printf -- '- team_start_exit_code: %s\n' "$team_status"
+      if [[ "$team_status" -eq 124 ]]; then
+        printf -- '- team_start_timed_out: true\n'
+      fi
+      printf -- '- output_dir: %s\n\n' "$iter_dir"
+      printf '### Team Start Stdout\n\n```text\n'
+      trimmed_preview "$team_stdout"
+      printf '\n```\n\n'
+      printf '### Team Start Stderr\n\n```text\n'
+      trimmed_preview "$team_stderr"
+      printf '\n```\n\n'
+    } >> "$loop_file"
+
+    if [[ "$team_status" -eq 124 ]]; then
+      loop_status="loop-timeout"
+      break
+    fi
+    if [[ "$team_status" -ne 0 ]]; then
+      loop_status="loop-failed"
+      break
+    fi
+
+    check_index=1
+    for arg in "${verify_checks[@]}"; do
+      check_stdout="$iter_dir/verify-check-$check_index.stdout"
+      check_stderr="$iter_dir/verify-check-$check_index.stderr"
+      set +e
+      team_loop_run_with_deadline "$deadline" bash -lc "$arg" >"$check_stdout" 2>"$check_stderr"
+      check_status="$?"
+      set -e
+      if [[ "$check_status" -ne 0 ]]; then
+        checks_pass="0"
+      fi
+      if [[ "$check_status" -eq 124 ]]; then
+        loop_status="loop-timeout"
+      fi
+      {
+        printf '### Verify Check %s\n\n' "$check_index"
+        printf -- '- command: `%s`\n' "$arg"
+        printf -- '- exit_code: %s\n' "$check_status"
+        if [[ "$check_status" -eq 124 ]]; then
+          printf -- '- timed_out: true\n'
+        fi
+        printf '\n#### Stdout\n\n```text\n'
+        trimmed_preview "$check_stdout"
+        printf '\n```\n\n'
+        printf '#### Stderr\n\n```text\n'
+        trimmed_preview "$check_stderr"
+        printf '\n```\n\n'
+      } >> "$loop_file"
+      if [[ "${loop_status:-}" == "loop-timeout" ]]; then
+        break
+      fi
+      check_index=$((check_index + 1))
+    done
+    if [[ "${loop_status:-}" == "loop-timeout" ]]; then
+      break
+    fi
+
+    verifier_message="$iter_dir/verifier.message"
+    verifier_stdout="$iter_dir/verifier.stdout"
+    verifier_stderr="$iter_dir/verifier.stderr"
+    verifier_prompt="$(cat <<EOF
+You are the verifier for an Atlas-managed team loop.
+
+First non-empty line must be exactly one of:
+done=true
+done=false
+
+Return done=true only when all required evidence proves the objective is satisfied. Return done=false when the latest team round only gives advice, when required implementation is missing, when verification was not run, when any verify-check failed, or when blockers remain unresolved.
+
+Task: $task_id
+Objective: $objective
+Additional verification instruction: ${verify_prompt_extra:-Use the objective, team artifacts, and verify-check results as the acceptance contract.}
+Iteration: $iteration
+Verify checks passed: $checks_pass
+Artifact directory: $artifact_dir
+Team decision: $decision_file
+Team staffing: $staffing_file
+Team loop ledger: $loop_file
+
+Check the latest artifacts and repository state. Cite the specific command output, file path, or artifact path that proves the result. Do not suggest fixes; only judge whether the loop should stop.
+EOF
+)"
+    set +e
+    team_loop_run_with_deadline "$deadline" "$CODEX_BIN" exec --skip-git-repo-check -C "$PWD" --output-last-message "$verifier_message" "$verifier_prompt" >"$verifier_stdout" 2>"$verifier_stderr"
+    verifier_status="$?"
+    set -e
+    verifier_sentinel="$(team_loop_verifier_sentinel "$verifier_message")"
+    verifier_done="0"
+    if [[ "$checks_pass" == "1" ]] && [[ "$verifier_status" -eq 0 ]] && [[ "$verifier_sentinel" == "true" ]]; then
+      verifier_done="1"
+    fi
+    {
+      printf '### Verifier\n\n'
+      printf -- '- exit_code: %s\n' "$verifier_status"
+      if [[ "$verifier_status" -eq 124 ]]; then
+        printf -- '- timed_out: true\n'
+      fi
+      printf -- '- sentinel: %s\n' "$verifier_sentinel"
+      printf -- '- done: %s\n\n' "$verifier_done"
+      printf '#### Message\n\n```markdown\n'
+      trimmed_preview "$verifier_message"
+      printf '\n```\n\n'
+      printf '#### Stdout\n\n```text\n'
+      trimmed_preview "$verifier_stdout"
+      printf '\n```\n\n'
+      printf '#### Stderr\n\n```text\n'
+      trimmed_preview "$verifier_stderr"
+      printf '\n```\n\n'
+    } >> "$loop_file"
+
+    if [[ "$verifier_status" -eq 124 ]]; then
+      loop_status="loop-timeout"
+      break
+    fi
+    if [[ "$verifier_status" -ne 0 ]]; then
+      loop_status="loop-failed"
+      break
+    fi
+    if [[ "$verifier_done" == "1" ]]; then
+      loop_status="loop-done"
+      break
+    fi
+
+    loop_status="loop-incomplete"
+    iteration=$((iteration + 1))
+  done
+
+  if [[ -z "${loop_status:-}" ]]; then
+    loop_status="loop-incomplete"
+  fi
+  if (( iteration > max_iterations )); then
+    iterations_completed="$max_iterations"
+  else
+    iterations_completed="$iteration"
+  fi
+  {
+    printf '\n## Final Status\n\n'
+    printf -- '- status: %s\n' "$loop_status"
+    printf -- '- iterations_completed: %s\n' "$iterations_completed"
+    printf -- '- completed_at: %s\n' "$(timestamp_utc)"
+  } >> "$loop_file"
+
+  upsert_task_fields "$task_file" "active_team_backend=legacy" "active_team_status=$loop_status" "active_team_decision=$decision_rel"
+  write_task_state_json "$task_id"
+  set_task_state_fields "$task_id" \
+    "active_team.backend=legacy" \
+    "active_team.status=$loop_status" \
+    "active_team.decision=$decision_rel" \
+    "active_team.staffing=$staffing_rel" \
+    "active_team.loop.status=$loop_status" \
+    "active_team.loop.file=$loop_rel" \
+    "active_team.loop.iteration=$iterations_completed" \
+    "active_team.loop.max_iterations=$max_iterations" \
+    "active_team.loop.max_time=$max_time"
+  append_task_runtime_event "$task_id" "team-loop-complete" "$loop_status"
+
+  printf 'task_id: %s\n' "$task_id"
+  printf 'status: %s\n' "$loop_status"
+  printf 'loop: %s\n' "$loop_file"
+  printf 'iterations: %s\n' "$iterations_completed"
+  if [[ "$loop_status" == "loop-done" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+main() {
+  if [[ "$ATLAS_DOCTOR_STRICT_REQUESTED" != true ]]; then
+    ensure_tasks_dir
+  fi
+
+  case "${1:-}" in
+    init-task)
+      shift
+      cmd_init_task "$@"
+      ;;
+    list)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" list "$@"
+      ;;
+    start)
+      shift
+      cmd_task_mutation start "$@"
+      ;;
+    block)
+      shift
+      cmd_task_mutation block "$@"
+      ;;
+    resume)
+      shift
+      cmd_task_mutation resume "$@"
+      ;;
+    done)
+      shift
+      cmd_task_mutation done "$@"
+      ;;
+    archive)
+      shift
+      cmd_task_mutation archive "$@"
+      ;;
+    stale)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" stale "$@"
+      ;;
+    show)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" show "$@"
+      ;;
+    ready)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" ready "$@"
+      ;;
+    scaffold-intake)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" scaffold-intake "$@"
+      ;;
+    scaffold-brainstorm)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" scaffold-brainstorm "$@"
+      ;;
+    scaffold-clarify)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" scaffold-clarify "$@"
+      ;;
+    scaffold-team)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" scaffold-team "$@"
+      ;;
+    scaffold-phase)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" scaffold-phase "$@"
+      ;;
+    handoff-envelope)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow handoff-envelope <task-id> --prd <file> --repo <path> --base <branch> [--title "<title>"] [--packet <file>] --acceptance "<id>|<requirement>|<required|advisory>" --validation "<id>|<surface>|<required|advisory>|<evidence>"' >&2; exit 1; }
+      shift
+      cmd_handoff_envelope "$@"
+      ;;
+    result-ingest)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow result-ingest <task-id> --issue <url-or-id> --outcome draft-pr|blocker --commit <sha-or-unknown> --worktree <path-or-none> --evidence <path-or-url> [--draft-pr <url>] [--blocker <path-or-url>] [--summary "<summary>"] [--lesson "<candidate>"]' >&2; exit 1; }
+      shift
+      cmd_result_ingest "$@"
+      ;;
+    route-decision)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" route-decision "$@"
+      ;;
+    curated-packet)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"] | codex-workflow curated-packet --lint <file>' >&2; exit 1; }
+      shift
+      cmd_curated_packet "$@"
+      ;;
+    checkpoint)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" checkpoint "$@"
+      ;;
+    source-snapshot)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" source-snapshot "$@"
+      ;;
+    prompt-bundle)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" prompt-bundle "$@"
+      ;;
+    trace-promote)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/feedback/cli.js" trace-promote "$@"
+      ;;
+    multica-feedback)
+      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow multica-feedback <task-id> --issue <url-or-id> --commit <sha-or-unknown> --round <n> --status clean|repair-needed|blocked [--review <path-or-url>]... [--e2e <path-or-url>]... [--scorecard <path-or-url>]... [--evidence-manifest <path-or-url>] [--blocking-finding "<id|summary>"]...' >&2; exit 1; }
+      shift
+      cmd_multica_feedback "$@"
+      ;;
+    feedback-cycle)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/feedback/cli.js" feedback-cycle "$@"
+      ;;
+    lesson-candidate)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/feedback/cli.js" lesson-candidate "$@"
+      ;;
+    learning-decision)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/feedback/cli.js" learning-decision "$@"
+      ;;
+    gate-metric)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" gate-metric "$@"
+      ;;
+    gate-report)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" gate-report "$@"
+      ;;
+    outcome-mark)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/outcome/cli.js" outcome-mark "$@"
+      ;;
+    outcome-report)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/outcome/cli.js" outcome-report "$@"
+      ;;
+    learn)
+      [[ $# -eq 4 ]] || { echo 'usage: codex-workflow learn <task-id> "<learning title>" "<lesson>"' >&2; exit 1; }
+      cmd_learn "$2" "$3" "$4"
+      ;;
+    dream)
+      [[ $# -eq 1 ]] || { echo 'usage: codex-workflow dream' >&2; exit 1; }
+      cmd_dream
+      ;;
+    recall)
+      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow recall "<query>"' >&2; exit 1; }
+      cmd_recall "$2"
+      ;;
+    doctor)
+      shift
+      cmd_doctor "$@"
+      ;;
+    smoke)
+      [[ $# -eq 1 ]] || { echo 'usage: codex-workflow smoke' >&2; exit 1; }
+      cmd_smoke
+      ;;
+    verify)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" verify "$@"
+      ;;
+    self-test)
+      [[ $# -eq 1 ]] || { echo 'usage: codex-workflow self-test' >&2; exit 1; }
+      cmd_self_test
+      ;;
+    install-hooks)
+      [[ $# -eq 1 ]] || { echo 'usage: codex-workflow install-hooks' >&2; exit 1; }
+      cmd_install_hooks
+      ;;
+    team-start)
+      [[ $# -ge 3 ]] || { echo 'usage: codex-workflow team-start <task-id> "<objective>" [--mode discuss|execute] [--agents N] [--claude-review]' >&2; exit 1; }
+      shift
+      cmd_team_start "$@"
+      ;;
+    team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote)
+      command="$1"
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/team/cli.js" "$command" "$@"
+      ;;
+    team-loop)
+      [[ $# -ge 3 ]] || { echo 'usage: codex-workflow team-loop <task-id> "<objective>" [--agents N] [--max-iterations N] [--max-time <duration>] [--verify-check <command>]... [--verify "<prompt>"] [--archive] [--name <name>]' >&2; exit 1; }
+      shift
+      cmd_team_loop "$@"
+      ;;
+    *)
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
