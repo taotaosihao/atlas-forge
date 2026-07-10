@@ -1,0 +1,990 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { TextDecoder } = require("util");
+
+const ENVELOPE_FIELDS = new Set([
+  "contract_semantics_version",
+  "work_type",
+  "first_code_guard",
+  "first_code_not_applicable_reason",
+  "product_ui_gate",
+  "product_ui_not_applicable_reason",
+]);
+
+const FIRST_CODE_FIELDS = [
+  "first_code_slice",
+  "first_code_slice_kind",
+  "first_code_owner",
+  "first_code_verification",
+  "allowed_contract_gate_only_until",
+  "stop_if_no_code_by_phase",
+  "gate_parallelization_or_deferral_plan",
+];
+
+const PRODUCT_UI_FIELDS = [
+  "first_operable_user_flow",
+  "browser_entrypoint",
+  "served_ui_validation_action",
+  "ui_data_mode",
+  "required_safety_gates",
+  "allowed_headless_only_until",
+  "stop_if_no_ui_by_phase",
+];
+
+const DETAIL_FIELDS = new Set([...FIRST_CODE_FIELDS, ...PRODUCT_UI_FIELDS]);
+const RECOGNIZED_FIELDS = new Set([...ENVELOPE_FIELDS, ...DETAIL_FIELDS]);
+const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
+const GATE_VALUES = new Set(["required", "not_applicable"]);
+const FIRST_CODE_KINDS = new Set([
+  "product",
+  "runtime",
+  "api",
+  "cli",
+  "workflow",
+  "scanner_behavior",
+]);
+
+const PLACEHOLDER_TOKENS = new Set([
+  "tbd",
+  "todo",
+  "fixme",
+  "placeholder",
+  "unknown",
+  "unset",
+  "none",
+  "null",
+  "n/a",
+  "na",
+  "-",
+  "|",
+  ">",
+  "[]",
+  "[]()",
+  "()",
+  "{}",
+  "待定",
+  "待确认",
+  "待补充",
+  "未定",
+  "暂无",
+  "占位",
+]);
+const NOT_APPLICABLE_TOKENS = new Set(["not_applicable", "not applicable", "not-applicable"]);
+const FIRST_CODE_HEADINGS = new Set([
+  "first code slice guard",
+  "首个代码切片门禁",
+  "第一代码切片门禁",
+]);
+const PRODUCT_UI_HEADINGS = new Set([
+  "product/ui acceptance gate",
+  "产品/ui 验收门禁",
+  "产品/ui 接受门禁",
+]);
+
+class CliError extends Error {}
+class InputError extends Error {}
+
+function usage() {
+  console.log(`usage: codex-implementation-contract-lint --file <path> [--strict]
+
+Validates versioned first-code and Product/UI semantics in an implementation
+contract. Unversioned historical contracts pass with a warning unless
+--strict is supplied.
+
+Options:
+  --file <path>  Markdown implementation contract to validate.
+  --strict       Require contract_semantics_version.
+  --help         Show this help.
+
+Exit codes:
+  0  Contract is valid, including a non-strict legacy warning.
+  1  Contract content or semantics are invalid.
+  2  CLI usage, input, encoding, or internal tool failure.`);
+}
+
+function parseArgs(argv) {
+  const options = { file: null, strict: false, help: false };
+  let strictSeen = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else if (arg === "--strict") {
+      if (strictSeen) throw new CliError("duplicate --strict option");
+      strictSeen = true;
+      options.strict = true;
+    } else if (arg === "--file") {
+      if (options.file !== null) throw new CliError("duplicate --file option");
+      if (index + 1 >= argv.length || argv[index + 1].startsWith("-")) {
+        throw new CliError("--file requires a path");
+      }
+      options.file = argv[++index];
+    } else if (arg.startsWith("--file=")) {
+      if (options.file !== null) throw new CliError("duplicate --file option");
+      options.file = arg.slice("--file=".length);
+      if (!options.file) throw new CliError("--file requires a path");
+    } else if (arg.startsWith("--strict=")) {
+      throw new CliError("--strict does not accept a value");
+    } else {
+      throw new CliError(`unknown option or positional argument: ${arg}`);
+    }
+  }
+
+  if (!options.help && !options.file) throw new CliError("--file is required");
+  return options;
+}
+
+function readUtf8File(file) {
+  const absolute = path.resolve(file);
+  let stat;
+  try {
+    stat = fs.statSync(absolute);
+  } catch (error) {
+    if (error.code === "ENOENT") throw new InputError(`file does not exist: ${absolute}`);
+    throw new InputError(`cannot inspect file: ${absolute}: ${error.message}`);
+  }
+  if (!stat.isFile()) throw new InputError(`input is not a regular file: ${absolute}`);
+
+  let content;
+  try {
+    const buffer = fs.readFileSync(absolute);
+    content = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch (error) {
+    throw new InputError(`input is not readable UTF-8: ${absolute}: ${error.message}`);
+  }
+  if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
+  return { absolute, content };
+}
+
+function makeDiagnostic(severity, code, field, line, message) {
+  return { severity, code, field, line, message };
+}
+
+function fenceOpening(line) {
+  const match = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) return null;
+  return { marker: match[1][0], length: match[1].length };
+}
+
+function fenceCloses(line, fence) {
+  const match = /^[ \t]{0,3}(`+|~+)[ \t]*$/.exec(line);
+  return Boolean(match && match[1][0] === fence.marker && match[1].length >= fence.length);
+}
+
+function stripHtmlComments(line, inComment) {
+  let visible = "";
+  let cursor = 0;
+  let comment = inComment;
+  while (cursor < line.length) {
+    if (comment) {
+      const end = line.indexOf("-->", cursor);
+      if (end === -1) return { visible, inComment: true };
+      comment = false;
+      cursor = end + 3;
+      continue;
+    }
+    const start = line.indexOf("<!--", cursor);
+    if (start === -1) {
+      visible += line.slice(cursor);
+      break;
+    }
+    visible += line.slice(cursor, start);
+    comment = true;
+    cursor = start + 4;
+  }
+  return { visible, inComment: comment };
+}
+
+function parseFields(content) {
+  const fields = new Map();
+  const diagnostics = [];
+  const lines = content.split(/\r?\n/);
+  let fence = null;
+  let sectionSeen = false;
+  let htmlComment = false;
+  let machineSection = null;
+  let previousVisibleLine = "";
+  let h1Seen = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const lineNumber = index + 1;
+    if (fence) {
+      if (fenceCloses(rawLine, fence)) fence = null;
+      previousVisibleLine = "";
+      continue;
+    }
+    const stripped = stripHtmlComments(rawLine, htmlComment);
+    const line = stripped.visible;
+    htmlComment = stripped.inComment;
+    const opening = fenceOpening(line);
+    if (opening) {
+      fence = opening;
+      previousVisibleLine = "";
+      continue;
+    }
+    const setextH2 = /^ {0,3}-{2,}[ \t]*$/.test(line) && previousVisibleLine.trim() !== "";
+    if (setextH2) {
+      sectionSeen = true;
+      const heading = previousVisibleLine.trim().replace(/\s+/g, " ").toLowerCase();
+      machineSection = FIRST_CODE_HEADINGS.has(heading)
+        ? "first_code"
+        : PRODUCT_UI_HEADINGS.has(heading)
+          ? "product_ui"
+          : null;
+    }
+    const atxHeading = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)[ \t]*#*[ \t]*)?$/.exec(line);
+    if (atxHeading) {
+      const level = atxHeading[1].length;
+      if (level >= 2) sectionSeen = true;
+      if (level === 1) {
+        if (h1Seen) sectionSeen = true;
+        h1Seen = true;
+      }
+      const heading = (atxHeading[2] || "").trim().replace(/\s+/g, " ").toLowerCase();
+      machineSection = level === 2 && FIRST_CODE_HEADINGS.has(heading)
+        ? "first_code"
+        : level === 2 && PRODUCT_UI_HEADINGS.has(heading)
+          ? "product_ui"
+          : null;
+    }
+    previousVisibleLine = line;
+
+    let match = /^([a-z][a-z0-9_]*):[ \t]*(.*)$/.exec(line);
+    let style = "top";
+    if (!match) {
+      match = /^ {0,3}-[ \t]+([a-z][a-z0-9_]*):[ \t]*(.*)$/.exec(line);
+      style = "bullet";
+    }
+    if (!match || !RECOGNIZED_FIELDS.has(match[1])) continue;
+
+    const key = match[1];
+    const value = match[2].trim();
+    if (ENVELOPE_FIELDS.has(key) && (style !== "top" || sectionSeen)) {
+      diagnostics.push(makeDiagnostic(
+        "ERROR",
+        "FIELD_LOCATION_INVALID",
+        key,
+        lineNumber,
+        "envelope fields must be top-level before any H2-H6 section",
+      ));
+    } else if (DETAIL_FIELDS.has(key) && style === "top" && sectionSeen) {
+      diagnostics.push(makeDiagnostic(
+        "ERROR",
+        "FIELD_LOCATION_INVALID",
+        key,
+        lineNumber,
+        "top-level detail fields must appear before any H2-H6 section",
+      ));
+    } else if (DETAIL_FIELDS.has(key) && style === "bullet") {
+      const expectedSection = FIRST_CODE_FIELDS.includes(key) ? "first_code" : "product_ui";
+      if (machineSection !== expectedSection) {
+        diagnostics.push(makeDiagnostic(
+          "ERROR",
+          "FIELD_LOCATION_INVALID",
+          key,
+          lineNumber,
+          `bullet detail field must stay in its ${expectedSection} section`,
+        ));
+      }
+    }
+
+    if (fields.has(key)) {
+      diagnostics.push(makeDiagnostic(
+        "ERROR",
+        "FIELD_DUPLICATE",
+        key,
+        lineNumber,
+        `field was already declared on line ${fields.get(key).line}`,
+      ));
+      continue;
+    }
+    fields.set(key, { key, value, line: lineNumber, style });
+  }
+
+  return { fields, diagnostics };
+}
+
+function isPlaceholder(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  const unwrapped = unwrapScalar(value);
+  if (!unwrapped) return true;
+  const lower = unwrapped.toLowerCase();
+  if (PLACEHOLDER_TOKENS.has(lower)) return true;
+  if (/^\[?(?:todo|tbd|fixme|placeholder)\]?(?:\b|[:：\s])/i.test(unwrapped)) return true;
+  if (/^(?:待定|待确认|待补充|未定|暂无|占位)(?:\b|[:：，。,.\s]|$)/.test(unwrapped)) return true;
+  if (/\{\{[^{}]*\}\}/.test(trimmed)) return true;
+  if (/^<[^<>]+>$/.test(trimmed)) return true;
+  return false;
+}
+
+function unwrapScalar(value) {
+  const trimmed = value.trim();
+  return /^([`"'])(.*)\1$/.test(trimmed) ? trimmed.slice(1, -1).trim() : trimmed;
+}
+
+function isNotApplicableToken(value) {
+  return NOT_APPLICABLE_TOKENS.has(unwrapScalar(value).toLowerCase());
+}
+
+function isInactiveValue(value) {
+  const normalized = unwrapScalar(value).toLowerCase();
+  return normalized === "" || normalized === "not_applicable";
+}
+
+function cancelsSafetyGates(value) {
+  const normalized = unwrapScalar(value).trim();
+  const gateNoun = "(?:[a-z-]+\\s+){0,3}(?:gates?|controls?|checks?)";
+  if (new RegExp(`^no\\s+${gateNoun}\\s+(?:(?:are|is)\\s+)?(?:bypassed|omitted|skipped|weakened)\\b`, "i").test(normalized)) {
+    return false;
+  }
+  const cancellationPatterns = [
+    /^none\b/i,
+    /^not\s+(?:needed|required)\b/i,
+    new RegExp(`^(?:there\\s+(?:are|is)\\s+)?no\\s+${gateNoun}(?:\\s+(?:(?:are|is)\\s+)?(?:applicable|apply|exist|needed|required))?(?:\\b|[.:])`, "i"),
+    new RegExp(`^(?:we\\s+)?require\\s+no\\s+${gateNoun}\\b`, "i"),
+    new RegExp(`^we\\s+do\\s+not\\s+require\\s+any\\s+${gateNoun}\\b`, "i"),
+    new RegExp(`^(?:all\\s+)?${gateNoun}\\s+(?:are|is)\\s+(?:not\\s+(?:needed|required)|optional|unnecessary)\\b`, "i"),
+    new RegExp(`^(?:all\\s+)?${gateNoun}\\s+(?:can|may|might)\\s+be\\s+(?:bypassed|omitted|skipped|weakened)\\b`, "i"),
+    new RegExp(`^${gateNoun}\\s*:\\s*(?:none\\b|no\\b|not\\s+(?:needed|required)\\b|optional\\b)`, "i"),
+    /^(?:无需|不需要|没有).{0,20}(?:安全|硬性|发布|浏览器|凭据|数据)?(?:门禁|控制|检查)/,
+    /^(?:安全|硬性|发布|浏览器|凭据|数据)?(?:门禁|控制|检查).{0,12}(?:无需|不需要|没有|可选)/,
+  ];
+  return cancellationPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function hasEnglishImplementationClaim(normalized) {
+  const clauses = normalized.split(/\s*(?:[.,;]|\band\b|\bbut\b|\bthen\b)\s*/i).filter(Boolean);
+  const verbPattern = /\b(?:add|build|change|create|enforce|fix|harden|implement|modify|refactor|repair|update|wire)\b/gi;
+  const implementationTarget = /\b(?:behavior|code|command|endpoint|feature|logic)\b|\bscanner\b(?!\s+(?:docs?|documentation|fixtures?|tests?))|\b(?:api|cli|linter|parser|product|runtime|scanner|service|validator|workflow)\s+(?:behavior|code|command|endpoint|feature|logic|runtime)\b/i;
+  for (const clause of clauses) {
+    for (const verb of clause.matchAll(verbPattern)) {
+      const before = clause.slice(Math.max(0, verb.index - 24), verb.index);
+      if (/\b(?:do\s+not|never|without)\s*$/i.test(before)) continue;
+      const after = clause.slice(verb.index + verb[0].length);
+      const implementation = implementationTarget.exec(after);
+      if (!implementation) continue;
+      const nonImplementation = findEnglishNonImplementationTarget(after);
+      if (!nonImplementation) return true;
+      if (implementation.index < nonImplementation.index) {
+        const between = after.slice(
+          implementation.index + implementation[0].length,
+          nonImplementation.index,
+        );
+        if (/\b(?:alongside|plus|under|using|via|with)\b|\bbacked\s+by\b/i.test(between)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function findEnglishNonImplementationTarget(value) {
+  return /\b(?:docs?|documentation|fixtures?|evidence|analysis|tests?)\b|\bcontracts?\b(?![- ]owned\b)(?!\s+(?:behavior|cli|code|command|linter|logic|parser|runtime|tool|validator)\b)/i.exec(value);
+}
+
+function hasChineseImplementationClaim(normalized) {
+  const clauses = normalized.split(/(?:[，；。]|并且|然后)/).filter(Boolean);
+  const verbPattern = /(?:新增|添加|创建|开发|实现|修复|强化|强制|改变|修改|更新|重构|接入)/g;
+  const nonImplementationTarget = /(?:文档|夹具|证据|分析|合同|测试)/;
+  const implementationTarget = /(?:行为|代码|命令|功能|逻辑|端点|(?:产品|运行时|接口|命令行|工作流|解析器|扫描器|服务)(?:行为|代码|命令|功能|逻辑|端点|运行时))/;
+  for (const clause of clauses) {
+    for (const verb of clause.matchAll(verbPattern)) {
+      const before = clause.slice(Math.max(0, verb.index - 8), verb.index);
+      if (/(?:不|不得|无需)$/.test(before)) continue;
+      const after = clause.slice(verb.index + verb[0].length);
+      const implementation = implementationTarget.exec(after);
+      if (!implementation) continue;
+      const nonImplementation = nonImplementationTarget.exec(after);
+      if (!nonImplementation) return true;
+      if (implementation.index < nonImplementation.index) {
+        const between = after.slice(
+          implementation.index + implementation[0].length,
+          nonImplementation.index,
+        );
+        if (/(?:并(?:且)?(?:用|添加|新增|创建|编写)|以及|同时)/.test(between)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function sliceIsNonImplementationOnly(value) {
+  const normalized = unwrapScalar(value).toLowerCase().replace(/[.!?。！？]+$/, "").trim();
+  const hasEnglishNonImplementationTarget = Boolean(findEnglishNonImplementationTarget(normalized));
+  if (hasEnglishNonImplementationTarget && !hasEnglishImplementationClaim(normalized)) return true;
+  if (/^(?:keep|leave|preserve)\b.{0,80}\bunchanged\s+(?:behavior|implementation|runtime|scanner|code)\b/.test(normalized)) return true;
+  const hasChineseNonImplementationTarget = /(?:文档|夹具|证据|分析|合同|测试)/.test(normalized);
+  if (hasChineseNonImplementationTarget && !hasChineseImplementationClaim(normalized)) return true;
+  return /^(?:不|没有|无需).{0,24}(?:行为|实现|运行时|扫描器|代码)(?:改变|修改|变更)/.test(normalized);
+}
+
+function directNegationBefore(value, index) {
+  const prefix = value.slice(Math.max(0, index - 120), index);
+  const boundary = Math.max(
+    prefix.lastIndexOf(","),
+    prefix.lastIndexOf("，"),
+    prefix.lastIndexOf(";"),
+    prefix.lastIndexOf("；"),
+    prefix.lastIndexOf("."),
+    prefix.lastIndexOf("。"),
+    prefix.lastIndexOf("\n"),
+  );
+  const clausePrefix = prefix.slice(boundary + 1);
+  const english = /(?:do\s+not|does\s+not|must\s+not|never|without|no)\s+(?:(?:ever\s+)?(?:assign|call|set|use|invoke|open|navigate(?:\s+to)?|visit|fulfill|serve|load|render)\s+)*(?:(?:the|an?)\s+)?$/i;
+  const coordinatedEnglish = /(?:do\s+not|does\s+not|must\s+not|never|without|no)\s+(?:(?:ever\s+)?(?:assign|call|set|use|invoke|open|navigate(?:\s+to)?|visit|fulfill|serve|load|render)\s+)+(?:(?:the|an?)\s+)?[^,;]{1,100}\b(?:and|or)\s+(?:(?:the|an?)\s+)?$/i;
+  const coordinatedLabelEnglish = /(?:do\s+not|does\s+not|must\s+not|never|without|no)\s+(?:(?:the|an?)\s+)?[^,;]{1,100}\b(?:and|or)\s+(?:(?:the|an?)\s+)?$/i;
+  const chinese = /(?:不得|不要|禁止|从不)\s*(?:(?:赋值|设置|调用|使用|打开|访问|导航|填充|提供|加载|渲染)\s*)*$/;
+  const coordinatedChinese = /(?:不得|不要|禁止|从不)\s*(?:(?:赋值|设置|调用|使用|打开|访问|导航|填充|提供|加载|渲染)\s*)+[^，；]{1,100}(?:和|或|以及)\s*$/;
+  return english.test(clausePrefix)
+    || coordinatedEnglish.test(clausePrefix)
+    || coordinatedLabelEnglish.test(clausePrefix)
+    || chinese.test(clausePrefix)
+    || coordinatedChinese.test(clausePrefix);
+}
+
+function positiveMatches(value, pattern) {
+  return [...value.matchAll(pattern)].filter((match) => !directNegationBefore(value, match.index));
+}
+
+function semanticPositiveMatches(value, pattern) {
+  return positiveMatches(value, pattern).filter((match) => {
+    const suffix = value.slice(match.index + match[0].length, match.index + match[0].length + 80);
+    return !/^\s+(?:is|are|was|were)\s+(?:not|never)\s+(?:involved|required|targeted|used)\b/i.test(suffix);
+  });
+}
+
+function firstCallArgument(value, start) {
+  let argument = "";
+  let quote = null;
+  let escaped = false;
+  let blockComment = false;
+  let lineComment = false;
+  let nested = 0;
+
+  for (let index = start; index < value.length; index += 1) {
+    const char = value[index];
+    const next = value[index + 1];
+    if (lineComment) {
+      if (char === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (char === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      argument += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (["'", "\"", "`"].includes(char)) {
+      quote = char;
+      argument += char;
+      continue;
+    }
+    if (["(", "[", "{"].includes(char)) {
+      nested += 1;
+      argument += char;
+      continue;
+    }
+    if ([")", "]", "}"].includes(char)) {
+      if (char === ")" && nested === 0) break;
+      nested = Math.max(0, nested - 1);
+      argument += char;
+      continue;
+    }
+    if (char === "," && nested === 0) break;
+    argument += char;
+  }
+  return argument.trim();
+}
+
+function actionHasNavigation(value, expectedEntrypoint) {
+  let normalizedEntrypoint = expectedEntrypoint;
+  try {
+    normalizedEntrypoint = new URL(expectedEntrypoint).href;
+  } catch {
+    // Entrypoint validity is reported separately by the semantic validator.
+  }
+  for (const clause of value.split(/[;；\n]+/)) {
+    const gotoCalls = positiveMatches(clause, /page\s*\.\s*goto\s*\(/gi);
+    for (const match of gotoCalls) {
+      const argument = firstCallArgument(clause, match.index + match[0].length);
+      if (/^(?:browser_)?entrypoint$/i.test(argument)) return true;
+      const literal = /^(['"`])(https?:\/\/[^'"`]+)\1$/i.exec(argument);
+      if (literal) {
+        try {
+          if (new URL(literal[2]).href === normalizedEntrypoint) return true;
+        } catch {
+          // A malformed literal is not a valid navigation target.
+        }
+      }
+    }
+
+    const naturalContinuation = "(?=$|\\s+(?:after|and|before|for|in|then|to|using|while|with)\\b|\\s*(?:并且|然后|并|且)|[.,;:!?](?:\\s|$)|[，。；：！？])";
+    const targetCapture = `(?:(\\b(?:browser_)?entrypoint\\b)(?![A-Za-z0-9_-])|(https?:\\/\\/[^\\s),;]+))${naturalContinuation}`;
+    const patterns = [
+      new RegExp(`\\bplaywright\\s+(?:(?:will|must|should)\\s+)?(?:opens?|navigates?(?:\\s+to)?|visits?|goto)\\s+${targetCapture}`, "gi"),
+      new RegExp(`\\b(?:use|using)\\s+playwright\\s+to\\s+(?:open|navigate(?:\\s+to)?|visit|goto)\\s+${targetCapture}`, "gi"),
+      new RegExp(`\\b(?:the\\s+)?browser\\s+(?:(?:will|must|should)\\s+)?(?:opens?|navigates?(?:\\s+to)?|visits?)\\s+${targetCapture}`, "gi"),
+      new RegExp(`\\b(?:open|navigate(?:\\s+to)?|visit)\\s+${targetCapture}.{0,40}\\b(?:in|with|using)\\s+(?:the\\s+)?browser\\b`, "gi"),
+      new RegExp(`浏览器.{0,40}(?:打开|访问).{0,80}${targetCapture}`, "gi"),
+      new RegExp(`(?:打开|访问).{0,80}${targetCapture}.{0,40}浏览器`, "gi"),
+    ];
+    for (const pattern of patterns) {
+      for (const match of positiveMatches(clause, pattern)) {
+        if (match[1]) return true;
+        const candidate = (match[2] || "").replace(/[.!?]+$/, "");
+        try {
+          if (new URL(candidate).href === normalizedEntrypoint) return true;
+        } catch {
+          // A malformed natural-language URL cannot prove navigation.
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function fulfillClause(value, match) {
+  const before = Math.max(
+    value.lastIndexOf(";", match.index),
+    value.lastIndexOf("；", match.index),
+  );
+  const start = before + 1;
+  const afterCandidates = [
+    value.indexOf(";", match.index),
+    value.indexOf("；", match.index),
+  ]
+    .filter((index) => index !== -1);
+  const end = afterCandidates.length > 0 ? Math.min(...afterCandidates) : value.length;
+  return value.slice(start, end);
+}
+
+function pageRouteArguments(clause) {
+  return positiveMatches(clause, /\b(?:browsercontext|context|page)\s*\.\s*route\s*\(/gi)
+    .map((routeCall) => firstCallArgument(clause, routeCall.index + routeCall[0].length));
+}
+
+function expandGlobBraces(value) {
+  let alternatives = [value];
+  for (let round = 0; round < 16; round += 1) {
+    let expanded = false;
+    const next = [];
+    for (const alternative of alternatives) {
+      const match = /\{([^{}]*,[^{}]*)\}/.exec(alternative);
+      if (!match) {
+        next.push(alternative);
+        continue;
+      }
+      expanded = true;
+      const options = match[1].split(",");
+      if (next.length + options.length > 64) return null;
+      for (const option of options) {
+        next.push(
+          alternative.slice(0, match.index)
+          + option
+          + alternative.slice(match.index + match[0].length),
+        );
+      }
+    }
+    alternatives = next;
+    if (!expanded) return alternatives;
+  }
+  return null;
+}
+
+function globMatches(value, target) {
+  if (!value.includes("*") && !/\{[^{}]*,[^{}]*\}/.test(value)) return false;
+  const alternatives = expandGlobBraces(value);
+  if (alternatives === null) return true;
+  for (const alternative of alternatives) {
+    let pattern = "^";
+    for (let index = 0; index < alternative.length; index += 1) {
+      if (alternative[index] === "*") {
+        while (alternative[index + 1] === "*") index += 1;
+        pattern += ".*";
+      } else {
+        pattern += alternative[index].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+    }
+    pattern += "$";
+    try {
+      if (new RegExp(pattern).test(target)) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+function routeTargetsDeclaredEntrypoint(clause, expectedEntrypoint) {
+  let expectedUrl;
+  let normalizedEntrypoint;
+  let expectedPathname;
+  try {
+    expectedUrl = new URL(expectedEntrypoint);
+    normalizedEntrypoint = expectedUrl.href;
+    expectedPathname = expectedUrl.pathname;
+  } catch {
+    return false;
+  }
+  for (const argument of pageRouteArguments(clause)) {
+    if (/\b(?:browser_)?entrypoint\b/i.test(argument)) return true;
+    const literal = /^(['"`])([^'"`]+)\1$/.exec(argument);
+    if (!literal) continue;
+    const candidate = literal[2];
+    if (
+      globMatches(candidate, expectedEntrypoint)
+      || globMatches(candidate, normalizedEntrypoint)
+      || globMatches(candidate, expectedPathname)
+    ) return true;
+    try {
+      const candidateUrl = new URL(candidate);
+      if (candidateUrl.href === normalizedEntrypoint) return true;
+      if (candidateUrl.origin === expectedUrl.origin && candidateUrl.pathname === expectedPathname) return true;
+    } catch {
+      // Route globs and path patterns are compared below.
+    }
+    if (candidate === expectedPathname) return true;
+    const pathnameIndex = candidate.indexOf(expectedPathname);
+    const globPrefix = pathnameIndex >= 0 ? candidate.slice(0, pathnameIndex) : "";
+    const pathnameSuffix = pathnameIndex >= 0 ? candidate.slice(pathnameIndex + expectedPathname.length) : "";
+    if (expectedPathname !== "/" && (
+      candidate.startsWith(`${expectedPathname}?`)
+      || candidate.startsWith(`${expectedPathname}#`)
+      || candidate.startsWith(`${expectedPathname}/`)
+      || (/^\*+$/.test(globPrefix) && /^(?:$|[?#/])/.test(pathnameSuffix))
+    )) return true;
+  }
+  return false;
+}
+
+function routeMatchersAreBackendScoped(clause) {
+  const argumentsList = pageRouteArguments(clause);
+  if (argumentsList.length === 0) return true;
+  return argumentsList.every((argument) => {
+    const literal = /^(['"`])([^'"`]*)\1$/.exec(argument);
+    if (!literal) return false;
+    if (literal[1] === "`" && literal[2].includes("${")) return false;
+    const matcher = literal[2];
+    if (/(?:^|[^a-z0-9])api(?:[^a-z0-9]|$)|backend|data[-_ ]plane|graphql|json|service[-_ ]response|后端|数据面|接口/i.test(matcher)) {
+      return true;
+    }
+    return !/^[*/]+$/.test(matcher);
+  });
+}
+
+function addSyntheticUiDiagnostics(record, expectedEntrypoint, add) {
+  const value = record.value;
+  const setContent = positiveMatches(
+    value,
+    /\b(?:page\s*(?:\?\.|\.)\s*)?setcontent\b|\bpage\s*\[\s*["']setcontent["']\s*\]/gi,
+  );
+  if (setContent.length > 0) {
+    add("SYNTHETIC_UI_SET_CONTENT", record.key, record.line, "page.setContent cannot prove served UI acceptance");
+  }
+  if (positiveMatches(value, /\bfile\s*:/gi).length > 0) {
+    add("SYNTHETIC_UI_FILE_URL", record.key, record.line, "file: navigation cannot prove served UI acceptance");
+  }
+  if (positiveMatches(value, /\bdata\s*:/gi).length > 0) {
+    add("SYNTHETIC_UI_DATA_URL", record.key, record.line, "data: navigation cannot prove served UI acceptance");
+  }
+  if (positiveMatches(value, /synthetic[ -]+html|合成[的 ]*html/gi).length > 0) {
+    add("SYNTHETIC_UI_HTML", record.key, record.line, "synthetic HTML cannot prove served UI acceptance");
+  }
+  if (positiveMatches(
+    value,
+    /\bdocument\s*\.\s*write\b|\.\s*(?:innerhtml|outerhtml)\b|\binsertadjacenthtml\b/gi,
+  ).length > 0) {
+    add("SYNTHETIC_UI_DOM_INJECTION", record.key, record.line, "direct DOM injection cannot prove served document acceptance");
+  }
+  if (positiveMatches(
+    value,
+    /\bpage\s*\.\s*add(?:script|style)tag\s*\(\s*\{[^}]{0,240}\bcontent\s*:/gi,
+  ).length > 0) {
+    add("SYNTHETIC_UI_ASSET_INJECTION", record.key, record.line, "inline script or style injection cannot prove served application assets");
+  }
+  const fulfills = positiveMatches(
+    value,
+    /\b(?:route\s*(?:\.\s*|\s+))?fulfill(?:s|ed|ing)?\b/gi,
+  );
+  let mainDocumentReported = false;
+  let appBundleReported = false;
+  let unprovenReported = false;
+  for (const fulfill of fulfills) {
+    const clause = fulfillClause(value, fulfill);
+    const hasMainDocumentTarget = positiveMatches(
+      clause,
+      /main[ -]+document|html[ -]+document|\b[a-z0-9._/-]+\.html\b/gi,
+    ).length > 0;
+    const hasRawHtmlBody = positiveMatches(
+      clause,
+      /\bbody\s*:\s*(?:['"`]\s*(?:<!doctype\s+html|<(?:html|head|body)\b)|(?:html|markup|rawdocument)\b)|(?:^|[^a-z0-9_])['"`]?content(?:type|-type)['"`]?\s*:\s*['"`]text\/html\b/gi,
+    ).length > 0;
+    const hasMainDocument = hasMainDocumentTarget
+      || hasRawHtmlBody
+      || routeTargetsDeclaredEntrypoint(clause, expectedEntrypoint)
+      || /^\s*(?:\(\s*)?(?:the\s+)?(?:browser_)?entrypoint\b/i.test(
+        clause.slice(fulfill.index + fulfill[0].length),
+      );
+    const hasAppBundle = positiveMatches(
+      clause,
+      /app(?:lication)?[ -]+bundle|javascript[ -]+bundle|css[ -]+bundle|js\s*\/\s*css[ -]+assets?|app[ -]+assets?|\b[a-z0-9._/-]+\.(?:cjs|css|js|mjs)\b|\bbody\s*:\s*(?:appbundle|appcss|javascriptbundle)\b|\b(?:application\/(?:javascript|x-javascript)|text\/(?:css|javascript))\b/gi,
+    ).length > 0;
+    const hasBackendLabel = semanticPositiveMatches(
+      clause,
+      /\bapi\b|backend|data[ -]+plane|graphql|\bjson\b|service[ -]+response|后端|数据面|接口/gi,
+    ).length > 0;
+    const hasBackendTarget = hasBackendLabel && routeMatchersAreBackendScoped(clause);
+    if (hasMainDocument && !mainDocumentReported) {
+      add("SYNTHETIC_UI_MAIN_DOCUMENT_FULFILL", record.key, record.line, "the main document must come from a real HTTP server");
+      mainDocumentReported = true;
+    }
+    if (hasAppBundle && !appBundleReported) {
+      add("SYNTHETIC_UI_APP_BUNDLE_FULFILL", record.key, record.line, "application assets must come from a real HTTP server");
+      appBundleReported = true;
+    }
+    if (!hasBackendTarget && !unprovenReported) {
+      add("UI_FULFILL_TARGET_UNPROVEN", record.key, record.line, "route fulfillment must be explicitly limited to backend or data-plane responses");
+      unprovenReported = true;
+    }
+  }
+}
+
+function validateVersionOne(fields, initialDiagnostics) {
+  const diagnostics = [...initialDiagnostics];
+  const add = (code, field, line, message) => {
+    diagnostics.push(makeDiagnostic("ERROR", code, field, line, message));
+  };
+  const get = (key) => fields.get(key) || null;
+
+  const requireSubstantive = (key, allowNotApplicable = false) => {
+    const record = get(key);
+    if (!record) {
+      add("REQUIRED_FIELD_MISSING", key, 0, "required field is missing");
+      return null;
+    }
+    if (isPlaceholder(record.value) || (!allowNotApplicable && isNotApplicableToken(record.value))) {
+      add("REQUIRED_FIELD_PLACEHOLDER", key, record.line, "required field must contain a substantive value");
+      return null;
+    }
+    return record;
+  };
+
+  const requireNotApplicableReason = (key) => {
+    const record = get(key);
+    if (!record || isPlaceholder(record.value) || isNotApplicableToken(record.value)) {
+      add(
+        "NOT_APPLICABLE_REASON_REQUIRED",
+        key,
+        record?.line || 0,
+        "a substantive reason is required when the gate is not_applicable",
+      );
+      return null;
+    }
+    return record;
+  };
+
+  const workType = requireSubstantive("work_type");
+  const firstGuard = requireSubstantive("first_code_guard", true);
+  const productGate = requireSubstantive("product_ui_gate", true);
+
+  const validWorkType = Boolean(workType && WORK_TYPES.has(workType.value));
+  const validFirstGuard = Boolean(firstGuard && GATE_VALUES.has(firstGuard.value));
+  const validProductGate = Boolean(productGate && GATE_VALUES.has(productGate.value));
+
+  if (workType && !validWorkType) {
+    add("WORK_TYPE_INVALID", workType.key, workType.line, `allowed values: ${[...WORK_TYPES].join(", ")}`);
+  }
+  if (firstGuard && !validFirstGuard) {
+    add("FIRST_CODE_GUARD_INVALID", firstGuard.key, firstGuard.line, "allowed values: required, not_applicable");
+  }
+  if (productGate && !validProductGate) {
+    add("PRODUCT_UI_GATE_INVALID", productGate.key, productGate.line, "allowed values: required, not_applicable");
+  }
+
+  if (validWorkType && validFirstGuard) {
+    if (workType.value === "implementation" && firstGuard.value !== "required") {
+      add("FIRST_CODE_GUARD_WORK_TYPE_CONFLICT", firstGuard.key, firstGuard.line, "version 1 implementation contracts require the first-code guard");
+    } else if (workType.value !== "implementation" && firstGuard.value !== "not_applicable") {
+      add("FIRST_CODE_GUARD_WORK_TYPE_CONFLICT", firstGuard.key, firstGuard.line, "non-implementation work must mark the first-code guard not_applicable");
+    }
+  }
+  if (validWorkType && validProductGate && workType.value !== "implementation" && productGate.value !== "not_applicable") {
+    add("PRODUCT_UI_GATE_WORK_TYPE_CONFLICT", productGate.key, productGate.line, "non-implementation work must mark the Product/UI gate not_applicable");
+  }
+
+  if (validFirstGuard && firstGuard.value === "required") {
+    const reason = get("first_code_not_applicable_reason");
+    if (reason && reason.value.trim()) {
+      add("REASON_CONFLICTS_WITH_REQUIRED_GATE", reason.key, reason.line, "not-applicable reason must be empty when the guard is required");
+    }
+    const required = new Map(FIRST_CODE_FIELDS.map((key) => [key, requireSubstantive(key)]));
+    const kind = required.get("first_code_slice_kind");
+    if (kind && !FIRST_CODE_KINDS.has(kind.value)) {
+      add("FIRST_CODE_SLICE_KIND_INVALID", kind.key, kind.line, `allowed values: ${[...FIRST_CODE_KINDS].join(", ")}`);
+    }
+    const slice = required.get("first_code_slice");
+    if (slice && sliceIsNonImplementationOnly(slice.value)) {
+      add("FIRST_CODE_SLICE_NON_IMPLEMENTATION_ONLY", slice.key, slice.line, "docs-, fixture-, evidence-, analysis-, or contract-only work is not a first code slice");
+    }
+  } else if (validFirstGuard && firstGuard.value === "not_applicable") {
+    requireNotApplicableReason("first_code_not_applicable_reason");
+    for (const key of FIRST_CODE_FIELDS) {
+      const record = get(key);
+      if (record && !isInactiveValue(record.value)) {
+        add("FIELD_CONFLICTS_WITH_NOT_APPLICABLE", key, record.line, "first-code detail must be empty or not_applicable when the guard is not_applicable");
+      }
+    }
+  }
+
+  if (validProductGate && productGate.value === "required") {
+    const reason = get("product_ui_not_applicable_reason");
+    if (reason && reason.value.trim()) {
+      add("REASON_CONFLICTS_WITH_REQUIRED_GATE", reason.key, reason.line, "not-applicable reason must be empty when the gate is required");
+    }
+    const required = new Map(PRODUCT_UI_FIELDS.map((key) => [key, requireSubstantive(key)]));
+    const entrypoint = required.get("browser_entrypoint");
+    if (entrypoint) {
+      try {
+        const parsed = new URL(entrypoint.value);
+        if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+          throw new Error("unsupported served URL");
+        }
+      } catch {
+        add("BROWSER_ENTRYPOINT_INVALID", entrypoint.key, entrypoint.line, "browser_entrypoint must be an absolute HTTP(S) URL without credentials");
+      }
+    }
+    const action = required.get("served_ui_validation_action");
+    if (action) {
+      addSyntheticUiDiagnostics(action, entrypoint?.value || "", add);
+      if (!actionHasNavigation(action.value, entrypoint?.value || "")) {
+        add("SERVED_UI_NAVIGATION_MISSING", action.key, action.line, "served UI validation must name a browser navigation action");
+      }
+    }
+    const safety = required.get("required_safety_gates");
+    if (safety && (
+      isPlaceholder(safety.value)
+      || cancelsSafetyGates(safety.value)
+    )) {
+      add("REQUIRED_SAFETY_GATES_INVALID", safety.key, safety.line, "required_safety_gates cannot be empty or not applicable");
+    }
+  } else if (validProductGate && productGate.value === "not_applicable") {
+    requireNotApplicableReason("product_ui_not_applicable_reason");
+    for (const key of [
+      "first_operable_user_flow",
+      "browser_entrypoint",
+      "served_ui_validation_action",
+      "ui_data_mode",
+      "stop_if_no_ui_by_phase",
+    ]) {
+      const record = get(key);
+      if (record && !isInactiveValue(record.value)) {
+        add("FIELD_CONFLICTS_WITH_NOT_APPLICABLE", key, record.line, "UI acceptance detail must be empty or not_applicable when the gate is not_applicable");
+      }
+    }
+  }
+
+  return diagnostics;
+}
+
+function sortDiagnostics(diagnostics) {
+  return diagnostics.sort((left, right) => (
+    left.line - right.line
+    || left.field.localeCompare(right.field)
+    || left.code.localeCompare(right.code)
+  ));
+}
+
+function printDiagnostic(diagnostic, file) {
+  console.error(
+    `${diagnostic.severity} ${diagnostic.code}`
+    + ` file=${JSON.stringify(file)}`
+    + ` line=${diagnostic.line}`
+    + ` field=${diagnostic.field}`
+    + ` message=${JSON.stringify(diagnostic.message)}`,
+  );
+}
+
+function printSummary(ok, file, strict, version, diagnostics) {
+  const errors = diagnostics.filter((item) => item.severity === "ERROR").length;
+  const warnings = diagnostics.filter((item) => item.severity === "WARNING").length;
+  console.log(`implementation_contract_lint: ${ok}`);
+  console.log(`file: ${file}`);
+  console.log(`strict: ${strict}`);
+  console.log(`semantics_version: ${version}`);
+  console.log(`errors: ${errors}`);
+  console.log(`warnings: ${warnings}`);
+}
+
+function lint(file, strict) {
+  const { absolute, content } = readUtf8File(file);
+  const parsed = parseFields(content);
+  const version = parsed.fields.get("contract_semantics_version");
+
+  if (!version) {
+    const diagnostic = strict
+      ? makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1")
+      : makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
+    const diagnostics = [diagnostic];
+    diagnostics.forEach((item) => printDiagnostic(item, absolute));
+    const ok = !diagnostics.some((item) => item.severity === "ERROR");
+    printSummary(ok, absolute, strict, "legacy", diagnostics);
+    return ok ? 0 : 1;
+  }
+
+  if (version.value !== "1") {
+    const diagnostics = sortDiagnostics([
+      ...parsed.diagnostics,
+      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1 is supported"),
+    ]);
+    diagnostics.forEach((item) => printDiagnostic(item, absolute));
+    printSummary(false, absolute, strict, version.value || "invalid", diagnostics);
+    return 1;
+  }
+
+  const diagnostics = sortDiagnostics(validateVersionOne(parsed.fields, parsed.diagnostics));
+  diagnostics.forEach((item) => printDiagnostic(item, absolute));
+  const ok = !diagnostics.some((item) => item.severity === "ERROR");
+  printSummary(ok, absolute, strict, "1", diagnostics);
+  return ok ? 0 : 1;
+}
+
+function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    usage();
+    return 0;
+  }
+  return lint(options.file, options.strict);
+}
+
+try {
+  process.exitCode = main();
+} catch (error) {
+  const code = error instanceof CliError ? "CLI_USAGE" : error instanceof InputError ? "INPUT_INVALID" : "TOOL_INTERNAL_ERROR";
+  console.error("implementation_contract_lint: false");
+  console.error(`ERROR ${code} message=${JSON.stringify(error.message)}`);
+  process.exitCode = 2;
+}

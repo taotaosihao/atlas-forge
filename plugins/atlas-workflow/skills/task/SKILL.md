@@ -82,10 +82,9 @@ Follow this loop:
       contract-owned behavior under test. For scanner/tooling tasks,
       implementing scanner/tool behavior may count; adding fixtures around
       unchanged behavior does not.
-    - If `First-code guard` is required and `stop_if_no_code_by_phase` is
-      omitted, stop after at most one preparatory contract/gate-only phase before
-      the first implementation diff and before release, perf, soak, or P0G-style
-      evidence expansion.
+    - A semantics version 1 contract with a required First-code guard must name
+      `stop_if_no_code_by_phase`. The one-phase default for an omitted field
+      applies only when interpreting an unversioned historical contract.
     - For non-tiny user-facing product, frontend, dashboard, editor, player,
       browser, GUI, or site work, the contract must classify
       `Product/UI gate` as `required` or `not_applicable`.
@@ -105,6 +104,8 @@ Follow this loop:
     - The non-evidence list applies to UI/product acceptance evidence. Correctly
       labeled headless/network evidence may still satisfy safety gates, and
       served UI evidence never replaces required hard safety-gate evidence.
+    - Resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout.
+    - Before executing a new versioned final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`.
     - A product task with no served app cannot be classified as tiny solely
       because the requested slice is small.
     - Classify process docs before committing: workflow working notes such as intake, clarify drafts, analysis, team rounds, loop ledgers, and repair notes stay under `workflow/artifacts/<task-id>/` unless their confirmed summary is needed as durable handoff.

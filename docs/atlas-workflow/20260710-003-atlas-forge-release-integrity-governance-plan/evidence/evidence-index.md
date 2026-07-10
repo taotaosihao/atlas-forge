@@ -25,10 +25,13 @@ workflow_id: `20260710-003-atlas-forge`
 - `workflow/templates/implementation-contract.md`
 - `workflow/templates/implementation-contract.final.md`
 - `workflow/templates/gate-checklist.md`
+- `plugins/atlas-workflow/scripts/codex-implementation-contract-lint`
+- `workflow/tests/contract_implementation_contract.sh`
+- `test/fixtures/implementation-contract/`
 
 ## Verification Boundary
 
-本索引证明规划来源和 native review 已完成，不证明任何 P0/P1 代码已经实现，也不证明真实 marketplace 已更新。
+本索引关联规划来源、各 phase 实施结论和 native review；每份 phase conclusion 独立记录对应代码、测试与边界证据。本索引及这些结论均不证明真实 marketplace 已更新。
 
 ## Phase Conclusions
 
@@ -39,3 +42,4 @@ workflow_id: `20260710-003-atlas-forge`
 - Phase 2 dev/release isolation and fail-closed verification: `./phase-2-conclusion.md`
 - Phase 3 plugin-scoped strict doctor: `./phase-3-conclusion.md`
 - Phase 4 hermetic contracts and Atlas-only CI: `./phase-4-conclusion.md`
+- Phase 5 implementation contract semantic gate: `./phase-5-conclusion.md`

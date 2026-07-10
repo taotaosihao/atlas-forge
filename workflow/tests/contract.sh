@@ -120,10 +120,13 @@ bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_business_acceptance.sh"
+bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_implementation_contract.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_native.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
 source "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_business_acceptance.sh"
+bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_implementation_contract.sh"
+pass "implementation contract semantic lint"
 
 update_plugin_script="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-plugin"
 if [[ -x "$update_plugin_script" ]]; then
@@ -533,7 +536,8 @@ rg -q "first_code_verification" "$ATLAS_FORGE_ROOT/workflow/templates/implementa
 rg -q "allowed_contract_gate_only_until" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 rg -q "stop_if_no_code_by_phase" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md" "$ATLAS_FORGE_ROOT/workflow/templates/team-staffing.md"
 rg -q "gate_parallelization_or_deferral_plan" "$ATLAS_FORGE_ROOT/workflow/templates/team-staffing.md"
-rg -q "at most one preparatory contract/gate-only phase" "$source_skills_root/team/SKILL.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
+rg -q "semantics version 1 contract with a required guard must name" "$source_skills_root/team/SKILL.md"
+rg -q "semantics version 1 requires.*stop_if_no_code_by_phase" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 rg -q "docs-only artifacts" "$source_skills_root/team/SKILL.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md"
 rg -q "not first code slices by themselves" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 rg -q "adding fixtures .*unchanged" "$source_skills_root/team/SKILL.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
@@ -588,6 +592,7 @@ rg -q "staffing" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "evidence_index" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Final Contract Cleanliness Gate" "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.final.md"
 test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
+test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-implementation-contract-lint"
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
   printf 'repo source contract passed\n'
   exit 0

@@ -224,15 +224,16 @@ gate checklist must name:
 - `stop_if_no_code_by_phase`
 - `gate_parallelization_or_deferral_plan`
 
-`not_applicable` is allowed for pure planning, review, audit, docs-only,
-non-implementation tasks, and tiny precise fixes whose acceptance path is
-already obvious.
+`not_applicable` is allowed for pure planning, review, audit, docs-only, and
+other non-implementation tasks. Tiny precise fixes whose acceptance path is
+already obvious may skip a versioned implementation contract; a semantics
+version 1 `implementation` contract must use the required guard.
 
-If the guard is required and `stop_if_no_code_by_phase` is omitted, default to
-stopping after at most one preparatory contract/gate-only phase before the first
-implementation diff, and always before release, perf, soak, or P0G-style
-evidence expansion. Return to clarify/team unless the user explicitly approves
-continued gate-only work.
+A semantics version 1 contract with a required guard must name
+`stop_if_no_code_by_phase`. The one-phase fallback for an omitted field applies
+only when interpreting an unversioned historical contract; in that legacy case,
+return to clarify/team unless the user explicitly approves continued gate-only
+work.
 
 ## Operable UI Vertical Slice Gate
 
@@ -294,10 +295,11 @@ Tiny and not-applicable rules:
 - A product task with no served app cannot be classified as tiny solely because
   the requested slice is small.
 
-If the gate is required and `stop_if_no_ui_by_phase` is omitted, default to
-stopping before release, perf, soak, or P0G-style evidence. Stop expanding
-headless scanners/evidence and return to clarify/team unless the user explicitly
-approves deferral.
+A semantics version 1 contract with a required Product/UI gate must name
+`stop_if_no_ui_by_phase`. The stop-before-release fallback for an omitted field
+applies only when interpreting an unversioned historical contract; in that
+legacy case, stop expanding headless evidence and return to clarify/team unless
+the user explicitly approves deferral.
 
 When Business Acceptance First Mode also applies, served UI evidence does not
 automatically satisfy BAF Goal B. BAF Goal B still needs business scenario
@@ -727,6 +729,8 @@ Native loop requirements:
    - The contract must preserve the team decision and must not add new scope.
    - After review, the final implementation contract must be a clean rewrite of the settled requirements in `implementation-contract.final.md`; keep review history in `reviews/` or `decisions/`, not appended to the final contract body.
    - Maintain `contract-index.md` so the next implementer can find the current authoritative contract without reading older drafts first.
+   - Resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout.
+   - Before promoting a versioned final contract to execution, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`.
    - For Multica handoff, prefer the Multica sprint contract rather than the Atlas lightweight template.
 5. When the team discussion settles an actionable plan, promotion, or staffing handoff, also write a concise project doc:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.

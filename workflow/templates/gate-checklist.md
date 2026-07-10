@@ -11,6 +11,7 @@ artifact_category: phase_conclusion
 | Required validation passed | yes | pending |  |
 | Evidence budget within limit or exception explained | yes | pending |  |
 | Blocking defects resolved or recorded | yes | pending |  |
+| Versioned implementation contract strict lint passed | conditional | pending |  |
 | First-code guard classification recorded when non-tiny implementation work is in scope | conditional | pending |  |
 | First implementation diff completed before gate/evidence expansion | conditional | pending |  |
 | Contract/scanner/fixture/evidence-only preparation stayed within the allowed phase budget | conditional | pending |  |

@@ -7,6 +7,12 @@ contract_status: final
 current_authoritative_contract: ./implementation-contract.final.md
 created: {{CREATED}}
 finalized: {{FINALIZED}}
+contract_semantics_version: 1
+work_type: implementation | planning | review | audit | docs-only
+first_code_guard: required | not_applicable
+first_code_not_applicable_reason:
+product_ui_gate: required | not_applicable
+product_ui_not_applicable_reason:
 
 ## Scope
 
@@ -17,8 +23,8 @@ finalized: {{FINALIZED}}
 
 ## First Code Slice Guard
 
-- First-code guard: required | not_applicable
 - first_code_slice:
+- first_code_slice_kind: product | runtime | api | cli | workflow | scanner_behavior
 - first_code_owner:
 - first_code_verification:
 - allowed_contract_gate_only_until:
@@ -28,12 +34,11 @@ finalized: {{FINALIZED}}
 - First-code rule: the first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
 - Gate-only non-completion: docs-only artifacts, scanner fixtures, analysis notes, and evidence bundles are not first code slices by themselves. For scanner/tooling tasks, implementing scanner/tool behavior may count; adding fixtures around unchanged behavior does not.
 - Safety rule: hard safety gates remain blockers for acceptance and release; starting a bounded code slice never authorizes skipping, weakening, or backfilling named safety gates.
-- Default stop: if `stop_if_no_code_by_phase` is omitted while this guard is required, stop after at most one preparatory contract/gate-only phase before the first implementation diff and before release, perf, soak, or P0G-style evidence expansion.
-- Not-applicable boundary: pure planning, review, audit, docs-only, non-implementation tasks, and tiny precise fixes whose acceptance path is already obvious.
+- Versioned stop: semantics version 1 requires `stop_if_no_code_by_phase`. The one-phase default applies only when interpreting an unversioned historical contract.
+- Not-applicable boundary: planning, review, audit, and docs-only work. Tiny precise fixes whose acceptance path is already obvious may skip a versioned implementation contract; a version 1 `implementation` contract must use the required guard.
 
 ## Product/UI Acceptance Gate
 
-- Product/UI gate: required | not_applicable
 - first_operable_user_flow:
 - browser_entrypoint:
 - served_ui_validation_action:

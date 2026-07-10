@@ -88,10 +88,9 @@ Follow this loop:
      by phase or step; the first code slice may be fixture-backed, mocked, or
      in-memory, but it must change the product, runtime, API, CLI, workflow, or
      contract-owned behavior under test
-   - when `First-code guard` is required and `stop_if_no_code_by_phase` is
-     omitted, implementation should stop after at most one preparatory
-     contract/gate-only phase before the first implementation diff and before
-     release, perf, soak, or P0G-style evidence expansion
+   - a semantics version 1 contract with a required First-code guard must name
+     `stop_if_no_code_by_phase`; the one-phase default for an omitted field
+     applies only when interpreting an unversioned historical contract
    - for non-tiny user-facing product, frontend, dashboard, editor, player,
      browser, GUI, or site work, whether `Product/UI gate` is `required` or
      `not_applicable`
@@ -128,6 +127,8 @@ Follow this loop:
    - no contradictions between context, decision, spec, and the project doc
    - assumptions are labelled
    - acceptance criteria match the verification plan
+   - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
+   - run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>` before calling a versioned final contract execution-ready
 14. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
