@@ -159,6 +159,17 @@ expect_fail "stale invalid days" "$BIN" stale --days 0
 grep -Fxq 'invalid days: 0' "$TMP_ROOT/expect-fail.err"
 pass "task lifecycle and stale behavior"
 
+$BIN outcome-mark "$lifecycle_id" --kind first-code --evidence "commit:contract" >/dev/null
+$BIN outcome-mark "$lifecycle_id" --kind operable-flow --evidence "docs/headless.md" --not-applicable "headless CLI" >/dev/null
+grep -Fq '"kind":"outcome.first-code"' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/runtime.jsonl"
+grep -Fq '"evidence":"commit:contract"' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/runtime.jsonl"
+grep -Fq '"not_applicable_reason":"headless CLI"' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/runtime.jsonl"
+expect_fail "outcome marker invalid kind" "$BIN" outcome-mark "$lifecycle_id" --kind speed --evidence bad
+grep -Fxq 'invalid outcome kind: speed' "$TMP_ROOT/expect-fail.err"
+expect_fail "outcome marker missing evidence" "$BIN" outcome-mark "$lifecycle_id" --kind clean-review
+grep -Fxq 'missing required argument: --evidence' "$TMP_ROOT/expect-fail.err"
+pass "outcome marker behavior"
+
 learning_basename="$($BIN learn "$done_id" "纯中文学习" "legacy learning token remains stable")"
 [[ "$learning_basename" =~ ^${done_id}-u[0-9]+$ ]] || {
   printf 'unexpected learning basename: %s\n' "$learning_basename" >&2

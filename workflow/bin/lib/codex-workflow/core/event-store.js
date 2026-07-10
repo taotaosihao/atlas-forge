@@ -13,7 +13,7 @@ function eventTimestamp(clock) {
   return date.toISOString();
 }
 
-function appendLifecycleEvent(
+function appendStructuredEvent(
   file,
   { taskId, kind, data = {}, clock = () => new Date(), eventId = () => crypto.randomUUID() },
 ) {
@@ -29,6 +29,8 @@ function appendLifecycleEvent(
   fs.appendFileSync(file, `${JSON.stringify(event)}\n`, "utf8");
   return event;
 }
+
+const appendLifecycleEvent = appendStructuredEvent;
 
 function readEventRows(file) {
   let text;
@@ -57,6 +59,7 @@ function readEventRows(file) {
 
 module.exports = {
   appendLifecycleEvent,
+  appendStructuredEvent,
   eventTimestamp,
   readEventRows,
 };

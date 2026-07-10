@@ -7621,6 +7621,10 @@ main() {
       shift
       cmd_gate_report "$@"
       ;;
+    outcome-mark)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/outcome/cli.js" outcome-mark "$@"
+      ;;
     learn)
       [[ $# -eq 4 ]] || { echo 'usage: codex-workflow learn <task-id> "<learning title>" "<lesson>"' >&2; exit 1; }
       cmd_learn "$2" "$3" "$4"
@@ -7695,7 +7699,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
       exit 1
       ;;
   esac
