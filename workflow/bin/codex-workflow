@@ -173,10 +173,6 @@ validate_single_line_reason() {
   fi
 }
 
-validate_readiness_skip_reason() {
-  validate_single_line_reason "readiness skip reason" "$1"
-}
-
 validate_positive_integer() {
   local value="$1"
   local label="$2"
@@ -679,72 +675,6 @@ task_learning_decision_file() {
 
 gate_metrics_file() {
   printf '%s/gate-metrics.jsonl\n' "$STATE_DIR"
-}
-
-evaluate_task_readiness() {
-  local task_id="$1"
-  local requirements="$2"
-  local artifact_dir
-  artifact_dir="$(task_artifact_dir "$task_id")"
-  python3 - "$artifact_dir" "$requirements" <<'PY'
-from pathlib import Path
-import sys
-
-artifact_dir = Path(sys.argv[1])
-requirements = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
-valid = {"context", "spec", "analysis", "decision"}
-unknown = [item for item in requirements if item not in valid]
-
-if not requirements:
-    print("invalid readiness requirements: empty", file=sys.stderr)
-    raise SystemExit(2)
-if unknown:
-    print(f"invalid readiness requirement(s): {','.join(unknown)}", file=sys.stderr)
-    raise SystemExit(2)
-
-def path_for(requirement: str) -> Path:
-    if requirement == "decision":
-        root_decision = artifact_dir / "decision.md"
-        if root_decision.exists():
-            return root_decision
-        return artifact_dir / "team" / "decision.md"
-    return artifact_dir / f"{requirement}.md"
-
-def has_substantive_content(path: Path) -> bool:
-    if not path.exists():
-        return False
-    text = path.read_text(encoding="utf-8", errors="replace")
-    content = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            continue
-        if line.startswith("Task:") or line.startswith("Title:"):
-            continue
-        if line == "Pending discussion.":
-            continue
-        content.append(line)
-    return bool("\n".join(content).strip())
-
-issues = []
-paths = []
-for requirement in requirements:
-    path = path_for(requirement)
-    try:
-        rel_path = path.relative_to(artifact_dir).as_posix()
-    except ValueError:
-        rel_path = str(path)
-    paths.append(f"{requirement}:{rel_path}")
-    if not path.exists():
-        issues.append(f"{requirement}:missing")
-    elif not has_substantive_content(path):
-        issues.append(f"{requirement}:template")
-
-status = "ready" if not issues else "not-ready"
-print("\t".join([status, ",".join(issues) if issues else "-", ",".join(paths)]))
-PY
 }
 
 write_handoff_envelope() {
@@ -4088,107 +4018,6 @@ cmd_task_mutation() {
   sync_codex_memory
 }
 
-cmd_ready() {
-  local task_id="$1"
-  shift
-  local file requirements skip_reason skip_requested checked_at result status issue_summary path_summary
-  requirements="context,spec,analysis"
-  skip_reason=""
-  skip_requested="0"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --require)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]' >&2; exit 1; }
-        requirements="$2"
-        shift 2
-        ;;
-      --require=*)
-        requirements="${1#--require=}"
-        shift
-        ;;
-      --skip)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]' >&2; exit 1; }
-        skip_reason="$2"
-        skip_requested="1"
-        shift 2
-        ;;
-      --skip=*)
-        skip_reason="${1#--skip=}"
-        skip_requested="1"
-        shift
-        ;;
-      *)
-        echo 'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]' >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  requirements="$(printf '%s' "$requirements" | tr -d '[:space:]')"
-  if [[ -z "$requirements" ]]; then
-    echo "invalid readiness requirements: empty" >&2
-    exit 1
-  fi
-  if [[ "$skip_requested" == "1" ]]; then
-    validate_readiness_skip_reason "$skip_reason"
-  fi
-
-  file="$(require_task "$task_id")"
-  validate_task_for_update "$file"
-  sync_task_runtime "$task_id"
-  checked_at="$(timestamp_utc)"
-
-  if [[ "$skip_requested" == "1" ]]; then
-    upsert_task_fields "$file" \
-      "readiness_status=skipped" \
-      "readiness_checked_at=$checked_at" \
-      "readiness_requirements=$requirements" \
-      "readiness_issues=-" \
-      "readiness_skip_reason=$skip_reason"
-    write_task_state_json "$task_id"
-    set_task_state_fields "$task_id" \
-      "readiness.status=skipped" \
-      "readiness.checked_at=$checked_at" \
-      "readiness.requirements=$requirements" \
-      "readiness.issues=-" \
-      "readiness.skip_reason=$skip_reason"
-    append_task_runtime_event "$task_id" "readiness-skip" "$requirements: $skip_reason"
-    printf 'task_id: %s\n' "$task_id"
-    printf 'status: skipped\n'
-    printf 'requirements: %s\n' "$requirements"
-    printf 'reason: %s\n' "$skip_reason"
-    return 0
-  fi
-
-  result="$(evaluate_task_readiness "$task_id" "$requirements")"
-  IFS=$'\t' read -r status issue_summary path_summary <<<"$result"
-  upsert_task_fields "$file" \
-    "readiness_status=$status" \
-    "readiness_checked_at=$checked_at" \
-    "readiness_requirements=$requirements" \
-    "readiness_issues=$issue_summary" \
-    "readiness_paths=$path_summary" \
-    "readiness_skip_reason=-"
-  write_task_state_json "$task_id"
-  set_task_state_fields "$task_id" \
-    "readiness.status=$status" \
-    "readiness.checked_at=$checked_at" \
-    "readiness.requirements=$requirements" \
-    "readiness.issues=$issue_summary" \
-    "readiness.paths=$path_summary" \
-    "readiness.skip_reason=-"
-  append_task_runtime_event "$task_id" "readiness" "$status $requirements $issue_summary"
-  printf 'task_id: %s\n' "$task_id"
-  printf 'status: %s\n' "$status"
-  printf 'requirements: %s\n' "$requirements"
-  printf 'issues: %s\n' "$issue_summary"
-  printf 'paths: %s\n' "$path_summary"
-  if [[ "$status" != "ready" ]]; then
-    exit 1
-  fi
-}
-
 cmd_handoff_envelope() {
   local task_id="$1"
   shift
@@ -6448,9 +6277,8 @@ main() {
       node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" show "$@"
       ;;
     ready)
-      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]' >&2; exit 1; }
       shift
-      cmd_ready "$@"
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" ready "$@"
       ;;
     scaffold-intake)
       shift
