@@ -1,7 +1,7 @@
 # 合同索引
 
 workflow_id: 20260710-001-atlas-forge-js-first-self-use-workflow-replan
-contract_status: in-implementation
+contract_status: implemented
 mvp_status: implemented
 current_authoritative_contract: ./implementation-contract.final.md
 
@@ -26,6 +26,8 @@ supporting_evidence:
 - phase_4a_conclusion: ./evidence/phase-4a-conclusion.md
 - phase_4b_conclusion: ./evidence/phase-4b-conclusion.md
 - phase_5_domain_decisions: ./evidence/phase-5-domain-decisions.md
+- phase_5_conclusion: ./evidence/phase-5-conclusion.md
+- phase_6_conclusion: ./evidence/phase-6-conclusion.md
 - workflow_team_decision: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/decision.md
 - workflow_team_staffing: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/staffing.md
 - prior_release_bundle: ../20260710-003-atlas-forge-release-integrity-governance-plan/contract-index.md
@@ -37,4 +39,4 @@ authority_rules:
 - workflow artifacts 是过程证据，不替代本目录中的版本化合同。
 
 next_action:
-- Phase 4 已完成；执行 Phase 5 的 memory/team/doctor/install/release 与 Multica-facing migrate/retire/keep-shell 决策。
+- Phase 1–6 已完成；仅在出现外部分发、第二长期环境或正式 rollback 需求时，为 trigger-only release backlog 创建新的批准方案。

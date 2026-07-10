@@ -1,7 +1,7 @@
 # Atlas Forge JS-first 自用工作流实施计划
 
 workflow_id: 20260710-001-atlas-forge-js-first-self-use-workflow-replan
-plan_status: approved
+plan_status: implemented
 mvp_status: implemented
 created: 2026-07-10
 
@@ -52,34 +52,21 @@ created: 2026-07-10
 ## 4. 目标架构
 
 ```text
-workflow/bin/codex-workflow
-  └── migration-time Bash dispatcher
-      ├── migrated command -> Node domain CLI
-      └── not-yet-migrated command -> existing Bash implementation
-
-workflow/bin/lib/codex-workflow/
-├── core/
-│   ├── paths.js
-│   ├── atomic-file.js
-│   ├── lock.js
-│   └── event-store.js
-├── task/
-│   ├── id.js
-│   ├── header.js
-│   ├── repository.js
-│   ├── lifecycle.js
-│   └── cli.js
-├── outcome/
-│   ├── schema.js
-│   ├── marker.js
-│   └── report.js
-├── artifact/
-├── verification/
-├── memory/
-└── team/
+workflow/bin/
+├── codex-workflow                 # 5 行公开 Bash façade
+├── codex-workflow-legacy          # internal compatibility launcher
+└── lib/codex-workflow/
+    ├── cli.js                     # 34 条 direct JS 路由，其余 exec legacy
+    ├── core/
+    ├── task/
+    ├── outcome/
+    ├── artifact/
+    ├── verification/
+    ├── feedback/
+    └── team/
 ```
 
-模块只在真实命令迁移时创建；上图不是预先创建空文件的要求。
+未迁移的 explicit memory、host/process、team-v1 与 planned-deprecation 命令保留在 internal legacy launcher；不为目录对称创建空 `memory/` 模块。
 
 ## 5. Phase 1：JS task-id 与 slug 垂直切片
 
@@ -375,7 +362,7 @@ authoritative_decision: ./evidence/phase-5-domain-decisions.md
 
 ## 10. Phase 6：公开入口收缩与最终回归
 
-phase_status: pending
+phase_status: implemented
 
 ### 10.1 前置条件
 
@@ -407,6 +394,14 @@ git diff --exit-code -- plugins/multica-sdlc .agents
 ```
 
 release integration 只在最终 diff 触及 release/marketplace 相关路径时运行。
+
+实施结果：
+
+- [x] keeper commits：入口拆分 `4898ebc`；doctor layout fixture `e7c3859`。
+- [x] public façade 5 行；root router direct 34 条；legacy fallback 13 条并覆盖空/未知 usage。
+- [x] root CLI tests 4/4、全部 JS tests 78/78、repo contract 通过；独立 reviewer `CLEAN`。
+- [x] full contract、host layout、strict doctor 35/35、local-cache transaction 与 dev-sync 全部通过。
+- [x] Multica 五项 hard fingerprint 与基线一致；forbidden status=0；真实 release/marketplace mutation 未执行。
 
 ## 11. 验证分层
 

@@ -30,4 +30,6 @@
 
 ## 下一步
 
-Phase 1–3 的 JS-first MVP 与 Phase 4 分域迁移均已完成：task、outcome、artifact planning、readiness、verification、gate metrics 与 generic feedback 已由 CommonJS 单一实现。下一步进入 Phase 5，对 memory、team、doctor/install/release 与 Multica-facing commands 做 migrate/retire/keep-shell 决策；低优先级 release backlog 和 Multica 继续不进入关键路径。
+Phase 1–6 已全部完成：task、outcome、artifact planning、readiness、verification、gate metrics、generic feedback 与 native team state 已由 CommonJS 单一实现；公开 `codex-workflow` 已收缩为 5 行 façade，显式 keep-shell 命令由 internal legacy launcher 承接。
+
+近期没有必做迁移项。shared marketplace mutation、Atlas-only marketplace 与 exact-SHA rotation 继续是 trigger-only backlog；只有出现外部分发、第二长期环境或正式 rollback 需求时再新建批准方案。Multica 仍仅标记 planned deprecation，不进入 Atlas 日常关键路径。

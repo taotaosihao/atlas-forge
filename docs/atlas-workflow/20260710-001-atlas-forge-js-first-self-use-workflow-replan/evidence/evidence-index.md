@@ -1,7 +1,7 @@
 # 规划证据索引
 
 workflow_id: 20260710-001-atlas-forge-js-first-self-use-workflow-replan
-evidence_status: mvp-implemented
+evidence_status: implemented
 
 | Evidence | Location | Role |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ evidence_status: mvp-implemented
 | Phase 4B 结论 | [phase-4b-conclusion.md](./phase-4b-conclusion.md) | readiness、verify/record、gate metrics 与 generic feedback 迁移 |
 | Phase 5 领域决策 | [phase-5-domain-decisions.md](./phase-5-domain-decisions.md) | native team migrate 与其余领域 keep-shell/retire 边界 |
 | Phase 5 结论 | [phase-5-conclusion.md](./phase-5-conclusion.md) | native team CommonJS 迁移、legacy 边界与验证 |
+| Phase 6 结论 | [phase-6-conclusion.md](./phase-6-conclusion.md) | 薄公开 façade、JS root router、legacy boundary 与最终集成 |
 
 ## 本轮只读事实
 
@@ -58,3 +59,7 @@ evidence_status: mvp-implemented
 - Phase 5 keeper commits：领域决策 `74af117`；native team `0c86f66`。
 - Phase 5 native team tests 6/6；全部 JS tests 74/74；repo contract 与独立 reviewer `CLEAN`。
 - Phase 5 结束时 `codex-workflow` 为 4,773 行、26 段 Python heredoc；legacy team 与 Multica-facing 边界保留。
+- Phase 6 keeper commits：入口拆分 `4898ebc`；doctor layout fixture `e7c3859`。
+- Phase 6 root CLI tests 4/4；全部 JS tests 78/78；独立 reviewer `CLEAN`。
+- 最终 `contract.sh`、host layout、strict doctor 35/35、local cache 与 dev-sync 通过；Multica hard fingerprints 全部匹配。
+- 公开 `codex-workflow` 为 5 行 façade；4,775 行 internal legacy 仅承接 13 条显式 keep-shell 命令与兼容 usage。
