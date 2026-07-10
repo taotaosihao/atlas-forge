@@ -12,6 +12,7 @@ evidence_status: planning-complete
 | 上一轮发布合同 | [release contract](../../20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md) | 继续有效的 release 防线 |
 | Phase 1 结论 | [phase-1-conclusion.md](./phase-1-conclusion.md) | JS task-id/slug keeper slice 与验证 |
 | Phase 2A 结论 | [phase-2a-conclusion.md](./phase-2a-conclusion.md) | JS task repository `list/show` 读取切片 |
+| Phase 2B 结论 | [phase-2b-conclusion.md](./phase-2b-conclusion.md) | JS task lifecycle、状态扩展、事件与 stale |
 
 ## 本轮只读事实
 
@@ -35,3 +36,6 @@ evidence_status: planning-complete
 - Phase 2A Node tests：17/17 通过。
 - Phase 2A 删除 list-only Bash/Python，并保留 lifecycle 共用 validator。
 - Phase 2A hermetic repo contract 与完整 `workflow/tests/contract.sh`：通过。
+- Phase 2B task tests：25/25 通过，含并行 init、状态机、done gate、pointer、archive 与 stale。
+- Phase 2B 删除 task-specific Bash ID/render/status/lifecycle 实现；公开 Bash 仅 delegation + legacy memory sync。
+- Phase 2B hermetic repo contract、dev-sync 与完整 `workflow/tests/contract.sh`：通过。

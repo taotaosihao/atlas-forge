@@ -132,7 +132,7 @@ bash workflow/tests/integration_atlas_plugin_dev_sync.sh
 
 ## 6. Phase 2：Task repository、生命周期与任务卫生
 
-phase_status: in-progress（Phase 2A `list/show` implemented）
+phase_status: implemented
 
 ### 6.1 目标
 
@@ -141,10 +141,10 @@ phase_status: in-progress（Phase 2A `list/show` implemented）
 ### 6.2 迁移顺序
 
 1. `list`、`show`：已在 Phase 2A 迁移到 JS，header parser、路径、GNU version sort 和输出等价通过完整 contract。
-2. `init-task`：把锁、序号、模板渲染和 scaffold 写入 JS；删除 Phase 1 临时桥接。
-3. `start`、`block`、`resume`、`archive`：建立状态转换和结构化事件。
-4. `done`：保留现有 verification gate 后迁移。
-5. `stale`：基于事件读取的只读报告。
+2. `init-task`：已在 Phase 2B 迁移锁、序号、模板渲染、runtime scaffold 与 `task.created`。
+3. `start`、`block`、`resume`、`archive`：已在 Phase 2B 建立五状态转换、pointer 投影与 schema-v1 事件。
+4. `done`：已迁移到 JS，successful verification 与 `--no-verify` gate 保持。
+5. `stale`：已实现只读报告，优先 schema-v1 lifecycle event，历史任务标记 `legacy-date`。
 6. `ready` 保留到 Phase 4 artifact 域，避免 task phase 同时吞入 readiness 规则。
 
 ### 6.3 状态模型
@@ -199,10 +199,12 @@ bash workflow/tests/contract.sh
 
 ### 6.7 完成门
 
-- task 生命周期由 JS 单一实现。
-- Bash 中相应 parser、writer 和 command handler 已删除。
-- 当前公开输出和退出码兼容；新增命令有稳定 usage。
-- 15 个现有 doing task 可通过 stale report 清晰盘点，但未被自动改写。
+- [x] task 生命周期由 JS 单一实现。
+- [x] Bash 中 task-specific ID/render/status/lifecycle 业务已删除；未迁移领域的 metadata helpers 明确保留。
+- [x] 当前公开输出和退出码兼容；新增命令有稳定 usage。
+- [x] 现有 open tasks 可通过 stale report 盘点，命令不自动改写或删除 durable data。
+
+Phase 2B 使用 `core/paths|atomic-file|lock|event-store` 与 `task/runtime|lifecycle` 承载真实行为；`codex-workflow` 减少约 316 行 task-specific Bash。blocked 暂不进入 legacy memory open-task 摘要，留待 Phase 5 memory-domain 决策，不影响 task list/stale 事实源。
 
 ## 7. Phase 3：Outcome events 与 latency report
 

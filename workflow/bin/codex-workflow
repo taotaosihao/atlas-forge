@@ -46,7 +46,6 @@ ARTIFACTS_DIR="$WORKFLOW_ROOT/artifacts"
 HOOKS_DIR="$WORKFLOW_ROOT/hooks"
 SOURCE_HOOKS_DIR="$SCRIPT_DIR/../hooks"
 TEMPLATE_DIR="${CODEX_WORKFLOW_TEMPLATE_DIR:-$SCRIPT_DIR/../templates}"
-TASK_TEMPLATE="$TEMPLATE_DIR/task.md"
 LEARNING_TEMPLATE="$TEMPLATE_DIR/learning.md"
 CURRENT_TASK_FILE="$STATE_DIR/current-task.json"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$CODEX_HOME_ROOT/config.toml}"
@@ -87,8 +86,6 @@ TASK_MEMORY_INDEX="$MEMORY_DIR/tasks.md"
 RECENT_LEARNINGS_INDEX="$LEARNINGS_DIR/RECENT.md"
 MEMORY_SEARCH_INDEX="$MEMORY_DIR/memory.jsonl"
 MEMORY_RECENT_DAYS="${CODEX_MEMORY_RECENT_DAYS:-7}"
-INIT_TASK_LOCK_FILE="$TASKS_DIR/.init-task.lock"
-TASK_LOCK_DIR="${TMPDIR:-/tmp}/codex-workflow-task-locks"
 LEARNING_LOCK_DIR="${TMPDIR:-/tmp}/codex-workflow-learning-locks"
 TEAM_LOCK_DIR="${TMPDIR:-/tmp}/codex-workflow-team-locks"
 LOCK_DIRS=()
@@ -174,10 +171,6 @@ validate_single_line_reason() {
     echo "unsafe $label: reason must be a single non-empty line" >&2
     exit 1
   fi
-}
-
-validate_no_verify_reason() {
-  validate_single_line_reason "no-verify reason" "$1"
 }
 
 validate_readiness_skip_reason() {
@@ -507,10 +500,6 @@ title_token() {
   printf 'u%s\n' "$token"
 }
 
-task_id_title_token() {
-  node "$SCRIPT_DIR/lib/codex-workflow/task/id.js" "$1"
-}
-
 title_checksum() {
   printf '%s' "$1" | cksum | awk '{print $1}'
 }
@@ -521,13 +510,6 @@ task_file() {
 
 ensure_tasks_dir() {
   mkdir -p "$TASKS_DIR"
-}
-
-ensure_task_template() {
-  if [[ ! -f "$TASK_TEMPLATE" ]]; then
-    echo "missing task template: $TASK_TEMPLATE" >&2
-    exit 1
-  fi
 }
 
 ensure_learning_template() {
@@ -587,13 +569,6 @@ ensure_memory_dir() {
   fi
 }
 
-ensure_task_lock_dir() {
-  if ! mkdir -p "$TASK_LOCK_DIR" 2>/dev/null; then
-    echo "unable to prepare task lock directory: $TASK_LOCK_DIR" >&2
-    exit 1
-  fi
-}
-
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
@@ -611,10 +586,6 @@ ensure_team_lock_dir() {
     echo "unable to prepare team lock directory: $TEAM_LOCK_DIR" >&2
     exit 1
   fi
-}
-
-task_lock_file() {
-  printf '%s/%s.lock\n' "$TASK_LOCK_DIR" "$(title_checksum "$1")"
 }
 
 learning_lock_file() {
@@ -755,34 +726,6 @@ task_learning_decision_file() {
 
 gate_metrics_file() {
   printf '%s/gate-metrics.jsonl\n' "$STATE_DIR"
-}
-
-task_has_successful_verification() {
-  local task_id="$1"
-  local state_file
-  state_file="$(task_state_file "$task_id")"
-  python3 - "$state_file" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-path = Path(sys.argv[1])
-if not path.exists():
-    raise SystemExit(1)
-
-try:
-    state = json.loads(path.read_text(encoding="utf-8"))
-except json.JSONDecodeError:
-    raise SystemExit(1)
-
-last_verified_at = str(state.get("last_verified_at") or "").strip()
-verification = state.get("verification") or {}
-last_exit_code = verification.get("last_exit_code")
-
-if last_verified_at and (last_exit_code == 0 or str(last_exit_code) == "0"):
-    raise SystemExit(0)
-raise SystemExit(1)
-PY
 }
 
 evaluate_task_readiness() {
@@ -3243,54 +3186,6 @@ sync_task_runtime() {
   write_task_state_json "$task_id"
 }
 
-write_current_task_pointer() {
-  local task_id="$1"
-  local task_file title artifact_dir_rel
-  task_file="$(require_task "$task_id")"
-  title="$(get_field "$task_file" title)"
-  artifact_dir_rel="$(task_artifact_dir_rel "$task_id")"
-  ensure_state_dir
-  python3 - "$CURRENT_TASK_FILE" "$task_id" "$title" "$artifact_dir_rel" "$(timestamp_utc)" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-path = Path(sys.argv[1])
-data = {
-    "task_id": sys.argv[2],
-    "title": sys.argv[3],
-    "artifact_dir": sys.argv[4],
-    "updated_at": sys.argv[5],
-}
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
-}
-
-clear_current_task_pointer() {
-  local task_id="${1:-}"
-  python3 - "$CURRENT_TASK_FILE" "$task_id" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-path = Path(sys.argv[1])
-task_id = sys.argv[2]
-if not path.exists():
-    raise SystemExit(0)
-if not task_id:
-    path.unlink()
-    raise SystemExit(0)
-try:
-    data = json.loads(path.read_text(encoding="utf-8"))
-except json.JSONDecodeError:
-    path.unlink()
-    raise SystemExit(0)
-if data.get("task_id") == task_id:
-    path.unlink()
-PY
-}
-
 header_field_count() {
   local file="$1"
   local field="$2"
@@ -3319,60 +3214,6 @@ header_field_count() {
       print count
     }
   ' "$file" | head -n 1
-}
-
-next_task_id() {
-  local title="$1"
-  local prefix max seq candidate file base
-
-  prefix="$(date +%Y%m%d)"
-  max=0
-
-  shopt -s nullglob
-  for file in "$TASKS_DIR"/"$prefix"-*.md; do
-    base="$(basename "$file" .md)"
-    if [[ "$base" =~ ^${prefix}-([0-9]+)- ]]; then
-      seq="${BASH_REMATCH[1]}"
-      if (( 10#$seq > max )); then
-        max=$((10#$seq))
-      fi
-    fi
-  done
-
-  seq=$((max + 1))
-  candidate="$prefix-$(printf '%03d' "$seq")-$(task_id_title_token "$title")"
-  while [[ -e "$(task_file "$candidate")" ]]; do
-    seq=$((seq + 1))
-    candidate="$prefix-$(printf '%03d' "$seq")-$(task_id_title_token "$title")"
-  done
-
-  printf '%s\n' "$candidate"
-}
-
-render_task() {
-  local file="$1"
-  local id="$2"
-  local title="$3"
-  local criteria="$4"
-  local now
-
-  now="$(today)"
-  local artifact_dir_rel=""
-  artifact_dir_rel="$(task_artifact_dir_rel "$id")"
-  ID="$id" \
-  TITLE="$title" \
-  STATUS="todo" \
-  CREATED="$now" \
-  UPDATED="$now" \
-  ARTIFACT_DIR="$artifact_dir_rel" \
-  LAST_VERIFIED_AT="" \
-  ACTIVE_TEAM_BACKEND="" \
-  ACTIVE_TEAM_MODE="" \
-  ACTIVE_TEAM_STATUS="" \
-  ACTIVE_TEAM_DECISION="" \
-  SUCCESS_CRITERIA="$criteria" \
-  perl -pe 's/\{\{(ID|TITLE|STATUS|CREATED|UPDATED|ARTIFACT_DIR|LAST_VERIFIED_AT|ACTIVE_TEAM_BACKEND|ACTIVE_TEAM_MODE|ACTIVE_TEAM_STATUS|ACTIVE_TEAM_DECISION|SUCCESS_CRITERIA)\}\}/$ENV{$1}/ge' \
-    "$TASK_TEMPLATE" > "$file"
 }
 
 render_learning() {
@@ -3772,62 +3613,6 @@ write_atomic(
 PY
 }
 
-update_status() {
-  local file="$1"
-  local status="$2"
-  local tmp
-  tmp="$(mktemp)"
-  STATUS="$status" UPDATED="$(today)" perl -ne '
-    BEGIN {
-      $in_header = 1;
-      $status = $ENV{STATUS};
-      $updated = $ENV{UPDATED};
-      $id_seen = 0;
-      $title_seen = 0;
-      $status_seen = 0;
-      $created_seen = 0;
-      $updated_seen = 0;
-    }
-    my $eol = "\n";
-    $eol = $1 if s/(\r?\n)\z//;
-    if ($in_header) {
-      if (/^id: /) {
-        $id_seen = 1;
-      } elsif (/^title: /) {
-        $title_seen = 1;
-      } elsif (/^status: /) {
-        $_ = "status: $status";
-        $status_seen = 1;
-      } elsif (/^created: /) {
-        $created_seen = 1;
-      } elsif (/^updated: /) {
-        $_ = "updated: $updated";
-        $updated_seen = 1;
-      } elsif (/^[A-Za-z0-9_.-]+: /) {
-        # Keep extra metadata lines in the header.
-      } elsif (/^$/ || /^##\s/ || /^#\s/) {
-        $in_header = 0;
-      } else {
-        $in_header = 0;
-      }
-      if ($id_seen && $title_seen && $status_seen && $created_seen && $updated_seen) {
-        $in_header = 0;
-      }
-    }
-    print $_, $eol;
-    END {
-      if (!$status_seen || !$updated_seen) {
-        my @missing;
-        push @missing, "status" unless $status_seen;
-        push @missing, "updated" unless $updated_seen;
-        print STDERR "malformed task file: missing ", join(", ", @missing), "\n";
-        exit 1;
-      }
-    }
-  ' "$file" > "$tmp"
-  mv "$tmp" "$file"
-}
-
 require_task() {
   local id="$1"
   local file
@@ -3885,7 +3670,7 @@ validate_task_for_update() {
   fi
 
   case "$status" in
-    todo|doing|done)
+    todo|doing|blocked|done|archived)
       ;;
     *)
       echo "malformed task file: $file invalid status $status" >&2
@@ -5005,130 +4790,14 @@ PY
 }
 
 cmd_init_task() {
-  local title="$1"
-  local criteria="$2"
-  local id file
-
-  validate_title "$title"
-  acquire_lock "$INIT_TASK_LOCK_FILE"
-  id="$(next_task_id "$title")"
-  if [[ -n "${CODEX_WORKFLOW_TEST_INIT_PAUSE_BEFORE_WRITE:-}" ]]; then
-    sleep "$CODEX_WORKFLOW_TEST_INIT_PAUSE_BEFORE_WRITE"
-  fi
-  file="$(task_file "$id")"
-  render_task "$file" "$id" "$title" "$criteria"
-  release_lock "$INIT_TASK_LOCK_FILE"
+  local id
+  id="$(node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" init-task "$@")" || return $?
   sync_codex_memory
   printf '%s\n' "$id"
 }
 
-cmd_start() {
-  local file current lock_file
-  file="$(require_task "$1")"
-  ensure_task_lock_dir
-  lock_file="$(task_lock_file "$file")"
-  acquire_lock "$lock_file"
-  validate_task_for_update "$file"
-  current="$(get_field "$file" status)"
-  if [[ "$current" == "done" ]]; then
-    release_lock "$lock_file"
-    echo "task already done: $1" >&2
-    exit 1
-  fi
-  if [[ "$current" == "doing" ]]; then
-    release_lock "$lock_file"
-    echo "task already doing: $1" >&2
-    exit 1
-  fi
-  if [[ -n "${CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE:-}" ]]; then
-    sleep "$CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE"
-  fi
-  update_status "$file" "doing"
-  release_lock "$lock_file"
-  sync_task_runtime "$1"
-  write_current_task_pointer "$1"
-  append_task_runtime_event "$1" "task-status" "started"
-  sync_codex_memory
-}
-
-cmd_done() {
-  local task_id="$1"
-  shift
-  local file current lock_file no_verify_reason no_verify_requested no_verify_at
-  no_verify_reason=""
-  no_verify_requested="0"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --no-verify)
-        [[ $# -ge 2 ]] || { echo 'usage: codex-workflow done <task-id> [--no-verify "<reason>"]' >&2; exit 1; }
-        no_verify_reason="$2"
-        no_verify_requested="1"
-        shift 2
-        ;;
-      --no-verify=*)
-        no_verify_reason="${1#--no-verify=}"
-        no_verify_requested="1"
-        shift
-        ;;
-      *)
-        echo 'usage: codex-workflow done <task-id> [--no-verify "<reason>"]' >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  if [[ "$no_verify_requested" == "1" ]]; then
-    validate_no_verify_reason "$no_verify_reason"
-  fi
-
-  file="$(require_task "$task_id")"
-  ensure_task_lock_dir
-  lock_file="$(task_lock_file "$file")"
-  acquire_lock "$lock_file"
-  validate_task_for_update "$file"
-  current="$(get_field "$file" status)"
-  if [[ "$current" == "done" ]]; then
-    release_lock "$lock_file"
-    echo "task already done: $task_id" >&2
-    exit 1
-  fi
-  if [[ "$current" != "doing" ]]; then
-    release_lock "$lock_file"
-    echo "task must be doing before done: $task_id" >&2
-    exit 1
-  fi
-
-  write_task_state_json "$task_id"
-  if [[ "$no_verify_requested" != "1" ]] && ! task_has_successful_verification "$task_id"; then
-    release_lock "$lock_file"
-    echo "task lacks successful workflow verification: $task_id" >&2
-    echo "run: codex-workflow verify $task_id -- <command...>" >&2
-    echo 'or explicitly skip with: codex-workflow done <task-id> --no-verify "<reason>"' >&2
-    exit 1
-  fi
-
-  if [[ -n "${CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE:-}" ]]; then
-    sleep "$CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE"
-  fi
-
-  if [[ "$no_verify_requested" == "1" ]]; then
-    no_verify_at="$(timestamp_utc)"
-    upsert_task_fields "$file" "no_verify_reason=$no_verify_reason" "no_verify_at=$no_verify_at"
-  fi
-
-  update_status "$file" "done"
-  release_lock "$lock_file"
-  sync_task_runtime "$task_id"
-  if [[ "$no_verify_requested" == "1" ]]; then
-    set_task_state_fields "$task_id" \
-      "verification.skipped=__TRUE__" \
-      "verification.skip_reason=$no_verify_reason" \
-      "verification.skipped_at=$no_verify_at"
-    append_task_runtime_event "$task_id" "verify-skip" "$no_verify_reason"
-  fi
-  clear_current_task_pointer "$task_id"
-  append_task_runtime_event "$task_id" "task-status" "done"
+cmd_task_mutation() {
+  node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" "$@" || return $?
   sync_codex_memory
 }
 
@@ -7823,22 +7492,36 @@ main() {
 
   case "${1:-}" in
     init-task)
-      [[ $# -eq 3 ]] || { echo 'usage: codex-workflow init-task "<title>" "<success criteria>"' >&2; exit 1; }
-      ensure_task_template
-      cmd_init_task "$2" "$3"
+      shift
+      cmd_init_task "$@"
       ;;
     list)
       shift
       node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" list "$@"
       ;;
     start)
-      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow start <task-id>' >&2; exit 1; }
-      cmd_start "$2"
+      shift
+      cmd_task_mutation start "$@"
+      ;;
+    block)
+      shift
+      cmd_task_mutation block "$@"
+      ;;
+    resume)
+      shift
+      cmd_task_mutation resume "$@"
       ;;
     done)
-      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow done <task-id> [--no-verify "<reason>"]' >&2; exit 1; }
       shift
-      cmd_done "$@"
+      cmd_task_mutation done "$@"
+      ;;
+    archive)
+      shift
+      cmd_task_mutation archive "$@"
+      ;;
+    stale)
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" stale "$@"
       ;;
     show)
       shift
@@ -8012,7 +7695,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|done|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-loop}' >&2
       exit 1
       ;;
   esac

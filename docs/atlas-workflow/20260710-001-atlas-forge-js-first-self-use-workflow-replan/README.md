@@ -30,4 +30,4 @@
 
 ## 下一步
 
-Phase 1 和 Phase 2A 已完成：task slug、`list` 与 `show` 已进入 JS。下一步进入 Phase 2B，迁移 task creation/lifecycle 写路径并增加 `blocked/archived`。
+Phase 1 和 Phase 2 已完成：task slug、repository、五状态 lifecycle、结构化事件与 stale report 已进入 JS。下一步进入 Phase 3，增加 evidence-bound outcome event 与 latency report，完成 JS-first MVP。

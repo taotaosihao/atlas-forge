@@ -15,6 +15,7 @@ const CLI_PATH = path.resolve(__dirname, "../../bin/lib/codex-workflow/task/cli.
 const {
   listTaskRecords,
   parseTaskHeader,
+  updateTaskFields,
   validateTaskFile,
 } = require(REPOSITORY_PATH);
 const {
@@ -70,7 +71,7 @@ test("parses the metadata header and stops before the body", () => {
   assert.deepEqual(fields.custom_field, ["value"]);
 });
 
-test("validates required, duplicate, filename, and status fields", (t) => {
+test("validates required, duplicate, filename, and the five task statuses", (t) => {
   const root = temporaryWorkflow(t);
   const tasksDir = path.join(root, "tasks");
 
@@ -95,9 +96,15 @@ test("validates required, duplicate, filename, and status fields", (t) => {
     /filename\/id mismatch \(expected != actual\)$/,
   );
 
+  for (const status of ["todo", "doing", "blocked", "done", "archived"]) {
+    const file = path.join(tasksDir, `valid-${status}.md`);
+    fs.writeFileSync(file, taskContent(`valid-${status}`, { status }));
+    assert.equal(validateTaskFile(file).task.status, status);
+  }
+
   const invalidStatus = path.join(tasksDir, "invalid-status.md");
-  fs.writeFileSync(invalidStatus, taskContent("invalid-status", { status: "blocked" }));
-  assert.throws(() => validateTaskFile(invalidStatus), /invalid status blocked$/);
+  fs.writeFileSync(invalidStatus, taskContent("invalid-status", { status: "paused" }));
+  assert.throws(() => validateTaskFile(invalidStatus), /invalid status paused$/);
 });
 
 test("filters only old done tasks by the inclusive cutoff day", (t) => {
@@ -111,6 +118,36 @@ test("filters only old done tasks by the inclusive cutoff day", (t) => {
     listTaskRecords(path.join(root, "tasks"), "20260704").map((task) => task.id),
     ["20200101-002-old-doing", "20260704-001-cutoff-done", "custom-done"],
   );
+});
+
+test("hides archived tasks by default and includes them with all", (t) => {
+  const root = temporaryWorkflow(t);
+  writeTask(root, "20260710-001-open", { status: "blocked" });
+  writeTask(root, "20260710-002-archived", { status: "archived" });
+
+  assert.deepEqual(
+    listTaskRecords(path.join(root, "tasks"), "").map((task) => task.id),
+    ["20260710-001-open"],
+  );
+  assert.deepEqual(
+    listTaskRecords(path.join(root, "tasks"), "", true).map((task) => task.id),
+    ["20260710-001-open", "20260710-002-archived"],
+  );
+});
+
+test("upserts task metadata while preserving unknown fields and body", (t) => {
+  const root = temporaryWorkflow(t);
+  const file = writeTask(root, "20260710-001-upsert", { title: "Upsert" });
+  const before = fs.readFileSync(file, "utf8");
+
+  updateTaskFields(file, { status: "blocked", blocked_reason: "dependency" });
+  const after = fs.readFileSync(file, "utf8");
+
+  assert.match(after, /^status: blocked$/m);
+  assert.match(after, /^artifact_dir: artifacts\/example$/m);
+  assert.match(after, /^blocked_reason: dependency$/m);
+  assert.equal(after.includes("## Success Criteria\nfixture"), true);
+  assert.equal(before.includes("## Success Criteria\nfixture"), true);
 });
 
 test("preserves GNU version ordering for task IDs", () => {
@@ -144,12 +181,17 @@ test("list CLI emits sorted tab-separated rows and normalizes title tabs", (t) =
   const root = temporaryWorkflow(t);
   writeTask(root, "20260710-10-ten", { title: "Ten" });
   writeTask(root, "20260710-2-two", { title: "Two\tColumns" });
+  writeTask(root, "20260710-11-archived", { status: "archived", title: "Archived" });
+
+  const recent = runCli(root, "list");
+  assert.equal(recent.status, 0);
+  assert.equal(recent.stdout.includes("archived"), false);
 
   const result = runCli(root, "list", "--all");
   assert.equal(result.status, 0);
   assert.equal(
     result.stdout,
-    "todo\t20260710-2-two\tTwo Columns\ntodo\t20260710-10-ten\tTen\n",
+    "todo\t20260710-2-two\tTwo Columns\ntodo\t20260710-10-ten\tTen\narchived\t20260710-11-archived\tArchived\n",
   );
   assert.equal(result.stderr, "");
 });

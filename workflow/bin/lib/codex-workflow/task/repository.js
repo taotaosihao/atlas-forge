@@ -2,9 +2,10 @@
 
 const fs = require("fs");
 const path = require("path");
+const { atomicWriteFile } = require("../core/atomic-file");
 
 const REQUIRED_FIELDS = ["id", "title", "status", "created", "updated"];
-const VALID_STATUSES = new Set(["todo", "doing", "done"]);
+const VALID_STATUSES = new Set(["todo", "doing", "blocked", "done", "archived"]);
 const METADATA_LINE = /^[A-Za-z0-9_.-]+: /;
 const TASK_DAY = /^(\d{8})-\d+-/;
 
@@ -35,6 +36,62 @@ function parseTaskHeader(text) {
     fields[key].push(value);
   }
   return fields;
+}
+
+function splitTaskDocument(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) || [];
+  let headerEnd = lines.length;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\r?\n$/, "");
+    if (line === "" || line.startsWith("## ") || line.startsWith("# ")) {
+      headerEnd = index;
+      break;
+    }
+    if (!METADATA_LINE.test(line)) {
+      headerEnd = index;
+      break;
+    }
+  }
+  return {
+    body: lines.slice(headerEnd).join(""),
+    header: lines.slice(0, headerEnd).map((line) => line.replace(/\r?\n$/, "")),
+  };
+}
+
+function updateTaskFields(file, updates) {
+  const text = fs.readFileSync(file, "utf8");
+  const { body, header } = splitTaskDocument(text);
+  const entries = Array.isArray(updates) ? updates : Object.entries(updates);
+  const written = new Set();
+
+  for (let index = 0; index < header.length; index += 1) {
+    for (const [key, value] of entries) {
+      if (!written.has(key) && header[index].startsWith(`${key}: `)) {
+        header[index] = `${key}: ${value}`;
+        written.add(key);
+        break;
+      }
+    }
+  }
+  for (const [key, value] of entries) {
+    if (!written.has(key)) {
+      header.push(`${key}: ${value}`);
+    }
+  }
+
+  let output = header.length > 0 ? `${header.join("\n")}\n` : "";
+  if (body) {
+    if (!body.startsWith("\n")) {
+      output += "\n";
+    }
+    output += body.replace(/^\n+/, "");
+  }
+  atomicWriteFile(file, output, { encoding: "utf8" });
+}
+
+function getTaskField(file, field) {
+  const fields = parseTaskHeader(fs.readFileSync(file, "utf8"));
+  return fields[field] ? fields[field][0] : "";
 }
 
 function validateTaskFile(file) {
@@ -112,7 +169,10 @@ function requireTaskFile(tasksDir, taskId) {
   throw new TaskRepositoryError(message);
 }
 
-function shouldListTask(status, taskId, cutoffDay) {
+function shouldListTask(status, taskId, cutoffDay, includeArchived = false) {
+  if (status === "archived" && !includeArchived) {
+    return false;
+  }
   if (!cutoffDay || status !== "done") {
     return true;
   }
@@ -120,13 +180,13 @@ function shouldListTask(status, taskId, cutoffDay) {
   return !match || match[1] >= cutoffDay;
 }
 
-function listTaskRecords(tasksDir, cutoffDay = "") {
+function listTaskRecords(tasksDir, cutoffDay = "", includeArchived = false) {
   const taskIds = listTaskIds(tasksDir);
   const records = [];
   for (const taskId of taskIds) {
     const file = taskFile(tasksDir, taskId);
     const { task } = validateTaskFile(file);
-    if (shouldListTask(task.status, task.id, cutoffDay)) {
+    if (shouldListTask(task.status, task.id, cutoffDay, includeArchived)) {
       records.push(task);
     }
   }
@@ -136,11 +196,15 @@ function listTaskRecords(tasksDir, cutoffDay = "") {
 module.exports = {
   REQUIRED_FIELDS,
   TaskRepositoryError,
+  VALID_STATUSES,
+  getTaskField,
   listTaskIds,
   listTaskRecords,
   parseTaskHeader,
   requireTaskFile,
   shouldListTask,
+  splitTaskDocument,
   taskFile,
+  updateTaskFields,
   validateTaskFile,
 };

@@ -115,6 +115,50 @@ $BIN verify "$done_id" -- true >/dev/null
 $BIN done "$done_id"
 pass "done gate"
 
+lifecycle_id="$($BIN init-task "contract lifecycle" "blocked archive stale")"
+$BIN start "$lifecycle_id"
+$BIN block "$lifecycle_id" --reason "waiting locally"
+grep -Fxq 'status: blocked' "$CODEX_WORKFLOW_ROOT/tasks/$lifecycle_id.md"
+grep -Fxq 'blocked_reason: waiting locally' "$CODEX_WORKFLOW_ROOT/tasks/$lifecycle_id.md"
+[[ ! -f "$CODEX_WORKFLOW_ROOT/state/current-task.json" ]]
+$BIN resume "$lifecycle_id"
+grep -Fq "\"task_id\": \"$lifecycle_id\"" "$CODEX_WORKFLOW_ROOT/state/current-task.json"
+printf '%s\n' 'durable sentinel' > "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/keep.txt"
+$BIN archive "$lifecycle_id" --reason="superseded"
+grep -Fxq 'status: archived' "$CODEX_WORKFLOW_ROOT/tasks/$lifecycle_id.md"
+grep -Fxq 'archived_reason: superseded' "$CODEX_WORKFLOW_ROOT/tasks/$lifecycle_id.md"
+grep -Fxq 'durable sentinel' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/keep.txt"
+[[ ! -f "$CODEX_WORKFLOW_ROOT/state/current-task.json" ]]
+if $BIN list | grep -Fq "$lifecycle_id"; then
+  printf 'archived task leaked into default list: %s\n' "$lifecycle_id" >&2
+  exit 1
+fi
+$BIN list --all | grep -Fxq $'archived\t'"$lifecycle_id"$'\tcontract lifecycle'
+grep -Fq '"schema_version":1' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/runtime.jsonl"
+grep -Fq '"kind":"task.archived"' "$CODEX_WORKFLOW_ROOT/artifacts/$lifecycle_id/runtime.jsonl"
+expect_fail "block requires doing" "$BIN" block "$unicode_slug_id" --reason "not started"
+grep -Fxq "task must be doing before block: $unicode_slug_id" "$TMP_ROOT/expect-fail.err"
+expect_fail "archive requires reason" "$BIN" archive "$unicode_slug_id"
+grep -Fxq 'usage: codex-workflow archive <task-id> --reason "<reason>"' "$TMP_ROOT/expect-fail.err"
+
+legacy_stale_id="19990101-001-legacy-stale"
+legacy_stale_file="$CODEX_WORKFLOW_ROOT/tasks/$legacy_stale_id.md"
+printf '%s\n' \
+  "id: $legacy_stale_id" \
+  'title: Legacy stale' \
+  'status: todo' \
+  'created: 1999-01-01' \
+  'updated: 1999-01-02' \
+  '' \
+  '## Success Criteria' \
+  'legacy' > "$legacy_stale_file"
+cp "$legacy_stale_file" "$TMP_ROOT/legacy-stale.before"
+$BIN stale --days 7 | grep -Fxq $'todo\t'"$legacy_stale_id"$'\t1999-01-02\tlegacy-date\tLegacy stale'
+cmp -s "$legacy_stale_file" "$TMP_ROOT/legacy-stale.before"
+expect_fail "stale invalid days" "$BIN" stale --days 0
+grep -Fxq 'invalid days: 0' "$TMP_ROOT/expect-fail.err"
+pass "task lifecycle and stale behavior"
+
 learning_basename="$($BIN learn "$done_id" "纯中文学习" "legacy learning token remains stable")"
 [[ "$learning_basename" =~ ^${done_id}-u[0-9]+$ ]] || {
   printf 'unexpected learning basename: %s\n' "$learning_basename" >&2
