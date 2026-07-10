@@ -333,7 +333,7 @@ Phase 4 共完成 artifact、verification 与 feedback 三个 CommonJS 域；4B 
 
 ## 9. Phase 5：剩余领域的 migrate/retire/keep-shell 决策
 
-phase_status: in-progress
+phase_status: implemented
 
 authoritative_decision: ./evidence/phase-5-domain-decisions.md
 
@@ -345,7 +345,7 @@ authoritative_decision: ./evidence/phase-5-domain-decisions.md
 
 ### 9.2 Team
 
-- [ ] native team record/finalize/loop-record/status/stop/promote 迁入 CommonJS。
+- [x] native team record/finalize/loop-record/status/stop/promote 迁入 CommonJS。
 - plugin 内已有 Node team tools 继续复用，不复制实现。
 - [x] team-v1 `team-start/team-loop` 涉及 process、timeout、signal，决定 keep-shell。
 - 不运行或修改 Multica team/router/listener。
@@ -365,6 +365,13 @@ authoritative_decision: ./evidence/phase-5-domain-decisions.md
 ### 9.5 决策门
 
 领域决策已记录在 [phase-5-domain-decisions.md](./evidence/phase-5-domain-decisions.md)。Phase 5 唯一代码 slice 是 native team；其余领域以明确 keep-shell/retire 决定关闭，不追求形式上的全 JS。
+
+实施结果：
+
+- [x] keeper commits：领域决策 `74af117`；native team `0c86f66`。
+- [x] native team targeted tests 6/6、全部 JS tests 74/74、repo contract 通过。
+- [x] native/legacy team 独立 reviewer `CLEAN`；forbidden repo paths diff=0。
+- [x] `codex-workflow` 收缩到 4,773 行、26 段 Python heredoc。
 
 ## 10. Phase 6：公开入口收缩与最终回归
 

@@ -17,6 +17,7 @@ evidence_status: mvp-implemented
 | Phase 4A 结论 | [phase-4a-conclusion.md](./phase-4a-conclusion.md) | artifact scaffold、routing、checkpoint、source 与 prompt planning 迁移 |
 | Phase 4B 结论 | [phase-4b-conclusion.md](./phase-4b-conclusion.md) | readiness、verify/record、gate metrics 与 generic feedback 迁移 |
 | Phase 5 领域决策 | [phase-5-domain-decisions.md](./phase-5-domain-decisions.md) | native team migrate 与其余领域 keep-shell/retire 边界 |
+| Phase 5 结论 | [phase-5-conclusion.md](./phase-5-conclusion.md) | native team CommonJS 迁移、legacy 边界与验证 |
 
 ## 本轮只读事实
 
@@ -54,3 +55,6 @@ evidence_status: mvp-implemented
 - Phase 4B targeted tests：4+5+5+5；全部 JS tests：68/68；repo/full contract 与 dev-sync sentinel 通过。
 - Phase 4B reviewers：4B1/4B3/4B4 `CLEAN`；4B2 quoting P2 修复并 focused recheck `CLEAN`。
 - Phase 4B 结束时 `codex-workflow` 为 5,407 行、28 段 Python heredoc；Multica-facing handler 保留且 function block diff=0。
+- Phase 5 keeper commits：领域决策 `74af117`；native team `0c86f66`。
+- Phase 5 native team tests 6/6；全部 JS tests 74/74；repo contract 与独立 reviewer `CLEAN`。
+- Phase 5 结束时 `codex-workflow` 为 4,773 行、26 段 Python heredoc；legacy team 与 Multica-facing 边界保留。
