@@ -27,6 +27,8 @@ function resolvePaths(environment = process.env) {
   const tasksDir = path.join(root, "tasks");
   const stateDir = path.join(root, "state");
   const artifactsDir = path.join(root, "artifacts");
+  const templateDir =
+    environment.CODEX_WORKFLOW_TEMPLATE_DIR || path.join(moduleWorkflowRoot(), "templates");
 
   return {
     artifactsDir,
@@ -37,10 +39,8 @@ function resolvePaths(environment = process.env) {
     root,
     stateDir,
     taskLockDir: path.join(environment.TMPDIR || os.tmpdir(), "codex-workflow-task-locks"),
-    taskTemplate: path.join(
-      environment.CODEX_WORKFLOW_TEMPLATE_DIR || path.join(moduleWorkflowRoot(), "templates"),
-      "task.md",
-    ),
+    taskTemplate: path.join(templateDir, "task.md"),
+    templateDir,
     tasksDir,
   };
 }
