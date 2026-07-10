@@ -673,10 +673,6 @@ task_learning_decision_file() {
   printf '%s/learning-decision.md\n' "$(task_artifact_dir "$1")"
 }
 
-gate_metrics_file() {
-  printf '%s/gate-metrics.jsonl\n' "$STATE_DIR"
-}
-
 write_handoff_envelope() {
   local task_id="$1"
   local prd_path="$2"
@@ -1955,143 +1951,6 @@ event = {
 with (artifact_dir / "ledger.jsonl").open("a", encoding="utf-8") as fh:
     fh.write(json.dumps(event, ensure_ascii=False) + "\n")
 print("\t".join([str(decision_file), decision, str(len(candidates))]))
-PY
-}
-
-write_gate_metric() {
-  local task_id="$1"
-  local gate="$2"
-  local action="$3"
-  local reason="$4"
-  local duration_ms="$5"
-  local recorded_at="$6"
-  local metrics_file
-  metrics_file="$(gate_metrics_file)"
-  python3 - "$metrics_file" "$task_id" "$gate" "$action" "$reason" "$duration_ms" "$recorded_at" <<'PY'
-from pathlib import Path
-import json
-import sys
-
-metrics_file = Path(sys.argv[1])
-task_id = sys.argv[2]
-gate = sys.argv[3]
-action = sys.argv[4]
-reason = sys.argv[5]
-duration_ms = sys.argv[6]
-recorded_at = sys.argv[7]
-
-VALID_GATES = {
-    "ready",
-    "route-decision",
-    "consensus",
-    "handoff-envelope",
-    "curated-packet",
-    "doctor",
-    "self-test",
-    "verify",
-    "checkpoint",
-    "source-snapshot",
-    "prompt-bundle",
-    "trace-promote",
-    "multica-feedback",
-    "feedback-cycle",
-    "lesson-candidate",
-    "learning-decision",
-}
-VALID_ACTIONS = {"used", "skipped", "failed"}
-
-def fail(message: str) -> None:
-    print(message, file=sys.stderr)
-    raise SystemExit(1)
-
-def one_line(value: str, label: str, allow_empty: bool = False) -> str:
-    if any(ch in value for ch in "\n\r\t"):
-        fail(f"invalid {label}: must be a single line")
-    value = value.strip()
-    if not allow_empty and not value:
-        fail(f"invalid {label}: must be non-empty")
-    return value
-
-task_id = one_line(task_id, "task id")
-gate = one_line(gate, "gate")
-action = one_line(action, "action")
-reason = one_line(reason, "reason")
-if gate not in VALID_GATES:
-    fail(f"invalid gate: {gate}")
-if action not in VALID_ACTIONS:
-    fail(f"invalid action: {action}")
-duration = None
-if duration_ms:
-    if not duration_ms.isdigit():
-        fail(f"invalid duration-ms: {duration_ms}")
-    duration = int(duration_ms)
-
-metrics_file.parent.mkdir(parents=True, exist_ok=True)
-row = {
-    "created_at": recorded_at,
-    "task_id": task_id,
-    "gate": gate,
-    "action": action,
-    "reason": reason,
-    "duration_ms": duration,
-}
-with metrics_file.open("a", encoding="utf-8") as fh:
-    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-print("\t".join([str(metrics_file), gate, action, str(duration) if duration is not None else "-"]))
-PY
-}
-
-render_gate_report() {
-  local days="$1"
-  local metrics_file
-  metrics_file="$(gate_metrics_file)"
-  python3 - "$metrics_file" "$days" "$(timestamp_utc)" <<'PY'
-from pathlib import Path
-import datetime as dt
-import json
-import statistics
-import sys
-
-metrics_file = Path(sys.argv[1])
-days = int(sys.argv[2])
-now = dt.datetime.fromisoformat(sys.argv[3].replace("Z", "+00:00"))
-cutoff = now - dt.timedelta(days=days)
-rows = []
-if metrics_file.exists():
-    for raw in metrics_file.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not raw.strip():
-            continue
-        try:
-            row = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        created = row.get("created_at", "")
-        try:
-            created_dt = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if created_dt >= cutoff:
-            rows.append(row)
-
-groups = {}
-for row in rows:
-    groups.setdefault(row.get("gate", "-"), []).append(row)
-
-print("# Gate Report")
-print()
-print(f"Window: {days} day(s)")
-print(f"Events: {len(rows)}")
-print()
-print("| Gate | Used | Skipped | Failed | Median Duration ms |")
-print("| --- | ---: | ---: | ---: | ---: |")
-for gate in sorted(groups):
-    group = groups[gate]
-    used = sum(1 for row in group if row.get("action") == "used")
-    skipped = sum(1 for row in group if row.get("action") == "skipped")
-    failed = sum(1 for row in group if row.get("action") == "failed")
-    durations = [row.get("duration_ms") for row in group if isinstance(row.get("duration_ms"), int)]
-    median = int(statistics.median(durations)) if durations else 0
-    print(f"| {gate} | {used} | {skipped} | {failed} | {median} |")
 PY
 }
 
@@ -4561,52 +4420,6 @@ cmd_learning_decision() {
   printf 'task_id: %s\nartifact: %s\ndecision: %s\ncandidates: %s\n' "$task_id" "$decision_path" "$decision" "$candidate_count"
 }
 
-cmd_gate_metric() {
-  local task_id="$1"
-  shift
-  local gate action reason duration_ms recorded_at metadata metrics_path
-  gate=""
-  action=""
-  reason=""
-  duration_ms=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --gate) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1; }; gate="$2"; shift 2 ;;
-      --gate=*) gate="${1#--gate=}"; shift ;;
-      --action) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1; }; action="$2"; shift 2 ;;
-      --action=*) action="${1#--action=}"; shift ;;
-      --reason) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1; }; reason="$2"; shift 2 ;;
-      --reason=*) reason="${1#--reason=}"; shift ;;
-      --duration-ms) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1; }; duration_ms="$2"; shift 2 ;;
-      --duration-ms=*) duration_ms="${1#--duration-ms=}"; shift ;;
-      *) echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1 ;;
-    esac
-  done
-  [[ -n "$gate" ]] || { echo "missing required argument: --gate" >&2; exit 1; }
-  [[ -n "$action" ]] || { echo "missing required argument: --action" >&2; exit 1; }
-  [[ -n "$reason" ]] || { echo "missing required argument: --reason" >&2; exit 1; }
-  require_task "$task_id" >/dev/null
-  ensure_state_dir
-  recorded_at="$(timestamp_utc)"
-  metadata="$(write_gate_metric "$task_id" "$gate" "$action" "$reason" "$duration_ms" "$recorded_at")"
-  IFS=$'\t' read -r metrics_path gate action duration_ms <<<"$metadata"
-  append_task_runtime_event "$task_id" "gate-metric" "$gate $action"
-  printf 'task_id: %s\nmetrics: %s\ngate: %s\naction: %s\nduration_ms: %s\n' "$task_id" "$metrics_path" "$gate" "$action" "$duration_ms"
-}
-
-cmd_gate_report() {
-  local days="30"
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --days) [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-report [--days <n>]' >&2; exit 1; }; days="$2"; shift 2 ;;
-      --days=*) days="${1#--days=}"; shift ;;
-      *) echo 'usage: codex-workflow gate-report [--days <n>]' >&2; exit 1 ;;
-    esac
-  done
-  validate_positive_integer "$days" "days"
-  render_gate_report "$days"
-}
-
 cmd_learn() {
   local task_id title lesson task_file basename file tmp existing_created created current lock_file
 
@@ -6134,13 +5947,12 @@ main() {
       cmd_learning_decision "$@"
       ;;
     gate-metric)
-      [[ $# -ge 2 ]] || { echo 'usage: codex-workflow gate-metric <task-id> --gate <gate> --action used|skipped|failed --reason "<reason>" [--duration-ms <n>]' >&2; exit 1; }
       shift
-      cmd_gate_metric "$@"
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" gate-metric "$@"
       ;;
     gate-report)
       shift
-      cmd_gate_report "$@"
+      node "$SCRIPT_DIR/lib/codex-workflow/verification/cli.js" gate-report "$@"
       ;;
     outcome-mark)
       shift

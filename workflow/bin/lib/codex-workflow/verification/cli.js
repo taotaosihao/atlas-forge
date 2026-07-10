@@ -2,6 +2,14 @@
 
 const { CommandError } = require("../core/command-runtime");
 const { TaskRepositoryError } = require("../task/repository");
+const {
+  GATE_METRIC_USAGE,
+  GATE_REPORT_USAGE,
+  parseGateMetricArgs,
+  parseGateReportArgs,
+  runGateMetric,
+  runGateReport,
+} = require("./gates");
 const { READY_USAGE, parseReadyArgs, runReady } = require("./readiness");
 const { VERIFY_USAGE, parseVerifyArgs, runVerification } = require("./runner");
 
@@ -16,12 +24,20 @@ function main(argv) {
       result = runReady(parseReadyArgs(argv.slice(1)));
     } else if (argv[0] === "verify") {
       result = runVerification(parseVerifyArgs(argv.slice(1)));
+    } else if (argv[0] === "gate-metric") {
+      result = runGateMetric(parseGateMetricArgs(argv.slice(1)));
+    } else if (argv[0] === "gate-report") {
+      result = runGateReport(parseGateReportArgs(argv.slice(1)));
     } else {
       throw new CommandError(
-        `usage: codex-workflow {ready|verify}\n${READY_USAGE}\n${VERIFY_USAGE}`,
+        `usage: codex-workflow {ready|verify|gate-metric|gate-report}\n${READY_USAGE}\n${VERIFY_USAGE}\n${GATE_METRIC_USAGE}\n${GATE_REPORT_USAGE}`,
       );
     }
-    writeLines(result.lines);
+    if (result.output !== undefined) {
+      process.stdout.write(result.output);
+    } else {
+      writeLines(result.lines);
+    }
     return result.exitCode;
   } catch (error) {
     process.stderr.write(`${error.message || String(error)}\n`);
