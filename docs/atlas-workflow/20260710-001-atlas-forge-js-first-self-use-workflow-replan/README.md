@@ -30,4 +30,4 @@
 
 ## 下一步
 
-Phase 1 和 Phase 2 已完成：task slug、repository、五状态 lifecycle、结构化事件与 stale report 已进入 JS。下一步进入 Phase 3，增加 evidence-bound outcome event 与 latency report，完成 JS-first MVP。
+Phase 1–3 已完成：task slug、repository、五状态 lifecycle、结构化 lifecycle/outcome event、stale report 与 outcome latency report 均已进入 JS，JS-first MVP 门已达成。下一步先在当前 MVP 收益点做一次决策：可以暂停主 CLI 迁移，也可以另行进入 Phase 4 的 artifact、readiness 与 verification；两种选择都不把低优先级 release backlog 带回关键路径。

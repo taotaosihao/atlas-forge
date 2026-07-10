@@ -2,6 +2,7 @@
 
 workflow_id: 20260710-001-atlas-forge-js-first-self-use-workflow-replan
 plan_status: approved
+mvp_status: implemented
 created: 2026-07-10
 
 ## 1. 目标与完成定义
@@ -208,6 +209,8 @@ Phase 2B 使用 `core/paths|atomic-file|lock|event-store` 与 `task/runtime|life
 
 ## 7. Phase 3：Outcome events 与 latency report
 
+phase_status: implemented
+
 ### 7.1 目标
 
 用最小、可验证的事件模型衡量 workflow 从 `task.started` 到真实结果的时间，而不是继续把 gate duration 当 outcome。
@@ -251,7 +254,13 @@ bash workflow/tests/contract.sh
 
 ### 7.6 JS-first MVP 门
 
-Phase 1–3 全部通过后即可宣布 JS-first MVP 完成。是否继续 Phase 4–6 依据实际维护痛点决定，不把“单体还没完全消失”视为 MVP 阻塞。
+- [x] `outcome-mark` 只写 evidence-bound schema-v1 outcome event。
+- [x] `outcome-report` 从合法 `task.created/task.started` 与 outcome event 计算 raw wall-clock latency。
+- [x] historical unknown、prospective unknown、not-applicable 与 applicable coverage 分开报告。
+- [x] Markdown/JSON 共用一个 report model；stale count 与 gate metrics 不混入 latency。
+- [x] Phase 1–3 的 JS-first MVP 验证全部通过。
+
+Phase 3 分成 marker `01e5526` 与 report `f35f87f` 两个独立 keeper commit；12/12 outcome tests、37/37 全部 JS tests、repo contract、dev-sync 与完整 contract 均通过。实现不从 Git、mtime、task date 或 legacy `detail` 推测历史结果；缺少合法 `task.created` 的任务只进入 `historical_unknown_count`，合法 prospective task 缺少 start 或 outcome 时按 kind 显示 unknown。Phase 4–6 继续按实际维护收益推进，不把 Bash 单体尚未完全消失视为 MVP 阻塞。
 
 ## 8. Phase 4：Artifact、readiness 与 verification 分域
 
