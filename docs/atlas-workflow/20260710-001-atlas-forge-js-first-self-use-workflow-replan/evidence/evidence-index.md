@@ -14,6 +14,7 @@ evidence_status: mvp-implemented
 | Phase 2A 结论 | [phase-2a-conclusion.md](./phase-2a-conclusion.md) | JS task repository `list/show` 读取切片 |
 | Phase 2B 结论 | [phase-2b-conclusion.md](./phase-2b-conclusion.md) | JS task lifecycle、状态扩展、事件与 stale |
 | Phase 3 结论 | [phase-3-conclusion.md](./phase-3-conclusion.md) | evidence-bound outcome marker 与 latency report |
+| Phase 4A 结论 | [phase-4a-conclusion.md](./phase-4a-conclusion.md) | artifact scaffold、routing、checkpoint、source 与 prompt planning 迁移 |
 
 ## 本轮只读事实
 
@@ -44,3 +45,6 @@ evidence_status: mvp-implemented
 - Phase 3 keeper commits：marker `01e5526`；report `f35f87f`。
 - Phase 3 复审发现并关闭 N/A denominator 与 incomplete task-event validation 两项缺陷；最终 verdict 为 `CLEAN`。
 - Phase 3 hermetic repo contract、dev-sync 与完整 `workflow/tests/contract.sh`：通过。
+- Phase 4A keeper commits：scaffold `1d08a5b`；planning `e3e8202`。
+- Phase 4A artifact tests：12/12；全部 JS tests：49/49；repo/full contract 与 dev-sync 通过。
+- Phase 4A reviewer：4A1 P2 修复后 `CLEAN`；4A2 `CLEAN`；release/Multica forbidden paths 无 diff。

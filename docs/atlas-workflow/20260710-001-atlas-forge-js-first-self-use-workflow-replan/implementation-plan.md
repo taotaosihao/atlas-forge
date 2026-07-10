@@ -264,11 +264,15 @@ Phase 3 分成 marker `01e5526` 与 report `f35f87f` 两个独立 keeper commit�
 
 ## 8. Phase 4：Artifact、readiness 与 verification 分域
 
+phase_status: in-progress
+
 ### 8.1 目标
 
 迁移 Bash→Python 参数桥接最密集的纯数据领域，显著减少 `codex-workflow` 体积。
 
 ### 8.2 Slice 4A：Artifact planning commands
+
+slice_status: implemented
 
 - scaffold intake/brainstorm/clarify/team/phase。
 - route-decision。
@@ -286,7 +290,17 @@ artifact/routing.js
 artifact/checkpoint.js
 ```
 
+实施结果：
+
+- [x] scaffold intake/brainstorm/clarify/team/phase 使用 CommonJS template renderer，Bash/Perl 实现已删除。
+- [x] route-decision、checkpoint、source-snapshot、prompt-bundle 使用 CommonJS parser/writer。
+- [x] task header、state、artifact 与 legacy runtime event 投影保持兼容。
+- [x] 4A1 `1d08a5b`、4A2 `e3e8202`；artifact tests 12/12、all JS 49/49、repo/full contract 通过。
+- [x] `codex-workflow` 收缩到 6,628 行，Python heredoc 收缩到 36 段。
+
 ### 8.3 Slice 4B：Readiness、feedback 与 verification
+
+slice_status: pending
 
 - ready/evaluate readiness。
 - handoff/result ingest。
