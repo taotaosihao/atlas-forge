@@ -24,6 +24,7 @@ supporting_evidence:
 - phase_2b_conclusion: ./evidence/phase-2b-conclusion.md
 - phase_3_conclusion: ./evidence/phase-3-conclusion.md
 - phase_4a_conclusion: ./evidence/phase-4a-conclusion.md
+- phase_4b_conclusion: ./evidence/phase-4b-conclusion.md
 - workflow_team_decision: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/decision.md
 - workflow_team_staffing: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/staffing.md
 - prior_release_bundle: ../20260710-003-atlas-forge-release-integrity-governance-plan/contract-index.md
@@ -35,4 +36,4 @@ authority_rules:
 - workflow artifacts 是过程证据，不替代本目录中的版本化合同。
 
 next_action:
-- Phase 4A 已完成；执行 Phase 4B 的 readiness、feedback 与 verification migration。
+- Phase 4 已完成；执行 Phase 5 的 memory/team/doctor/install/release 与 Multica-facing migrate/retire/keep-shell 决策。

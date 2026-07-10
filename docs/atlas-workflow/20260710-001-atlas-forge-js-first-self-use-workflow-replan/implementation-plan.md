@@ -264,7 +264,7 @@ Phase 3 分成 marker `01e5526` 与 report `f35f87f` 两个独立 keeper commit�
 
 ## 8. Phase 4：Artifact、readiness 与 verification 分域
 
-phase_status: in-progress
+phase_status: implemented
 
 ### 8.1 目标
 
@@ -300,13 +300,20 @@ artifact/checkpoint.js
 
 ### 8.3 Slice 4B：Readiness、feedback 与 verification
 
-slice_status: pending
+slice_status: implemented
 
-- ready/evaluate readiness。
-- handoff/result ingest。
-- trace/feedback/lesson/gate metric。
-- verify 与 verification record。
-- gate report 保持 gate 语义，不与 outcome report 合并。
+- [x] ready/evaluate readiness。
+- [x] verify、verification record 与 smoke 共用 record writer。
+- [x] gate metric/report 保持独立 gate 语义，不与 outcome report 合并。
+- [x] generic trace/feedback/lesson/learning decision。
+- [x] handoff/result ingest/curated packet/Multica feedback 明确保留 Shell，不纳入本 slice。
+
+实施结果：
+
+- [x] 4B1 `19e6667`、4B2 `5dc5951`、4B3 `162f8b4`、4B4 `99bc7e9`。
+- [x] targeted tests 19/19、全部 JS 68/68、repo/full contract 与 dev-sync sentinel 通过。
+- [x] `codex-workflow` 收缩到 5,407 行，Python heredoc 收缩到 28 段。
+- [x] `write_multica_feedback`/`cmd_multica_feedback` 与 Phase 4B 基线 function block diff=0。
 
 ### 8.4 验证
 
@@ -317,11 +324,16 @@ slice_status: pending
 
 ### 8.5 完成门
 
-- 所属 Python heredoc 已删除。
-- JS 与 Bash 不再双写同一个 artifact。
-- readiness 和 verify 的已有 gate 行为不变。
+- [x] 所属 Python heredoc 已删除。
+- [x] JS 与 Bash 不再双写同一个 artifact。
+- [x] readiness 和 verify 的已有 gate 行为不变。
+- [x] Multica-facing/计划弃用命令有明确 keep-shell 边界。
+
+Phase 4 共完成 artifact、verification 与 feedback 三个 CommonJS 域；4B reviewers 全部 CLEAN（4B2 修复一项 quoting P2 后复审 CLEAN）。handoff/result/packet/Multica feedback 不为追求 JS 百分比强迁移，转入 Phase 5 的显式 keep-shell/planned-deprecation 决策。
 
 ## 9. Phase 5：剩余领域的 migrate/retire/keep-shell 决策
+
+phase_status: pending
 
 ### 9.1 Memory
 
@@ -348,6 +360,8 @@ slice_status: pending
 每个领域进入实现前写一页 migrate/retire/keep-shell 决策。若保留 Shell 的实现足够薄且稳定，该领域可以直接关闭，不追求形式上的全 JS。
 
 ## 10. Phase 6：公开入口收缩与最终回归
+
+phase_status: pending
 
 ### 10.1 前置条件
 

@@ -30,4 +30,4 @@
 
 ## 下一步
 
-Phase 1–3 的 JS-first MVP 已完成；用户已批准继续。Phase 4A 也已完成：五个 scaffold 命令及 route/checkpoint/source/prompt planning 命令均由 CommonJS 单一实现。下一步进入 Phase 4B，迁移 readiness、feedback 与 verification；低优先级 release backlog 和 Multica 继续不进入关键路径。
+Phase 1–3 的 JS-first MVP 与 Phase 4 分域迁移均已完成：task、outcome、artifact planning、readiness、verification、gate metrics 与 generic feedback 已由 CommonJS 单一实现。下一步进入 Phase 5，对 memory、team、doctor/install/release 与 Multica-facing commands 做 migrate/retire/keep-shell 决策；低优先级 release backlog 和 Multica 继续不进入关键路径。

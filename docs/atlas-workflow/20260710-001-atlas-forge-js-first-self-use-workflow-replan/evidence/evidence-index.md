@@ -15,6 +15,7 @@ evidence_status: mvp-implemented
 | Phase 2B 结论 | [phase-2b-conclusion.md](./phase-2b-conclusion.md) | JS task lifecycle、状态扩展、事件与 stale |
 | Phase 3 结论 | [phase-3-conclusion.md](./phase-3-conclusion.md) | evidence-bound outcome marker 与 latency report |
 | Phase 4A 结论 | [phase-4a-conclusion.md](./phase-4a-conclusion.md) | artifact scaffold、routing、checkpoint、source 与 prompt planning 迁移 |
+| Phase 4B 结论 | [phase-4b-conclusion.md](./phase-4b-conclusion.md) | readiness、verify/record、gate metrics 与 generic feedback 迁移 |
 
 ## 本轮只读事实
 
@@ -48,3 +49,7 @@ evidence_status: mvp-implemented
 - Phase 4A keeper commits：scaffold `1d08a5b`；planning `e3e8202`。
 - Phase 4A artifact tests：12/12；全部 JS tests：49/49；repo/full contract 与 dev-sync 通过。
 - Phase 4A reviewer：4A1 P2 修复后 `CLEAN`；4A2 `CLEAN`；release/Multica forbidden paths 无 diff。
+- Phase 4B keeper commits：readiness `19e6667`；verify `5dc5951`；gates `162f8b4`；feedback `99bc7e9`。
+- Phase 4B targeted tests：4+5+5+5；全部 JS tests：68/68；repo/full contract 与 dev-sync sentinel 通过。
+- Phase 4B reviewers：4B1/4B3/4B4 `CLEAN`；4B2 quoting P2 修复并 focused recheck `CLEAN`。
+- Phase 4B 结束时 `codex-workflow` 为 5,407 行、28 段 Python heredoc；Multica-facing handler 保留且 function block diff=0。
