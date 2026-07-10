@@ -30,6 +30,7 @@ function outcomeKindFromEvent(row) {
     typeof row.data !== "object" ||
     typeof row.data.evidence !== "string" ||
     !row.data.evidence.trim() ||
+    /[\n\r\t]/.test(row.data.evidence) ||
     typeof row.data.applicable !== "boolean"
   ) {
     return "";
@@ -37,7 +38,8 @@ function outcomeKindFromEvent(row) {
   if (
     row.data.applicable === false &&
     (typeof row.data.not_applicable_reason !== "string" ||
-      !row.data.not_applicable_reason.trim())
+      !row.data.not_applicable_reason.trim() ||
+      /[\n\r\t]/.test(row.data.not_applicable_reason))
   ) {
     return "";
   }

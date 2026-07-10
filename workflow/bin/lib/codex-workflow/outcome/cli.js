@@ -2,9 +2,11 @@
 
 const { TaskRepositoryError } = require("../task/repository");
 const { OutcomeMarkerError, markOutcome } = require("./marker");
+const { buildOutcomeReport, renderOutcomeMarkdown } = require("./report");
 
 const MARK_USAGE =
   'usage: codex-workflow outcome-mark <task-id> --kind first-code|operable-flow|clean-review --evidence <path-or-url> [--not-applicable "<reason>"]';
+const REPORT_USAGE = "usage: codex-workflow outcome-report [--days <n>|--days=<n>] [--json]";
 
 class OutcomeCliError extends Error {
   constructor(message) {
@@ -69,12 +71,44 @@ function runMark(argv, environment = process.env) {
   );
 }
 
+function parseReportArgs(argv) {
+  let days = "30";
+  let daysLocked = false;
+  let json = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--json" && !json) {
+      json = true;
+    } else if (argument === "--days" && !daysLocked && index + 1 < argv.length) {
+      days = argv[++index];
+      daysLocked = true;
+    } else if (argument.startsWith("--days=") && !daysLocked) {
+      days = argument.slice("--days=".length);
+      daysLocked = true;
+    } else {
+      throw new OutcomeCliError(REPORT_USAGE);
+    }
+  }
+  if (!/^[1-9]\d*$/.test(days)) {
+    throw new OutcomeCliError(`invalid days: ${days}`);
+  }
+  return { days: Number(days), json };
+}
+
+function runReport(argv, environment = process.env) {
+  const { days, json } = parseReportArgs(argv);
+  const report = buildOutcomeReport({ days, environment });
+  process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : renderOutcomeMarkdown(report));
+}
+
 function main(argv) {
   try {
     if (argv[0] === "outcome-mark") {
       runMark(argv.slice(1));
+    } else if (argv[0] === "outcome-report") {
+      runReport(argv.slice(1));
     } else {
-      throw new OutcomeCliError("usage: codex-workflow {outcome-mark}");
+      throw new OutcomeCliError("usage: codex-workflow {outcome-mark|outcome-report}");
     }
     return 0;
   } catch (error) {
@@ -97,6 +131,8 @@ if (require.main === module) {
 
 module.exports = {
   MARK_USAGE,
+  REPORT_USAGE,
   main,
   parseMarkArgs,
+  parseReportArgs,
 };

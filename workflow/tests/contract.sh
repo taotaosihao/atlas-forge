@@ -170,6 +170,30 @@ expect_fail "outcome marker missing evidence" "$BIN" outcome-mark "$lifecycle_id
 grep -Fxq 'missing required argument: --evidence' "$TMP_ROOT/expect-fail.err"
 pass "outcome marker behavior"
 
+$BIN outcome-report --days 1 --json > "$TMP_ROOT/outcome-report.json"
+python3 - "$TMP_ROOT/outcome-report.json" "$lifecycle_id" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+task_id = sys.argv[2]
+assert report["schema_version"] == 1
+assert report["window_days"] == 1
+assert report["historical_unknown_count"] >= 1
+task = next(row for row in report["tasks"] if row["task_id"] == task_id)
+assert task["outcomes"]["first-code"]["status"] == "known"
+assert task["outcomes"]["operable-flow"]["status"] == "not-applicable"
+first_code = next(row for row in report["outcomes"] if row["kind"] == "first-code")
+assert first_code["known_count"] >= 1
+PY
+$BIN outcome-report --days=1 > "$TMP_ROOT/outcome-report.md"
+grep -Fxq '# Outcome Latency Report' "$TMP_ROOT/outcome-report.md"
+grep -Fq '| first-code |' "$TMP_ROOT/outcome-report.md"
+grep -Fq 'historical_unknown_tasks:' "$TMP_ROOT/outcome-report.md"
+expect_fail "outcome report invalid days" "$BIN" outcome-report --days 0
+grep -Fxq 'invalid days: 0' "$TMP_ROOT/expect-fail.err"
+pass "outcome latency report"
+
 learning_basename="$($BIN learn "$done_id" "纯中文学习" "legacy learning token remains stable")"
 [[ "$learning_basename" =~ ^${done_id}-u[0-9]+$ ]] || {
   printf 'unexpected learning basename: %s\n' "$learning_basename" >&2
