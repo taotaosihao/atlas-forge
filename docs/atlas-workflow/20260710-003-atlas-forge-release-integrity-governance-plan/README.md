@@ -2,11 +2,11 @@
 
 workflow_id: `20260710-003-atlas-forge`
 artifact_category: durable handoff
-status: implementation active
+status: implemented
 
 ## 结论
 
-Atlas Forge 下一轮实施先解决 atlas-workflow 的发布身份、开发/发布通道混写、stale marketplace snapshot、active cache 防降级和 manifest runtime compatibility。完成这些 P0 后，再拆分 hermetic repo contract 与 host-install integration，最后把 first-code、Product/UI 和 BAF 双目标从文字 presence guard 升级为 versioned semantic lint。
+Atlas Forge 已完成 atlas-workflow 的发布身份、开发/发布通道隔离、stale marketplace snapshot 与 active cache 防降级、hermetic repo/host contract、strict doctor、first-code/Product UI semantic lint 和 BAF v2 dual-goal semantic lint。Phase 7 已补齐项目约束、文档权威索引和可复用相对链接门禁。
 
 Multica 已标记为 `planned deprecation`：现有兼容入口保留，但不修复、不迁移、不重构、不 bump、不补测试。本方案禁止修改 Multica source、generated assets、router、listener、fixtures、runtime 和同步入口。
 
@@ -34,4 +34,4 @@ Outcome metrics、task 状态扩展、自动清理、slug 修正和 `codex-workf
 
 ## 下一步
 
-实现任务为 `20260710-004-atlas-forge`。从 Phase 1 开始，每个 phase 独立实现、验证、review 和提交；任一 P0 未闭环时不得进入 semantic lint。
+实现任务 `20260710-004-atlas-forge` 已完成 Phase 0-7。后续发布仍须遵守本 bundle 的 release identity、hermetic verification、Multica 零修改和独立 cachebuster 门禁；延后项需要单独立项。

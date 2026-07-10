@@ -138,11 +138,12 @@ repository, then run one command:
 scripts/update-atlas-workflow-plugin
 ```
 
-This syncs `plugins/atlas-workflow/` into the local Codex plugin source,
-refreshes installed runtime cache copies, syncs workflow helpers and native
-Codex agents, and verifies source/cache equality. Use `--dry-run` to preview
-the runtime writes and `--contract` when you want the full workflow contract
-suite after the refresh:
+This syncs `plugins/atlas-workflow/` into
+`$CODEX_HOME_ROOT/plugins/atlas-workflow`, refreshes the installed
+`$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local` copy, syncs
+workflow helpers and native Codex agents, and verifies source/cache equality.
+Use `--dry-run` to preview the runtime writes and `--contract` when you want
+the full workflow contract suite after the refresh:
 
 ```bash
 scripts/update-atlas-workflow-plugin --dry-run
@@ -193,34 +194,29 @@ GitHub Actions runs four read-only jobs: `manifest-release-integrity`,
 `repo-contract`, `host-layout-fixtures`, and `docs-links`. The hosted jobs do
 not use Codex credentials, marketplace network access, or Multica tests.
 
-Before publishing a new marketplace snapshot, bump the changed plugin's
-manifest cachebuster:
+After an Atlas plugin release slice is content- and review-frozen, update its
+release identity before committing:
 
 ```bash
 scripts/bump-plugin-cachebuster.sh atlas-workflow
-scripts/bump-plugin-cachebuster.sh mempalace
-scripts/bump-plugin-cachebuster.sh multica-sdlc
 ```
 
-Then commit and push:
+The cachebuster establishes source identity; it does not publish or refresh a
+real marketplace. Do not bump `multica-sdlc`, which remains maintenance-frozen
+under planned deprecation.
+
+The Atlas release wrapper currently exposes read-only preflight and installed
+verification only:
 
 ```bash
-git add -A
-git commit -m "type(scope): summary"
-git push origin main
+scripts/update-atlas-workflow-marketplace --help
 ```
 
-Refresh Codex from the Git marketplace snapshot:
-
-```bash
-scripts/codex-plugin-update.sh atlas-workflow
-scripts/codex-plugin-update.sh mempalace
-scripts/codex-plugin-update.sh multica-sdlc
-```
-
-`codex-plugin-update.sh` is the stricter publish/update path for installed
-devices. It requires a clean local checkout whose `HEAD` matches `origin/main`,
-then upgrades the `atlas-forge` marketplace and reinstalls the selected plugin.
+`--preflight-only` and `--verify-only` require the verifier's explicit layout
+arguments and remain read-only. `--execute` intentionally fails closed until
+an Atlas-only marketplace and safe exact-SHA rotation protocol are proven.
+The legacy generic `codex-plugin-update.sh` is not an Atlas release path and
+must not be used to bypass this boundary.
 
 ## Repository Layout
 

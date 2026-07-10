@@ -1,7 +1,7 @@
 # Contract Index
 
 workflow_id: 20260710-003-atlas-forge
-contract_status: final
+contract_status: implemented
 current_authoritative_contract: ./implementation-contract.final.md
 
 source_chain:
@@ -27,4 +27,4 @@ artifact_categories:
 - temporary_raw_run: 隔离安装目录、命令全量输出和失败重试日志，不进入 Git。
 
 next_action:
-- 按 `implementation-contract.final.md` 从 Phase 1 开始实现；每个 phase 独立验证、review 和提交。
+- Phase 0-7 已完成；后续变更按当前合同执行 release identity、hermetic verification 和 Multica 零修改门禁。

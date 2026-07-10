@@ -167,8 +167,9 @@ the low-level cache primitive:
 - Task artifacts live in `workflow/artifacts/<task-id>/`.
 - Active task pointer lives in `workflow/state/current-task.json`.
 - Design-review artifacts live in `workflow/design-reviews/` by default.
-- Local plugin source lives under `plugins/`; installed runtime copies live under `plugins/cache/`.
+- Local Atlas plugin source lives under `$CODEX_HOME_ROOT/plugins/atlas-workflow`;
+  the installed development copy lives under
+  `$CODEX_HOME_ROOT/plugins/cache/local-atlas/atlas-workflow/local`.
 - Legacy Atlas learnings are stored in `~/Documents/note/codex-memory/learnings/` by default.
 - MemPalace is the default long-term memory and semantic recall layer; Atlas recall/learn commands remain for compatibility.
-- Use `docs/durable-learning-reuse-playbook.md` as the default extracted checklist layer for environment verification, source-of-truth cleanup, real-path acceptance, and deploy wiring checks.
 - The helper also accepts `CODEX_WORKFLOW_ROOT`, `CODEX_WORKFLOW_TEMPLATE_DIR`, and `CODEX_LEARNINGS_DIR` when you need to point it at a temp or alternate location.

@@ -594,6 +594,40 @@ rg -q "Final Contract Cleanliness Gate" "$ATLAS_FORGE_ROOT/workflow/templates/im
 test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-contract-index-lint"
 test -x "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-implementation-contract-lint"
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
+  test -x "$ATLAS_FORGE_ROOT/scripts/check-relative-markdown-links.py"
+  "$ATLAS_FORGE_ROOT/scripts/check-relative-markdown-links.py" --root "$ATLAS_FORGE_ROOT" \
+    > "$TMP_ROOT/relative-markdown-links.out"
+  rg -q '^markdown_files_checked=[1-9][0-9]*$' "$TMP_ROOT/relative-markdown-links.out"
+  rg -q '^relative_markdown_links_checked=[1-9][0-9]*$' "$TMP_ROOT/relative-markdown-links.out"
+
+  link_fixture_repo="$TMP_ROOT/relative-markdown-link-fixture"
+  setup_repo "$link_fixture_repo"
+  printf '%s\n' '# Relative links' '[inline](target.md)' '![image](image.png)' \
+    '[balanced](guide_(v2).md)' '[reference]: target.md' '```markdown' \
+    '[fenced](missing-fenced.md)' '```' \
+    > "$link_fixture_repo/links.md"
+  printf '%s\n' '# Target' > "$link_fixture_repo/target.md"
+  printf '%s\n' '# Balanced target' > "$link_fixture_repo/guide_(v2).md"
+  printf '%s\n' 'image fixture' > "$link_fixture_repo/image.png"
+  "$ATLAS_FORGE_ROOT/scripts/check-relative-markdown-links.py" --root "$link_fixture_repo" >/dev/null
+  for broken_link in \
+    '[inline](missing-inline.md)' \
+    '![image](missing-image.png)' \
+    '[balanced](missing_(v2).md)' \
+    '    - [nested](missing-nested.md)' \
+    '[reference]: missing-reference.md'; do
+    printf '%s\n' '# Broken link' "$broken_link" > "$link_fixture_repo/broken.md"
+    expect_fail "relative Markdown link rejects missing target: $broken_link" \
+      "$ATLAS_FORGE_ROOT/scripts/check-relative-markdown-links.py" --root "$link_fixture_repo"
+    grep -q 'missing:' "$TMP_ROOT/expect-fail.out"
+  done
+  printf '%s\n' '# Indented code' '    ```' '    [literal](missing-literal.md)' '' \
+    '[real](missing-real.md)' > "$link_fixture_repo/broken.md"
+  expect_fail "relative Markdown link does not treat indented code as a fence" \
+    "$ATLAS_FORGE_ROOT/scripts/check-relative-markdown-links.py" --root "$link_fixture_repo"
+  grep -q 'missing-real.md' "$TMP_ROOT/expect-fail.out"
+  rm "$link_fixture_repo/broken.md"
+  pass "relative Markdown link gate"
   printf 'repo source contract passed\n'
   exit 0
 fi
