@@ -63,6 +63,8 @@ setup_repo() {
 }
 
 bash -n "$BIN"
+node --test "$ATLAS_FORGE_ROOT/workflow/tests/js/task-id.test.js" >/dev/null
+pass "task id JavaScript contract"
 
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
   bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
@@ -74,12 +76,34 @@ if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
   pass "atlas strict doctor contract"
 fi
 
+prefixed_slug_id="$($BIN init-task "20260709-003-contract slug prefix" "slug prefix")"
+[[ "$prefixed_slug_id" =~ ^[0-9]{8}-[0-9]{3}-contract-slug-prefix$ ]] || {
+  printf 'unexpected prefixed task slug: %s\n' "$prefixed_slug_id" >&2
+  exit 1
+}
+unicode_slug_id="$($BIN init-task "纯中文标题" "unicode slug")"
+[[ "$unicode_slug_id" =~ ^[0-9]{8}-[0-9]{3}-u-e1e4b2c89617$ ]] || {
+  printf 'unexpected Unicode task slug: %s\n' "$unicode_slug_id" >&2
+  exit 1
+}
+grep -Fxq 'title: 纯中文标题' "$CODEX_WORKFLOW_ROOT/tasks/$unicode_slug_id.md"
+expect_fail "multiline task title" "$BIN" init-task $'bad\ntitle' "invalid title"
+grep -q 'unsafe title: titles must be a single line' "$TMP_ROOT/expect-fail.err"
+pass "task id slug behavior"
+
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"
 expect_fail "done without verification" "$BIN" done "$done_id"
 $BIN verify "$done_id" -- true >/dev/null
 $BIN done "$done_id"
 pass "done gate"
+
+learning_basename="$($BIN learn "$done_id" "纯中文学习" "legacy learning token remains stable")"
+[[ "$learning_basename" =~ ^${done_id}-u[0-9]+$ ]] || {
+  printf 'unexpected learning basename: %s\n' "$learning_basename" >&2
+  exit 1
+}
+pass "learning basename keeps legacy title token"
 
 ready_id="$($BIN init-task "contract readiness" "readiness")"
 $BIN start "$ready_id"

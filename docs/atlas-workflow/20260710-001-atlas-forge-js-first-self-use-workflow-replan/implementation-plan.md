@@ -82,6 +82,8 @@ workflow/bin/lib/codex-workflow/
 
 ## 5. Phase 1：JS task-id 与 slug 垂直切片
 
+phase_status: implemented
+
 ### 5.1 目标
 
 用最小真实行为建立 JS 模块、测试和 Bash delegation 路径，修复新建 task 的重复 slug。
@@ -90,18 +92,20 @@ workflow/bin/lib/codex-workflow/
 
 - 新增 `workflow/bin/lib/codex-workflow/task/id.js`。
 - 新增 `workflow/tests/js/task-id.test.js`。
-- 修改 `workflow/bin/codex-workflow` 的 `title_token`/`next_task_id` 窄调用点，让 slug/token 由 JS 生成；同日序号扫描和文件写入暂留 Bash。
+- 新增 task-ID 专用 `task_id_title_token()` delegate，只替换 `next_task_id()` 的两个调用点；共享 `title_token()` 继续服务 `learning_basename()`。
+- 同日序号扫描、锁和文件写入暂留 Bash。
 - 如测试需要，新增一个仅内部使用的 Node CLI 入口；不新增面向用户的永久命令。
 
 ### 5.3 Slug 规则
 
 1. 保持 task ID 外形 `YYYYMMDD-NNN-slug`。
 2. title 原文照常写入 task 文件。
-3. 生成 slug 前只剥离 title 开头的一个 `YYYYMMDD-NNN-`。
+3. title 先执行 NFC + trim；生成 slug 前只剥离开头的一个 `YYYYMMDD-NNN-`。
 4. ASCII letters/numbers 继续 lower-kebab；连续符号折叠为单个 `-`。
 5. slug 截断到 64 个 ASCII 字符，并去除尾部 `-`。
 6. 没有 ASCII token 时，使用 `crypto.createHash("sha256")` 生成 `u-<前 12 位 hex>`。
 7. 不引入中文转写，不放宽 safe task-id 字符集，不重命名历史文件。
+8. 不改变 learn/memory 的 legacy `title_token()` 和 learning basename。
 
 ### 5.4 验证
 

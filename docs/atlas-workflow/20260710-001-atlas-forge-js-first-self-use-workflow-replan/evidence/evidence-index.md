@@ -10,6 +10,7 @@ evidence_status: planning-complete
 | 架构决策 | [decision.md](../decision.md) | 方案比较与选型 |
 | 实施分工 | [staffing.md](../staffing.md) | 后续 slice ownership |
 | 上一轮发布合同 | [release contract](../../20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md) | 继续有效的 release 防线 |
+| Phase 1 结论 | [phase-1-conclusion.md](./phase-1-conclusion.md) | JS task-id/slug keeper slice 与验证 |
 
 ## 本轮只读事实
 
@@ -26,3 +27,7 @@ evidence_status: planning-complete
 - relative Markdown links：通过。
 - workflow readiness `context,spec,analysis,decision`：通过。
 - private path audit：runtime/instructions 无未授权发现；本 bundle 未新增 private path。
+- Phase 1 Node tests：7/7 通过。
+- Phase 1 hermetic repo contract：通过。
+- Phase 1 Atlas dev-sync integration：通过，`workflow/bin/lib/` 递归同步且 release/Multica sentinels 不变。
+- Phase 1 完整 `workflow/tests/contract.sh`：通过。

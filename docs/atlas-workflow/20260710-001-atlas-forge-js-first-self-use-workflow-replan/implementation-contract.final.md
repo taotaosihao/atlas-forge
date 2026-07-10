@@ -61,6 +61,7 @@ stop_if_no_ui_by_phase: not_applicable
 4. JS module 使用 CommonJS、`"use strict"`、Node 标准库和当前仓库代码风格。
 5. module root 固定在 `workflow/bin/lib/`，沿用现有递归 sync；本合同不新增 `workflow/lib/` managed root。
 6. 高频领域迁移完成后，公开入口收缩为只做环境定位和 `exec node` 的 façade。
+7. Phase 1 使用 task-ID 专用 delegate；共享 legacy `title_token()` 保留给 `learning_basename()`，直到 memory 领域另行迁移或退役。
 
 ## Task 状态合同
 
@@ -87,11 +88,12 @@ stop_if_no_ui_by_phase: not_applicable
 - 只影响合同实施后的新 task。
 - task ID 保持 `YYYYMMDD-NNN-slug`。
 - 原始 title 原样保留。
-- 生成 slug 前剥离 title 开头最多一个 `YYYYMMDD-NNN-`。
+- title 先执行 NFC + trim；生成 slug 前剥离开头最多一个 `YYYYMMDD-NNN-`。
 - ASCII slug 保持 lower-kebab，最大 64 个字符。
 - 没有 ASCII token 时使用 `u-` 加标准化 title 的 SHA-256 前 12 位 hex。
 - 不做中文拼音、不允许 Unicode task ID、不改名历史 task。
 - 同日序号和并行创建继续由锁保护，不允许产生相同 ID。
+- learn/memory basename 继续使用 legacy title token，本 phase 不改变其文件名。
 
 ## Outcome event 合同
 

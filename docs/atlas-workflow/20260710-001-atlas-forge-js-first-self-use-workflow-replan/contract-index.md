@@ -1,7 +1,7 @@
 # 合同索引
 
 workflow_id: 20260710-001-atlas-forge-js-first-self-use-workflow-replan
-contract_status: ready-for-implementation
+contract_status: in-implementation
 current_authoritative_contract: ./implementation-contract.final.md
 
 source_chain:
@@ -18,6 +18,7 @@ supporting_evidence:
 - architecture_decision: ./decision.md
 - staffing: ./staffing.md
 - evidence_index: ./evidence/evidence-index.md
+- phase_1_conclusion: ./evidence/phase-1-conclusion.md
 - workflow_team_decision: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/decision.md
 - workflow_team_staffing: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/staffing.md
 - prior_release_bundle: ../20260710-003-atlas-forge-release-integrity-governance-plan/contract-index.md
@@ -29,4 +30,4 @@ authority_rules:
 - workflow artifacts 是过程证据，不替代本目录中的版本化合同。
 
 next_action:
-- 执行 Phase 1：JS task-id/slug 垂直切片。
+- Phase 1 已完成；执行 Phase 2 的 `list/show` JS 只读迁移切片。

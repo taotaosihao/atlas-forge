@@ -511,6 +511,10 @@ title_token() {
   printf 'u%s\n' "$token"
 }
 
+task_id_title_token() {
+  node "$SCRIPT_DIR/lib/codex-workflow/task/id.js" "$1"
+}
+
 title_checksum() {
   printf '%s' "$1" | cksum | awk '{print $1}'
 }
@@ -3432,10 +3436,10 @@ next_task_id() {
   done
 
   seq=$((max + 1))
-  candidate="$prefix-$(printf '%03d' "$seq")-$(title_token "$title")"
+  candidate="$prefix-$(printf '%03d' "$seq")-$(task_id_title_token "$title")"
   while [[ -e "$(task_file "$candidate")" ]]; do
     seq=$((seq + 1))
-    candidate="$prefix-$(printf '%03d' "$seq")-$(title_token "$title")"
+    candidate="$prefix-$(printf '%03d' "$seq")-$(task_id_title_token "$title")"
   done
 
   printf '%s\n' "$candidate"

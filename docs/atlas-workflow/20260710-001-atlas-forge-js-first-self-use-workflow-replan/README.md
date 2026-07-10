@@ -30,4 +30,4 @@
 
 ## 下一步
 
-从 Phase 1 开始实现 `workflow/bin/lib/codex-workflow/task/id.js` 和对应 `node:test`，以 slug 修正作为首个 keeper implementation diff。
+Phase 1 已完成 JS task-id/slug 垂直切片。下一步进入 Phase 2 的只读 task repository slice，先迁移 `list` 与 `show`，再处理 lifecycle 写路径。
