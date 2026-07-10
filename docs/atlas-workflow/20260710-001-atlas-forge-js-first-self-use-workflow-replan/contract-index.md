@@ -19,6 +19,7 @@ supporting_evidence:
 - staffing: ./staffing.md
 - evidence_index: ./evidence/evidence-index.md
 - phase_1_conclusion: ./evidence/phase-1-conclusion.md
+- phase_2a_conclusion: ./evidence/phase-2a-conclusion.md
 - workflow_team_decision: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/decision.md
 - workflow_team_staffing: workflow/artifacts/20260710-001-atlas-forge-js-first-self-use-workflow-replan/team/staffing.md
 - prior_release_bundle: ../20260710-003-atlas-forge-release-integrity-governance-plan/contract-index.md
@@ -30,4 +31,4 @@ authority_rules:
 - workflow artifacts 是过程证据，不替代本目录中的版本化合同。
 
 next_action:
-- Phase 1 已完成；执行 Phase 2 的 `list/show` JS 只读迁移切片。
+- Phase 1 与 Phase 2A 已完成；执行 Phase 2B 的 task creation/lifecycle 写路径迁移。

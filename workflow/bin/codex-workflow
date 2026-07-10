@@ -145,10 +145,6 @@ sys.stdout.write(preview)
 PY
 }
 
-list_usage() {
-  echo 'usage: codex-workflow list [--all|--days <n>|--days=<n>]' >&2
-}
-
 slugify() {
   printf '%s' "$1" |
     tr '[:upper:]' '[:lower:]' |
@@ -517,98 +513,6 @@ task_id_title_token() {
 
 title_checksum() {
   printf '%s' "$1" | cksum | awk '{print $1}'
-}
-
-list_cutoff_day() {
-  local days="$1"
-  local offset
-
-  validate_positive_integer "$days" "days"
-  offset=$((days - 1))
-  if date -d "$offset days ago" +%Y%m%d >/dev/null 2>&1; then
-    date -d "$offset days ago" +%Y%m%d
-  else
-    date -v-"$offset"d +%Y%m%d
-  fi
-}
-
-task_id_day() {
-  local task_id="$1"
-
-  if [[ "$task_id" =~ ^([0-9]{8})-[0-9]+- ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
-    return 0
-  fi
-
-  return 1
-}
-
-parse_list_args() {
-  local mode="recent"
-  local days="7"
-  local mode_locked="0"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --all)
-        if [[ "$mode_locked" == "1" ]]; then
-          list_usage
-          exit 1
-        fi
-        mode="all"
-        mode_locked="1"
-        shift
-        ;;
-      --days)
-        if [[ "$mode_locked" == "1" || $# -lt 2 ]]; then
-          list_usage
-          exit 1
-        fi
-        mode="recent"
-        mode_locked="1"
-        days="$2"
-        shift 2
-        ;;
-      --days=*)
-        if [[ "$mode_locked" == "1" ]]; then
-          list_usage
-          exit 1
-        fi
-        mode="recent"
-        mode_locked="1"
-        days="${1#--days=}"
-        shift
-        ;;
-      *)
-        list_usage
-        exit 1
-        ;;
-    esac
-  done
-
-  if [[ "$mode" == "recent" ]]; then
-    validate_positive_integer "$days" "days"
-  fi
-
-  printf '%s\t%s\n' "$mode" "$days"
-}
-
-should_list_task() {
-  local status="$1"
-  local task_id="$2"
-  local cutoff_day="$3"
-  local task_day
-
-  if [[ -z "$cutoff_day" || "$status" != "done" ]]; then
-    return 0
-  fi
-
-  if ! task_day="$(task_id_day "$task_id")"; then
-    return 0
-  fi
-
-  [[ "$task_day" < "$cutoff_day" ]] && return 1
-  return 0
 }
 
 task_file() {
@@ -5118,80 +5022,6 @@ cmd_init_task() {
   printf '%s\n' "$id"
 }
 
-cmd_list() {
-  local mode="$1"
-  local days="$2"
-  local cutoff_day=""
-
-  if [[ "$mode" == "recent" ]]; then
-    cutoff_day="$(list_cutoff_day "$days")"
-  fi
-
-  python3 - "$TASKS_DIR" "$cutoff_day" <<'PY' | sort -t $'\t' -k2,2V
-from pathlib import Path
-import re
-import sys
-
-tasks_dir = Path(sys.argv[1])
-cutoff_day = sys.argv[2]
-required_fields = ("id", "title", "status", "created", "updated")
-metadata_re = re.compile(r"^[A-Za-z0-9_.-]+: ")
-task_day_re = re.compile(r"^([0-9]{8})-[0-9]+-")
-
-
-def parse_header(path):
-    fields = {}
-    text = path.read_text(encoding="utf-8", errors="replace")
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\r")
-        if line == "" or line.startswith("## ") or line.startswith("# "):
-            break
-        if metadata_re.match(line):
-            key, value = line.split(": ", 1)
-            fields.setdefault(key, []).append(value)
-            continue
-        break
-    return fields
-
-
-def fail(message: str) -> None:
-    print(message, file=sys.stderr)
-    raise SystemExit(1)
-
-
-def should_list_task(status: str, task_id: str) -> bool:
-    if not cutoff_day or status != "done":
-        return True
-    match = task_day_re.match(task_id)
-    if not match:
-        return True
-    return match.group(1) >= cutoff_day
-
-
-for path in sorted(tasks_dir.glob("*.md")):
-    expected_id = path.stem
-    fields = parse_header(path)
-    missing = [field for field in required_fields if len(fields.get(field, [])) == 0]
-    duplicate = [field for field in required_fields if len(fields.get(field, [])) > 1]
-
-    if missing:
-        fail(f"malformed task file: {path} missing {' '.join(missing)}")
-    if duplicate:
-        fail(f"malformed task file: {path} duplicate {' '.join(duplicate)}")
-
-    task_id = fields["id"][0]
-    title = fields["title"][0]
-    status = fields["status"][0]
-
-    if task_id != expected_id:
-        fail(f"malformed task file: {path} filename/id mismatch ({expected_id} != {task_id})")
-    if status not in {"todo", "doing", "done"}:
-        fail(f"malformed task file: {path} invalid status {status}")
-    if should_list_task(status, task_id):
-        print(f"{status}\t{task_id}\t{title.replace(chr(9), ' ')}")
-PY
-}
-
 cmd_start() {
   local file current lock_file
   file="$(require_task "$1")"
@@ -5300,13 +5130,6 @@ cmd_done() {
   clear_current_task_pointer "$task_id"
   append_task_runtime_event "$task_id" "task-status" "done"
   sync_codex_memory
-}
-
-cmd_show() {
-  local file
-  file="$(require_task "$1")"
-  validate_task_for_update "$file"
-  cat "$file"
 }
 
 cmd_ready() {
@@ -8005,11 +7828,8 @@ main() {
       cmd_init_task "$2" "$3"
       ;;
     list)
-      local mode days parsed
       shift
-      parsed="$(parse_list_args "$@")"
-      IFS=$'\t' read -r mode days <<<"$parsed"
-      cmd_list "$mode" "$days"
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" list "$@"
       ;;
     start)
       [[ $# -eq 2 ]] || { echo 'usage: codex-workflow start <task-id>' >&2; exit 1; }
@@ -8021,8 +7841,8 @@ main() {
       cmd_done "$@"
       ;;
     show)
-      [[ $# -eq 2 ]] || { echo 'usage: codex-workflow show <task-id>' >&2; exit 1; }
-      cmd_show "$2"
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/task/cli.js" show "$@"
       ;;
     ready)
       [[ $# -ge 2 ]] || { echo 'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]' >&2; exit 1; }

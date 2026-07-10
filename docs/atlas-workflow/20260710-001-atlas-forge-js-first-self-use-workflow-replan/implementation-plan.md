@@ -132,13 +132,15 @@ bash workflow/tests/integration_atlas_plugin_dev_sync.sh
 
 ## 6. Phase 2：Task repository、生命周期与任务卫生
 
+phase_status: in-progress（Phase 2A `list/show` implemented）
+
 ### 6.1 目标
 
 将 task 文件解析、状态更新、current pointer 和 lifecycle event 收敛到 JS，为 metrics 提供可靠时间源。
 
 ### 6.2 迁移顺序
 
-1. `list`、`show`：先迁移只读命令，验证 header parser、路径和输出等价。
+1. `list`、`show`：已在 Phase 2A 迁移到 JS，header parser、路径、GNU version sort 和输出等价通过完整 contract。
 2. `init-task`：把锁、序号、模板渲染和 scaffold 写入 JS；删除 Phase 1 临时桥接。
 3. `start`、`block`、`resume`、`archive`：建立状态转换和结构化事件。
 4. `done`：保留现有 verification gate 后迁移。

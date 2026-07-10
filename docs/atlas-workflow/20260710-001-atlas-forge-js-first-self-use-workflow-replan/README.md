@@ -30,4 +30,4 @@
 
 ## 下一步
 
-Phase 1 已完成 JS task-id/slug 垂直切片。下一步进入 Phase 2 的只读 task repository slice，先迁移 `list` 与 `show`，再处理 lifecycle 写路径。
+Phase 1 和 Phase 2A 已完成：task slug、`list` 与 `show` 已进入 JS。下一步进入 Phase 2B，迁移 task creation/lifecycle 写路径并增加 `blocked/archived`。

@@ -63,8 +63,8 @@ setup_repo() {
 }
 
 bash -n "$BIN"
-node --test "$ATLAS_FORGE_ROOT/workflow/tests/js/task-id.test.js" >/dev/null
-pass "task id JavaScript contract"
+node --test "$ATLAS_FORGE_ROOT"/workflow/tests/js/*.test.js >/dev/null
+pass "workflow JavaScript contracts"
 
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 ]]; then
   bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
@@ -90,6 +90,23 @@ grep -Fxq 'title: 纯中文标题' "$CODEX_WORKFLOW_ROOT/tasks/$unicode_slug_id.
 expect_fail "multiline task title" "$BIN" init-task $'bad\ntitle' "invalid title"
 grep -q 'unsafe title: titles must be a single line' "$TMP_ROOT/expect-fail.err"
 pass "task id slug behavior"
+
+$BIN list --all > "$TMP_ROOT/task-list.out"
+grep -Fxq $'todo\t'"$unicode_slug_id"$'\t纯中文标题' "$TMP_ROOT/task-list.out"
+$BIN show "$unicode_slug_id" > "$TMP_ROOT/task-show.out"
+cmp -s "$CODEX_WORKFLOW_ROOT/tasks/$unicode_slug_id.md" "$TMP_ROOT/task-show.out"
+expect_fail "list invalid days" "$BIN" list --days 0
+grep -Fxq 'invalid days: 0' "$TMP_ROOT/expect-fail.err"
+expect_fail "list unknown option" "$BIN" list --unknown
+grep -Fxq 'usage: codex-workflow list [--all|--days <n>|--days=<n>]' "$TMP_ROOT/expect-fail.err"
+expect_fail "show unknown task" "$BIN" show missing-task
+grep -Fxq 'unknown task: missing-task' "$TMP_ROOT/expect-fail.err"
+grep -Fxq 'known tasks:' "$TMP_ROOT/expect-fail.err"
+printf '%s\n' 'id: broken' > "$CODEX_WORKFLOW_ROOT/tasks/broken.md"
+expect_fail "list malformed task" "$BIN" list --all
+grep -Fq "malformed task file: $CODEX_WORKFLOW_ROOT/tasks/broken.md missing title status created updated" "$TMP_ROOT/expect-fail.err"
+rm -f "$CODEX_WORKFLOW_ROOT/tasks/broken.md"
+pass "task list and show JavaScript behavior"
 
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"

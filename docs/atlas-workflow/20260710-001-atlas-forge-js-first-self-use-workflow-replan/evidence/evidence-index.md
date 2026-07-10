@@ -11,6 +11,7 @@ evidence_status: planning-complete
 | 实施分工 | [staffing.md](../staffing.md) | 后续 slice ownership |
 | 上一轮发布合同 | [release contract](../../20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md) | 继续有效的 release 防线 |
 | Phase 1 结论 | [phase-1-conclusion.md](./phase-1-conclusion.md) | JS task-id/slug keeper slice 与验证 |
+| Phase 2A 结论 | [phase-2a-conclusion.md](./phase-2a-conclusion.md) | JS task repository `list/show` 读取切片 |
 
 ## 本轮只读事实
 
@@ -31,3 +32,6 @@ evidence_status: planning-complete
 - Phase 1 hermetic repo contract：通过。
 - Phase 1 Atlas dev-sync integration：通过，`workflow/bin/lib/` 递归同步且 release/Multica sentinels 不变。
 - Phase 1 完整 `workflow/tests/contract.sh`：通过。
+- Phase 2A Node tests：17/17 通过。
+- Phase 2A 删除 list-only Bash/Python，并保留 lifecycle 共用 validator。
+- Phase 2A hermetic repo contract 与完整 `workflow/tests/contract.sh`：通过。
