@@ -6,10 +6,10 @@ description: Use the Atlas team flow with Codex native subagents for discussion,
 Use the Atlas native team flow for this request.
 
 `$atlas-workflow:team` is the default Atlas team entrypoint. It must use Codex
-native subagents through `multi_agent_v1.spawn_agent`,
-`multi_agent_v1.wait_agent`, and `multi_agent_v1.close_agent`. This skill is a
-native-only contract: if native subagent tools are unavailable, stop instead of
-substituting another orchestration implementation.
+native subagents through the directly exposed `collaboration.spawn_agent` and
+`collaboration.wait_agent` tools. This skill is a native-only contract: if
+native subagent tools are unavailable, stop instead of substituting another
+orchestration implementation.
 
 ## 输出语言
 
@@ -20,11 +20,35 @@ substituting another orchestration implementation.
 ## Native Tool Gate
 
 1. Confirm native subagent tools are callable.
-   - If `multi_agent_v1.spawn_agent`, `multi_agent_v1.wait_agent`, and `multi_agent_v1.close_agent` are already available, use them directly.
-   - If they are not available but `tool_search` is available, search for `multi_agent_v1 spawn_agent wait_agent close_agent` and use the exposed tools.
-   - If the native tools still are not callable, stop and tell the user that `$atlas-workflow:team` requires Codex native subagents; ask for an explicit alternate workflow before proceeding.
+   - `collaboration.spawn_agent` and `collaboration.wait_agent` must both be available.
+   - Invoke collaboration tools directly. Do not nest them inside `functions.exec`, shell commands, background processes, or another tool wrapper.
+   - If either required tool is not callable, stop and tell the user that `$atlas-workflow:team` requires Codex native subagents; ask for an explicit alternate workflow before proceeding.
 2. Never replace a requested native team run with shell-managed lanes, background processes, or another non-native delegate mechanism.
 3. Keep the main Codex as orchestrator. Subagents provide lane work, implementation slices, review, or verification; the main Codex owns final synthesis, file integration, and final user reporting.
+
+## Native Collaboration Lifecycle
+
+1. Spawn a lane with `collaboration.spawn_agent`. Use only the tool's exposed
+   arguments: `task_name`, `message`, and optional `fork_turns`.
+   - `task_name` must use lowercase letters, digits, and underscores.
+   - Put the role, permission boundary, expected output, model or reasoning
+     preference, and stop conditions in the prompt and `staffing.md`; do not
+     invent unsupported spawn arguments such as `agent_type`, `model`, or
+     `reasoning_effort`.
+2. Use bounded, repeated `collaboration.wait_agent` calls to wait for mailbox
+   updates until every planned lane is terminal or the round reaches its stated
+   timeout or interruption condition. Agent messages and final answers are the
+   lane results; a single wait returning does not imply that every lane finished.
+3. Use `collaboration.list_agents` to inspect live agents and their current
+   status before adding or reusing lanes. Respect the concurrency limit reported
+   by the current session.
+4. Use `collaboration.send_message` to deliver information without starting an
+   idle agent turn. Use `collaboration.followup_task` when an idle completed
+   agent should perform another bounded turn.
+5. Completed agents require no cleanup and remain available for reuse. Use
+   `collaboration.interrupt_agent` only to stop a still-running turn after a
+   timeout, direction change, or explicit cancellation. Interrupting does not
+   close or delete the agent and must not be used as completion cleanup.
 
 ## Task Setup
 
@@ -329,13 +353,17 @@ Agent planning rules:
    - required local tools, browser/MCP/runtime targets, credentials, or external blockers;
    - existing workflow artifacts and acceptance rows.
 3. Choose only the roles the task needs, and list omitted roles with reasons.
-4. There is no hard agent-count cap in the skill. Set `--agents <N>` to the
-   number of active native roles/subagents actually planned. Keep the number
-   small enough to integrate safely, but scale up when the task has separable
-   domains or independent evidence lanes.
+4. There is no hard agent-count cap in the skill, but the current session has a
+   finite runtime concurrency limit. Use `collaboration.list_agents` to
+   inventory live agents, respect the session-reported limit, set
+   `--agents <N>` to the native roles/subagents actually planned, and schedule
+   waves when the plan exceeds the available slots. Keep the number small
+   enough to integrate safely, but scale up when the task has separable domains
+   or independent evidence lanes.
 5. For each active role, define:
    - role name;
-   - native `agent_type` (`explorer`, `worker`, `default`, or another available role);
+   - a valid lowercase letters/digits/underscores `task_name`;
+   - requested runtime behavior or profile, expressed in the prompt rather than unsupported spawn arguments;
    - read/write permission;
    - owned files, modules, or evidence surfaces;
    - required tools or runtime access;
@@ -483,10 +511,11 @@ or omit roles according to the Agent Plan. Examples: `domain-architect`,
 `api-reviewer`, `ui-verifier`, `security-critic`, `docs-reviewer`,
 `migration-risk`, or `evidence-qa`.
 
-Run planned discuss roles as native subagents, normally `agent_type: explorer`
-or `default` depending on the task. Keep prompts read-only unless the user
-explicitly asks a discuss lane to edit files. After all lanes finish or a
-bounded timeout/interruption occurs, synthesize `decision.md` and `staffing.md`.
+Run planned discuss roles as native subagents. Express explorer-style or
+general-purpose behavior in each prompt instead of passing an unsupported
+`agent_type` argument. Keep prompts read-only unless the user explicitly asks a
+discuss lane to edit files. After all lanes finish or a bounded
+timeout/interruption occurs, synthesize `decision.md` and `staffing.md`.
 
 If a lane fails or is interrupted, do not pretend consensus exists. Write the partial evidence into `round-*.md`, mark the record `failed` or `interrupted`, and only proceed when the remaining evidence is enough and the risk is low enough to justify direct main-agent action.
 
@@ -715,7 +744,9 @@ Native loop requirements:
 7. Record terminal loop status with:
    - `~/.codex/workflow/bin/codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <loop-file> --iterations <N>`
 8. Use `loop-done` only when the acceptance evidence is concrete and current. Use `loop-incomplete` when iterations or user-approved time run out without proof. Use `loop-failed` for failed native agents, invalid artifacts, or blocked verification. Use `loop-timeout` for time-budget exhaustion.
-9. Close completed subagents with `multi_agent_v1.close_agent` when their results have been integrated or recorded.
+9. After integrating results, leave completed subagents idle and reusable. Use
+   `collaboration.interrupt_agent` only for a lane that is still running and
+   must be stopped; it is not completion cleanup and does not delete the agent.
 
 ## Decision And Promotion
 
