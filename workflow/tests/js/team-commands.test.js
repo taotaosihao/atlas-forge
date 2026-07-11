@@ -106,35 +106,11 @@ function writeNativeArtifacts(paths, taskId) {
 
 - backend: native
 
-## Agent Plan
-
-Tools and Read/Write ownership are assigned to the executor.
-
-## Active Roles
-
-The executor and reviewer own this bounded phase.
-
-## Omitted Roles
-
-No browser role is required for this command-line slice.
-
-## Runtime Staffing Adjustments
-
-No runtime adjustment was required.
-
-## Phase Gates
-
-The contract suite is the required phase gate.
-
-## Commit Boundaries
-
-Commit Boundary follows successful focused verification.
-
-## Concurrency And Write Boundaries
+## Ownership
 
 Only the integration owner writes the dispatcher.
 
-## Verification Evidence
+## Verification
 
 Node tests and repository contracts provide evidence.
 `,
@@ -250,7 +226,7 @@ test("finalize rejects invalid artifacts without changing running state", (t) =>
   const { decision, round, staffing } = writeNativeArtifacts(paths, taskId);
   fs.writeFileSync(
     staffing,
-    "# Staffing\n\n- backend: native\n\n## Evidence\nThis file is substantive but deliberately incomplete.\n",
+    "# Staffing\n\n- backend: native\n\nPending discussion.\n",
   );
   const parsed = parseRecordFinalizeArgs([
     taskId,
@@ -262,7 +238,7 @@ test("finalize rejects invalid artifacts without changing running state", (t) =>
   ]);
   assert.throws(
     () => runRecordFinalize(parsed, { environment }),
-    /team staffing file is missing required native staffing fields/,
+    /team staffing file is not substantive/,
   );
   assert.equal(readJsonObject(taskStateFile(paths, taskId)).active_team.status, "running");
 

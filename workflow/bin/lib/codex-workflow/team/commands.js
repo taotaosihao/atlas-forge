@@ -312,34 +312,6 @@ function validateNativeArtifact(paths, taskId, label, file) {
   if (content.length < 20) {
     throw new CommandError(`${label} file is not substantive: ${absolute}`);
   }
-  if (label === "team staffing") {
-    const requiredSections = [
-      "Agent Plan",
-      "Active Roles",
-      "Omitted Roles",
-      "Runtime Staffing Adjustments",
-      "Phase Gates",
-      "Commit Boundaries",
-      "Concurrency And Write Boundaries",
-      "Verification Evidence",
-    ];
-    const missing = requiredSections.filter(
-      (section) =>
-        !new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "im").test(
-          text,
-        ),
-    );
-    for (const token of ["Tools", "Read/Write", "Commit Boundary"]) {
-      if (!text.includes(token)) {
-        missing.push(token);
-      }
-    }
-    if (missing.length > 0) {
-      throw new CommandError(
-        `${label} file is missing required native staffing fields: ${missing.join(", ")}: ${absolute}`,
-      );
-    }
-  }
   return absolute;
 }
 

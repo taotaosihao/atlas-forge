@@ -7,86 +7,15 @@ backend: native
 
 ## Agent Plan
 
-| Role | Agent Type | Count | Read/Write | Owned Scope | Tools | Deliverable | Join Gate |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |  |  |
+List only roles that materially help the current task. Omit this section when a
+single owner is enough.
 
-## Active Roles
+## Ownership
 
-| Role | Why Active | Agent Type | Count | Read/Write | Owned Scope |
-| --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |
+- Writable owner and scope:
+- Read-only reviewers, if any:
+- Integration owner:
 
-## Omitted Roles
+## Verification
 
-| Role | Omission Reason |
-| --- | --- |
-|  |  |
-
-## Runtime Staffing Adjustments
-
-| Trigger | Role Change | Model | Reasoning Effort | Why Now | Ledger/Event |
-| --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |
-
-## Phase Gates
-
-| Phase | Owner | Input | Output | Required Gate | Commit Boundary |
-| --- | --- | --- | --- | --- | --- |
-|  |  |  |  |  |  |
-
-## First Code Slice Guard Staffing
-
-| Field | Owner | Evidence |
-| --- | --- | --- |
-| First-code guard classification |  |  |
-| first_code_slice |  |  |
-| first_code_owner |  |  |
-| first_code_verification |  |  |
-| allowed_contract_gate_only_until |  |  |
-| stop_if_no_code_by_phase |  |  |
-| gate_parallelization_or_deferral_plan |  |  |
-
-Contract, scanner, fixture, and evidence-only preparation must stay inside the
-named phase/step budget before the first implementation diff. Hard safety gates
-remain blockers for acceptance and release.
-
-## Product/UI Gate Staffing
-
-| Field | Owner | Evidence |
-| --- | --- | --- |
-| Product/UI gate classification |  |  |
-| first_operable_user_flow |  |  |
-| browser_entrypoint |  |  |
-| served_ui_validation_action |  |  |
-| ui_data_mode |  |  |
-| required_safety_gates |  |  |
-| stop_if_no_ui_by_phase |  |  |
-
-Served UI evidence and hard safety-gate evidence are separate acceptance inputs.
-Served UI evidence does not replace `no-data-plane-direct`, `no-cloud-runtime`,
-Provider credential, or browser network boundary evidence. Correctly labeled
-headless/network evidence may satisfy safety gates, but not UI/product
-acceptance by itself.
-
-## Commit Boundaries
-
-- Each implementation step or acceptance slice that changes files:
-- Verification required before each commit:
-- Commit owner:
-- Allowed no-commit exceptions:
-
-## Concurrency And Write Boundaries
-
-- Writable workers:
-- Disjoint write sets:
-- Main Codex integration owner:
-
-## Verification Evidence
-
-- Commands:
-- Phase conclusion files:
-- Temporary raw run directory:
-- Browser/API/runtime evidence kept in git:
-- Artifact paths:
-- Stop conditions:
+- Required checks or evidence:

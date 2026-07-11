@@ -98,7 +98,7 @@ test("replaces only exact team placeholders and then preserves rendered files", 
     `updated\t${path.join(teamDir, "staffing.md")}`,
   ]);
   assert.match(fs.readFileSync(path.join(teamDir, "decision.md"), "utf8"), /backend: native/);
-  assert.match(fs.readFileSync(path.join(teamDir, "staffing.md"), "utf8"), /## Agent Plan/);
+  assert.match(fs.readFileSync(path.join(teamDir, "staffing.md"), "utf8"), /## Ownership/);
 
   const decisionFile = path.join(teamDir, "decision.md");
   fs.appendFileSync(decisionFile, "\nSubstantive decision.\n", "utf8");
