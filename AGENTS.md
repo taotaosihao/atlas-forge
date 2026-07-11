@@ -32,4 +32,4 @@
 | 跨域或最终集成 | `bash workflow/tests/contract.sh`，并核对 forbidden paths 与 Multica hard fingerprints |
 
 - 先运行最小专项检查，再按影响面扩大；无法运行的命令必须记录具体原因。
-- 每个独立 phase 保持可回退的 Conventional Commit；提交前检查 staged diff、`git diff --cached --check` 和 forbidden paths。
+- 默认倾向按适中、可独立理解/验证/回退的逻辑成果创建 Conventional Commit；不按每个 step、slice 或 fix round 机械提交，也不把整个 roadmap 堆成超大 diff。只 stage 当前任务拥有的 paths/hunks，提交前检查 staged diff、`git diff --cached --check` 和 forbidden paths；commit 不推导出 push、release 或安装态 mutation 权限。

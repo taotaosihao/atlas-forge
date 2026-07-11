@@ -28,8 +28,6 @@ const KEYS = [
   "acceptance_refs",
   "required_checks",
   "commit_policy",
-  "max_question_rounds",
-  "fix_loop_policy",
   "output_contract",
 ];
 
@@ -55,9 +53,7 @@ function validateBrief(value) {
   expectStringArray(value, "forbidden_paths", errors);
   expectStringArray(value, "acceptance_refs", errors);
   expectStringArray(value, "required_checks", errors);
-  expectEnum(value, "commit_policy", ["required_for_file_changes", "required_always", "no_change_allowed"], errors);
-  expectPositiveInteger(value, "max_question_rounds", errors);
-  expectEnum(value, "fix_loop_policy", ["unbounded_until_clean_or_terminal"], errors);
+  expectEnum(value, "commit_policy", ["logical_outcome", "no_change_allowed"], errors);
   expectEnum(value, "output_contract", ["final_message_json_only"], errors);
   expectGitRevision(value.repo, value.base_sha, "base_sha", errors);
   return errors;

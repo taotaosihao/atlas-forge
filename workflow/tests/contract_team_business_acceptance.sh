@@ -177,9 +177,7 @@ write_sdd_lint_fixture() {
   "forbidden_paths": ["plugins/atlas-workflow/skills"],
   "acceptance_refs": ["AC-1"],
   "required_checks": ["workflow/tests/contract.sh"],
-  "commit_policy": "required_for_file_changes",
-  "max_question_rounds": 1,
-  "fix_loop_policy": "unbounded_until_clean_or_terminal",
+  "commit_policy": "logical_outcome",
   "output_contract": "final_message_json_only"
 }
 JSON

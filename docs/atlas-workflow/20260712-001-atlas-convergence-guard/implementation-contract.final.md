@@ -60,8 +60,8 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 | AC-4 | Team 常驻 skill 不再含 dynamic staffing、逐轮 commit、开放式 clean repair 或无条件 whole-branch review；SDD/BAF 按需加载 | yes | focused `rg`、plugin validation、repo contract |
 | AC-5 | Reviewer 发现自由、自动 repair 有限、full-roadmap 连续执行、适中自动 commit 和单一滚动 checkpoint 在权威规则中清晰表达 | yes | skill contract assertions |
 | AC-6 | 项目 checkout、Multica、release 与最小验证边界保持；项目 commit 规则按逻辑成果而非机械 phase | yes | project AGENTS review 与 repo contract |
-| AC-7 | 重复 prose 存在性断言被必要行为/不变量检查替代，源码不再出现 `unbounded_until_clean_or_terminal` | yes | `rg`、Team SDD/native 与全量合同 |
-| AC-8 | 预先存在的 Agent model policy、planner/browser-verifier 和对应测试 hunks未被覆盖或夹带本任务 commit | yes | staged diff audit |
+| AC-7 | 重复 prose 存在性断言被必要行为/不变量检查替代；活动源码不再出现 `unbounded_until_clean_or_terminal` 或 `max_question_rounds`，SDD commit policy 使用逻辑成果而非逐文件/逐轮提交 | yes | `rg`、Team SDD/native 与全量合同 |
+| AC-8 | 预先存在的独立 Agent/model-policy 文件及对应测试 hunks不被覆盖或 stage；与 Team skill 重叠的模型策略语义在减法重写中完整保留并单独审计 | yes | staged diff audit |
 
 ## Real Validation Plan
 
@@ -102,6 +102,6 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 - [ ] Scope stayed inside the contract
 - [ ] Required acceptance criteria passed
 - [ ] Required validation rows have evidence
-- [ ] Existing user changes were preserved and excluded from task commits
+- [ ] Existing user changes were preserved; standalone user-owned files/hunks were excluded from task commits and overlapping Team semantics were retained
 - [ ] Cache, marketplace, runtime, release, and Multica forbidden paths stayed unchanged
 - [ ] Residual risks are recorded

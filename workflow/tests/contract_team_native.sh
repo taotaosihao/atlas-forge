@@ -124,4 +124,23 @@ $BIN team-status "$native_roles_id" > "$TMP_ROOT/native-dynamic-roles-status.out
 grep -q "team_backend: native" "$TMP_ROOT/native-dynamic-roles-status.out"
 grep -q "team_agents: 4" "$TMP_ROOT/native-dynamic-roles-status.out"
 grep -q "team_roles: domain-architect,api-reviewer,ui-verifier,evidence-qa" "$TMP_ROOT/native-dynamic-roles-status.out"
+
+native_execute_id="$($BIN init-task "contract native execute admission" "native execute admission")"
+$BIN start "$native_execute_id"
+write_ready_artifacts "$native_execute_id"
+native_execute_state="$CODEX_WORKFLOW_ROOT/artifacts/$native_execute_id/state.json"
+native_execute_runtime="$CODEX_WORKFLOW_ROOT/artifacts/$native_execute_id/runtime.jsonl"
+native_execute_state_before="$(cksum "$native_execute_state")"
+native_execute_runtime_before="$(cksum "$native_execute_runtime")"
+expect_fail "native execute start requires authorization ref" "$BIN" team-record-start "$native_execute_id" "execute objective" --backend native --mode execute --agents 1 --roles executor
+[[ "$(cksum "$native_execute_state")" == "$native_execute_state_before" ]]
+[[ "$(cksum "$native_execute_runtime")" == "$native_execute_runtime_before" ]]
+$BIN team-record-start "$native_execute_id" "execute objective" --backend native --mode execute --agents 1 --roles executor --authorization-ref user-message:execute-contract >/dev/null
+grep -Eq '"authorization_ref":[[:space:]]*"user-message:execute-contract"' "$native_execute_state"
+
+native_promote_state_before="$(cksum "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json")"
+expect_fail "native execute promotion requires authorization ref" "$BIN" team-promote "$native_roles_id" --to execute
+[[ "$(cksum "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json")" == "$native_promote_state_before" ]]
+$BIN team-promote "$native_roles_id" --to execute --authorization-ref user-message:promote-contract >/dev/null
+grep -Eq '"authorization_ref":[[:space:]]*"user-message:promote-contract"' "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json"
 pass "native team record observability"

@@ -434,11 +434,9 @@ for template in implementation-contract.md implementation-contract.final.md; do
   ! grep -q '^- Product/UI gate:' "$file"
 done
 grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROOT/workflow/templates/gate-checklist.md"
-for skill in task clarify team; do
-  grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/$skill/SKILL.md"
-  grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/$skill/SKILL.md"
-done
-pass 'templates, gate checklist, and skills adopt the strict semantic lint command'
+grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+pass 'templates, gate checklist, and clarify adopt the strict semantic lint command'
 
 resolved_plugin_root="$(cd "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/task/../.." && pwd)"
 (cd "$TMP_ROOT" && node "$resolved_plugin_root/scripts/codex-implementation-contract-lint" \

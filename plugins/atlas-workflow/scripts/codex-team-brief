@@ -18,8 +18,7 @@ function usage() {
 options:
   --contract <file>           Sprint Contract markdown to compile into evidence-manifest.json
   --forbidden <path>           repeatable, comma-separated allowed
-  --commit-policy <policy>     required_for_file_changes|required_always|no_change_allowed
-  --max-question-rounds <n>    default: 2`);
+  --commit-policy <policy>     logical_outcome|no_change_allowed`);
 }
 
 function parseArgs(argv) {
@@ -34,8 +33,7 @@ function parseArgs(argv) {
     forbidden: [],
     checks: [],
     contract: null,
-    commitPolicy: "required_for_file_changes",
-    maxQuestionRounds: 2,
+    commitPolicy: "logical_outcome",
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -86,10 +84,6 @@ function parseArgs(argv) {
       options.commitPolicy = argv[++i];
     } else if (arg.startsWith("--commit-policy=")) {
       options.commitPolicy = arg.slice("--commit-policy=".length);
-    } else if (arg === "--max-question-rounds") {
-      options.maxQuestionRounds = Number(argv[++i]);
-    } else if (arg.startsWith("--max-question-rounds=")) {
-      options.maxQuestionRounds = Number(arg.slice("--max-question-rounds=".length));
     } else {
       throw new Error(`unknown option: ${arg}`);
     }
@@ -286,8 +280,6 @@ function writeBrief(options) {
     acceptance_refs: options.acceptance,
     required_checks: options.checks,
     commit_policy: options.commitPolicy,
-    max_question_rounds: options.maxQuestionRounds,
-    fix_loop_policy: "unbounded_until_clean_or_terminal",
     output_contract: "final_message_json_only",
   };
   const errors = validateBrief(brief);

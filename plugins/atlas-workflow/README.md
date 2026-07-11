@@ -24,52 +24,21 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
-Atlas has separate team entrypoints with separate rule sets.
-
-Native entrypoint: use `$atlas-workflow:team` before execution when a task
-changes behavior, touches multiple files, has meaningful implementation choices,
-needs evaluator/reviewer judgment, or should produce a lightweight
-implementation contract. It requires Codex native subagent tools and records
-native rounds with `team-record-start`, `team-record-finalize`, and
-`team-loop-record`. Native team uses a Multica-style dynamic Agent Plan: choose
-active roles by task shape, list omitted roles, define phase gates, write
-boundaries, verification evidence, and concurrency strategy; three roles are
-only a common small-round seed, not a limit.
+Atlas has separate native and legacy team entrypoints. Use
+`$atlas-workflow:team` when the user asks for multiple agents, independent lanes
+materially reduce latency, or a distinct specialist/reviewer materially reduces
+risk. Multiple files and behavior changes do not by themselves require Team.
+Native Team records lifecycle state with `team-record-start`,
+`team-record-finalize`, and `team-loop-record`; choose only useful roles and keep
+write ownership disjoint.
 
 Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
 flow debugging, or explicit user acceptance of the CLI-backed team behavior.
-Tiny precise fixes may still use direct `$atlas-workflow:task` flow when scope
-and verification are obvious, and explicit user requests to avoid multi-agent
-should be honored when safe.
-
-## Short Request Intake Gate
-
-One-line or low-information requests are not enough to start coding by default.
-First run a short intake check when the request has multiple plausible meanings,
-lacks an acceptance path, or omits important user, data, permission, deployment,
-or workflow boundaries. Give critical feedback before implementation: name the
-main ambiguity, risk, simpler alternative, or stop condition.
-
-Direct execution is allowed only for a tiny escape hatch: the affected surface,
-expected behavior, validation path, and risk are all clear; the change does not
-touch data, permissions, deployment, migration, product strategy, or architecture
-boundaries; and the scope is normally a single file or similarly small. If the
-tiny classification is uncertain, ask one short question before coding.
-
-Non-tiny work must have auditable documentation before code changes. Existing
-external issues, PRDs, or design docs may count as equivalent evidence, but the
-current workflow artifact must cite them and fill any missing acceptance,
-verification, risk, and stop-condition gaps. At minimum, use `context.md` and
-`spec.md`; for execution-ready changes, also use a project doc or lightweight
-implementation contract.
-
-This gate applies to implementation-adjacent Atlas entries, including
-`$atlas-workflow:task`, `$atlas-workflow:cw`, and `$atlas-workflow:worktree`.
-`$atlas-workflow:intake` runs grilling-style intake: it asks one blocking
-question at a time, recommends an answer for each decision, looks up codebase
-facts instead of asking for them, and does not enact the plan until the user
-confirms shared understanding. `$atlas-workflow:clarify` turns the chosen
-direction into documented execution boundaries.
+Clear, low-risk, verifiable work may use `$atlas-workflow:task` directly even
+when it touches several files. Use `$atlas-workflow:intake` only for blocking
+intent/scope decisions and `$atlas-workflow:clarify` when a chosen direction
+still needs execution boundaries. A short request alone is not a reason to build
+a planning or artifact process.
 
 ## 输出语言
 
@@ -93,59 +62,24 @@ They share the same task artifact directory:
 
 ## Lightweight Implementation Contracts
 
-For non-tiny local implementation work, Atlas workflow uses a lightweight
-contract before coding as the implementation artifact that captures the selected
-scope, acceptance rows, evidence paths, and stop conditions. For non-tiny work
-this contract is normally formed from or checked by `$atlas-workflow:team`;
-direct `$atlas-workflow:task` may use it without team only for tiny work or an
-explicit safe bypass. Use `workflow/templates/implementation-contract.md` when
-the task changes user-visible behavior, touches multiple files, changes
-UI/API/CLI/background-job behavior, or has meaningful edge cases. Tiny precise
-fixes can skip it when the acceptance path is obvious.
-
-This contract records goal, non-goals, acceptance criteria, real validation
-steps, evidence paths, and stop conditions. Multica uses the fuller sprint
-contract flow for multi-agent PRD implementation.
+Use a lightweight contract when ambiguity, risk, cross-session handoff, audit,
+or release value justifies the extra artifact. Reuse an existing issue, PRD,
+spec, or contract whenever it already supplies the required boundary. Multiple
+files alone do not require a new contract or Team round. A contract should stay
+small and record only goal, non-goals, acceptance, real validation, and true
+return conditions.
 
 ## Concise Phase Evidence
 
-Atlas phase evidence should be small enough to review. Keep git evidence to
-phase conclusion files by default: `phase-review-report.md`,
-`defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and
-`gate-checklist.md`. Use `review-checklist.md`, `verification-checklist.md`,
-final screenshots, or customer-facing HTML/PDF/sign-off deliverables only when
-they prove acceptance.
-
-Raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command
-output, retry logs, worker debug JSONL, API dumps, localhost or port status,
-and intermediate repair output belong in the temporary run directory by
-default, not git. Reviewers inspect phase conclusion files first and open raw
-artifacts only for blocking defects, disputed gates, or missing conclusion
-references. Target each phase at 10 git evidence files or fewer and 1 MB or
-less; explain exceptions in `phase-review-report.md`.
+Keep Git evidence to the smallest durable conclusion needed for review or
+handoff. Raw logs, Playwright output, traces, videos, screenshots, dumps, retry
+logs, port status, and intermediate repair output stay outside Git by default.
 
 ## Workflow Artifact Categories
 
-Classify Atlas process docs before adding them to git:
-
-- Durable handoff: repo docs that future implementers should read, such as
-  `README.md`, `clarify.md`, `team-decision.md`, `staffing.md`,
-  `contract-index.md`, and `implementation-contract.final.md`.
-- Phase conclusion: small reviewable gate outputs such as
-  `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or
-  `evidence-manifest.json`, and `gate-checklist.md`.
-- Workflow working notes: `intake.md`, early `context.md`, `analysis.md`,
-  draft `decision.md`, draft `spec.md`, `team/round-*.md`, and loop ledgers.
-  Keep these under `workflow/artifacts/<task-id>/` by default; mirror only the
-  confirmed summary into durable handoff docs.
-- Temporary raw run: raw logs, traces, bulk screenshots, dumps, retry output,
-  and other machine output. Keep this outside git unless a blocking gate needs
-  the exact artifact.
-
-Use process-specific scaffold commands before filling Atlas artifacts:
-`codex-workflow scaffold-intake`, `scaffold-brainstorm`, `scaffold-clarify`,
-`scaffold-team`, and `scaffold-phase`. These commands create the expected
-templates and keep agents from inventing file shapes.
+Workflow working notes stay under `workflow/artifacts/<task-id>/`. Mirror only a
+confirmed summary that future implementers actually need. Do not create
+staffing, evidence, checklist, or phase files solely to satisfy a file list.
 
 ## Source vs Installed Copy
 
@@ -156,8 +90,9 @@ Do not treat `plugins/cache/` as the source of truth.
 
 ## Refresh After Changes
 
-If you change this plugin source from the Atlas Forge checkout, use the local
-development refresh command before starting a new session:
+Refresh the installed development copy only when the task explicitly includes an
+installation-state change. Ordinary source development and hermetic validation
+must not mutate cache/runtime state. The explicit refresh command is:
 
 ```bash
 scripts/update-atlas-workflow-plugin

@@ -14,8 +14,6 @@
     "acceptance_refs",
     "required_checks",
     "commit_policy",
-    "max_question_rounds",
-    "fix_loop_policy",
     "output_contract"
   ],
   "properties": {
@@ -31,9 +29,7 @@
     "forbidden_paths": { "type": "array", "items": { "type": "string" } },
     "acceptance_refs": { "type": "array", "items": { "type": "string" } },
     "required_checks": { "type": "array", "items": { "type": "string" } },
-    "commit_policy": { "type": "string", "enum": ["required_for_file_changes", "required_always", "no_change_allowed"] },
-    "max_question_rounds": { "type": "integer" },
-    "fix_loop_policy": { "type": "string", "enum": ["unbounded_until_clean_or_terminal"] },
+    "commit_policy": { "type": "string", "enum": ["logical_outcome", "no_change_allowed"] },
     "output_contract": { "type": "string", "enum": ["final_message_json_only"] }
   },
   "additionalProperties": false
