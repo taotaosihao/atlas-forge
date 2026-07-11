@@ -16,7 +16,7 @@ const { getTaskField } = require("../task/repository");
 const { readJsonObject, taskStateFile, timestampSeconds } = require("../task/runtime");
 
 const RECORD_START_USAGE =
-  'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"';
+  'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>" [--authorization-ref <user-message-ref>]';
 const RECORD_FINALIZE_USAGE =
   "usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>";
 const LOOP_RECORD_USAGE =
@@ -24,7 +24,7 @@ const LOOP_RECORD_USAGE =
 const STATUS_USAGE = "usage: codex-workflow team-status <task-id>";
 const STOP_USAGE = "usage: codex-workflow team-stop <task-id>";
 const PROMOTE_USAGE =
-  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish";
+  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish [--authorization-ref <user-message-ref>]";
 
 function teamDir(paths, taskId) {
   return path.join(taskArtifactDir(paths, taskId), "team");
@@ -119,6 +119,16 @@ function validateReason(value, label) {
   }
 }
 
+function validateExecutionAuthorization(mode, authorizationRef) {
+  if (mode !== "execute") {
+    return;
+  }
+  if (!authorizationRef) {
+    throw new CommandError("missing execute authorization ref");
+  }
+  validateReason(authorizationRef, "execute authorization ref");
+}
+
 function parseRecordStartArgs(argv) {
   if (argv.length < 2) {
     throw new CommandError(RECORD_START_USAGE);
@@ -126,12 +136,13 @@ function parseRecordStartArgs(argv) {
   const parsed = parseFlags(argv, 2, {
     name: "team-record-start",
     usage: RECORD_START_USAGE,
-    defaults: { backend: "", mode: "", agents: "", roles: "" },
+    defaults: { backend: "", mode: "", agents: "", roles: "", authorizationRef: "" },
     flags: {
       "--backend": "backend",
       "--mode": "mode",
       "--agents": "agents",
       "--roles": "roles",
+      "--authorization-ref": "authorizationRef",
     },
     required: [
       ["backend", "missing team backend"],
@@ -149,6 +160,7 @@ function runRecordStart(parsed, options = {}) {
   validatePositiveInteger(parsed.agents, "agents");
   validateQuery(parsed.objective);
   validateReason(parsed.roles, "team roles");
+  validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
   const { clock, environment, paths } = commandOptions(options);
   prepareTaskCommand(paths, parsed.taskId, clock);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
@@ -173,6 +185,7 @@ function runRecordStart(parsed, options = {}) {
         "active_team.objective": parsed.objective,
         "active_team.agents": parsed.agents,
         "active_team.roles": parsed.roles,
+        "active_team.authorization_ref": parsed.mode === "execute" ? parsed.authorizationRef : "",
         "active_team.staffing": staffing,
         "active_team.temp_dir": "",
       },
@@ -186,16 +199,20 @@ function runRecordStart(parsed, options = {}) {
     `${parsed.backend}/${parsed.mode} roles=${parsed.roles}`,
     clock,
   );
+  const lines = [
+    `task_id: ${parsed.taskId}`,
+    `backend: ${parsed.backend}`,
+    `mode: ${parsed.mode}`,
+    "status: running",
+    `decision: ${decisionFile}`,
+    `staffing: ${staffingFile}`,
+  ];
+  if (parsed.mode === "execute") {
+    lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+  }
   return {
     exitCode: 0,
-    lines: [
-      `task_id: ${parsed.taskId}`,
-      `backend: ${parsed.backend}`,
-      `mode: ${parsed.mode}`,
-      "status: running",
-      `decision: ${decisionFile}`,
-      `staffing: ${staffingFile}`,
-    ],
+    lines,
   };
 }
 
@@ -574,8 +591,8 @@ function parsePromoteArgs(argv) {
   const parsed = parseFlags(argv, 1, {
     name: "team-promote",
     usage: PROMOTE_USAGE,
-    defaults: { target: "" },
-    flags: { "--to": "target" },
+    defaults: { target: "", authorizationRef: "" },
+    flags: { "--to": "target", "--authorization-ref": "authorizationRef" },
   });
   if (!new Set(["execute", "worktree", "finish"]).has(parsed.target)) {
     throw new CommandError(`invalid promotion target: ${parsed.target}`);
@@ -584,6 +601,7 @@ function parsePromoteArgs(argv) {
 }
 
 function runPromote(parsed, options = {}) {
+  validateExecutionAuthorization(parsed.target, parsed.authorizationRef);
   const { clock, paths } = commandOptions(options);
   const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
@@ -593,6 +611,14 @@ function runPromote(parsed, options = {}) {
     mode = "execute";
   }
   const status = `promoted:${parsed.target}`;
+  const stateUpdates = {
+    "active_team.mode": mode,
+    "active_team.status": status,
+    "active_team.promoted_to": parsed.target,
+  };
+  if (parsed.target === "execute") {
+    stateUpdates["active_team.authorization_ref"] = parsed.authorizationRef;
+  }
   updateTaskCommand(
     paths,
     parsed.taskId,
@@ -601,26 +627,29 @@ function runPromote(parsed, options = {}) {
       active_team_status: status,
       active_team_decision: decision,
     },
-    {
-      "active_team.mode": mode,
-      "active_team.status": status,
-      "active_team.promoted_to": parsed.target,
-    },
+    stateUpdates,
     clock,
   );
+  const authorizationLine = parsed.target === "execute"
+    ? `- authorization_ref: ${parsed.authorizationRef}\n`
+    : "";
   fs.appendFileSync(
     decisionFile,
-    `\n## Promotion\n\n- promoted_to: ${parsed.target}\n- created_at: ${timestampSeconds(clock)}\n`,
+    `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
     "utf8",
   );
   appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
+  const lines = [
+    `task_id: ${parsed.taskId}`,
+    `target: ${parsed.target}`,
+    `decision: ${decisionFile}`,
+  ];
+  if (parsed.target === "execute") {
+    lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+  }
   return {
     exitCode: 0,
-    lines: [
-      `task_id: ${parsed.taskId}`,
-      `target: ${parsed.target}`,
-      `decision: ${decisionFile}`,
-    ],
+    lines,
   };
 }
 

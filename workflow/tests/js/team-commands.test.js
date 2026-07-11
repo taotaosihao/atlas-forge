@@ -208,6 +208,41 @@ test("record-start validates and records native running state", (t) => {
   });
 });
 
+test("record-start requires an explicit authorization ref before execute writes", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Guard native execute start");
+  const stateFile = taskStateFile(paths, taskId);
+  const runtimeFile = taskRuntimeFile(paths, taskId);
+  const stateBefore = fs.readFileSync(stateFile, "utf8");
+  const runtimeBefore = fs.readFileSync(runtimeFile, "utf8");
+  const parsed = {
+    taskId,
+    objective: "implement the explicitly authorized change",
+    backend: "native",
+    mode: "execute",
+    agents: "1",
+    roles: "executor",
+    authorizationRef: "",
+  };
+
+  assert.throws(
+    () => runRecordStart(parsed, { environment }),
+    /missing execute authorization ref/,
+  );
+  assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
+  assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
+
+  const result = runRecordStart(
+    { ...parsed, authorizationRef: "user-message:implement-roadmap" },
+    { environment },
+  );
+  assert.equal(result.lines.at(-1), "authorization_ref: user-message:implement-roadmap");
+  assert.equal(
+    readJsonObject(stateFile).active_team.authorization_ref,
+    "user-message:implement-roadmap",
+  );
+});
+
 test("finalize rejects invalid artifacts without changing running state", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Reject native artifacts");
@@ -408,7 +443,22 @@ test("promote updates state and accepts equals form through the public dispatche
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Promote native record");
   startNativeRecord(environment, taskId);
-  const execute = runPromote(parsePromoteArgs([taskId, "--to=execute"]), {
+  const stateFile = taskStateFile(paths, taskId);
+  const runtimeFile = taskRuntimeFile(paths, taskId);
+  const stateBefore = fs.readFileSync(stateFile, "utf8");
+  const runtimeBefore = fs.readFileSync(runtimeFile, "utf8");
+  assert.throws(
+    () => runPromote({ taskId, target: "execute", authorizationRef: "" }, { environment }),
+    /missing execute authorization ref/,
+  );
+  assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
+  assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
+
+  const execute = runPromote(parsePromoteArgs([
+    taskId,
+    "--to=execute",
+    "--authorization-ref=user-message:implement-roadmap",
+  ]), {
     clock: clockAt("2026-07-10T12:05:00.000Z"),
     environment,
   });
@@ -416,10 +466,12 @@ test("promote updates state and accepts equals form through the public dispatche
     `task_id: ${taskId}`,
     "target: execute",
     `decision: ${teamDecisionFile(paths, taskId)}`,
+    "authorization_ref: user-message:implement-roadmap",
   ]);
   let state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.active_team.mode, "execute");
   assert.equal(state.active_team.promoted_to, "execute");
+  assert.equal(state.active_team.authorization_ref, "user-message:implement-roadmap");
 
   const dispatched = spawnSync(PUBLIC_BIN, ["team-promote", taskId, "--to=finish"], {
     encoding: "utf8",
@@ -433,6 +485,7 @@ test("promote updates state and accepts equals form through the public dispatche
   assert.equal(state.active_team.promoted_to, "finish");
   const decision = fs.readFileSync(teamDecisionFile(paths, taskId), "utf8");
   assert.match(decision, /- promoted_to: execute/);
+  assert.match(decision, /- authorization_ref: user-message:implement-roadmap/);
   assert.match(decision, /- promoted_to: finish/);
   assert.equal(readEvents(paths, taskId).at(-1).detail, "finish");
 });
