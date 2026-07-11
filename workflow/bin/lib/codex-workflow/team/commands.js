@@ -12,8 +12,13 @@ const {
 } = require("../core/command-runtime");
 const { posixChecksum, withLock } = require("../core/lock");
 const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
-const { getTaskField } = require("../task/repository");
-const { readJsonObject, taskStateFile, timestampSeconds } = require("../task/runtime");
+const { getTaskField, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  readJsonObject,
+  taskRuntimeFile,
+  taskStateFile,
+  timestampSeconds,
+} = require("../task/runtime");
 
 const RECORD_START_USAGE =
   'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>" [--authorization-ref <user-message-ref>]';
@@ -44,6 +49,47 @@ function teamLockFile(taskId, environment = process.env) {
     "codex-workflow-team-locks",
     `${posixChecksum(taskId)}.lock`,
   );
+}
+
+function snapshotPromotionFile(file, label, required = false) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === "ENOENT" && !required) {
+      return { content: null, file, mode: null };
+    }
+    throw error;
+  }
+  if (!stat.isFile()) {
+    throw new CommandError(`${label} is not a regular file: ${file}`);
+  }
+  return { content: fs.readFileSync(file), file, mode: stat.mode & 0o777 };
+}
+
+function restorePromotionFile(snapshot) {
+  if (snapshot.content === null) {
+    try {
+      fs.unlinkSync(snapshot.file);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+    return;
+  }
+  let current = null;
+  try {
+    current = fs.readFileSync(snapshot.file);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  if (!current || !current.equals(snapshot.content)) {
+    fs.writeFileSync(snapshot.file, snapshot.content);
+  }
+  fs.chmodSync(snapshot.file, snapshot.mode);
 }
 
 function parseFlags(argv, startIndex, configuration) {
@@ -574,43 +620,65 @@ function parsePromoteArgs(argv) {
 
 function runPromote(parsed, options = {}) {
   validateExecutionAuthorization(parsed.target, parsed.authorizationRef);
-  const { clock, paths } = commandOptions(options);
-  const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
+  const { clock, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
-  let mode = getTaskField(taskFile, "active_team_mode");
-  if (parsed.target === "execute") {
-    mode = "execute";
-  }
-  const status = `promoted:${parsed.target}`;
-  const stateUpdates = {
-    "active_team.mode": mode,
-    "active_team.status": status,
-    "active_team.promoted_to": parsed.target,
-  };
-  if (parsed.target === "execute") {
-    stateUpdates["active_team.authorization_ref"] = parsed.authorizationRef;
-  }
-  updateTaskCommand(
-    paths,
-    parsed.taskId,
-    {
-      active_team_mode: mode,
-      active_team_status: status,
-      active_team_decision: decision,
-    },
-    stateUpdates,
-    clock,
-  );
-  const authorizationLine = parsed.target === "execute"
-    ? `- authorization_ref: ${parsed.authorizationRef}\n`
-    : "";
-  fs.appendFileSync(
-    decisionFile,
-    `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
-    "utf8",
-  );
-  appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
+  withLock(teamLockFile(parsed.taskId, environment), () => {
+    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+    validateTaskFile(taskFile);
+    const snapshots = [
+      snapshotPromotionFile(taskFile, "task file", true),
+      snapshotPromotionFile(taskStateFile(paths, parsed.taskId), "task state"),
+      snapshotPromotionFile(decisionFile, "team decision"),
+      snapshotPromotionFile(taskRuntimeFile(paths, parsed.taskId), "task runtime"),
+    ];
+    let mode = getTaskField(taskFile, "active_team_mode");
+    if (parsed.target === "execute") {
+      mode = "execute";
+    }
+    const status = `promoted:${parsed.target}`;
+    const stateUpdates = {
+      "active_team.mode": mode,
+      "active_team.status": status,
+      "active_team.promoted_to": parsed.target,
+    };
+    if (parsed.target === "execute") {
+      stateUpdates["active_team.authorization_ref"] = parsed.authorizationRef;
+    }
+    try {
+      updateTaskCommand(
+        paths,
+        parsed.taskId,
+        {
+          active_team_mode: mode,
+          active_team_status: status,
+          active_team_decision: decision,
+        },
+        stateUpdates,
+        clock,
+      );
+      const authorizationLine = parsed.target === "execute"
+        ? `- authorization_ref: ${parsed.authorizationRef}\n`
+        : "";
+      fs.appendFileSync(
+        decisionFile,
+        `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
+        "utf8",
+      );
+      appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
+    } catch (error) {
+      try {
+        for (const snapshot of snapshots.reverse()) {
+          restorePromotionFile(snapshot);
+        }
+      } catch (rollbackError) {
+        throw new CommandError(
+          `team promotion failed and rollback failed: ${error.message}; ${rollbackError.message}`,
+        );
+      }
+      throw error;
+    }
+  });
   const lines = [
     `task_id: ${parsed.taskId}`,
     `target: ${parsed.target}`,

@@ -465,3 +465,29 @@ test("promote updates state and accepts equals form through the public dispatche
   assert.match(decision, /- promoted_to: finish/);
   assert.equal(readEvents(paths, taskId).at(-1).detail, "finish");
 });
+
+test("promote rolls back task, state, and decision when runtime append fails", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Rollback failed promotion");
+  startNativeRecord(environment, taskId);
+  const files = [
+    taskFile(paths.tasksDir, taskId),
+    taskStateFile(paths, taskId),
+    teamDecisionFile(paths, taskId),
+    taskRuntimeFile(paths, taskId),
+  ];
+  const before = files.map((file) => fs.readFileSync(file));
+  const originalAppendFileSync = fs.appendFileSync;
+  t.mock.method(fs, "appendFileSync", (file, ...args) => {
+    if (file === taskRuntimeFile(paths, taskId)) {
+      throw new Error("injected runtime append failure");
+    }
+    return originalAppendFileSync(file, ...args);
+  });
+
+  assert.throws(
+    () => runPromote({ taskId, target: "finish", authorizationRef: "" }, { environment }),
+    /injected runtime append failure/,
+  );
+  files.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), before[index]));
+});
