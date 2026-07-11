@@ -2,7 +2,7 @@
 
 ## 选定方向
 
-- 两个 execute 入口共用一个 `authorization_ref` 准入；它防止误晋级，不替代宿主权限。
+- 两个 execute 入口共用一个 `authorization_ref` 审计准入；它只证明调用方提供了明确实施消息引用，用于防止误晋级，不验证引用语义，也不替代宿主权限。
 - Full-roadmap、review 修复权、自动 commit 和滚动 checkpoint 作为短编排不变量表达，不复制进多层 schema。
 - 删除 default Team、重复 intake/artifact、动态 staffing、逐轮 commit、开放式 clean repair、无条件 whole-branch review和对应 prose 锁定测试。
 - Team 主 skill 只保留高频编排规则；SDD 与 Business Acceptance 通过 references 按需加载。
@@ -15,4 +15,4 @@
 
 ## 已有改动边界
 
-当前 worktree 中 Agent model policy、planner/browser-verifier 和相关测试改动属于预先存在的用户工作。本任务保留它们，但不纳入本任务 commit。
+Agent model policy、planner/browser-verifier 和相关测试最初是预先存在的用户工作；后续审查发现 Team 角色合同依赖这些文件，因此已获授权作为独立逻辑成果纳入提交，避免 clean checkout 与活动规则不一致。

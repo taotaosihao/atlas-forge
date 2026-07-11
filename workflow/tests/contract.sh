@@ -556,7 +556,11 @@ rg -q "ask for an explicit alternate workflow" "$source_skills_root/team/SKILL.m
 rg -q "team-record-start" "$source_skills_root/team/SKILL.md"
 rg -q "team-loop-record" "$source_skills_root/team/SKILL.md"
 rg -q -- "--authorization-ref" "$source_skills_root/team/SKILL.md"
-rg -q "full-roadmap" "$source_skills_root/team/SKILL.md"
+# Prompt-policy lint only: executable Team behavior is covered by the native/SDD contracts above.
+rg -q "current authorized goal already is the named roadmap or all listed phases" "$source_skills_root/task/SKILL.md" "$source_skills_root/team/SKILL.md"
+rg -q "Persistence wording alone does not expand a narrower goal" "$source_skills_root/task/SKILL.md" "$source_skills_root/team/SKILL.md"
+! rg -q "asks for complete or full-roadmap implementation" "$source_skills_root/task/SKILL.md" "$source_skills_root/team/SKILL.md"
+rg -q "持续执行措辞本身不扩大较窄目标" "$ATLAS_FORGE_ROOT/AGENTS.md"
 rg -q "Reviewer discovery is unrestricted" "$source_skills_root/team/SKILL.md"
 rg -q "fix_progress_stalled" "$source_skills_root/team/SKILL.md"
 rg -q "moderate logical outcomes" "$source_skills_root/team/SKILL.md"

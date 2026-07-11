@@ -1,7 +1,7 @@
 # 合同入口
 
 workflow_id: 20260712-001-atlas
-contract_status: in-implementation
+contract_status: implemented
 current_authoritative_contract: ./implementation-contract.final.md
 implementation_authorized: true
 

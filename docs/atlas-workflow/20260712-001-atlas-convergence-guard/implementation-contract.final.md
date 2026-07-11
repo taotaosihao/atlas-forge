@@ -15,7 +15,7 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 - Goal: 用一道 execute 准入和流程减法，阻止非实施任务误晋级，并让明确任务与完整 roadmap 在不扩大目标的前提下尽快收敛。
 - Non-goals: 不建设宿主 capability、roadmap/scope 状态机、acceptance hash、合同 digest、review schema 或数字型停止森林；不修改 Multica、cache、marketplace、runtime 或 release 状态。
 - Files or surfaces likely affected: `workflow/bin/lib/codex-workflow/team/commands.js`、对应 JS tests、`plugins/atlas-workflow/{README.md,skills/task,skills/cw,skills/team}`、必要的 Team references、`workflow/tests/contract.sh`、用户级与项目级 `AGENTS.md` 及本 bundle。
-- User-visible behavior: analyze/review/clarify 没有明确实施消息引用时不能进入 execute；明确工作不再因多文件默认进入 Team；完整 roadmap 连续执行；review/fix、commit 和上下文保持有限。
+- User-visible behavior: analyze/review/clarify 没有明确实施消息审计引用时不能进入 execute；该引用不验证消息语义或宿主权限；明确工作不再因多文件默认进入 Team；当前已授权 roadmap 连续执行但持续执行措辞不扩权；review/fix、commit 和上下文保持有限。
 
 ## First Code Slice Guard
 
@@ -54,14 +54,14 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 
 | ID | Criterion | Required | Verification |
 |----|-----------|----------|--------------|
-| AC-1 | `team-record-start --mode execute` 与 `team-promote --to execute` 缺非空单行 `authorization_ref` 时在写 state、decision 或 runtime event 前失败；discuss 与非 execute promotion 保持兼容 | yes | `node --test workflow/tests/js/team-commands.test.js` |
+| AC-1 | `team-record-start --mode execute` 与 `team-promote --to execute` 缺非空单行 `authorization_ref` 时在写 state、decision 或 runtime event 前失败；该字段仅为审计引用；promotion 后续写入失败时回滚 task/state/decision/runtime；discuss 与非 execute promotion 保持兼容 | yes | `node --test workflow/tests/js/team-commands.test.js` |
 | AC-2 | 用户级 AGENTS 不再常驻 Atlas 专用 routing/cache 细节，也不要求普通非 tiny 工作默认生成完整 artifacts | yes | focused `rg` 与 diff review |
 | AC-3 | Task/CW 不再因多文件或行为变化默认 Team；Team 只在用户明确要求或存在真实独立协作价值时使用 | yes | `workflow/tests/contract.sh` |
 | AC-4 | Team 常驻 skill 不再含 dynamic staffing、逐轮 commit、开放式 clean repair 或无条件 whole-branch review；SDD/BAF 按需加载 | yes | focused `rg`、plugin validation、repo contract |
-| AC-5 | Reviewer 发现自由、自动 repair 有限、full-roadmap 连续执行、适中自动 commit 和单一滚动 checkpoint 在权威规则中清晰表达 | yes | skill contract assertions |
+| AC-5 | Reviewer 发现自由、自动 repair 有限、已授权 full-roadmap 连续执行但 persistence wording 不扩权、适中自动 commit 和单一滚动 checkpoint 在权威规则中清晰表达 | yes | skill contract assertions |
 | AC-6 | 项目 checkout、Multica、release 与最小验证边界保持；项目 commit 规则按逻辑成果而非机械 phase | yes | project AGENTS review 与 repo contract |
 | AC-7 | 重复 prose 存在性断言被必要行为/不变量检查替代；活动源码不再出现 `unbounded_until_clean_or_terminal` 或 `max_question_rounds`，SDD commit policy 使用逻辑成果而非逐文件/逐轮提交 | yes | `rg`、Team SDD/native 与全量合同 |
-| AC-8 | 预先存在的独立 Agent/model-policy 文件及对应测试 hunks不被覆盖或 stage；与 Team skill 重叠的模型策略语义在减法重写中完整保留并单独审计 | yes | staged diff audit |
+| AC-8 | Agent/model-policy 文件及对应测试与 Team 角色合同保持一致，并作为独立逻辑成果提交；Multica 与无关用户改动不被覆盖或 stage | yes | structured model-policy test 与 staged diff audit |
 
 ## Real Validation Plan
 
@@ -87,7 +87,8 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 | Discuss start without authorization ref | 保持成功 | yes |
 | Execute start or promotion without authorization ref | 失败且 state、decision、runtime event 不变 | yes |
 | Worktree/finish promotion without authorization ref | 保持现有行为 | yes |
-| 用户授权完整 roadmap | 内部 slices 连续执行，不逐 slice 请求确认 | yes |
+| 当前授权目标明确覆盖完整 roadmap | 内部 slices 连续执行，不逐 slice 请求确认 | yes |
+| 较窄目标仅附加“完成”或“不要停” | 持续推进该目标，但不自动纳入 roadmap 外工作 | yes |
 | Reviewer 发现 roadmap 外优化 | 报告为 follow-up，不自动 fixer | yes |
 | Dirty worktree 含用户独立改动 | 精确 stage 本任务 hunks，不覆盖或夹带 | yes |
 
@@ -99,9 +100,9 @@ product_ui_not_applicable_reason: 本任务修改 headless workflow CLI、skills
 
 ## Completion Check
 
-- [ ] Scope stayed inside the contract
-- [ ] Required acceptance criteria passed
-- [ ] Required validation rows have evidence
-- [ ] Existing user changes were preserved; standalone user-owned files/hunks were excluded from task commits and overlapping Team semantics were retained
-- [ ] Cache, marketplace, runtime, release, and Multica forbidden paths stayed unchanged
-- [ ] Residual risks are recorded
+- [x] Scope stayed inside the contract
+- [x] Required acceptance criteria passed
+- [x] Required validation rows have evidence
+- [x] Existing user changes were preserved; Team 依赖的 Agent/model-policy 前置改动经授权后独立提交，其他无关 hunks 未被夹带
+- [x] Cache, marketplace, runtime, release, and Multica forbidden paths stayed unchanged
+- [x] Residual risks are recorded

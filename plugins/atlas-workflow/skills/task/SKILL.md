@@ -23,7 +23,7 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.
 - Treat the current user goal and existing authoritative spec as the scope. Do not create a second roadmap/scope state machine.
-- When the user requests complete/full-roadmap implementation, continue through internal slices without asking for routine confirmation while scope and authority remain unchanged.
+- Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while scope and authority remain unchanged. Persistence wording alone does not expand a narrower goal.
 
 ## Artifacts And Context
 

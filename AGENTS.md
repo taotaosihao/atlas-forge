@@ -22,6 +22,12 @@
 - 禁止为普通 Atlas 变更运行 Multica tests、router、listener、legacy host 或 runtime。允许在不读取业务内容的前提下做只读 tree/hash fingerprint，用于证明零修改。
 - 不得通过共享全量 sync/install 入口间接写入 Multica；Atlas 开发和验证只使用 Atlas-scoped、隔离路径。
 
+## 目标与收敛
+
+- 当前用户请求与已有权威规格共同定义授权目标，不另建 roadmap/scope 状态机。
+- 只有当“完整实施”明确指向当前已授权 roadmap 或其全部已列 phases 时，才连续跨内部 slices 执行；“完成”“不要停”等持续执行措辞本身不扩大较窄目标。
+- 在目标、权限和安全边界不变时不因内部 phase/slice 例行暂停；roadmap 文件仅是调度材料，不能自行授权实施。
+
 ## 最小验证矩阵
 
 | 变更范围 | 最小验证 |

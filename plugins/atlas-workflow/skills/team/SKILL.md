@@ -70,7 +70,7 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 ## Goal And Roadmap Continuity
 
 - The current user request and existing authoritative spec define the goal. Do not create a second roadmap/scope state machine.
-- When the user asks for complete or full-roadmap implementation, continue through internal slices without pausing for routine confirmation while the goal, authority, and safety boundaries stay unchanged.
+- Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while the goal, authority, and safety boundaries stay unchanged. Persistence wording alone does not expand a narrower goal.
 - A roadmap document alone does not authorize implementation. Internal slices are scheduling/checkpoint units, not new permission boundaries.
 - Return when the whole authorized goal is complete, continuing needs new authority or a user-owned decision, an external state must change, or safe work can no longer make material progress.
 - Elapsed time, rounds, agents, commits, tokens, and tool calls are telemetry, not default semantic stop conditions.
