@@ -11,8 +11,10 @@
   },
   "roles": {
     "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "max" },
-    "atlas-sdd-implementer": { "capability": "frontier", "reasoning_effort": "high" },
+    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "high" },
+    "atlas-sdd-implementer": { "capability": "fast", "reasoning_effort": "max" },
     "atlas-sdd-verifier": { "capability": "balanced", "reasoning_effort": "high" },
+    "atlas-sdd-browser-verifier": { "capability": "fast", "reasoning_effort": "high" },
     "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "medium" }
   }
 }
