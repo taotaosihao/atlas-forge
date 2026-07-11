@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "family": {
+    "slug_pattern": "^gpt-(\\d+)\\.(\\d+)-",
+    "selection": "latest"
+  },
+  "capabilities": {
+    "frontier": { "description_pattern": "\\bfrontier\\b" },
+    "balanced": { "description_pattern": "\\bbalanced\\b" },
+    "fast": { "description_pattern": "\\bfast\\b" }
+  },
+  "roles": {
+    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "max" },
+    "atlas-sdd-implementer": { "capability": "frontier", "reasoning_effort": "high" },
+    "atlas-sdd-verifier": { "capability": "balanced", "reasoning_effort": "high" },
+    "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "medium" }
+  }
+}

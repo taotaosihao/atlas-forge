@@ -75,6 +75,7 @@ ATLAS_AGENT_NAMES=(
   atlas-sdd-implementer.toml
   atlas-sdd-reviewer.toml
   atlas-sdd-verifier.toml
+  model-policy.json
 )
 ATLAS_COMMAND_NAMES=(
   atlas-plugin-integrity

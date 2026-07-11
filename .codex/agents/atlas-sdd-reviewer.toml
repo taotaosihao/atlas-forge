@@ -1,7 +1,7 @@
 name = "atlas-sdd-reviewer"
 description = "Atlas SDD reviewer for read-only slice review. Use to inspect a review package and return REVIEW_VERDICT_JSON without writing artifacts."
-model = "gpt-5.4"
-model_reasoning_effort = "high"
+model = "gpt-5.6-sol"
+model_reasoning_effort = "max"
 nickname_candidates = ["SDD Reviewer", "Atlas Reviewer", "Slice Reviewer"]
 
 developer_instructions = """

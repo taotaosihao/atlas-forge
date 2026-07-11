@@ -26,6 +26,20 @@ orchestration implementation.
 2. Never replace a requested native team run with shell-managed lanes, background processes, or another non-native delegate mechanism.
 3. Keep the main Codex as orchestrator. Subagents provide lane work, implementation slices, review, or verification; the main Codex owns final synthesis, file integration, and final user reporting.
 
+## Latest Model Policy Gate
+
+Before spawning any native lane that may select an Atlas SDD custom agent, run:
+
+```bash
+~/.codex/workflow/bin/atlas-agent-model-policy check
+```
+
+- This gate is mandatory before the first spawn of every native round. Record its conclusion in the round artifact.
+- The policy resolves the numerically highest available stable GPT `major.minor` family from the local Codex model catalog. It does not assume that model versions are consecutive.
+- Agent roles use semantic capability and thinking profiles: reviewer=`frontier/max`, implementer=`frontier/high`, verifier=`balanced/high`, and explorer=`fast/medium`.
+- If the catalog is missing, incomplete, ambiguous, has an unsupported reasoning level, or is newer than the checked-in agent projections, stop before `collaboration.spawn_agent`. Do not fall back to an older family or silently lower thinking effort.
+- A newly detected family must be projected into the four checked-in Agent TOML files and reviewed explicitly before team execution resumes. Detection is automatic; adoption is auditable.
+
 ## Native Collaboration Lifecycle
 
 1. Spawn a lane with `collaboration.spawn_agent`. Use only the tool's exposed
