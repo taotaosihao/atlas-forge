@@ -17,7 +17,7 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
 
 ## Review And Repair
 
-1. Validate the implementer report and current diff.
+1. Validate the implementer report against its brief (`codex-team-validate-json --type implementer-report --file <report> --brief <brief>`) and inspect the current diff.
 2. Review against the current user goal, slice acceptance, required checks, and directly affected integration surface.
 3. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe.
 4. Record other findings as follow-ups; they do not create new SDD slices or acceptance.

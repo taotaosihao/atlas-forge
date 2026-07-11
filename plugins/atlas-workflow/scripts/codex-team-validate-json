@@ -88,12 +88,13 @@ function typeList() {
 function usage() {
   console.log(`usage:
   codex-team-validate-json --type ${typeList()} --file <json-file>
+  codex-team-validate-json --type implementer-report --file <json-file> --brief <brief.json>
   codex-team-validate-json --type implementer-report|review-verdict --from-message <message-file>
   codex-team-validate-json --type implementer-report|review-verdict --stdin`);
 }
 
 function parseArgs(argv) {
-  const options = { type: null, file: null, fromMessage: null, stdin: false, help: false };
+  const options = { type: null, file: null, fromMessage: null, brief: null, stdin: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -110,6 +111,10 @@ function parseArgs(argv) {
       options.fromMessage = argv[++i];
     } else if (arg.startsWith("--from-message=")) {
       options.fromMessage = arg.slice("--from-message=".length);
+    } else if (arg === "--brief") {
+      options.brief = argv[++i];
+    } else if (arg.startsWith("--brief=")) {
+      options.brief = arg.slice("--brief=".length);
     } else if (arg === "--stdin") {
       options.stdin = true;
     } else {
@@ -146,7 +151,25 @@ function main() {
       throw new Error(`--type must be one of: ${Object.keys(TYPES).join(", ")}`);
     }
     const value = loadValue(options, contract);
-    const errors = contract.validate(value);
+    let validationOptions = {};
+    const errors = [];
+    if (options.brief) {
+      if (options.type !== "implementer-report") {
+        throw new Error("--brief is supported only for --type implementer-report");
+      }
+      const brief = readJsonFile(options.brief);
+      const briefErrors = validateBrief(brief);
+      if (briefErrors.length > 0) {
+        throw new Error(`invalid brief: ${briefErrors.join("; ")}`);
+      }
+      validationOptions = { commitPolicy: brief.commit_policy };
+      for (const key of ["task_id", "slice_id", "base_sha"]) {
+        if (value[key] !== brief[key]) {
+          errors.push(`${key} must match brief`);
+        }
+      }
+    }
+    errors.push(...contract.validate(value, validationOptions));
     if (errors.length > 0) {
       throw new Error(errors.join("; "));
     }

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "status": "DONE",
+  "task_id": "fixture",
+  "slice_id": "slice-001",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "head_sha": "1111111111111111111111111111111111111111",
+  "commits": [],
+  "changed_files": ["plugins/atlas-workflow/scripts/codex-team-brief"],
+  "checks": [],
+  "self_review": "The integration owner will commit this verified logical outcome.",
+  "concerns": [],
+  "questions": [],
+  "blockers": [],
+  "no_change_reason": null
+}

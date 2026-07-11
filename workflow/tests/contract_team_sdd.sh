@@ -114,14 +114,40 @@ grep -q "evidence_manifest:" "$TMP_ROOT/sdd-contract-brief.out"
 expect_fail "contract brief rejects unknown acceptance" node "$brief_bin" --task fixture-contract --slice slice-002 --repo "$sdd_repo" --base "$sdd_base" --objective bad --contract "$sprint_contract" --acceptance "SC-MISSING" --owned "plugins/atlas-workflow/contracts/team-sdd" --check true
 
 node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/implementer-report.json" >/dev/null
+node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/uncommitted-implementer-report.json" >/dev/null
 node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/implementer-message.md" >/dev/null
 node "$validate_json_bin" --type review-verdict --file "$fixture_dir/valid/review-verdict.json" >/dev/null
 node "$validate_json_bin" --type review-verdict --from-message "$fixture_dir/valid/review-message.md" >/dev/null
 expect_fail "missing final message block" node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/review-message.md"
-expect_fail "done requires commit" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/done-without-commit.json"
 expect_fail "needs context requires questions" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/needs-context-without-questions.json"
 expect_fail "blocked requires blockers" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/blocked-without-blockers.json"
 expect_fail "schema ref is not supported" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/schema-ref-not-supported.json"
+
+node "$brief_bin" --task fixture-no-commit --slice slice-001 --repo "$sdd_repo" --base "$sdd_base" --objective "Return an uncommitted patch" --acceptance AC-1 --owned plugins/atlas-workflow --check true --commit-policy changes_allowed_no_commit >/dev/null
+node "$brief_bin" --task fixture-no-change --slice slice-001 --repo "$sdd_repo" --base "$sdd_base" --objective "Perform a read-only check" --acceptance AC-1 --owned plugins/atlas-workflow --check true --commit-policy no_change_allowed >/dev/null
+logical_report="$TMP_ROOT/logical-outcome-report.json"
+no_commit_report="$TMP_ROOT/changes-allowed-no-commit-report.json"
+no_change_bad_report="$TMP_ROOT/no-change-bad-report.json"
+no_change_good_report="$TMP_ROOT/no-change-good-report.json"
+legacy_report="$TMP_ROOT/legacy-required-commit-report.json"
+node - "$fixture_dir/valid/uncommitted-implementer-report.json" "$logical_report" "$no_commit_report" "$no_change_bad_report" "$no_change_good_report" "$legacy_report" "$sdd_base" <<'NODE'
+const fs = require("fs");
+const [source, logical, noCommit, noChangeBad, noChangeGood, legacy, base] = process.argv.slice(2);
+const template = JSON.parse(fs.readFileSync(source, "utf8"));
+function write(target, task, slice, overrides = {}) {
+  fs.writeFileSync(target, `${JSON.stringify({ ...template, task_id: task, slice_id: slice, base_sha: base, head_sha: base, ...overrides }, null, 2)}\n`);
+}
+write(logical, "fixture", "slice-002");
+write(noCommit, "fixture-no-commit", "slice-001");
+write(noChangeBad, "fixture-no-change", "slice-001");
+write(noChangeGood, "fixture-no-change", "slice-001", { commits: [], changed_files: [], no_change_reason: "The requested verification required no repository change." });
+write(legacy, "legacy-brief-fixture", "slice-001");
+NODE
+node "$validate_json_bin" --type implementer-report --file "$logical_report" --brief "$sdd_root/artifacts/fixture/team/sdd/slices/slice-002/brief.json" >/dev/null
+node "$validate_json_bin" --type implementer-report --file "$no_commit_report" --brief "$sdd_root/artifacts/fixture-no-commit/team/sdd/slices/slice-001/brief.json" >/dev/null
+node "$validate_json_bin" --type implementer-report --file "$no_change_good_report" --brief "$sdd_root/artifacts/fixture-no-change/team/sdd/slices/slice-001/brief.json" >/dev/null
+expect_fail "no-change policy rejects changed files" node "$validate_json_bin" --type implementer-report --file "$no_change_bad_report" --brief "$sdd_root/artifacts/fixture-no-change/team/sdd/slices/slice-001/brief.json"
+expect_fail "legacy required commit policy rejects uncommitted changes" node "$validate_json_bin" --type implementer-report --file "$legacy_report" --brief "$legacy_brief"
 
 review_repo="$TMP_ROOT/sdd-review-repo"
 setup_repo "$review_repo"

@@ -30,7 +30,25 @@ const KEYS = [
   "no_change_reason",
 ];
 
-function validateImplementerReport(value) {
+function validateCommitPolicy(value, commitPolicy) {
+  const errors = [];
+  const commits = Array.isArray(value.commits) ? value.commits : [];
+  const changedFiles = Array.isArray(value.changed_files) ? value.changed_files : [];
+  if (["required_for_file_changes", "required_always"].includes(commitPolicy)
+      && (commitPolicy === "required_always" || changedFiles.length > 0)
+      && commits.length === 0) {
+    errors.push(`commit_policy ${commitPolicy} requires commits`);
+  }
+  if (commitPolicy === "changes_allowed_no_commit" && commits.length > 0) {
+    errors.push("commit_policy changes_allowed_no_commit forbids commits");
+  }
+  if (commitPolicy === "no_change_allowed" && (changedFiles.length > 0 || commits.length > 0)) {
+    errors.push("commit_policy no_change_allowed forbids changed_files and commits");
+  }
+  return errors;
+}
+
+function validateImplementerReport(value, options = {}) {
   const errors = [];
   if (!requireObject(value, errors)) {
     return errors;
@@ -59,9 +77,6 @@ function validateImplementerReport(value) {
     if (!value.head_sha) {
       errors.push("head_sha is required when changed_files is non-empty");
     }
-    if (!Array.isArray(value.commits) || value.commits.length === 0) {
-      errors.push("commits are required when changed_files is non-empty");
-    }
   }
   if (value.status === "NEEDS_CONTEXT" && Array.isArray(value.questions) && value.questions.length === 0) {
     errors.push("NEEDS_CONTEXT requires questions");
@@ -69,7 +84,10 @@ function validateImplementerReport(value) {
   if (value.status === "BLOCKED" && Array.isArray(value.blockers) && value.blockers.length === 0) {
     errors.push("BLOCKED requires blockers");
   }
+  if (options.commitPolicy) {
+    errors.push(...validateCommitPolicy(value, options.commitPolicy));
+  }
   return errors;
 }
 
-module.exports = { validateImplementerReport };
+module.exports = { validateCommitPolicy, validateImplementerReport };
