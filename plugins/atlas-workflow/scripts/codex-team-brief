@@ -18,7 +18,7 @@ function usage() {
 options:
   --contract <file>           Sprint Contract markdown to compile into evidence-manifest.json
   --forbidden <path>           repeatable, comma-separated allowed
-  --commit-policy <policy>     logical_outcome|no_change_allowed`);
+  --commit-policy <policy>     logical_outcome|changes_allowed_no_commit|no_change_allowed`);
 }
 
 function parseArgs(argv) {
@@ -267,7 +267,7 @@ function writeBrief(options) {
   fs.writeFileSync(path.join(dir, "brief.md"), briefMarkdown, "utf8");
 
   const brief = {
-    schema_version: 1,
+    schema_version: 2,
     task_id: options.task,
     slice_id: options.slice,
     repo: options.repo,

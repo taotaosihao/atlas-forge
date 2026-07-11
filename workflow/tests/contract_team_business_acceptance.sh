@@ -165,7 +165,7 @@ write_sdd_lint_fixture() {
     > "$sdd_dir/progress.jsonl"
   cat > "$slice_dir/brief.json" <<JSON
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "task_id": "$task",
   "slice_id": "slice-001",
   "repo": "$business_repo",

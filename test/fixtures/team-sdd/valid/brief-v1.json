@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "task_id": "legacy-brief-fixture",
+  "slice_id": "slice-001",
+  "repo": "__REPO__",
+  "base_sha": "__BASE_SHA__",
+  "objective": "Validate a persisted legacy Team SDD brief.",
+  "requirements_path": "brief.md",
+  "global_constraints_path": "../../global-constraints.md",
+  "owned_paths": ["plugins/atlas-workflow/contracts/team-sdd"],
+  "forbidden_paths": ["plugins/multica-sdlc"],
+  "acceptance_refs": ["AC-1"],
+  "required_checks": ["workflow/tests/contract.sh"],
+  "commit_policy": "required_for_file_changes",
+  "max_question_rounds": 2,
+  "fix_loop_policy": "unbounded_until_clean_or_terminal",
+  "output_contract": "final_message_json_only"
+}

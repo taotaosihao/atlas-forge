@@ -69,6 +69,21 @@ test -f "$sdd_root/artifacts/fixture/team/sdd/slices/slice-002/brief.json"
 test -f "$sdd_root/artifacts/fixture/team/sdd/slices/slice-002/brief.md"
 test -f "$sdd_root/artifacts/fixture/team/sdd/global-constraints.md"
 node "$validate_json_bin" --type brief --file "$sdd_root/artifacts/fixture/team/sdd/slices/slice-002/brief.json" >/dev/null
+node - "$sdd_root/artifacts/fixture/team/sdd/slices/slice-002/brief.json" <<'NODE'
+const brief = require(process.argv[2]);
+if (brief.schema_version !== 2 || brief.commit_policy !== "logical_outcome") process.exit(1);
+if ("max_question_rounds" in brief || "fix_loop_policy" in brief) process.exit(1);
+NODE
+legacy_brief="$TMP_ROOT/legacy-brief-v1.json"
+node - "$fixture_dir/valid/brief-v1.json" "$legacy_brief" "$sdd_repo" "$sdd_base" <<'NODE'
+const fs = require("fs");
+const [source, target, repo, base] = process.argv.slice(2);
+const brief = JSON.parse(fs.readFileSync(source, "utf8"));
+brief.repo = repo;
+brief.base_sha = base;
+fs.writeFileSync(target, `${JSON.stringify(brief, null, 2)}\n`);
+NODE
+node "$validate_json_bin" --type brief --file "$legacy_brief" >/dev/null
 expect_fail "brief rejects relative repo" node "$brief_bin" --task fixture --slice slice-003 --repo relative --base HEAD --objective bad --acceptance AC-1 --owned docs --check true
 
 sprint_contract="$TMP_ROOT/sprint-contract.md"
