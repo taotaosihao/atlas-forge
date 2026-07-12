@@ -33,9 +33,9 @@ workflow/bin/atlas-agent-model-policy check
 - This gate is mandatory before the first such spawn in a native round; record only its conclusion when an artifact already exists.
 - The policy resolves the numerically highest stable GPT `major.minor` family from the local Codex model catalog and does not assume that model versions are consecutive.
 - Agent roles use semantic capability and thinking profiles: planner=`frontier/medium`, routine-reviewer=`balanced/high`, phase-reviewer=`frontier/medium`, implementer=`fast/max`, verifier=`balanced/high`, browser-verifier=`fast/high`, and explorer=`fast/medium`.
-- Route implementation coding to the implementer and plans to the Sol-backed planner. Use the Terra-backed reviewer for routine reviews and the Terra-backed verifier for routine commands and evidence checks. Select another review profile only when the controller or user explicitly requires it.
-- Reserve the Sol-backed phase-reviewer for phase boundaries, final integration gates, and explicitly requested Sol reviews. Do not use it for routine per-slice review.
-- Add the Luna browser-verifier only for substantial Playwright or visual interaction work. Its result is supporting evidence; every such path must finish with a fresh Sol phase-reviewer pass before phase acceptance.
+- Default path: Luna implementer, then Terra routine reviewer and verifier. Add the Sol planner only when the task actually needs planning; skip that lane for clear bounded work.
+- Upgrade to the Sol phase-reviewer when an error would be costly or hard to reverse, at a phase or final integration gate, when explicitly requested, or after one non-mechanical review or verification failure whose cause is unclear. Formatting, import, typo, and similarly obvious repairs stay on the default path.
+- Add the Luna browser-verifier only for substantial Playwright or visual interaction work. Route its evidence to `atlas-sdd-phase-reviewer` only when it supports phase or final acceptance; routine UI smoke and regression checks stay on the default review path.
 - If the catalog or checked-in projection is missing, ambiguous, or incompatible, stop before spawning rather than silently selecting an older model or weaker reasoning level.
 
 ## Modes And Authority

@@ -14,5 +14,5 @@ Rules:
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Keep raw traces, videos, screenshots, and logs in the controller-designated temporary run directory unless exact evidence is required in git.
 - Report commands, scenarios, outcomes, relevant artifact paths, skipped checks, and residual risk.
-- Browser or visual success is not the final review gate. Require the controller to route the resulting diff and evidence to the Sol reviewer before acceptance.
+- When the evidence supports phase or final acceptance, require the controller to route the resulting diff and evidence to `atlas-sdd-phase-reviewer`. Routine UI smoke and regression evidence stays on the default review path.
 """

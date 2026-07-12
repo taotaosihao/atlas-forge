@@ -1,6 +1,6 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260712163843",
+  "version": "0.1.0+codex.20260712165807",
   "description": "Atlas workflow plugin for bounded local Codex work.",
   "author": {
     "name": "Local Atlas",
