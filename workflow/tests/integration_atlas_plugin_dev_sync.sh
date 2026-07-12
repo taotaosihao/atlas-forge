@@ -97,7 +97,7 @@ assert_allowed_codex_tree() {
     case "$relative" in
       .agents|.agents/plugins|.agents/plugins/marketplace.json) ;;
       .tmp|.tmp/marketplaces|.tmp/marketplaces/atlas-forge|.tmp/marketplaces/atlas-forge/*) ;;
-      agents|agents/atlas-sdd-explorer.toml|agents/atlas-sdd-implementer.toml|agents/atlas-sdd-reviewer.toml|agents/atlas-sdd-verifier.toml|agents/model-policy.json|agents/unrelated.toml) ;;
+      agents|agents/atlas-sdd-browser-verifier.toml|agents/atlas-sdd-explorer.toml|agents/atlas-sdd-implementer.toml|agents/atlas-sdd-planner.toml|agents/atlas-sdd-reviewer.toml|agents/atlas-sdd-verifier.toml|agents/model-policy.json|agents/unrelated.toml) ;;
       plugins|plugins/atlas-workflow|plugins/atlas-workflow/*) ;;
       plugins/cache|plugins/cache/atlas-forge|plugins/cache/atlas-forge/*) ;;
       plugins/cache/local-atlas|plugins/cache/local-atlas/atlas-workflow|plugins/cache/local-atlas/atlas-workflow/local|plugins/cache/local-atlas/atlas-workflow/local/*) ;;
@@ -169,8 +169,10 @@ run_success_case() {
   pass 'Atlas workflow helpers are synchronized without replacing workflow state roots'
 
   for agent_name in \
+    atlas-sdd-browser-verifier.toml \
     atlas-sdd-explorer.toml \
     atlas-sdd-implementer.toml \
+    atlas-sdd-planner.toml \
     atlas-sdd-reviewer.toml \
     atlas-sdd-verifier.toml \
     model-policy.json; do
