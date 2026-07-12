@@ -11,7 +11,7 @@ make_catalog() {
   local include_fast="${3:-yes}"
   {
     printf '{"models":['
-    printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]},' "$family"
+    printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"max"}]},' "$family"
     printf '{"slug":"gpt-%s-terra","description":"Balanced agentic coding model for everyday work.","supported_reasoning_levels":[{"effort":"high"}]}' "$family"
     if [[ "$include_fast" == yes ]]; then
       printf ',{"slug":"gpt-%s-luna","description":"Fast and affordable agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"max"}]}' "$family"
@@ -24,8 +24,9 @@ make_agents() {
   local dir="$1"
   local family="$2"
   mkdir -p "$dir"
-  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "max"\n' "$family" > "$dir/atlas-sdd-reviewer.toml"
-  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-planner.toml"
+  printf 'model = "gpt-%s-terra"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-reviewer.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-phase-reviewer.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-planner.toml"
   printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "max"\n' "$family" > "$dir/atlas-sdd-implementer.toml"
   printf 'model = "gpt-%s-terra"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-verifier.toml"
   printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-browser-verifier.toml"

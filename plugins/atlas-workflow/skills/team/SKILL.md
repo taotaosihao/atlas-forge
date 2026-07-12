@@ -32,9 +32,10 @@ workflow/bin/atlas-agent-model-policy check
 
 - This gate is mandatory before the first such spawn in a native round; record only its conclusion when an artifact already exists.
 - The policy resolves the numerically highest stable GPT `major.minor` family from the local Codex model catalog and does not assume that model versions are consecutive.
-- Agent roles use semantic capability and thinking profiles: planner=`frontier/high`, reviewer=`frontier/max`, implementer=`fast/max`, verifier=`balanced/high`, browser-verifier=`fast/high`, and explorer=`fast/medium`.
-- Route implementation coding to the implementer. Route plans and final acceptance reviews to Sol-backed planner/reviewer roles. Use the Terra-backed verifier for routine commands and evidence checks.
-- Add the Luna browser-verifier only for substantial Playwright or visual interaction work. Its result is supporting evidence; every such path must finish with a fresh Sol reviewer pass before acceptance.
+- Agent roles use semantic capability and thinking profiles: planner=`frontier/medium`, routine-reviewer=`balanced/high`, phase-reviewer=`frontier/medium`, implementer=`fast/max`, verifier=`balanced/high`, browser-verifier=`fast/high`, and explorer=`fast/medium`.
+- Route implementation coding to the implementer and plans to the Sol-backed planner. Use the Terra-backed reviewer for routine reviews and the Terra-backed verifier for routine commands and evidence checks. Select another review profile only when the controller or user explicitly requires it.
+- Reserve the Sol-backed phase-reviewer for phase boundaries, final integration gates, and explicitly requested Sol reviews. Do not use it for routine per-slice review.
+- Add the Luna browser-verifier only for substantial Playwright or visual interaction work. Its result is supporting evidence; every such path must finish with a fresh Sol phase-reviewer pass before phase acceptance.
 - If the catalog or checked-in projection is missing, ambiguous, or incompatible, stop before spawning rather than silently selecting an older model or weaker reasoning level.
 
 ## Modes And Authority
