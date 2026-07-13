@@ -6,10 +6,13 @@ current_authoritative_contract: ./implementation-contract.final.md
 
 ## 来源链
 
-- 用户方向：按官方 standalone custom-agent 方案形成可实施 runtime proof。
+- 用户方向：按官方 standalone custom-agent 方案形成相对降本的软路由实施合同。
+- 用户修正：目标是相对降低成本，不要求每次 spawn 的绝对证明；由 `20260713-011-atlas-custom-agent` 澄清覆盖原硬门禁。
 - workflow context：`/home/gewu/.codex/workflow/artifacts/20260713-009-atlas-custom-subagent-runtime/context.md`
 - workflow decision：`/home/gewu/.codex/workflow/artifacts/20260713-009-atlas-custom-subagent-runtime/decision.md`
 - workflow spec：`/home/gewu/.codex/workflow/artifacts/20260713-009-atlas-custom-subagent-runtime/spec.md`
+- superseding workflow decision：`/home/gewu/.codex/workflow/artifacts/20260713-011-atlas-custom-agent/decision.md`
+- superseding workflow spec：`/home/gewu/.codex/workflow/artifacts/20260713-011-atlas-custom-agent/spec.md`
 
 ## 支持材料
 

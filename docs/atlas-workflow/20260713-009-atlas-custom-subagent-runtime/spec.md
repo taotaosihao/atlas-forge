@@ -2,32 +2,28 @@
 
 ## 目标
 
-证明 `atlas-sdd-reviewer` 使用 Terra high、`atlas-sdd-phase-reviewer` 使用 Sol medium 的真实 spawned-session 绑定，并让 Atlas Team 合同只声明已被证明的能力。
+通过按需 staffing、低成本模型优先和失败后升级，实现 Team 模式的相对降本，同时保持关键判断质量。
 
 ## 非目标
 
-- 不调整模型组合，不新增 agent。
-- 不建设动态路由器、风险矩阵或成本 dashboard。
-- 不修改真实 Codex 用户配置、cache、marketplace、runtime 或 Multica。
+- 不保证每次 spawn 都能证明实际 model/effort。
+- 不禁止 controller 根据任务证据选择其他可用 profile。
+- 不建设 runtime router、Gate A、长期 smoke runner、风险矩阵或成本 dashboard。
+- 不修改真实 Codex 用户配置、安装态、MultiAgentV2、发布或 Multica。
 
-## 阶段
+## 默认与升级路径
 
-### Phase 1：Runtime proof
+- 小而清晰的任务：主 Agent 直接完成。
+- 实现角色需要时：优先 `atlas-sdd-implementer` / Luna max。
+- 常规 review 或 verify 需要时：优先 Terra high。
+- 规划确有价值、方向难以撤销或关键结果验收时：优先 Sol medium。
+- 默认路径出现一次疑似实现/决策错误且根因不明时：考虑升级 Sol；明确环境 blocker 不升级。
+- 大量浏览器操作使用 Luna high；只有证据支撑阶段/最终验收且额外判断有价值时才使用 Sol phase reviewer。
 
-- 实现 opt-in smoke runner、两个命名 agent probe、可信 metadata parser、negative fixtures、redaction 和 cleanup。
-- specialized child 使用 self-contained mission；禁止把 full-history inheritance 当作通过。
-- 产出 `passed | failed | inconclusive`。
+## Runtime 校准
 
-### Gate A
+- Codex 版本、agent 配置变化或成本异常时抽样检查一个低成本角色和一个 Sol 角色。
+- metadata 可用则记录 `verified`；不可见或矛盾则记录 `unverified`，不阻塞普通任务。
+- 确认昂贵父模型继承、异常 fan-out 或成本失控时停止新的 fan-out 并调查。
 
-只有 resolved role、model、effort 全部匹配时 `passed`。agent 自报、UI badge 或单纯 spawn 成功均不足。
-
-### Phase 2：Contract convergence
-
-- Team 精确点名 custom agents；默认模型不等于固定 staffing。
-- 难以撤销的方向在实现前使用 Sol planner；完成结果使用 Sol phase reviewer。
-- 明确环境 blocker 不触发 Sol review。
-- 视觉 Sol review 只用于 phase/final acceptance。
-- implementer 遵循 controller 的适中提交边界。
-
-详细验收与命令见 [最终实施合同](./implementation-contract.final.md)。
+详细验收与验证见 [最终实施合同](./implementation-contract.final.md)。

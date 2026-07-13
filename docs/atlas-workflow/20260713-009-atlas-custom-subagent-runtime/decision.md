@@ -1,5 +1,5 @@
 # 实施决策
 
-选定官方 standalone `.codex/agents/*.toml` 机制。先实现 stable runtime 的隔离、opt-in profile-binding smoke，只有可信 resolved role/model/effort 全部匹配后，才把 Atlas Team 的模型路由标记为受运行时保证。
+采用“软路由 + 少量硬边界”：Luna/Terra 是高频工作的优先配置，Sol 用于确有价值的规划、关键验收和默认路径未收敛的判断；不机械启动全部角色。
 
-不直接启用 MultiAgentV2，不修改真实用户配置，不以 agent 自报或 UI badge 代替可信 metadata。Gate A 不通过时停止并返回脱敏最小复现。
+取消 runtime proof 硬前置、Gate A、长期 smoke runner和临时认证基础设施。模型 metadata 可见时记录，缺失时标记 `unverified` 并继续；只有确认昂贵继承、异常 fan-out 或成本失控时停止。
