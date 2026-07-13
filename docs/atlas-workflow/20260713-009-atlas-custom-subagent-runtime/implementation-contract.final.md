@@ -23,9 +23,9 @@ product_ui_not_applicable_reason: 纯 custom-agent 配置、Team 路由合同与
 - first_code_slice_kind: workflow
 - first_code_owner: 当前主 Codex
 - first_code_verification: Team、planner、phase reviewer、browser verifier、implementer 的静态正负合同断言通过。
-- allowed_contract_gate_only_until: 实施 Phase 1 开始前。
-- stop_if_no_code_by_phase: Phase 1 结束时。
-- gate_parallelization_or_deferral_plan: Phase 1 完成路由与 agent prompt 行为修改；Phase 2 补齐跨文件合同测试与可选抽样校准说明。文档或 fixture 不得替代 Team/custom-agent 行为修改。
+- allowed_contract_gate_only_until: 里程碑 1（Team/custom-agent 路由行为修改）开始前。
+- stop_if_no_code_by_phase: 里程碑 1 完成时。
+- gate_parallelization_or_deferral_plan: 里程碑 1 完成 Team 与 custom-agent prompt 的路由行为修改；里程碑 2 补齐跨文件合同测试与仓库验证。条件性 runtime 校准不属于必需里程碑；文档或 fixture 不得替代 Team/custom-agent 行为修改。
 - Ordering rule: contract, scanner, fixture, and evidence-only preparation must be bounded before the first implementation diff; it cannot remain the only deliverable after the named stop point.
 - First-code rule: the first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
 - Gate-only non-completion: docs-only artifacts, scanner fixtures, analysis notes, and evidence bundles are not first code slices by themselves. For scanner/tooling tasks, implementing scanner/tool behavior may count; adding fixtures around unchanged behavior does not.
@@ -55,16 +55,32 @@ product_ui_not_applicable_reason: 纯 custom-agent 配置、Team 路由合同与
 | ID | Criterion | Required | Verification |
 |----|-----------|----------|--------------|
 | AC-1 | 实现、routine review/verify、planning/phase review 的模型为优先配置，不使用绝对限制措辞 | yes | Team/custom-agent contract assertions |
-| AC-2 | 默认模型不等于固定 staffing；小而清晰的任务允许主 Agent 直接完成，不机械 spawn 三角色 | yes | Team positive assertion |
+| AC-2 | 默认模型不等于固定 staffing；小而清晰的任务默认由主 Agent 直接完成，只有具体证据表明 specialist review 或 delegation 能明显降低风险或延迟时才使用 subagent | yes | Team positive/negative assertion |
 | AC-3 | 需要实现角色时优先 Luna；需要常规 review/verify 时优先 Terra；规划或关键判断确有价值时优先 Sol | yes | model policy + Team assertions |
 | AC-4 | 难以撤销的是方案方向时优先 Sol planner；完成阶段或集成结果时才使用 Sol phase reviewer | yes | cross-file assertions |
 | AC-5 | 一次非机械失败只有在疑似实现/决策错误且根因不明时才考虑升级 Sol；明确环境/基础设施 blocker 不升级 | yes | positive/negative assertions |
 | AC-6 | 大量浏览器操作优先 Luna high；只有 phase/final acceptance 的额外判断有价值时才使用 Sol phase reviewer | yes | Team、browser、phase reviewer assertions |
 | AC-7 | implementer 服从 controller 的适中逻辑 commit boundary，不强制每个 slice 独立提交 | yes | cross-file assertion |
 | AC-8 | runtime metadata 可见时记录 `verified`；不可见或冲突时记录 `unverified` 并允许普通任务继续 | yes | Team calibration assertion |
-| AC-9 | Codex 版本/agent 配置变化、token 异常或疑似父模型继承时才抽样校准；不建设长期 runner | yes | Team/docs assertion + absence check |
-| AC-10 | 只有确认昂贵父模型继承、异常 fan-out 或明显成本失控时才停止新的 fan-out 并调查 | yes | Team stop assertion |
+| AC-9 | 只有异常 token 消耗、异常 fan-out、疑似昂贵父模型继承等成本信号，或用户明确要求时才抽样校准；版本/配置变化本身不触发，也不建设长期 runner | yes | Team/docs assertion + absence check |
+| AC-10 | 确认昂贵父模型继承、异常 fan-out 或明显成本失控时停止新增 fan-out，允许最小只读诊断并安全降级；只有修复需要额外 mutation 或外部动作时才请求授权 | yes | Team stop/fallback assertion |
 | AC-11 | Atlas plugin/repo 验证通过，未修改 forbidden paths、Multica、真实配置或安装态 | yes | required validation commands |
+
+## Scenario Acceptance
+
+| Scenario | Allowed action | Disallowed action |
+|----------|----------------|-------------------|
+| 小而清晰的修复 | 默认由主 Agent 完成；有具体降风险或降延迟证据时可使用 specialist/subagent | 仅因存在 Team 能力就机械 spawn |
+| 常规实现且 delegation 有价值 | 需要 implementer 时优先 Luna，其他角色按需加入 | 固定启动完整角色集 |
+| 常规 review 或 verify | 需要该角色时优先 Terra | 无额外判断价值时升级 Sol |
+| 难以撤销的方案方向 | 需要 planner 时优先 Sol | 把纯机械或环境问题交给 Sol planner |
+| typo、import、端口、网络或凭据失败 | 保持原 profile，直接修复、诊断或报告 blocker | 仅因一次失败升级 Sol |
+| 已完成阶段或集成结果需要额外判断 | 需要 phase reviewer 时优先 Sol | 用 phase reviewer 代替常规 review |
+| preferred custom agent 不可用 | 合理回退并披露 | 虚构 preferred profile 已生效 |
+| runtime metadata 不可见或冲突 | 标记 `unverified` 并继续普通任务 | 报告为 `verified` 或把可观测性变成日常门禁 |
+| 确认昂贵父模型继承 | 停止新增 fan-out，最小只读诊断并安全降级 | 继续扩张 fan-out，或未经授权修改配置/runtime |
+
+未来合同测试应把每个场景投影为允许与禁止动作的正负断言，不能只检查关键词存在。
 
 ## Real Validation Plan
 
@@ -72,7 +88,7 @@ product_ui_not_applicable_reason: 纯 custom-agent 配置、Team 路由合同与
 |-----|--------|-------------------|-----------------|---------------------------|
 | V-1 | static model policy | `bash workflow/tests/contract_agent_model_policy.sh` | 七角色投影与 family gate 通过 | final conclusion |
 | V-2 | soft routing contract | 运行 Team/custom-agent 专项正负断言 | 默认模型、按需 staffing、升级和 blocker 边界一致 | final conclusion |
-| V-3 | optional calibration | 版本/配置变化或成本异常时，点名一个低成本角色与一个 Sol 角色，检查当时可用 thread/status/log metadata | 记录 `verified` 或 `unverified`；后者不阻塞普通任务 | temporary calibration note |
+| V-3 | conditional, non-required calibration | 仅在出现疑似成本信号或用户明确要求时，点名一个低成本角色与一个 Sol 角色，检查当时可用 thread/status/log metadata | 被触发时记录 `verified` 或 `unverified`；未触发时无需证据，`unverified` 不阻塞普通任务 | conditional calibration note |
 | V-4 | plugin validity | 官方 `validate_plugin.py` 与 `atlas-plugin-integrity manifest` | exit 0 | final conclusion |
 | V-5 | repo contracts | `bash workflow/tests/contract_repo.sh` | exit 0 | final conclusion |
 | V-6 | diff boundaries | `git diff --check`、staged diff、forbidden paths | 无格式错误、无越界路径 | final conclusion |
@@ -87,23 +103,25 @@ product_ui_not_applicable_reason: 纯 custom-agent 配置、Team 路由合同与
 
 | Case | Expected behavior | Required |
 |------|-------------------|----------|
-| 小而清晰的单 Agent 工作 | 不启动 Team lanes，主 Agent 直接完成 | yes |
+| 小而清晰的单 Agent 工作 | 默认由主 Agent 直接完成；只有具体证据表明 specialist review 或 delegation 能明显降低风险或延迟时才使用 subagent | yes |
 | preferred custom agent 不可用 | 允许合理回退并如实说明，不宣称已 verified | yes |
 | custom agent 能 spawn 但 model metadata 不可见 | `unverified`，普通任务继续 | yes |
 | UI badge 与 log metadata 冲突 | `unverified`；仅在成本异常时继续调查 | yes |
-| 确认普通 lane 使用昂贵父模型 | 停止新的 fan-out，减少 subagent并调查配置/runtime | yes |
+| 确认普通 lane 使用昂贵父模型 | 停止新增 fan-out，做最小只读诊断并降级为主 Agent 或更少 subagent；仅在修复需要 mutation 时请求授权 | yes |
 | 明确端口、网络、凭据或服务 blocker | 诊断或报告 blocker，不升级 Sol reviewer | yes |
 | 默认路径一次失败但原因是简单机械错误 | 保持原 profile，完成直接修复 | yes |
 | 需要 MultiAgentV2 workaround | 停止，请求独立实验授权 | yes |
 
 ## Failure And Stop Conditions
 
-- Stop and ask the user when: 确认昂贵模型继承、异常 fan-out、明显成本失控，或需要修改真实用户配置、启用 MultiAgentV2、刷新安装态、发布、上传日志、提交上游 issue。
+- Stop new fan-out and diagnose when: 确认昂贵模型继承、异常 fan-out 或明显成本失控；只允许最小只读诊断，并优先降级为主 Agent 或更少 subagent。
+- Stop and ask the user when: 上述问题的修复需要修改真实用户配置、启用 MultiAgentV2、刷新安装态、上传日志、提交上游 issue 或发布。
 - Treat the task as failed when: Team 机械启动不必要角色、普通任务无理由使用 Sol、明确环境 blocker 被升级给 Sol、`unverified` 被虚假报告为 `verified`，或合同/仓库测试失败。
 - Safe fallback: 减少或停止 subagent fan-out，由主 Agent 直接完成当前任务；保留 preferred profile 配置并如实标记 runtime model `unverified`。
 
 ## Completion Check
 
+- 条件性验证行只在触发条件成立时需要证据；未触发的 V-3 不影响完成结论。
 - [ ] Scope stayed inside the contract
 - [ ] Required acceptance criteria passed
 - [ ] Required validation rows have evidence

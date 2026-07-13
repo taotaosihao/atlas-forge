@@ -11,9 +11,9 @@
 ## 锁定边界
 
 - 普通实现优先 Luna；常规 review/verify 优先 Terra；确有规划价值或关键判断时优先 Sol。
-- 默认模型不等于固定三角色 staffing；小而清晰的任务优先主 Agent 直接完成。
+- 默认模型不等于固定三角色 staffing；小而清晰的任务默认由主 Agent 直接完成，只有具体证据表明 specialist review 或 delegation 能明显降低风险或延迟时才使用 subagent。
 - `unverified` 不是 blocker，不阻止 Team 执行或合同修正。
-- 版本升级、agent 配置变化、token 异常或疑似父模型继承时进行一次抽样校准。
+- 只有出现异常 token 消耗、异常 fan-out、疑似昂贵父模型继承等成本信号，或用户明确要求时，才进行一次抽样校准；版本或配置变化本身不触发校准。
 - 不建设 runtime smoke CLI、认证复制、metadata parser、Gate A 或长期成本系统。
 
 ## 关键反馈
@@ -22,4 +22,4 @@
 
 ## 停止条件
 
-确认普通 lane 使用昂贵父模型、出现异常 fan-out、成本明显失控，或需要修改真实用户配置、启用 MultiAgentV2、刷新安装态、发布时停止并请求方向。
+确认普通 lane 使用昂贵父模型、出现异常 fan-out 或成本明显失控时，先停止新增 fan-out，允许最小只读诊断，并降级为主 Agent 或更少 subagent。只有修复需要修改真实用户配置、启用 MultiAgentV2、刷新安装态、上传日志、提交上游 issue 或发布时，才停止并请求用户授权。

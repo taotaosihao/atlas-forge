@@ -13,7 +13,7 @@
 
 ## 默认与升级路径
 
-- 小而清晰的任务：主 Agent 直接完成。
+- 小而清晰的任务：默认由主 Agent 直接完成；只有具体证据表明 specialist review 或 delegation 能明显降低风险或延迟时才使用 subagent。
 - 实现角色需要时：优先 `atlas-sdd-implementer` / Luna max。
 - 常规 review 或 verify 需要时：优先 Terra high。
 - 规划确有价值、方向难以撤销或关键结果验收时：优先 Sol medium。
@@ -22,8 +22,8 @@
 
 ## Runtime 校准
 
-- Codex 版本、agent 配置变化或成本异常时抽样检查一个低成本角色和一个 Sol 角色。
+- 只有出现异常 token 消耗、异常 fan-out、疑似昂贵父模型继承等成本信号，或用户明确要求时，才抽样检查一个低成本角色和一个 Sol 角色；版本或配置变化本身不触发校准。
 - metadata 可用则记录 `verified`；不可见或矛盾则记录 `unverified`，不阻塞普通任务。
-- 确认昂贵父模型继承、异常 fan-out 或成本失控时停止新的 fan-out 并调查。
+- 确认昂贵父模型继承、异常 fan-out 或成本失控时停止新增 fan-out，允许最小只读诊断，并降级为主 Agent 或更少 subagent；需要配置、运行时、安装、日志上传、上游 issue 或发布 mutation 时另行请求授权。
 
 详细验收与验证见 [最终实施合同](./implementation-contract.final.md)。
