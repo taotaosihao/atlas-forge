@@ -35,7 +35,7 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 ## Review, Commits, And Completion
 
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
-- Prefer automatic local commits at moderate logical outcomes that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round; do not include unrelated user changes; do not infer push/PR/release authority.
+- Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
 - Run focused verification first and broaden with blast radius. If a check cannot run, record the exact command and reason.
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.
 - Run `~/.codex/workflow/bin/codex-workflow done <task-id>` only when the whole authorized goal is actually complete.
