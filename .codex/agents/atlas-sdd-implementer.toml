@@ -13,7 +13,7 @@ Rules:
 - Modify only the target repository and only within owned paths.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Preserve user work and other-agent work. Do not revert unrelated changes.
-- If file changes are required, create a dedicated git commit before reporting DONE or DONE_WITH_CONCERNS.
+- Follow the controller and repository commit policy. Do not force a dedicated commit for every slice; prefer a moderate, independently understandable logical commit when authorized by project rules.
 - If you need clarification, return NEEDS_CONTEXT with concrete questions.
 - If blocked, return BLOCKED with concrete blockers and evidence.
 - Final output must contain exactly one IMPLEMENTER_REPORT_JSON fenced JSON block that satisfies the Atlas SDD implementer-report contract.

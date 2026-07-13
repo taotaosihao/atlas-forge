@@ -22,21 +22,40 @@ This skill is native-only. Use the collaboration tools directly:
 
 If native collaboration tools are unavailable, ask for an explicit alternate workflow. Do not silently fall back to legacy CLI lanes.
 
-## Latest Model Policy Gate
+## Model Preferences And Calibration
 
-Before spawning a native lane that may select an Atlas SDD custom agent, run:
+Before the first native lane that may select an Atlas SDD custom agent, prefer running:
 
 ```bash
 workflow/bin/atlas-agent-model-policy check
 ```
 
-- This gate is mandatory before the first such spawn in a native round; record only its conclusion when an artifact already exists.
+- This check validates the checked-in preference projection; it does not prove the runtime model selected for a spawn.
 - The policy resolves the numerically highest stable GPT `major.minor` family from the local Codex model catalog and does not assume that model versions are consecutive.
 - Agent roles use semantic capability and thinking profiles: planner=`frontier/medium`, routine-reviewer=`balanced/high`, phase-reviewer=`frontier/medium`, implementer=`fast/max`, verifier=`balanced/high`, browser-verifier=`fast/high`, and explorer=`fast/medium`.
-- Default path: Luna implementer, then Terra routine reviewer and verifier. Add the Sol planner only when the task actually needs planning; skip that lane for clear bounded work.
-- Upgrade to the Sol phase-reviewer when an error would be costly or hard to reverse, at a phase or final integration gate, when explicitly requested, or after one non-mechanical review or verification failure whose cause is unclear. Formatting, import, typo, and similarly obvious repairs stay on the default path.
-- Add the Luna browser-verifier only for substantial Playwright or visual interaction work. Route its evidence to `atlas-sdd-phase-reviewer` only when it supports phase or final acceptance; routine UI smoke and regression checks stay on the default review path.
-- If the catalog or checked-in projection is missing, ambiguous, or incompatible, stop before spawning rather than silently selecting an older model or weaker reasoning level.
+- A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency.
+- When an implementation lane is useful, prefer GPT-5.6 Luna max. For routine review or command verification, prefer Terra. Add GPT-5.6 Sol medium planner only for planning whose direction is costly or hard to reverse.
+- Consider GPT-5.6 Sol medium phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the default path.
+- Add GPT-5.6 Luna high browser-verifier only for substantial Playwright or visual interaction work. Route its evidence to the Sol phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with Terra review/verification.
+- Preferred profiles are defaults, not fixed staffing or absolute restrictions. If a preferred agent or projection check is unavailable, use a reasonable available fallback and disclose it; do not claim the runtime model is verified.
+
+Runtime metadata is opportunistic calibration, not a daily gate. Record `verified` only when visible evidence supports it; otherwise record `unverified` and continue ordinary work. Calibrate only when the user asks or there are suspicious cost signals such as abnormal token use, unexpected fan-out, or suspected expensive parent-model inheritance. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to the main Codex or fewer subagents. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
+
+### Routing Scenarios
+
+| Scenario ID | Allowed decision | Disallowed decision |
+| --- | --- | --- |
+| `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
+| `routine-implementation` | `luna-max-implementer-when-useful` | `sol-by-default` |
+| `routine-review-verify` | `terra-reviewer-or-verifier` | `sol-routine-check` |
+| `hard-to-reverse-direction` | `sol-medium-planner-when-useful` | `sol-for-mechanical-or-env-failure` |
+| `completed-phase-extra-judgment` | `sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
+| `browser-heavy` | `luna-high-browser-verifier` | `sol-throughout-browser-run` |
+| `preferred-agent-unavailable` | `disclosed-reasonable-fallback` | `claim-preferred-profile-verified` |
+| `metadata-invisible` | `mark-unverified-and-continue` | `runtime-proof-daily-gate` |
+| `confirmed-cost-anomaly` | `stop-new-fanout; readonly-diagnosis; reduce-agents` | `continue-fanout-or-mutate-runtime` |
+
+Use this table as a decision contract, not as a fixed sequence of lanes.
 
 ## Modes And Authority
 
@@ -62,7 +81,7 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 ## Minimal Agent Planning
 
 1. Start with the main Codex. Spawn only a concrete bounded lane whose result materially changes latency or risk.
-2. Choose roles from the actual task; there is no default role set or required agent count.
+2. Choose roles from the actual task; there is no default role set or required agent count. Do not add lanes merely to follow the model preference table.
 3. Use one writable owner for tightly coupled changes. Multiple writable agents require disjoint path/module ownership and an explicit integration owner.
 4. Reviewers and verifiers stay read-only unless a focused repair is assigned.
 5. Do not create staffing artifacts or omitted-role inventories solely to prove that planning occurred. Record ownership only when handoff, concurrent writes, audit, or risk makes it useful.
