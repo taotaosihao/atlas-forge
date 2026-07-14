@@ -30,6 +30,10 @@ const { taskRuntimeFile, taskStateFile } = require(path.resolve(
   __dirname,
   "../../bin/lib/codex-workflow/task/runtime.js",
 ));
+const { prepareTaskCommand } = require(path.resolve(
+  __dirname,
+  "../../bin/lib/codex-workflow/core/command-runtime.js",
+));
 
 function temporaryWorkflow(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-task-lifecycle."));
@@ -301,5 +305,39 @@ test("reports stale open tasks without mutating task or artifact files", (t) => 
   );
   for (const [taskId, content] of before) {
     assert.equal(fs.readFileSync(path.join(paths.tasksDir, `${taskId}.md`), "utf8"), content);
+  }
+});
+
+test("rejects corrupt task state before lifecycle or command preparation writes", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const options = { clock: fixedClock("2026-07-10T13:00:00.000Z"), environment };
+  const corruptValues = ['{"active_team":', "[]", "null"];
+
+  for (const [index, corrupt] of corruptValues.entries()) {
+    const taskId = createTask(`Corrupt state ${index}`, "must fail closed", options);
+    const taskPath = path.join(paths.tasksDir, `${taskId}.md`);
+    const statePath = taskStateFile(paths, taskId);
+    const runtimePath = taskRuntimeFile(paths, taskId);
+    fs.writeFileSync(statePath, corrupt);
+    const before = {
+      task: fs.readFileSync(taskPath),
+      state: fs.readFileSync(statePath),
+      runtime: fs.readFileSync(runtimePath),
+    };
+
+    assert.throws(
+      () => startTask(taskId, options),
+      new RegExp(`corrupt task state: .*${taskId}.*state\\.json`),
+    );
+    assert.deepEqual(fs.readFileSync(taskPath), before.task);
+    assert.deepEqual(fs.readFileSync(statePath), before.state);
+    assert.deepEqual(fs.readFileSync(runtimePath), before.runtime);
+    assert.throws(
+      () => prepareTaskCommand(paths, taskId, options.clock),
+      new RegExp(`corrupt task state: .*${taskId}.*state\\.json`),
+    );
+    assert.deepEqual(fs.readFileSync(taskPath), before.task);
+    assert.deepEqual(fs.readFileSync(statePath), before.state);
+    assert.deepEqual(fs.readFileSync(runtimePath), before.runtime);
   }
 });

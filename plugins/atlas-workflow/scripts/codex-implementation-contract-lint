@@ -2,10 +2,19 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { TextDecoder } = require("util");
+const { validateBrief } = require("../contracts/team-sdd/validators/brief");
+const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const {
+  computeGoalRef,
+  digestFile,
+  validateControllerResolutionAgainst,
+} = require("../contracts/team-sdd/validators/controller-resolution");
 
 const ENVELOPE_FIELDS = new Set([
+  "task_id",
   "contract_semantics_version",
   "finding_scope_admission",
   "safe_fallback_authority",
@@ -75,6 +84,7 @@ const PLACEHOLDER_TOKENS = new Set([
   "占位",
 ]);
 const NOT_APPLICABLE_TOKENS = new Set(["not_applicable", "not applicable", "not-applicable"]);
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const FIRST_CODE_HEADINGS = new Set([
   "first code slice guard",
   "首个代码切片门禁",
@@ -90,7 +100,7 @@ class CliError extends Error {}
 class InputError extends Error {}
 
 function usage() {
-  console.log(`usage: codex-implementation-contract-lint --file <path> [--strict]
+  console.log(`usage: codex-implementation-contract-lint --file <path> [--strict] [--authority-slice <dir>]...
 
 Validates versioned first-code and Product/UI semantics in an implementation
 contract. Unversioned historical contracts pass with a warning unless
@@ -99,6 +109,9 @@ contract. Unversioned historical contracts pass with a warning unless
 Options:
   --file <path>  Markdown implementation contract to validate.
   --strict       Require contract_semantics_version.
+  --authority-slice <dir>
+                 Canonical Team SDD slice used to validate semantics-v2 goal
+                 and current-required authority. Repeat for multiple slices.
   --help         Show this help.
 
 Exit codes:
@@ -108,7 +121,7 @@ Exit codes:
 }
 
 function parseArgs(argv) {
-  const options = { file: null, strict: false, help: false };
+  const options = { file: null, strict: false, help: false, authoritySlices: [] };
   let strictSeen = false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -129,6 +142,15 @@ function parseArgs(argv) {
       if (options.file !== null) throw new CliError("duplicate --file option");
       options.file = arg.slice("--file=".length);
       if (!options.file) throw new CliError("--file requires a path");
+    } else if (arg === "--authority-slice") {
+      if (index + 1 >= argv.length || argv[index + 1].startsWith("-")) {
+        throw new CliError("--authority-slice requires a path");
+      }
+      options.authoritySlices.push(argv[++index]);
+    } else if (arg.startsWith("--authority-slice=")) {
+      const value = arg.slice("--authority-slice=".length);
+      if (!value) throw new CliError("--authority-slice requires a path");
+      options.authoritySlices.push(value);
     } else if (arg.startsWith("--strict=")) {
       throw new CliError("--strict does not accept a value");
     } else {
@@ -138,6 +160,126 @@ function parseArgs(argv) {
 
   if (!options.help && !options.file) throw new CliError("--file is required");
   return options;
+}
+
+function canonicalRegularFile(file, label) {
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    throw new Error(`${label} is missing: ${file}: ${error.message}`);
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(file) !== path.resolve(file)) {
+    throw new Error(`${label} must be a canonical regular non-symlink file: ${file}`);
+  }
+}
+
+function readCanonicalJson(file, label) {
+  canonicalRegularFile(file, label);
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`${label} is invalid JSON: ${file}: ${error.message}`);
+  }
+}
+
+function workflowRoot() {
+  return path.resolve(
+    process.env.CODEX_WORKFLOW_ROOT
+      || process.env.ATLAS_WORKFLOW_ROOT
+      || path.join(os.homedir(), ".codex", "workflow"),
+  );
+}
+
+function loadAuthoritySlices(slicePaths) {
+  const diagnostics = [];
+  const goalRefs = new Set();
+  const currentRequired = new Set();
+  const findingOwners = new Map();
+  const taskIds = new Set();
+  const seenSlices = new Set();
+  const add = (code, message) => diagnostics.push(
+    makeDiagnostic("ERROR", code, "authority-slice", 0, message),
+  );
+
+  for (const rawSlice of slicePaths) {
+    const sliceDir = path.resolve(rawSlice);
+    if (seenSlices.has(sliceDir)) {
+      add("AUTHORITY_SLICE_DUPLICATE", `authority slice was provided more than once: ${sliceDir}`);
+      continue;
+    }
+    seenSlices.add(sliceDir);
+    try {
+      const stat = fs.lstatSync(sliceDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(sliceDir) !== sliceDir) {
+        throw new Error(`authority slice must be a canonical non-symlink directory: ${sliceDir}`);
+      }
+      const briefFile = path.join(sliceDir, "brief.json");
+      const verdictFile = path.join(sliceDir, "review-verdict.json");
+      const resolutionFile = path.join(sliceDir, "controller-resolution.json");
+      const brief = readCanonicalJson(briefFile, "brief.json");
+      const verdict = readCanonicalJson(verdictFile, "review-verdict.json");
+      const resolution = readCanonicalJson(resolutionFile, "controller-resolution.json");
+      const briefErrors = validateBrief(brief);
+      if (brief.schema_version !== 2 || briefErrors.length > 0) {
+        throw new Error(`invalid brief v2: ${briefErrors.join("; ")}`);
+      }
+      const expectedSliceDir = path.join(
+        workflowRoot(),
+        "artifacts",
+        brief.task_id,
+        "team",
+        "sdd",
+        "slices",
+        brief.slice_id,
+      );
+      if (sliceDir !== expectedSliceDir) {
+        throw new Error(
+          `authority slice is outside the canonical workflow artifact tree: expected ${expectedSliceDir}`,
+        );
+      }
+      const verdictErrors = validateReviewVerdict(verdict);
+      if (verdict.schema_version !== 2 || verdictErrors.length > 0) {
+        throw new Error(`invalid review verdict v2: ${verdictErrors.join("; ")}`);
+      }
+      const resolutionErrors = validateControllerResolutionAgainst(resolution, {
+        brief,
+        verdict,
+        verdictDigest: digestFile(verdictFile),
+        goalRef: computeGoalRef(brief, sliceDir),
+        sliceDir,
+      });
+      if (resolutionErrors.length > 0) {
+        throw new Error(`invalid controller resolution: ${resolutionErrors.join("; ")}`);
+      }
+      taskIds.add(brief.task_id);
+      brief.acceptance_refs.forEach((ref) => goalRefs.add(ref));
+      for (const record of resolution.records) {
+        if (record.disposition !== "current-required") continue;
+        const owner = findingOwners.get(record.finding_id);
+        if (owner && owner !== sliceDir) {
+          add(
+            "CURRENT_REQUIRED_AUTHORITY_AMBIGUOUS",
+            `current-required finding appears in multiple authority slices: ${record.finding_id}`,
+          );
+          continue;
+        }
+        findingOwners.set(record.finding_id, sliceDir);
+        currentRequired.add(record.finding_id);
+      }
+    } catch (error) {
+      add("AUTHORITY_SLICE_INVALID", `${sliceDir}: ${error.message}`);
+    }
+  }
+  if (taskIds.size > 1) {
+    add("AUTHORITY_TASK_AMBIGUOUS", `authority slices span multiple tasks: ${[...taskIds].sort().join(", ")}`);
+  }
+  return {
+    currentRequired,
+    diagnostics,
+    goalRefs,
+    taskId: taskIds.size === 1 ? [...taskIds][0] : "",
+  };
 }
 
 function readUtf8File(file) {
@@ -949,7 +1091,7 @@ function validateRequiredRows(lines, heading, expectedHeader, authorityIndex, ad
   const section = sectionLines(lines, heading);
   if (!section) {
     add("SCOPE_TABLE_MISSING", heading, 0, `${heading} section is required by semantics version 2`);
-    return;
+    return [];
   }
   const headerIndex = section.findIndex((line) => {
     const cells = tableCells(line.text);
@@ -957,12 +1099,14 @@ function validateRequiredRows(lines, heading, expectedHeader, authorityIndex, ad
   });
   if (headerIndex < 0) {
     add("SCOPE_TABLE_HEADER_INVALID", heading, section[0]?.line || 0, `${heading} must include its authority column`);
-    return;
+    return [];
   }
+  const authorities = [];
   for (const line of section.slice(headerIndex + 2)) {
     const cells = tableCells(line.text);
     if (!cells || cells.length !== expectedHeader.length) continue;
     if (cells[2].toLowerCase() !== "yes") continue;
+    authorities.push({ value: cells[authorityIndex], line: line.line, field: heading });
     if (!/^(?:goal|current-required):[A-Za-z0-9][A-Za-z0-9._-]*$/.test(cells[authorityIndex])) {
       add(
         "REQUIRED_ROW_AUTHORITY_INVALID",
@@ -972,14 +1116,21 @@ function validateRequiredRows(lines, heading, expectedHeader, authorityIndex, ad
       );
     }
   }
+  return authorities;
 }
 
-function validateVersionTwo(content, fields, initialDiagnostics) {
+function validateVersionTwo(content, fields, initialDiagnostics, authority, strict) {
   const diagnostics = validateVersionOne(fields, initialDiagnostics);
   const add = (code, field, line, message) => {
     diagnostics.push(makeDiagnostic("ERROR", code, field, line, message));
   };
   const policy = fields.get("finding_scope_admission");
+  const taskId = fields.get("task_id");
+  if (!taskId) {
+    add("REQUIRED_FIELD_MISSING", "task_id", 0, "semantics version 2 requires task_id");
+  } else if (!SAFE_ID_PATTERN.test(taskId.value)) {
+    add("TASK_ID_INVALID", taskId.key, taskId.line, "task_id must be a safe identifier");
+  }
   if (!policy) {
     add("REQUIRED_FIELD_MISSING", "finding_scope_admission", 0, "semantics version 2 requires finding_scope_admission");
   } else if (policy.value !== "controller_current_required_only") {
@@ -1003,20 +1154,20 @@ function validateVersionTwo(content, fields, initialDiagnostics) {
   }
 
   const lines = visibleContentLines(content);
-  validateRequiredRows(
+  const requiredAuthorities = validateRequiredRows(
     lines,
     "Acceptance Criteria",
     ["id", "criterion", "required", "verification", "authority"],
     4,
     add,
   );
-  validateRequiredRows(
+  requiredAuthorities.push(...validateRequiredRows(
     lines,
     "Edge Cases",
     ["case", "expected behavior", "required", "admission"],
     3,
     add,
-  );
+  ));
   if (!sectionLines(lines, "Finding Provenance")) {
     add(
       "FINDING_PROVENANCE_MISSING",
@@ -1045,6 +1196,57 @@ function validateVersionTwo(content, fields, initialDiagnostics) {
         fallbackLine.line,
         "an admitted fallback authority requires substantive fallback behavior",
       );
+    }
+  }
+  if (strict) {
+    if (!authority) {
+      add(
+        "AUTHORITY_SLICE_REQUIRED",
+        "authority-slice",
+        0,
+        "strict semantics version 2 requires at least one --authority-slice",
+      );
+    } else {
+      diagnostics.push(...authority.diagnostics);
+      if (authority.diagnostics.length === 0) {
+        if (taskId && SAFE_ID_PATTERN.test(taskId.value) && taskId.value !== authority.taskId) {
+          add(
+            "AUTHORITY_TASK_MISMATCH",
+            taskId.key,
+            taskId.line,
+            `contract task_id ${taskId.value} does not match authority task ${authority.taskId}`,
+          );
+        }
+        const tokens = [...requiredAuthorities];
+        if (fallbackAuthority && fallbackAuthority.value !== "none") {
+          tokens.push({
+            value: fallbackAuthority.value,
+            line: fallbackAuthority.line,
+            field: "safe_fallback_authority",
+          });
+        }
+        for (const token of tokens) {
+          const separator = token.value.indexOf(":");
+          if (separator < 0) continue;
+          const kind = token.value.slice(0, separator);
+          const identity = token.value.slice(separator + 1);
+          if (kind === "goal" && !authority.goalRefs.has(identity)) {
+            add(
+              "GOAL_AUTHORITY_UNKNOWN",
+              token.field,
+              token.line,
+              `goal authority is not present in canonical brief acceptance_refs: ${identity}`,
+            );
+          } else if (kind === "current-required" && !authority.currentRequired.has(identity)) {
+            add(
+              "CURRENT_REQUIRED_AUTHORITY_UNKNOWN",
+              token.field,
+              token.line,
+              `finding is not current-required in canonical controller resolution: ${identity}`,
+            );
+          }
+        }
+      }
     }
   }
   return diagnostics;
@@ -1079,7 +1281,7 @@ function printSummary(ok, file, strict, version, diagnostics) {
   console.log(`warnings: ${warnings}`);
 }
 
-function lint(file, strict) {
+function lint(file, strict, authoritySlices = []) {
   const { absolute, content } = readUtf8File(file);
   const parsed = parseFields(content);
   const version = parsed.fields.get("contract_semantics_version");
@@ -1107,7 +1309,13 @@ function lint(file, strict) {
 
   const diagnostics = sortDiagnostics(
     version.value === "2"
-      ? validateVersionTwo(content, parsed.fields, parsed.diagnostics)
+      ? validateVersionTwo(
+        content,
+        parsed.fields,
+        parsed.diagnostics,
+        authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+        strict,
+      )
       : validateVersionOne(parsed.fields, parsed.diagnostics),
   );
   diagnostics.forEach((item) => printDiagnostic(item, absolute));
@@ -1122,7 +1330,7 @@ function main() {
     usage();
     return 0;
   }
-  return lint(options.file, options.strict);
+  return lint(options.file, options.strict, options.authoritySlices);
 }
 
 try {

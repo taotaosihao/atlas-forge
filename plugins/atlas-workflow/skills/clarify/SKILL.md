@@ -131,7 +131,8 @@ Follow this loop:
    - assumptions are labelled
    - acceptance criteria match the verification plan
    - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
-   - run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>` before calling a versioned final contract execution-ready
+   - for a semantics-v2 final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; the lint must validate contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
+   - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`
 14. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.

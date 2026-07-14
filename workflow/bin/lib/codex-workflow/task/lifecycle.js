@@ -18,8 +18,10 @@ const {
   clearCurrentTaskPointer,
   hasSuccessfulVerification,
   lifecycleEvents,
+  readJsonObject,
   setTaskStateFields,
   syncTaskRuntime,
+  taskStateFile,
   timestampSeconds,
   writeCurrentTaskPointer,
 } = require("./runtime");
@@ -153,6 +155,7 @@ function lockedTask(paths, taskId, callback) {
   return withLock(taskLockFile(paths, file), () => {
     requireTaskFile(paths.tasksDir, taskId);
     const record = validateTaskFile(file);
+    readJsonObject(taskStateFile(paths, taskId));
     return callback(file, record);
   });
 }

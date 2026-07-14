@@ -46,7 +46,7 @@ run_v1_valid() {
 run_v2_valid() {
   local label="$1" file="$2"
   case_paths
-  if ! "$BIN" --strict --file "$file" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+  if ! "$BIN" --strict --file "$file" --authority-slice "$AUTHORITY_SLICE" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
     show_failure "$label"
   fi
   grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
@@ -54,6 +54,20 @@ run_v2_valid() {
   grep -q '^errors: 0$' "$CASE_STDOUT" || show_failure "$label"
   grep -q '^warnings: 0$' "$CASE_STDOUT" || show_failure "$label"
   [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
+  pass "$label"
+}
+
+run_v2_authority_invalid() {
+  local label="$1" file="$2" expected_code="$3" authority_slice="${4:-$AUTHORITY_SLICE}"
+  local status
+  case_paths
+  set +e
+  "$BIN" --strict --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
+  grep -q '^implementation_contract_lint: false$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q "^ERROR $expected_code " "$CASE_STDERR" || show_failure "$label"
   pass "$label"
 }
 
@@ -127,6 +141,7 @@ run_usage_invalid() {
 node --check "$BIN"
 "$BIN" --help >"$TMP_ROOT/help.stdout"
 grep -q -- '--strict' "$TMP_ROOT/help.stdout"
+grep -q -- '--authority-slice' "$TMP_ROOT/help.stdout"
 grep -q 'Exit codes:' "$TMP_ROOT/help.stdout"
 pass 'CLI help and syntax are valid'
 
@@ -160,9 +175,138 @@ run_v1_valid 'planning contract passes with both gates not applicable' "$FIXTURE
 run_v1_valid 'review contract passes with both gates not applicable' "$FIXTURE_ROOT/valid/review.md"
 run_v1_valid 'audit contract passes with both gates not applicable' "$FIXTURE_ROOT/valid/audit.md"
 run_v1_valid 'fenced machine-field examples are ignored' "$FIXTURE_ROOT/valid/fenced-examples.md"
+scope_v2="$FIXTURE_ROOT/valid/scope-admission-v2.md"
+export CODEX_WORKFLOW_ROOT="$TMP_ROOT/workflow"
+AUTHORITY_SLICE="$CODEX_WORKFLOW_ROOT/artifacts/fixture/team/sdd/slices/slice-001"
+mkdir -p "$AUTHORITY_SLICE"
+base_sha="$(git -C "$ATLAS_FORGE_ROOT" rev-parse HEAD)"
+node - "$ATLAS_FORGE_ROOT" "$AUTHORITY_SLICE" "$base_sha" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [root, sliceDir, baseSha] = process.argv.slice(2);
+const { computeGoalRef, digestFile } = require(path.join(
+  root,
+  "plugins/atlas-workflow/contracts/team-sdd/validators/controller-resolution.js",
+));
+const brief = {
+  schema_version: 2,
+  task_id: "fixture",
+  slice_id: "slice-001",
+  repo: root,
+  base_sha: baseSha,
+  objective: "Provide canonical authority for implementation-contract lint tests.",
+  requirements_path: "brief.md",
+  global_constraints_path: "../../global-constraints.md",
+  owned_paths: ["plugins/atlas-workflow"],
+  forbidden_paths: ["plugins/multica-sdlc"],
+  acceptance_refs: ["REQ-1"],
+  required_checks: ["bash workflow/tests/contract_implementation_contract.sh"],
+  commit_policy: "logical_outcome",
+  output_contract: "final_message_json_only",
+};
+const verdict = {
+  schema_version: 2,
+  task_id: brief.task_id,
+  slice_id: brief.slice_id,
+  base_sha: baseSha,
+  head_sha: baseSha,
+  spec_compliance: "pass",
+  task_quality: "pass",
+  issues: [
+    {
+      finding_id: "finding-resolved",
+      severity: "Important",
+      category: "contract",
+      path: "implementation-contract.final.md",
+      line: 1,
+      evidence: "The finding remains required after repair.",
+      required_fix: "Retain the repaired requirement.",
+    },
+    {
+      finding_id: "finding-follow-up",
+      severity: "Minor",
+      category: "documentation",
+      path: "implementation-contract.final.md",
+      line: 2,
+      evidence: "The suggestion is outside the current goal.",
+      required_fix: "Track the suggestion as a follow-up.",
+    },
+  ],
+  cannot_verify_from_diff: [],
+  strengths: ["Canonical authority is explicit."],
+  reviewed_inputs: { brief_json: "brief.json", diff: "local" },
+};
+fs.writeFileSync(path.join(sliceDir, "brief.md"), "# Canonical requirements\n\n- REQ-1\n");
+fs.writeFileSync(path.join(sliceDir, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`);
+fs.writeFileSync(path.join(sliceDir, "review-verdict.json"), `${JSON.stringify(verdict, null, 2)}\n`);
+const resolution = {
+  schema_version: 2,
+  task_id: brief.task_id,
+  slice_id: brief.slice_id,
+  verdict_digest: digestFile(path.join(sliceDir, "review-verdict.json")),
+  goal_ref: computeGoalRef(brief, sliceDir),
+  records: [
+    {
+      finding_id: "finding-resolved",
+      disposition: "current-required",
+      basis: "goal-blocker",
+      authority_refs: ["acceptance:REQ-1"],
+      repair_status: "resolved",
+      reason: "The current goal still requires the repaired behavior.",
+    },
+    {
+      finding_id: "finding-follow-up",
+      disposition: "visible-follow-up",
+      basis: "not-current-required",
+      authority_refs: [],
+      repair_status: "omitted",
+      reason: "The suggestion is not required by the current goal.",
+    },
+  ],
+  evidence_gaps: [],
+};
+fs.writeFileSync(path.join(sliceDir, "controller-resolution.json"), `${JSON.stringify(resolution, null, 2)}\n`);
+NODE
 run_v2_valid 'scope admission v2 contract passes' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
 grep -q 'current-required:finding-resolved' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
 pass 'scope admission v2 retains resolved current-required behavior in clean rewrites'
+copied_authority="$TMP_ROOT/copied-authority-slice"
+cp -R "$AUTHORITY_SLICE" "$copied_authority"
+run_v2_authority_invalid \
+  'v2 rejects self-consistent authority outside the canonical workflow artifact tree' \
+  "$scope_v2" \
+  AUTHORITY_SLICE_INVALID \
+  "$copied_authority"
+case_paths
+set +e
+"$BIN" --strict --file "$FIXTURE_ROOT/valid/scope-admission-v2.md" >"$CASE_STDOUT" 2>"$CASE_STDERR"
+status=$?
+set -e
+[[ "$status" -eq 1 ]] || show_failure 'v2 strict lint requires canonical authority slices'
+grep -q '^ERROR AUTHORITY_SLICE_REQUIRED ' "$CASE_STDERR" || show_failure 'v2 strict lint requires canonical authority slices'
+pass 'v2 strict lint requires canonical authority slices'
+fake_goal="$TMP_ROOT/v2-fake-goal.md"
+sed 's/goal:REQ-1/goal:FAKE-GOAL/' "$scope_v2" > "$fake_goal"
+run_v2_authority_invalid 'v2 rejects unknown goal authority' "$fake_goal" GOAL_AUTHORITY_UNKNOWN
+fake_finding="$TMP_ROOT/v2-fake-finding.md"
+sed 's/current-required:finding-resolved/current-required:fake-finding/g' "$scope_v2" > "$fake_finding"
+run_v2_authority_invalid 'v2 rejects unknown current-required authority' "$fake_finding" CURRENT_REQUIRED_AUTHORITY_UNKNOWN
+non_required_finding="$TMP_ROOT/v2-non-required-finding.md"
+sed 's/current-required:finding-resolved/current-required:finding-follow-up/g' "$scope_v2" > "$non_required_finding"
+run_v2_authority_invalid 'v2 rejects a known but non-current-required finding' "$non_required_finding" CURRENT_REQUIRED_AUTHORITY_UNKNOWN
+foreign_task="$TMP_ROOT/v2-foreign-task.md"
+sed 's/^task_id:.*/task_id: foreign-task/' "$scope_v2" > "$foreign_task"
+run_v2_authority_invalid 'v2 rejects authority from another task' "$foreign_task" AUTHORITY_TASK_MISMATCH
+cp "$AUTHORITY_SLICE/review-verdict.json" "$TMP_ROOT/review-verdict.backup.json"
+node - "$AUTHORITY_SLICE/review-verdict.json" <<'NODE'
+const fs = require("fs");
+const file = process.argv[2];
+const value = JSON.parse(fs.readFileSync(file, "utf8"));
+value.strengths.push("Changed after controller resolution.");
+fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+NODE
+run_v2_authority_invalid 'v2 rejects stale verdict authority' "$scope_v2" AUTHORITY_SLICE_INVALID
+mv "$TMP_ROOT/review-verdict.backup.json" "$AUTHORITY_SLICE/review-verdict.json"
 run_v1_valid 'current authoritative implementation contract passes strict lint' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
@@ -480,12 +624,14 @@ for template in implementation-contract.md implementation-contract.final.md; do
 done
 grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROOT/workflow/templates/gate-checklist.md"
 grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'every validated controller finding with `disposition: current-required` remains an executable requirement' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'every validated controller resolution with `disposition: current-required` remains part of the current delivery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
 grep -q 'validated controller resolution is the sole finding-scope authority' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
+grep -q 'repeated `--authority-slice`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
 grep -q 'strict lint can validate attribution without interpreting natural language' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'every validated controller finding with `disposition: current-required` remains projected into executable requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team-v1/SKILL.md"
 pass 'templates and authoring skills adopt required-only scope admission and strict semantic lint'

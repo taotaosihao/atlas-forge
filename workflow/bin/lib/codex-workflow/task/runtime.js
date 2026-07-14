@@ -24,10 +24,16 @@ function timestampSeconds(clock = () => new Date()) {
 function readJsonObject(file) {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`corrupt task state: ${file}: expected a JSON object`);
+    }
+    return value;
   } catch (error) {
-    if (error.code === "ENOENT" || error instanceof SyntaxError) {
+    if (error.code === "ENOENT") {
       return {};
+    }
+    if (error instanceof SyntaxError) {
+      throw new Error(`corrupt task state: ${file}: ${error.message}`);
     }
     throw error;
   }
@@ -148,6 +154,7 @@ function setTaskStateFields(paths, taskId, updates, clock = () => new Date()) {
 function syncTaskRuntime(paths, taskId, clock = () => new Date()) {
   const file = requireTaskFile(paths.tasksDir, taskId);
   const { fields, task } = validateTaskFile(file);
+  readJsonObject(taskStateFile(paths, taskId));
   ensureTaskRuntimeScaffold(paths, taskId, task.title);
   updateTaskFields(file, {
     artifact_dir: taskArtifactDirRelative(paths, taskId),

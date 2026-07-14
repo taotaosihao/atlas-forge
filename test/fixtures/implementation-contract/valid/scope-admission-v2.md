@@ -1,5 +1,6 @@
 # Scope admission v2 contract
 
+task_id: fixture
 contract_semantics_version: 2
 finding_scope_admission: controller_current_required_only
 safe_fallback_authority: none

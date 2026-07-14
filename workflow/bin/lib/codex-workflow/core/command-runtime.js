@@ -10,9 +10,11 @@ const {
   validateTaskFile,
 } = require("../task/repository");
 const {
+  readJsonObject,
   setTaskStateFields,
   syncTaskRuntime,
   taskRuntimeFile,
+  taskStateFile,
   timestampSeconds,
   writeTaskState,
 } = require("../task/runtime");
@@ -69,6 +71,7 @@ function prepareTaskCommand(paths, taskId, clock) {
 
 function updateTaskCommand(paths, taskId, headerUpdates, stateUpdates, clock) {
   const file = requireTaskFile(paths.tasksDir, taskId);
+  readJsonObject(taskStateFile(paths, taskId));
   if (Object.keys(headerUpdates).length > 0) {
     updateTaskFields(file, headerUpdates);
   }
