@@ -150,6 +150,27 @@ test("accepts substantive defaults and uses the root decision when present", (t)
   assert.equal(result.exitCode, 0);
 });
 
+test("ready evaluates requested artifacts without interpreting admission-shaped state", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Admission-independent readiness");
+  appendSubstantiveArtifacts(paths, taskId);
+  const stateFile = taskStateFile(paths, taskId);
+  const state = readJsonObject(stateFile);
+  state.severity = "Critical";
+  state.admission = { disposition: "visible-follow-up", repair_status: "open" };
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+  const result = runReady(parseReadyArgs([taskId]), { clock: fixedClock, environment });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.lines[1], "status: ready");
+  const updated = readJsonObject(stateFile);
+  assert.equal(updated.severity, "Critical");
+  assert.deepEqual(updated.admission, {
+    disposition: "visible-follow-up",
+    repair_status: "open",
+  });
+});
+
 test("records an explicit readiness skip and rejects unsafe reasons", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Skipped readiness");

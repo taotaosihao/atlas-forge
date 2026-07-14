@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "required": ["schema_version", "task_id", "slice_id", "verdict_digest", "goal_ref", "records", "evidence_gaps"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [2] },
+    "task_id": { "type": "string" },
+    "slice_id": { "type": "string" },
+    "verdict_digest": { "type": "string" },
+    "goal_ref": { "type": "string" },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "disposition", "basis", "authority_refs", "repair_status", "reason"],
+        "properties": {
+          "finding_id": { "type": "string" },
+          "disposition": { "type": "string", "enum": ["current-required", "visible-follow-up", "informational"] },
+          "basis": { "type": "string", "enum": ["goal-blocker", "diff-regression", "safety-data-permission-risk", "not-current-required", "no-action"] },
+          "authority_refs": { "type": "array", "items": { "type": "string" } },
+          "repair_status": { "type": "string", "enum": ["open", "resolved", "omitted"] },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "evidence_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gap_id", "status", "evidence_refs", "reason"],
+        "properties": {
+          "gap_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "resolved", "terminal-blocker"] },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

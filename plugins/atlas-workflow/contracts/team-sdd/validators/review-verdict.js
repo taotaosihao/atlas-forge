@@ -35,8 +35,9 @@ function validateReviewVerdict(value) {
   requireKeys(value, KEYS, errors);
   rejectUnknownKeys(value, KEYS, errors);
   expectInteger(value, "schema_version", errors);
-  if (value.schema_version !== 1) {
-    errors.push("schema_version must be 1");
+  if (![1, 2].includes(value.schema_version)) {
+    errors.push("schema_version must be one of: 1, 2");
+    return errors;
   }
   expectSafeId(value, "task_id", errors);
   expectSafeId(value, "slice_id", errors);
@@ -51,15 +52,49 @@ function validateReviewVerdict(value) {
     errors.push("reviewed_inputs must be an object");
   }
   if (Array.isArray(value.issues)) {
-    value.issues.forEach((issue, index) => validateIssue(issue, index, errors));
+    value.issues.forEach((issue, index) => validateIssue(issue, index, errors, value.schema_version));
+    if (value.schema_version === 2) {
+      const findingIds = value.issues.map((issue) => issue && issue.finding_id).filter(Boolean);
+      const seen = new Set();
+      for (const findingId of findingIds) {
+        if (seen.has(findingId)) {
+          errors.push(`issues contains duplicate finding_id: ${findingId}`);
+        }
+        seen.add(findingId);
+      }
+    }
+  }
+  if (value.schema_version === 2 && Array.isArray(value.cannot_verify_from_diff)) {
+    const seen = new Set();
+    value.cannot_verify_from_diff.forEach((gap, index) => {
+      if (!isObject(gap)) {
+        errors.push(`cannot_verify_from_diff[${index}] must be an object`);
+        return;
+      }
+      rejectUnknownKeys(gap, ["gap_id", "description"], errors);
+      expectSafeId(gap, "gap_id", errors);
+      expectString(gap, "description", errors);
+      if (seen.has(gap.gap_id)) {
+        errors.push(`cannot_verify_from_diff contains duplicate gap_id: ${gap.gap_id}`);
+      }
+      seen.add(gap.gap_id);
+    });
   }
   return errors;
 }
 
-function validateIssue(issue, index, errors) {
+function validateIssue(issue, index, errors, schemaVersion) {
   if (!isObject(issue)) {
     errors.push(`issues[${index}] must be an object`);
     return;
+  }
+  if (schemaVersion === 2) {
+    rejectUnknownKeys(
+      issue,
+      ["finding_id", "severity", "category", "path", "line", "evidence", "required_fix"],
+      errors,
+    );
+    expectSafeId(issue, "finding_id", errors);
   }
   for (const key of ["severity", "category", "path", "evidence", "required_fix"]) {
     if (typeof issue[key] !== "string" || issue[key].length === 0) {

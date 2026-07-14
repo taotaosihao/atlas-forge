@@ -14,11 +14,12 @@ const {
 } = require("../core/command-runtime");
 const { relativeToCodeHome } = require("../core/paths");
 const { timestampSeconds } = require("../task/runtime");
+const { evaluateSddAdmission } = require("./sdd-admission");
 
 const TRACE_USAGE =
   'usage: codex-workflow trace-promote <task-id> [--from latest|<verification-record>] --type regression|lesson|workflow-rule --reason "<reason>" [--owner atlas|multica|project]';
 const FEEDBACK_USAGE =
-  'usage: codex-workflow feedback-cycle <task-id> --source verify|design-review|multica-review|multica-e2e|user --finding "<summary>" --severity blocking|high|medium|low --classification implementation-bug|spec-gap|acceptance-gap|env-blocker|prd-conflict|scope-change --route repair|clarify|new-prd|blocker|acceptance-update [--affected-row <id>]... [--evidence <path-or-url>]...';
+  'usage: codex-workflow feedback-cycle <task-id> --source sdd-review|verify|design-review|multica-review|multica-e2e|user --finding "<summary>" --severity blocking|high|medium|low --classification implementation-bug|spec-gap|acceptance-gap|env-blocker|prd-conflict|scope-change --route repair|clarify|new-prd|blocker|acceptance-update [--affected-row <id>]... [--evidence <path-or-url>]... [--sdd-slice <id> --finding-id <id> --verdict-digest <sha256> --goal-ref <sha256>]';
 const LESSON_USAGE =
   'usage: codex-workflow lesson-candidate <task-id> --trigger repeated-failure|remote|ui|data-contract|multica-feedback|manual --lesson "<candidate>" [--evidence <path-or-url>]...';
 const LEARNING_DECISION_USAGE =
@@ -295,6 +296,10 @@ function parseFeedbackArgs(argv) {
       severity: "",
       classification: "",
       route: "",
+      sddSlice: "",
+      findingId: "",
+      verdictDigest: "",
+      goalRef: "",
     },
     scalarFlags: {
       "--source": "source",
@@ -302,6 +307,10 @@ function parseFeedbackArgs(argv) {
       "--severity": "severity",
       "--classification": "classification",
       "--route": "route",
+      "--sdd-slice": "sddSlice",
+      "--finding-id": "findingId",
+      "--verdict-digest": "verdictDigest",
+      "--goal-ref": "goalRef",
     },
     repeatFlags: { "--affected-row": "rows", "--evidence": "evidence" },
     required: [
@@ -327,9 +336,15 @@ function feedbackValues(parsed) {
     evidence: parsed.evidence.map((item) =>
       oneLine(item, "evidence", { allowEmpty: false }),
     ),
+    admissionLocator: {
+      sliceId: oneLine(parsed.sddSlice || "", "SDD slice"),
+      findingId: oneLine(parsed.findingId || "", "finding id"),
+      verdictDigest: oneLine(parsed.verdictDigest || "", "verdict digest"),
+      goalRef: oneLine(parsed.goalRef || "", "goal ref"),
+    },
   };
   const enums = [
-    ["source", ["verify", "design-review", "multica-review", "multica-e2e", "user"]],
+    ["source", ["sdd-review", "verify", "design-review", "multica-review", "multica-e2e", "user"]],
     ["severity", ["blocking", "high", "medium", "low"]],
     [
       "classification",
@@ -371,14 +386,42 @@ function previousPlanCycle(ledgerFile) {
   return previous;
 }
 
+function hasLegacyMulticaRepairMarker(paths, taskId) {
+  const markerFile = artifactFile(paths, taskId, "multica-feedback.json");
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerFile, "utf8"));
+    return marker
+      && typeof marker === "object"
+      && !Array.isArray(marker)
+      && marker.task_id === taskId
+      && marker.status === "repair-needed"
+      && Number.isInteger(marker.round)
+      && marker.round > 0
+      && typeof marker.issue === "string"
+      && marker.issue.trim().length > 0
+      && Array.isArray(marker.blocking_findings)
+      && marker.blocking_findings.length > 0
+      && marker.blocking_findings.every((finding) => (
+        typeof finding === "string" && finding.trim().length > 0
+      ));
+  } catch (_error) {
+    return false;
+  }
+}
+
 function runFeedbackCycle(parsed, options = {}) {
-  const { clock, paths } = commandOptions(options);
+  const { clock, environment, paths } = commandOptions(options);
   prepareTaskCommand(paths, parsed.taskId, clock);
   const values = feedbackValues(parsed);
+  values.taskId = parsed.taskId;
+  const admission = evaluateSddAdmission(values, { environment, paths });
   const recordedAt = timestampSeconds(clock);
   const ledgerFile = artifactFile(paths, parsed.taskId, "ledger.jsonl");
   const previousCycle = previousPlanCycle(ledgerFile);
-  const createsCycle = ["blocking", "high"].includes(values.severity) || values.rows.length > 0;
+  const legacyMulticaCycle = ["multica-review", "multica-e2e"].includes(values.source)
+    && hasLegacyMulticaRepairMarker(paths, parsed.taskId)
+    && (["blocking", "high"].includes(values.severity) || values.rows.length > 0);
+  const createsCycle = admission.admitted || legacyMulticaCycle;
   const cycle = createsCycle ? previousCycle + 1 : previousCycle;
   const cycleStatus = createsCycle ? "new-cycle" : "current-cycle-note";
   let cycleFile = "-";
@@ -397,6 +440,8 @@ function runFeedbackCycle(parsed, options = {}) {
         `Classification: ${values.classification}`,
         `Route: ${values.route}`,
         `Finding: ${values.finding}`,
+        `Admission: ${admission.status}`,
+        `Admission reason: ${admission.reason}`,
         "",
         "## Affected Acceptance Rows",
         "",
@@ -426,6 +471,9 @@ function runFeedbackCycle(parsed, options = {}) {
     route: values.route,
     affected_rows: values.rows,
     evidence: values.evidence,
+    admission_status: admission.status,
+    admission_reason: admission.reason,
+    admission_locator: values.admissionLocator,
   });
 
   const returnFile = artifactFile(paths, parsed.taskId, "return-to-plan.md");
@@ -446,6 +494,8 @@ function runFeedbackCycle(parsed, options = {}) {
       `- Classification: ${values.classification}`,
       `- Route: ${values.route}`,
       `- Finding: ${values.finding}`,
+      `- Admission: ${admission.status}`,
+      `- Admission reason: ${admission.reason}`,
       "",
       "## Stale / Affected Acceptance Rows",
       "",
@@ -461,12 +511,21 @@ function runFeedbackCycle(parsed, options = {}) {
       "",
       "## Rule",
       "",
-      "Non-clean required validation must either create a new plan/spec cycle or record why the current plan still applies.",
+      "Feedback remains visible by default. Canonically validated current-required open SDD admission creates a repair cycle; legacy Multica severity/affected-row decisions require a valid durable repair-needed marker for this task.",
       "",
     ].join("\n"),
     "utf8",
   );
   const rowsJoined = values.rows.length > 0 ? values.rows.join(";") : "-";
+  const stateUpdates = {
+    "return_to_plan.artifact": relativeToCodeHome(paths, returnFile),
+    active_plan_cycle: cycle,
+    latest_feedback_route: values.route,
+  };
+  if (createsCycle) {
+    stateUpdates.previous_approval_status = "stale-if-affected";
+    stateUpdates.stale_acceptance_rows = rowsJoined;
+  }
   updateTaskCommand(
     paths,
     parsed.taskId,
@@ -475,13 +534,7 @@ function runFeedbackCycle(parsed, options = {}) {
       active_plan_cycle: cycle,
       latest_feedback_route: values.route,
     },
-    {
-      "return_to_plan.artifact": relativeToCodeHome(paths, returnFile),
-      active_plan_cycle: cycle,
-      latest_feedback_route: values.route,
-      previous_approval_status: "stale-if-affected",
-      stale_acceptance_rows: rowsJoined,
-    },
+    stateUpdates,
     clock,
   );
   appendLegacyRuntimeEvent(
@@ -500,6 +553,8 @@ function runFeedbackCycle(parsed, options = {}) {
       `cycle: ${cycle}`,
       `status: ${cycleStatus}`,
       `route: ${values.route}`,
+      `admission: ${admission.status}`,
+      `admission_reason: ${admission.reason}`,
     ],
   };
 }

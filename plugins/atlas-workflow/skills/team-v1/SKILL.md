@@ -48,7 +48,9 @@ Follow this loop:
     - Use it for non-tiny local work with UI/API/CLI/background-job behavior, cross-file changes, or meaningful edge cases.
     - The contract owner is the main implementer unless the team explicitly assigns a separate reviewer.
     - The contract must preserve the team decision and must not add new scope.
-    - After review, the final implementation contract must be a clean rewrite of the settled requirements in `implementation-contract.final.md`; keep review history in `reviews/` or `decisions/`, not appended to the final contract body.
+    - After review, the final implementation contract must be a clean rewrite of the settled requirements in `implementation-contract.final.md`; keep review history in `reviews/` or `decisions/`, not appended to the final executable contract body.
+    - Review severity, `required_fix`, affected rows, and remediation prose do not grant scope. For SDD v2, every validated controller finding with `disposition: current-required` remains projected into executable requirements whether `repair_status` is `open` or `resolved`; only `open` findings block or create repair feedback.
+    - Keep `visible-follow-up` and `informational` findings in provenance or follow-up records. In semantics-v2 contracts, required acceptance and edge-case rows cite `goal:<requirement-ref>` or `current-required:<finding_id>`.
     - Maintain `contract-index.md` so the next implementer can find the current authoritative contract without reading older drafts first.
     - For Multica handoff, prefer the Multica sprint contract rather than the Atlas lightweight template.
 14. When the team discussion settles an actionable plan, promotion, or staffing handoff, also write a concise project doc:

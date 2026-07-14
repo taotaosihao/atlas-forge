@@ -43,6 +43,20 @@ run_v1_valid() {
   pass "$label"
 }
 
+run_v2_valid() {
+  local label="$1" file="$2"
+  case_paths
+  if ! "$BIN" --strict --file "$file" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+    show_failure "$label"
+  fi
+  grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^semantics_version: 2$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^errors: 0$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^warnings: 0$' "$CASE_STDOUT" || show_failure "$label"
+  [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
+  pass "$label"
+}
+
 run_legacy_valid() {
   local label="$1" file="$2"
   case_paths
@@ -146,6 +160,9 @@ run_v1_valid 'planning contract passes with both gates not applicable' "$FIXTURE
 run_v1_valid 'review contract passes with both gates not applicable' "$FIXTURE_ROOT/valid/review.md"
 run_v1_valid 'audit contract passes with both gates not applicable' "$FIXTURE_ROOT/valid/audit.md"
 run_v1_valid 'fenced machine-field examples are ignored' "$FIXTURE_ROOT/valid/fenced-examples.md"
+run_v2_valid 'scope admission v2 contract passes' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
+grep -q 'current-required:finding-resolved' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
+pass 'scope admission v2 retains resolved current-required behavior in clean rewrites'
 run_v1_valid 'current authoritative implementation contract passes strict lint' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
@@ -368,6 +385,26 @@ run_semantic_invalid 'empty and punctuation-only required scalars are rejected' 
   REQUIRED_FIELD_PLACEHOLDER:required_safety_gates
 run_semantic_invalid 'unknown semantics version is rejected in strict mode' "$FIXTURE_ROOT/invalid/unsupported-version.md" SEMANTICS_VERSION_UNSUPPORTED
 run_nonstrict_invalid 'unknown semantics version cannot fall back to legacy mode' "$FIXTURE_ROOT/invalid/unsupported-version.md" SEMANTICS_VERSION_UNSUPPORTED
+
+scope_v2="$FIXTURE_ROOT/valid/scope-admission-v2.md"
+missing_scope_policy="$TMP_ROOT/v2-missing-scope-policy.md"
+sed '/^finding_scope_admission:/d' "$scope_v2" > "$missing_scope_policy"
+run_semantic_invalid 'v2 requires finding scope admission policy' "$missing_scope_policy" REQUIRED_FIELD_MISSING:finding_scope_admission
+bad_scope_policy="$TMP_ROOT/v2-bad-scope-policy.md"
+sed 's/^finding_scope_admission:.*/finding_scope_admission: reviewer_severity/' "$scope_v2" > "$bad_scope_policy"
+run_semantic_invalid 'v2 rejects reviewer-owned scope admission' "$bad_scope_policy" FINDING_SCOPE_ADMISSION_INVALID:finding_scope_admission
+missing_provenance="$TMP_ROOT/v2-missing-provenance.md"
+sed '/^## Finding Provenance$/,$d' "$scope_v2" > "$missing_provenance"
+run_semantic_invalid 'v2 requires visible finding provenance section' "$missing_provenance" FINDING_PROVENANCE_MISSING
+bad_acceptance_authority="$TMP_ROOT/v2-bad-acceptance-authority.md"
+sed 's/| AC-1 | Preserve the current authorized goal\. | yes | structural lint | goal:REQ-1 |/| AC-1 | Preserve the current authorized goal. | yes | structural lint | optional |/' "$scope_v2" > "$bad_acceptance_authority"
+run_semantic_invalid 'v2 required acceptance needs goal or current-required authority' "$bad_acceptance_authority" REQUIRED_ROW_AUTHORITY_INVALID
+bad_edge_admission="$TMP_ROOT/v2-bad-edge-admission.md"
+sed 's/| Optional review suggestion | Keep it out of executable scope\. | no | optional |/| Required failure mode | Handle it. | yes | optional |/' "$scope_v2" > "$bad_edge_admission"
+run_semantic_invalid 'v2 required edge case needs goal or current-required admission' "$bad_edge_admission" REQUIRED_ROW_AUTHORITY_INVALID
+bad_fallback="$TMP_ROOT/v2-bad-fallback.md"
+sed 's/^- Required safe fallback: not_applicable/- Required safe fallback: retry forever/' "$scope_v2" > "$bad_fallback"
+run_semantic_invalid 'v2 none fallback authority forbids required fallback behavior' "$bad_fallback" SAFE_FALLBACK_AUTHORITY_CONFLICT
 run_semantic_invalid 'UI acceptance rejects a sentence that declares no safety gates' "$FIXTURE_ROOT/invalid/ui-safety-none.md" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
 run_semantic_invalid 'UI acceptance rejects a direct not-required safety declaration' "$FIXTURE_ROOT/invalid/ui-safety-cancelled.md" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
 safety_subject_cancelled="$TMP_ROOT/ui-safety-subject-cancelled.md"
@@ -423,7 +460,9 @@ run_usage_invalid 'duplicate --file is a usage error' CLI_USAGE --file "$CURRENT
 
 for template in implementation-contract.md implementation-contract.final.md; do
   file="$ATLAS_FORGE_ROOT/workflow/templates/$template"
-  grep -q '^contract_semantics_version: 1$' "$file"
+  grep -q '^contract_semantics_version: 2$' "$file"
+  grep -q '^finding_scope_admission: controller_current_required_only$' "$file"
+  grep -q '^safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>$' "$file"
   grep -q '^work_type: implementation | planning | review | audit | docs-only$' "$file"
   grep -q '^first_code_not_applicable_reason:$' "$file"
   grep -q '^product_ui_not_applicable_reason:$' "$file"
@@ -432,11 +471,24 @@ for template in implementation-contract.md implementation-contract.final.md; do
   ! grep -q 'Default stop:' "$file"
   ! grep -q '^- First-code guard:' "$file"
   ! grep -q '^- Product/UI gate:' "$file"
+  grep -q '^## Edge Cases$' "$file"
+  grep -q '^| Case | Expected behavior | Required | Admission |$' "$file"
+  grep -q '^|  |  | no | optional |$' "$file"
+  grep -q '^- Required safe fallback: not_applicable$' "$file"
+  grep -q '^- Optional fallback notes:$' "$file"
+  grep -q '^## Finding Provenance$' "$file"
 done
 grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROOT/workflow/templates/gate-checklist.md"
 grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-pass 'templates, gate checklist, and clarify adopt the strict semantic lint command'
+grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'every validated controller finding with `disposition: current-required` remains an executable requirement' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'every validated controller resolution with `disposition: current-required` remains part of the current delivery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
+grep -q 'validated controller resolution is the sole finding-scope authority' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
+grep -q 'strict lint can validate attribution without interpreting natural language' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'every validated controller finding with `disposition: current-required` remains projected into executable requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team-v1/SKILL.md"
+pass 'templates and authoring skills adopt required-only scope admission and strict semantic lint'
 
 resolved_plugin_root="$(cd "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/task/../.." && pwd)"
 (cd "$TMP_ROOT" && node "$resolved_plugin_root/scripts/codex-implementation-contract-lint" \

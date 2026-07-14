@@ -7,6 +7,8 @@ const { TextDecoder } = require("util");
 
 const ENVELOPE_FIELDS = new Set([
   "contract_semantics_version",
+  "finding_scope_admission",
+  "safe_fallback_authority",
   "work_type",
   "first_code_guard",
   "first_code_not_applicable_reason",
@@ -909,6 +911,145 @@ function validateVersionOne(fields, initialDiagnostics) {
   return diagnostics;
 }
 
+function visibleContentLines(content) {
+  const results = [];
+  let fence = null;
+  let htmlComment = false;
+  content.split(/\r?\n/).forEach((rawLine, index) => {
+    if (fence) {
+      if (fenceCloses(rawLine, fence)) fence = null;
+      return;
+    }
+    const stripped = stripHtmlComments(rawLine, htmlComment);
+    htmlComment = stripped.inComment;
+    const opening = fenceOpening(stripped.visible);
+    if (opening) {
+      fence = opening;
+      return;
+    }
+    results.push({ text: stripped.visible, line: index + 1 });
+  });
+  return results;
+}
+
+function sectionLines(lines, heading) {
+  const start = lines.findIndex((line) => line.text.trim() === `## ${heading}`);
+  if (start < 0) return null;
+  const endOffset = lines.slice(start + 1).findIndex((line) => /^##?\s+/.test(line.text.trim()));
+  return lines.slice(start + 1, endOffset < 0 ? lines.length : start + 1 + endOffset);
+}
+
+function tableCells(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null;
+  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+}
+
+function validateRequiredRows(lines, heading, expectedHeader, authorityIndex, add) {
+  const section = sectionLines(lines, heading);
+  if (!section) {
+    add("SCOPE_TABLE_MISSING", heading, 0, `${heading} section is required by semantics version 2`);
+    return;
+  }
+  const headerIndex = section.findIndex((line) => {
+    const cells = tableCells(line.text);
+    return cells && cells.map((cell) => cell.toLowerCase()).join("|") === expectedHeader.join("|");
+  });
+  if (headerIndex < 0) {
+    add("SCOPE_TABLE_HEADER_INVALID", heading, section[0]?.line || 0, `${heading} must include its authority column`);
+    return;
+  }
+  for (const line of section.slice(headerIndex + 2)) {
+    const cells = tableCells(line.text);
+    if (!cells || cells.length !== expectedHeader.length) continue;
+    if (cells[2].toLowerCase() !== "yes") continue;
+    if (!/^(?:goal|current-required):[A-Za-z0-9][A-Za-z0-9._-]*$/.test(cells[authorityIndex])) {
+      add(
+        "REQUIRED_ROW_AUTHORITY_INVALID",
+        heading,
+        line.line,
+        "required rows must cite goal:<ref> or current-required:<finding_id>",
+      );
+    }
+  }
+}
+
+function validateVersionTwo(content, fields, initialDiagnostics) {
+  const diagnostics = validateVersionOne(fields, initialDiagnostics);
+  const add = (code, field, line, message) => {
+    diagnostics.push(makeDiagnostic("ERROR", code, field, line, message));
+  };
+  const policy = fields.get("finding_scope_admission");
+  if (!policy) {
+    add("REQUIRED_FIELD_MISSING", "finding_scope_admission", 0, "semantics version 2 requires finding_scope_admission");
+  } else if (policy.value !== "controller_current_required_only") {
+    add(
+      "FINDING_SCOPE_ADMISSION_INVALID",
+      policy.key,
+      policy.line,
+      "only controller_current_required_only is supported",
+    );
+  }
+  const fallbackAuthority = fields.get("safe_fallback_authority");
+  if (!fallbackAuthority) {
+    add("REQUIRED_FIELD_MISSING", "safe_fallback_authority", 0, "semantics version 2 requires safe_fallback_authority");
+  } else if (!/^(?:none|goal:[A-Za-z0-9][A-Za-z0-9._-]*|current-required:[A-Za-z0-9][A-Za-z0-9._-]*)$/.test(fallbackAuthority.value)) {
+    add(
+      "SAFE_FALLBACK_AUTHORITY_INVALID",
+      fallbackAuthority.key,
+      fallbackAuthority.line,
+      "safe fallback authority must be none, goal:<ref>, or current-required:<finding_id>",
+    );
+  }
+
+  const lines = visibleContentLines(content);
+  validateRequiredRows(
+    lines,
+    "Acceptance Criteria",
+    ["id", "criterion", "required", "verification", "authority"],
+    4,
+    add,
+  );
+  validateRequiredRows(
+    lines,
+    "Edge Cases",
+    ["case", "expected behavior", "required", "admission"],
+    3,
+    add,
+  );
+  if (!sectionLines(lines, "Finding Provenance")) {
+    add(
+      "FINDING_PROVENANCE_MISSING",
+      "Finding Provenance",
+      0,
+      "semantics version 2 requires a non-executable finding provenance section",
+    );
+  }
+  const failureLines = sectionLines(lines, "Failure And Stop Conditions") || [];
+  const fallbackLine = failureLines.find((line) => /^\s*-\s+Required safe fallback:/.test(line.text));
+  if (!fallbackLine) {
+    add("SAFE_FALLBACK_MISSING", "Required safe fallback", 0, "semantics version 2 requires the safe fallback row");
+  } else if (fallbackAuthority) {
+    const fallback = fallbackLine.text.replace(/^\s*-\s+Required safe fallback:\s*/, "").trim();
+    if (fallbackAuthority.value === "none" && !isNotApplicableToken(fallback)) {
+      add(
+        "SAFE_FALLBACK_AUTHORITY_CONFLICT",
+        "Required safe fallback",
+        fallbackLine.line,
+        "safe_fallback_authority none requires not_applicable",
+      );
+    } else if (fallbackAuthority.value !== "none" && (isPlaceholder(fallback) || isNotApplicableToken(fallback))) {
+      add(
+        "SAFE_FALLBACK_REQUIRED",
+        "Required safe fallback",
+        fallbackLine.line,
+        "an admitted fallback authority requires substantive fallback behavior",
+      );
+    }
+  }
+  return diagnostics;
+}
+
 function sortDiagnostics(diagnostics) {
   return diagnostics.sort((left, right) => (
     left.line - right.line
@@ -945,7 +1086,7 @@ function lint(file, strict) {
 
   if (!version) {
     const diagnostic = strict
-      ? makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1")
+      ? makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1 or 2")
       : makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
     const diagnostics = [diagnostic];
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
@@ -954,20 +1095,24 @@ function lint(file, strict) {
     return ok ? 0 : 1;
   }
 
-  if (version.value !== "1") {
+  if (!["1", "2"].includes(version.value)) {
     const diagnostics = sortDiagnostics([
       ...parsed.diagnostics,
-      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1 is supported"),
+      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1 or 2 is supported"),
     ]);
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
     printSummary(false, absolute, strict, version.value || "invalid", diagnostics);
     return 1;
   }
 
-  const diagnostics = sortDiagnostics(validateVersionOne(parsed.fields, parsed.diagnostics));
+  const diagnostics = sortDiagnostics(
+    version.value === "2"
+      ? validateVersionTwo(content, parsed.fields, parsed.diagnostics)
+      : validateVersionOne(parsed.fields, parsed.diagnostics),
+  );
   diagnostics.forEach((item) => printDiagnostic(item, absolute));
   const ok = !diagnostics.some((item) => item.severity === "ERROR");
-  printSummary(ok, absolute, strict, "1", diagnostics);
+  printSummary(ok, absolute, strict, version.value, diagnostics);
   return ok ? 0 : 1;
 }
 

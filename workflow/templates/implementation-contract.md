@@ -3,7 +3,9 @@
 task_id: {{TASK_ID}}
 title: {{TITLE}}
 created: {{CREATED}}
-contract_semantics_version: 1
+contract_semantics_version: 2
+finding_scope_admission: controller_current_required_only
+safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>
 work_type: implementation | planning | review | audit | docs-only
 first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
@@ -52,9 +54,9 @@ product_ui_not_applicable_reason:
 
 ## Acceptance Criteria
 
-| ID | Criterion | Required | Verification |
-|----|-----------|----------|--------------|
-| AC-1 |  | yes |  |
+| ID | Criterion | Required | Verification | Authority |
+|----|-----------|----------|--------------|-----------|
+| AC-1 |  | yes |  | goal:<requirement-ref> |
 
 ## Real Validation Plan
 
@@ -71,19 +73,30 @@ product_ui_not_applicable_reason:
 
 ## Edge Cases
 
-| Case | Expected behavior | Required |
-|------|-------------------|----------|
-|  |  | yes |
+| Case | Expected behavior | Required | Admission |
+|------|-------------------|----------|-----------|
+|  |  | no | optional |
 
 ## Failure And Stop Conditions
 
 - Stop and ask the user when:
 - Treat the task as failed when:
-- Safe fallback:
+- Required safe fallback: not_applicable
+- Optional fallback notes:
+
+## Finding Provenance
+
+Keep discovery visible here without turning it into executable scope. Only controller records admitted as `current-required` may appear as required Goal, Acceptance, Completion, Edge Case, or safe-fallback behavior.
+
+| Finding ID | Disposition | Source | Follow-up |
+|------------|-------------|--------|-----------|
+|  | visible-follow-up |  |  |
 
 ## Completion Check
 
 - [ ] Scope stayed inside the contract
 - [ ] Required acceptance criteria passed
 - [ ] Required validation rows have evidence
+- [ ] Every finding-derived executable requirement cites `current-required:<finding_id>`
+- [ ] Visible follow-up and informational findings remain provenance only
 - [ ] Residual risks are recorded

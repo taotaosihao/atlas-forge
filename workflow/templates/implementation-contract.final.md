@@ -7,7 +7,9 @@ contract_status: final
 current_authoritative_contract: ./implementation-contract.final.md
 created: {{CREATED}}
 finalized: {{FINALIZED}}
-contract_semantics_version: 1
+contract_semantics_version: 2
+finding_scope_admission: controller_current_required_only
+safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>
 work_type: implementation | planning | review | audit | docs-only
 first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
@@ -56,9 +58,9 @@ product_ui_not_applicable_reason:
 
 ## Acceptance Criteria
 
-| ID | Criterion | Required | Verification |
-|----|-----------|----------|--------------|
-| AC-1 |  | yes |  |
+| ID | Criterion | Required | Verification | Authority |
+|----|-----------|----------|--------------|-----------|
+| AC-1 |  | yes |  | goal:<requirement-ref> |
 
 ## Real Validation Plan
 
@@ -75,9 +77,9 @@ product_ui_not_applicable_reason:
 
 ## Edge Cases
 
-| Case | Expected behavior | Required |
-|------|-------------------|----------|
-|  |  | yes |
+| Case | Expected behavior | Required | Admission |
+|------|-------------------|----------|-----------|
+|  |  | no | optional |
 
 ## Implementation Notes
 
@@ -87,7 +89,8 @@ product_ui_not_applicable_reason:
 
 - Stop and ask the user when:
 - Treat the task as failed when:
-- Safe fallback:
+- Required safe fallback: not_applicable
+- Optional fallback notes:
 
 ## Provenance
 
@@ -95,11 +98,21 @@ product_ui_not_applicable_reason:
 - Supersedes:
 - Review history:
 
+## Finding Provenance
+
+Keep `visible-follow-up` and `informational` findings visible here or by stable links. They are non-executable and must not appear as required Goal, Acceptance, Completion, Edge Case, or safe-fallback behavior. Only controller records admitted as `current-required` may be projected into those sections.
+
+| Finding ID | Disposition | Source | Follow-up |
+|------------|-------------|--------|-----------|
+|  | visible-follow-up |  |  |
+
 ## Final Contract Cleanliness Gate
 
 - [ ] This is a clean rewrite of the final agreed requirements.
 - [ ] Superseded requirements are not included as executable instructions.
 - [ ] Review notes are linked in provenance, not pasted into the body.
 - [ ] Required acceptance criteria and validation rows are complete.
+- [ ] Every finding-derived executable requirement cites `current-required:<finding_id>`.
+- [ ] Visible follow-up and informational findings remain provenance only.
 - [ ] Git evidence stays within the phase evidence budget or the exception is explained.
 - [ ] Residual risks are recorded.

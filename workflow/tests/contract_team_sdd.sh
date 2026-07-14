@@ -118,6 +118,36 @@ node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/u
 node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/implementer-message.md" >/dev/null
 node "$validate_json_bin" --type review-verdict --file "$fixture_dir/valid/review-verdict.json" >/dev/null
 node "$validate_json_bin" --type review-verdict --from-message "$fixture_dir/valid/review-message.md" >/dev/null
+node - "$fixture_dir/valid/review-verdict.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/validators/review-verdict.js" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict.schema.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict-v1.schema.json" <<'NODE'
+const fs = require("fs");
+const [fixture, validator, schemaFile, legacySchemaFile] = process.argv.slice(2);
+const { validateReviewVerdict } = require(validator);
+const valid = JSON.parse(fs.readFileSync(fixture, "utf8"));
+const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+const legacySchema = JSON.parse(fs.readFileSync(legacySchemaFile, "utf8"));
+if (schema.additionalProperties !== false) process.exit(1);
+if (JSON.stringify(schema.properties.schema_version.enum) !== "[2]") process.exit(1);
+if (!schema.properties.issues.items.required.includes("finding_id")) process.exit(1);
+if (JSON.stringify(legacySchema.properties.schema_version.enum) !== "[1]") process.exit(1);
+if (legacySchema.properties.issues.items !== undefined) process.exit(1);
+if (validateReviewVerdict(valid).length !== 0) process.exit(1);
+if (!validateReviewVerdict({ ...valid, schema_version: 3 }).includes("schema_version must be one of: 1, 2")) process.exit(1);
+if (!validateReviewVerdict({ ...valid, controller_resolution: {} }).some((error) => error.includes("unknown key"))) process.exit(1);
+const issue = {
+  severity: "Important",
+  category: "contract",
+  path: "brief.json",
+  line: 1,
+  evidence: "current v1 issue",
+  required_fix: "repair if required",
+};
+const issueWithFutureIdentity = { ...structuredClone(valid), issues: [{ ...issue, finding_id: "future-id-is-currently-ignored" }] };
+if (validateReviewVerdict(issueWithFutureIdentity).length !== 0) process.exit(1);
+const emptyRequiredFix = { ...structuredClone(valid), issues: [{ ...issue, required_fix: "" }] };
+if (!validateReviewVerdict(emptyRequiredFix).some((error) => error.includes("required_fix must be a non-empty string"))) process.exit(1);
+const nonStringEvidenceGap = { ...valid, cannot_verify_from_diff: [42] };
+if (validateReviewVerdict(nonStringEvidenceGap).length !== 0) process.exit(1);
+NODE
 expect_fail "missing final message block" node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/review-message.md"
 expect_fail "needs context requires questions" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/needs-context-without-questions.json"
 expect_fail "blocked requires blockers" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/blocked-without-blockers.json"
@@ -231,9 +261,13 @@ write_lint_fixture() {
   if [[ "$mode" != "missing-review-package" ]]; then
     printf '%s\n' 'diff --git a/example b/example' '+lint fixture diff' > "$slice_dir/review-package.diff"
   fi
-  if [[ "$mode" == "critical" ]]; then
+  if [[ "$mode" == "critical" || "$mode" == "important" ]]; then
+    severity="Critical"
+    if [[ "$mode" == "important" ]]; then
+      severity="Important"
+    fi
     printf '%s\n' \
-      '{"schema_version":1,"task_id":"'"$task"'","slice_id":"slice-001","base_sha":"1111111111111111111111111111111111111111","head_sha":"2222222222222222222222222222222222222222","spec_compliance":"fail","task_quality":"fail","issues":[{"severity":"Critical","category":"contract","path":"brief.json","line":1,"evidence":"critical unresolved","required_fix":"resolve critical issue"}],"cannot_verify_from_diff":[],"strengths":[],"reviewed_inputs":{"brief_json":"brief.json","review_package_diff":"review-package.diff"}}' \
+      '{"schema_version":1,"task_id":"'"$task"'","slice_id":"slice-001","base_sha":"1111111111111111111111111111111111111111","head_sha":"2222222222222222222222222222222222222222","spec_compliance":"fail","task_quality":"fail","issues":[{"severity":"'"$severity"'","category":"contract","path":"brief.json","line":1,"evidence":"unresolved issue","required_fix":"resolve issue"}],"cannot_verify_from_diff":[],"strengths":[],"reviewed_inputs":{"brief_json":"brief.json","review_package_diff":"review-package.diff"}}' \
       > "$slice_dir/review-verdict.json"
   elif [[ "$mode" == "cannot-verify" ]]; then
     printf '%s\n' \
@@ -250,8 +284,123 @@ write_lint_fixture fixture-artifact-lint-valid valid
 node "$artifact_lint_bin" --task fixture-artifact-lint-valid --strict >/dev/null
 write_lint_fixture fixture-critical-unresolved critical
 expect_fail "artifact lint rejects unresolved critical" node "$artifact_lint_bin" --task fixture-critical-unresolved --strict
+printf '%s\n' '{"status":"resolved","reason":"any truthy v1 controller resolution currently clears the whole verdict"}' > "$sdd_root/artifacts/fixture-critical-unresolved/team/sdd/slices/slice-001/controller-resolution.json"
+node "$artifact_lint_bin" --task fixture-critical-unresolved --strict >/dev/null
+write_lint_fixture fixture-important-unresolved important
+expect_fail "artifact lint rejects unresolved important" node "$artifact_lint_bin" --task fixture-important-unresolved --strict
+printf '%s\n' '{"status":"follow-up","reason":"v1 lint currently checks only truthy status and reason"}' > "$sdd_root/artifacts/fixture-important-unresolved/team/sdd/slices/slice-001/controller-resolution.json"
+node "$artifact_lint_bin" --task fixture-important-unresolved --strict >/dev/null
 write_lint_fixture fixture-cannot-verify cannot-verify
 expect_fail "artifact lint rejects unresolved cannot verify" node "$artifact_lint_bin" --task fixture-cannot-verify --strict
+printf '%s\n' '{"status":"terminal","reason":"v1 resolution also clears cannot-verify with no evidence-gap identity"}' > "$sdd_root/artifacts/fixture-cannot-verify/team/sdd/slices/slice-001/controller-resolution.json"
+node "$artifact_lint_bin" --task fixture-cannot-verify --strict >/dev/null
+
+write_v2_lint_fixture() {
+  local task="$1"
+  local mode="$2"
+  local artifact="$sdd_root/artifacts/$task"
+  local slice_dir="$artifact/team/sdd/slices/slice-001"
+  node "$brief_bin" \
+    --task "$task" \
+    --slice slice-001 \
+    --repo "$sdd_repo" \
+    --base "$sdd_base" \
+    --objective "V2 admission lint fixture" \
+    --acceptance "AC-1" \
+    --owned "plugins/atlas-workflow/contracts/team-sdd" \
+    --check "workflow/tests/contract_team_sdd.sh" >/dev/null
+  printf '%s\n' \
+    '{"schema_version":1,"timestamp":"2026-07-06T00:00:00.000Z","event":"slice_started","task_id":"'"$task"'","slice_id":"slice-001"}' \
+    '{"schema_version":1,"timestamp":"2026-07-06T00:00:01.000Z","event":"review_package_written","task_id":"'"$task"'","slice_id":"slice-001"}' \
+    '{"schema_version":1,"timestamp":"2026-07-06T00:00:02.000Z","event":"review_clean","task_id":"'"$task"'","slice_id":"slice-001"}' \
+    > "$artifact/team/sdd/progress.jsonl"
+  printf '%s\n' '# Round' '' 'backend: native' '' 'Substantive v2 admission lint fixture.' > "$artifact/team/round-valid.md"
+  printf '%s\n' 'diff --git a/example b/example' '+v2 admission fixture diff' > "$slice_dir/review-package.diff"
+  node - "$task" "$slice_dir" "$mode" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/validators/controller-resolution.js" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [taskId, sliceDir, mode, controllerModule] = process.argv.slice(2);
+const { computeGoalRef, digestFile } = require(controllerModule);
+const brief = JSON.parse(fs.readFileSync(path.join(sliceDir, "brief.json"), "utf8"));
+const verdict = {
+  schema_version: 2,
+  task_id: taskId,
+  slice_id: "slice-001",
+  base_sha: "1".repeat(40),
+  head_sha: "2".repeat(40),
+  spec_compliance: "cannot_verify",
+  task_quality: "fail",
+  issues: [{
+    finding_id: "finding-critical",
+    severity: "Critical",
+    category: "contract",
+    path: "brief.json",
+    line: 1,
+    evidence: "critical issue evidence",
+    required_fix: "conditional repair",
+  }],
+  cannot_verify_from_diff: [{ gap_id: "gap-runtime", description: "runtime unavailable" }],
+  strengths: [],
+  reviewed_inputs: { brief_json: "brief.json", review_package_diff: "review-package.diff" },
+};
+const verdictFile = path.join(sliceDir, "review-verdict.json");
+fs.writeFileSync(verdictFile, `${JSON.stringify(verdict, null, 2)}\n`);
+if (mode === "missing-resolution") process.exit(0);
+const required = mode === "required-open" || mode === "required-resolved";
+const informational = mode === "informational";
+const resolution = {
+  schema_version: 2,
+  task_id: taskId,
+  slice_id: "slice-001",
+  verdict_digest: digestFile(verdictFile),
+  goal_ref: computeGoalRef(brief, sliceDir),
+  records: [{
+    finding_id: "finding-critical",
+    disposition: required ? "current-required" : informational ? "informational" : "visible-follow-up",
+    basis: required ? "goal-blocker" : informational ? "no-action" : "not-current-required",
+    authority_refs: required ? ["acceptance:AC-1"] : [],
+    repair_status: required ? (mode === "required-resolved" ? "resolved" : "open") : "omitted",
+    reason: required ? "finding blocks AC-1" : "finding is outside the current goal",
+  }],
+  evidence_gaps: [{
+    gap_id: "gap-runtime",
+    status: mode === "gap-open" ? "open" : mode === "gap-terminal" ? "terminal-blocker" : "resolved",
+    evidence_refs: mode === "gap-open" ? [] : ["evidence:runtime"],
+    reason: "explicit evidence-gap conclusion",
+  }],
+};
+if (mode === "wrong-goal") resolution.goal_ref = "f".repeat(64);
+fs.writeFileSync(path.join(sliceDir, "controller-resolution.json"), `${JSON.stringify(resolution, null, 2)}\n`);
+NODE
+}
+
+write_v2_lint_fixture fixture-v2-visible-follow-up visible
+node "$artifact_lint_bin" --task fixture-v2-visible-follow-up --strict >/dev/null
+node "$validate_json_bin" --type controller-resolution --file "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json" >/dev/null
+duplicate_resolution="$TMP_ROOT/duplicate-controller-resolution.json"
+node - "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json" "$duplicate_resolution" <<'NODE'
+const fs = require("fs");
+const [source, target] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(source, "utf8"));
+value.records.push(structuredClone(value.records[0]));
+value.evidence_gaps.push(structuredClone(value.evidence_gaps[0]));
+fs.writeFileSync(target, `${JSON.stringify(value, null, 2)}\n`);
+NODE
+expect_fail "validate-json rejects duplicate controller identities" node "$validate_json_bin" --type controller-resolution --file "$duplicate_resolution"
+write_v2_lint_fixture fixture-v2-informational informational
+node "$artifact_lint_bin" --task fixture-v2-informational --strict >/dev/null
+write_v2_lint_fixture fixture-v2-required-open required-open
+expect_fail "v2 artifact lint blocks current-required open" node "$artifact_lint_bin" --task fixture-v2-required-open --strict
+write_v2_lint_fixture fixture-v2-required-resolved required-resolved
+node "$artifact_lint_bin" --task fixture-v2-required-resolved --strict >/dev/null
+write_v2_lint_fixture fixture-v2-gap-open gap-open
+expect_fail "v2 artifact lint blocks open evidence gap" node "$artifact_lint_bin" --task fixture-v2-gap-open --strict
+write_v2_lint_fixture fixture-v2-gap-terminal gap-terminal
+expect_fail "v2 artifact lint blocks terminal evidence gap" node "$artifact_lint_bin" --task fixture-v2-gap-terminal --strict
+write_v2_lint_fixture fixture-v2-missing-resolution missing-resolution
+expect_fail "v2 artifact lint requires complete admission coverage" node "$artifact_lint_bin" --task fixture-v2-missing-resolution --strict
+write_v2_lint_fixture fixture-v2-wrong-goal wrong-goal
+expect_fail "v2 artifact lint rejects stale goal admission" node "$artifact_lint_bin" --task fixture-v2-wrong-goal --strict
 write_lint_fixture fixture-missing-review-package missing-review-package
 expect_fail "artifact lint rejects missing review package" node "$artifact_lint_bin" --task fixture-missing-review-package --strict
 write_lint_fixture fixture-missing-native-backend-metadata missing-native

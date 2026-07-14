@@ -7,6 +7,11 @@ const path = require("path");
 const { validateLedgerEvent } = require("../contracts/team-sdd/validators/ledger-event");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const {
+  computeGoalRef,
+  digestFile,
+  validateControllerResolutionAgainst,
+} = require("../contracts/team-sdd/validators/controller-resolution");
 const { validatePathLeaseDocument } = require("../contracts/team-sdd/validators/path-lease");
 const { validateBusinessIntent } = require("../contracts/team-sdd/validators/business-intent");
 const { validateBusinessScenarioCard } = require("../contracts/team-sdd/validators/business-scenario-card");
@@ -136,7 +141,7 @@ function lintBriefs(sliceDirs, errors) {
   }
 }
 
-function controllerResolutionExists(sliceDir) {
+function legacyControllerResolutionExists(sliceDir) {
   const file = path.join(sliceDir, "controller-resolution.json");
   if (!fs.existsSync(file)) {
     return false;
@@ -149,7 +154,7 @@ function controllerResolutionExists(sliceDir) {
   }
 }
 
-function lintReviewVerdicts(sliceDirs, errors, strict) {
+function lintReviewVerdicts(sliceDirs, errors, strict, taskId) {
   for (const sliceDir of sliceDirs) {
     const file = path.join(sliceDir, "review-verdict.json");
     if (!fs.existsSync(file)) {
@@ -167,10 +172,62 @@ function lintReviewVerdicts(sliceDirs, errors, strict) {
       errors.push(`${file}: ${validation.join("; ")}`);
       continue;
     }
-    const hasBlockingIssue = verdict.issues.some((issue) => ["Critical", "Important"].includes(issue.severity));
-    const hasCannotVerify = verdict.cannot_verify_from_diff.length > 0;
-    if (strict && (hasBlockingIssue || hasCannotVerify) && !controllerResolutionExists(sliceDir)) {
-      errors.push(`${sliceDir}: unresolved review verdict requires controller-resolution.json`);
+    if (verdict.schema_version === 1) {
+      const hasBlockingIssue = verdict.issues.some((issue) => ["Critical", "Important"].includes(issue.severity));
+      const hasCannotVerify = verdict.cannot_verify_from_diff.length > 0;
+      if (strict && (hasBlockingIssue || hasCannotVerify) && !legacyControllerResolutionExists(sliceDir)) {
+        errors.push(`${sliceDir}: unresolved review verdict requires controller-resolution.json`);
+      }
+      continue;
+    }
+
+    const expectedSliceId = path.basename(sliceDir);
+    if (verdict.task_id !== taskId) {
+      errors.push(`${file}: TASK_ID_MISMATCH expected ${taskId}, got ${verdict.task_id}`);
+    }
+    if (verdict.slice_id !== expectedSliceId) {
+      errors.push(`${file}: SLICE_ID_MISMATCH expected ${expectedSliceId}, got ${verdict.slice_id}`);
+    }
+    const resolutionFile = path.join(sliceDir, "controller-resolution.json");
+    const needsResolution = verdict.issues.length > 0 || verdict.cannot_verify_from_diff.length > 0;
+    if (!fs.existsSync(resolutionFile)) {
+      if (needsResolution) {
+        errors.push(`${sliceDir}: v2 review verdict requires controller-resolution.json`);
+      }
+      continue;
+    }
+    const resolution = readJson(resolutionFile, errors);
+    const briefFile = path.join(sliceDir, "brief.json");
+    const brief = readJson(briefFile, errors);
+    if (!resolution || !brief) continue;
+    let goalRef;
+    try {
+      goalRef = computeGoalRef(brief, sliceDir);
+    } catch (error) {
+      errors.push(`${briefFile}: cannot compute goal_ref: ${error.message}`);
+      continue;
+    }
+    const resolutionErrors = validateControllerResolutionAgainst(resolution, {
+      verdict,
+      brief,
+      verdictDigest: digestFile(file),
+      goalRef,
+      sliceDir,
+    });
+    if (resolutionErrors.length > 0) {
+      errors.push(`${resolutionFile}: ${resolutionErrors.join("; ")}`);
+      continue;
+    }
+    if (!strict) continue;
+    for (const record of resolution.records) {
+      if (record.disposition === "current-required" && record.repair_status === "open") {
+        errors.push(`${sliceDir}: unresolved current-required finding: ${record.finding_id}`);
+      }
+    }
+    for (const gap of resolution.evidence_gaps) {
+      if (gap.status !== "resolved") {
+        errors.push(`${sliceDir}: unresolved evidence gap: ${gap.gap_id} (${gap.status})`);
+      }
     }
   }
 }
@@ -611,7 +668,7 @@ function lint(options) {
   }
   lintSliceReferences(events, slicesDir, errors);
   lintBriefs(sliceDirs, errors);
-  lintReviewVerdicts(sliceDirs, errors, options.strict);
+  lintReviewVerdicts(sliceDirs, errors, options.strict, options.task);
   lintPathLeases(sddDir, errors);
   lintTeamMetadata(teamDir, errors, options.strict);
   lintPlaceholderArtifacts(teamDir, errors, options.strict);

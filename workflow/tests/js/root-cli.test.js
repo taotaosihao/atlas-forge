@@ -73,6 +73,11 @@ const LEGACY_COMMANDS = [
   "team-loop",
 ];
 
+test("does not expose a retry lifecycle command or admission shortcut", () => {
+  assert.equal(DIRECT_ROUTES.has("retry"), false);
+  assert.equal(LEGACY_COMMANDS.includes("retry"), false);
+});
+
 function temporaryLayout(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-root-cli."));
   const bin = path.join(root, "bin");

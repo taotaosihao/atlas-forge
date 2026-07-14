@@ -5,6 +5,7 @@ const fs = require("fs");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const { validateImplementerReport } = require("../contracts/team-sdd/validators/implementer-report");
 const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const { validateControllerResolution } = require("../contracts/team-sdd/validators/controller-resolution");
 const { validateLedgerEvent } = require("../contracts/team-sdd/validators/ledger-event");
 const { validatePathLeaseDocument } = require("../contracts/team-sdd/validators/path-lease");
 const { validateScorecardEvent } = require("../contracts/team-sdd/validators/scorecard");
@@ -33,6 +34,9 @@ const TYPES = {
   "review-verdict": {
     label: "REVIEW_VERDICT_JSON",
     validate: validateReviewVerdict,
+  },
+  "controller-resolution": {
+    validate: validateControllerResolution,
   },
   "ledger-event": {
     label: "LEDGER_EVENT_JSON",

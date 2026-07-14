@@ -209,6 +209,36 @@ test("keeps the done verification gate and records an explicit skip", (t) => {
   );
 });
 
+test("resume and done do not interpret admission-shaped task state", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const clock = fixedClock("2026-07-10T05:30:00.000Z");
+  const options = { clock, environment };
+  const taskId = createTask("Admission-independent lifecycle", "lifecycle only", options);
+  startTask(taskId, options);
+  blockTask(taskId, "pause before lifecycle characterization", options);
+
+  const stateFile = taskStateFile(paths, taskId);
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  state.severity = "Critical";
+  state.admission = { disposition: "visible-follow-up", repair_status: "open" };
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+  resumeTask(taskId, options);
+  completeTask(taskId, {
+    ...options,
+    noVerifyRequested: true,
+    noVerifyReason: "characterize lifecycle without changing admission semantics",
+  });
+
+  const completed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(completed.status, "done");
+  assert.equal(completed.severity, "Critical");
+  assert.deepEqual(completed.admission, {
+    disposition: "visible-follow-up",
+    repair_status: "open",
+  });
+});
+
 test("archives without verification, preserves durable files, and conditionally clears pointer", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const options = { clock: fixedClock("2026-07-10T06:00:00.000Z"), environment };
