@@ -35,6 +35,7 @@ const RECORD_KEYS = [
 ];
 const GAP_KEYS = ["gap_id", "status", "evidence_refs", "reason"];
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const CANONICAL_REQUIREMENTS_PATH = "brief.md";
 const CANONICAL_GLOBAL_CONSTRAINTS_PATH = "../../global-constraints.md";
 const SAFETY_INVARIANTS = new Set([
   "invariant:safety",
@@ -51,7 +52,23 @@ function digestFile(file) {
 }
 
 function computeGoalRef(brief, sliceDir) {
-  const requirementsFile = path.resolve(sliceDir, brief.requirements_path);
+  if (brief.requirements_path !== CANONICAL_REQUIREMENTS_PATH) {
+    throw new Error(`requirements_path must be canonical: ${CANONICAL_REQUIREMENTS_PATH}`);
+  }
+  const requirementsFile = path.join(sliceDir, CANONICAL_REQUIREMENTS_PATH);
+  const requirementsStat = fs.lstatSync(requirementsFile);
+  if (!requirementsStat.isFile() || requirementsStat.isSymbolicLink()) {
+    throw new Error("canonical requirements file must be a regular non-symlink file");
+  }
+  const requirementsRealPath = fs.realpathSync(requirementsFile);
+  const relativeToSlice = path.relative(sliceDir, requirementsRealPath);
+  if (
+    requirementsRealPath !== requirementsFile
+    || relativeToSlice.startsWith("..")
+    || path.isAbsolute(relativeToSlice)
+  ) {
+    throw new Error("canonical requirements file must remain inside the current slice");
+  }
   const evidenceManifestFile = path.join(sliceDir, "evidence-manifest.json");
   let contractDigest = null;
   if (fs.existsSync(evidenceManifestFile)) {

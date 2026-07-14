@@ -35,6 +35,17 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function isCanonicalRegularFile(file) {
+  try {
+    const stat = fs.lstatSync(file);
+    return stat.isFile()
+      && !stat.isSymbolicLink()
+      && fs.realpathSync(file) === path.resolve(file);
+  } catch (_error) {
+    return false;
+  }
+}
+
 function notAdmitted(reason) {
   return { admitted: false, status: "not-admitted", reason };
 }
@@ -70,7 +81,7 @@ function evaluateSddAdmission(values, options) {
   const briefFile = path.join(sliceDir, "brief.json");
   const verdictFile = path.join(sliceDir, "review-verdict.json");
   const resolutionFile = path.join(sliceDir, "controller-resolution.json");
-  if (![briefFile, verdictFile, resolutionFile].every((file) => fs.existsSync(file))) {
+  if (![briefFile, verdictFile, resolutionFile].every(isCanonicalRegularFile)) {
     return notAdmitted("missing-sdd-admission-artifact");
   }
   try {

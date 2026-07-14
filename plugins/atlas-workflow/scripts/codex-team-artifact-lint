@@ -66,6 +66,17 @@ function readJson(file, errors) {
   }
 }
 
+function canonicalRegularFile(file) {
+  try {
+    const stat = fs.lstatSync(file);
+    return stat.isFile()
+      && !stat.isSymbolicLink()
+      && fs.realpathSync(file) === path.resolve(file);
+  } catch (_error) {
+    return false;
+  }
+}
+
 function walkFiles(root) {
   if (!fs.existsSync(root)) {
     return [];
@@ -180,6 +191,10 @@ function lintReviewVerdicts(sliceDirs, errors, strict, taskId) {
       }
       continue;
     }
+    if (!canonicalRegularFile(file)) {
+      errors.push(`${file}: review verdict must be a canonical regular non-symlink file`);
+      continue;
+    }
 
     const expectedSliceId = path.basename(sliceDir);
     if (verdict.task_id !== taskId) {
@@ -196,8 +211,16 @@ function lintReviewVerdicts(sliceDirs, errors, strict, taskId) {
       }
       continue;
     }
+    if (!canonicalRegularFile(resolutionFile)) {
+      errors.push(`${resolutionFile}: controller resolution must be a canonical regular non-symlink file`);
+      continue;
+    }
     const resolution = readJson(resolutionFile, errors);
     const briefFile = path.join(sliceDir, "brief.json");
+    if (!canonicalRegularFile(briefFile)) {
+      errors.push(`${briefFile}: brief must be a canonical regular non-symlink file`);
+      continue;
+    }
     const brief = readJson(briefFile, errors);
     if (!resolution || !brief) continue;
     let goalRef;

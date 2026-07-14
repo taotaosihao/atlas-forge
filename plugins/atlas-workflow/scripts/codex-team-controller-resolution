@@ -1,0 +1,173 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { validateBrief } = require("../contracts/team-sdd/validators/brief");
+const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const {
+  computeGoalRef,
+  digestFile,
+  validateControllerResolutionAgainst,
+} = require("../contracts/team-sdd/validators/controller-resolution");
+const { isObject } = require("../contracts/team-sdd/validators/common");
+
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function usage() {
+  console.log(`usage:
+  codex-team-controller-resolution --task <task-id> --slice <slice-id> --decisions <json-file>
+
+The decisions file must contain exactly: {"records": [...], "evidence_gaps": [...]}.`);
+}
+
+function parseArgs(argv) {
+  const options = { task: null, slice: null, decisions: null, help: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") options.help = true;
+    else if (arg === "--task") options.task = argv[++i];
+    else if (arg.startsWith("--task=")) options.task = arg.slice("--task=".length);
+    else if (arg === "--slice") options.slice = argv[++i];
+    else if (arg.startsWith("--slice=")) options.slice = arg.slice("--slice=".length);
+    else if (arg === "--decisions") options.decisions = argv[++i];
+    else if (arg.startsWith("--decisions=")) options.decisions = arg.slice("--decisions=".length);
+    else throw new Error(`unknown option: ${arg}`);
+  }
+  return options;
+}
+
+function safeId(label, value) {
+  if (typeof value !== "string" || !ID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a safe identifier`);
+  }
+}
+
+function workflowRoot() {
+  return path.resolve(
+    process.env.CODEX_WORKFLOW_ROOT
+      || process.env.ATLAS_WORKFLOW_ROOT
+      || path.join(os.homedir(), ".codex", "workflow"),
+  );
+}
+
+function requireRegularFile(file, label) {
+  const stat = fs.lstatSync(file);
+  if (
+    !stat.isFile()
+    || stat.isSymbolicLink()
+    || fs.realpathSync(file) !== path.resolve(file)
+  ) {
+    throw new Error(`${label} must be a regular non-symlink file`);
+  }
+}
+
+function readJson(file, label) {
+  requireRegularFile(file, label);
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`${label} is invalid JSON: ${error.message}`);
+  }
+}
+
+function validateDecisions(value) {
+  if (!isObject(value)) throw new Error("decisions must be an object");
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== "evidence_gaps,records") {
+    throw new Error("decisions must contain exactly records and evidence_gaps");
+  }
+  if (!Array.isArray(value.records) || !Array.isArray(value.evidence_gaps)) {
+    throw new Error("decisions records and evidence_gaps must be arrays");
+  }
+}
+
+function writeAtomic(file, value) {
+  if (fs.existsSync(file)) {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error("controller-resolution.json must be a regular non-symlink file");
+    }
+  }
+  const temporary = path.join(path.dirname(file), `.controller-resolution.${process.pid}.tmp`);
+  try {
+    fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function main() {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      usage();
+      return;
+    }
+    safeId("task", options.task);
+    safeId("slice", options.slice);
+    if (!options.decisions) throw new Error("--decisions is required");
+
+    const sliceDir = path.join(
+      workflowRoot(),
+      "artifacts",
+      options.task,
+      "team",
+      "sdd",
+      "slices",
+      options.slice,
+    );
+    const briefFile = path.join(sliceDir, "brief.json");
+    const verdictFile = path.join(sliceDir, "review-verdict.json");
+    const outputFile = path.join(sliceDir, "controller-resolution.json");
+    const brief = readJson(briefFile, "brief.json");
+    const verdict = readJson(verdictFile, "review-verdict.json");
+    const decisions = readJson(path.resolve(options.decisions), "decisions file");
+    validateDecisions(decisions);
+
+    const briefErrors = validateBrief(brief);
+    if (briefErrors.length > 0) throw new Error(`invalid brief.json: ${briefErrors.join("; ")}`);
+    const verdictErrors = validateReviewVerdict(verdict);
+    if (verdict.schema_version !== 2 || verdictErrors.length > 0) {
+      throw new Error(`new controller resolutions require a valid review verdict v2: ${verdictErrors.join("; ")}`);
+    }
+    if (brief.task_id !== options.task || verdict.task_id !== options.task) {
+      throw new Error("task_id must match --task");
+    }
+    if (brief.slice_id !== options.slice || verdict.slice_id !== options.slice) {
+      throw new Error("slice_id must match --slice");
+    }
+
+    const verdictDigest = digestFile(verdictFile);
+    const goalRef = computeGoalRef(brief, sliceDir);
+    const resolution = {
+      schema_version: 2,
+      task_id: options.task,
+      slice_id: options.slice,
+      verdict_digest: verdictDigest,
+      goal_ref: goalRef,
+      records: decisions.records,
+      evidence_gaps: decisions.evidence_gaps,
+    };
+    const errors = validateControllerResolutionAgainst(resolution, {
+      verdict,
+      brief,
+      verdictDigest,
+      goalRef,
+      sliceDir,
+    });
+    if (errors.length > 0) throw new Error(errors.join("; "));
+
+    writeAtomic(outputFile, resolution);
+    console.log(`controller_resolution: ${outputFile}`);
+    console.log(`verdict_digest: ${verdictDigest}`);
+    console.log(`goal_ref: ${goalRef}`);
+  } catch (error) {
+    console.error(`codex-team-controller-resolution: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

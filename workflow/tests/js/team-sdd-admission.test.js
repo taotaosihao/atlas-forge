@@ -265,3 +265,22 @@ test("goal identity is deterministic, acceptance-order independent, and requirem
   fs.appendFileSync(path.join(context.sliceDir, "brief.md"), "Changed authority.\n");
   assert.notEqual(computeGoalRef(context.brief, context.sliceDir), context.goalRef);
 });
+
+test("goal identity accepts only the canonical in-slice regular requirements file", (t) => {
+  const context = fixture(t);
+  const foreignFile = path.join(path.dirname(context.sliceDir), "foreign-brief.md");
+  fs.writeFileSync(foreignFile, "# Foreign requirements\n");
+  for (const requirementsPath of [foreignFile, "../foreign-brief.md"]) {
+    assert.throws(
+      () => computeGoalRef({ ...context.brief, requirements_path: requirementsPath }, context.sliceDir),
+      /requirements_path must be canonical/,
+    );
+  }
+  const briefFile = path.join(context.sliceDir, "brief.md");
+  fs.rmSync(briefFile);
+  fs.symlinkSync(foreignFile, briefFile);
+  assert.throws(
+    () => computeGoalRef(context.brief, context.sliceDir),
+    /regular non-symlink/,
+  );
+});

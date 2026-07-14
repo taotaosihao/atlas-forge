@@ -8,6 +8,7 @@ workspace_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-works
 ledger_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-ledger"
 brief_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-brief"
 validate_json_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-validate-json"
+controller_resolution_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-controller-resolution"
 review_package_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-review-package"
 path_lease_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-path-lease"
 artifact_lint_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-artifact-lint"
@@ -18,6 +19,7 @@ node --check "$workspace_bin" >/dev/null
 node --check "$ledger_bin" >/dev/null
 node --check "$brief_bin" >/dev/null
 node --check "$validate_json_bin" >/dev/null
+node --check "$controller_resolution_bin" >/dev/null
 node --check "$review_package_bin" >/dev/null
 node --check "$path_lease_bin" >/dev/null
 node --check "$artifact_lint_bin" >/dev/null
@@ -26,6 +28,7 @@ node "$workspace_bin" --help >/dev/null
 node "$ledger_bin" --help >/dev/null
 node "$brief_bin" --help >/dev/null
 node "$validate_json_bin" --help >/dev/null
+node "$controller_resolution_bin" --help >/dev/null
 node "$review_package_bin" --help >/dev/null
 node "$path_lease_bin" --help >/dev/null
 node "$artifact_lint_bin" --help >/dev/null
@@ -118,11 +121,12 @@ node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/u
 node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/implementer-message.md" >/dev/null
 node "$validate_json_bin" --type review-verdict --file "$fixture_dir/valid/review-verdict.json" >/dev/null
 node "$validate_json_bin" --type review-verdict --from-message "$fixture_dir/valid/review-message.md" >/dev/null
-node - "$fixture_dir/valid/review-verdict.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/validators/review-verdict.js" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict.schema.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict-v1.schema.json" <<'NODE'
+node - "$fixture_dir/valid/review-verdict.json" "$fixture_dir/valid/review-verdict-v1.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/validators/review-verdict.js" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict.schema.json" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/contracts/team-sdd/review-verdict-v1.schema.json" <<'NODE'
 const fs = require("fs");
-const [fixture, validator, schemaFile, legacySchemaFile] = process.argv.slice(2);
+const [fixture, legacyFixture, validator, schemaFile, legacySchemaFile] = process.argv.slice(2);
 const { validateReviewVerdict } = require(validator);
 const valid = JSON.parse(fs.readFileSync(fixture, "utf8"));
+const legacy = JSON.parse(fs.readFileSync(legacyFixture, "utf8"));
 const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
 const legacySchema = JSON.parse(fs.readFileSync(legacySchemaFile, "utf8"));
 if (schema.additionalProperties !== false) process.exit(1);
@@ -130,7 +134,8 @@ if (JSON.stringify(schema.properties.schema_version.enum) !== "[2]") process.exi
 if (!schema.properties.issues.items.required.includes("finding_id")) process.exit(1);
 if (JSON.stringify(legacySchema.properties.schema_version.enum) !== "[1]") process.exit(1);
 if (legacySchema.properties.issues.items !== undefined) process.exit(1);
-if (validateReviewVerdict(valid).length !== 0) process.exit(1);
+if (valid.schema_version !== 2 || validateReviewVerdict(valid).length !== 0) process.exit(1);
+if (legacy.schema_version !== 1 || validateReviewVerdict(legacy).length !== 0) process.exit(1);
 if (!validateReviewVerdict({ ...valid, schema_version: 3 }).includes("schema_version must be one of: 1, 2")) process.exit(1);
 if (!validateReviewVerdict({ ...valid, controller_resolution: {} }).some((error) => error.includes("unknown key"))) process.exit(1);
 const issue = {
@@ -141,13 +146,17 @@ const issue = {
   evidence: "current v1 issue",
   required_fix: "repair if required",
 };
-const issueWithFutureIdentity = { ...structuredClone(valid), issues: [{ ...issue, finding_id: "future-id-is-currently-ignored" }] };
+const issueWithFutureIdentity = { ...structuredClone(legacy), issues: [{ ...issue, finding_id: "future-id-is-currently-ignored" }] };
 if (validateReviewVerdict(issueWithFutureIdentity).length !== 0) process.exit(1);
-const emptyRequiredFix = { ...structuredClone(valid), issues: [{ ...issue, required_fix: "" }] };
+const emptyRequiredFix = { ...structuredClone(legacy), issues: [{ ...issue, required_fix: "" }] };
 if (!validateReviewVerdict(emptyRequiredFix).some((error) => error.includes("required_fix must be a non-empty string"))) process.exit(1);
-const nonStringEvidenceGap = { ...valid, cannot_verify_from_diff: [42] };
+const nonStringEvidenceGap = { ...legacy, cannot_verify_from_diff: [42] };
 if (validateReviewVerdict(nonStringEvidenceGap).length !== 0) process.exit(1);
 NODE
+grep -q 'New verdicts must use review-verdict schema_version 2' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-reviewer.toml"
+grep -q 'New verdicts must use review-verdict schema_version 2' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-phase-reviewer.toml"
+grep -q 'schema v1 is read-only historical compatibility' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
+grep -q 'codex-team-controller-resolution --task' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
 expect_fail "missing final message block" node "$validate_json_bin" --type implementer-report --from-message "$fixture_dir/valid/review-message.md"
 expect_fail "needs context requires questions" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/needs-context-without-questions.json"
 expect_fail "blocked requires blockers" node "$validate_json_bin" --type implementer-report --file "$fixture_dir/invalid/blocked-without-blockers.json"
@@ -375,8 +384,44 @@ NODE
 }
 
 write_v2_lint_fixture fixture-v2-visible-follow-up visible
+controller_decisions="$TMP_ROOT/controller-decisions.json"
+cat > "$controller_decisions" <<'JSON'
+{
+  "records": [{
+    "finding_id": "finding-critical",
+    "disposition": "visible-follow-up",
+    "basis": "not-current-required",
+    "authority_refs": [],
+    "repair_status": "omitted",
+    "reason": "finding is outside the current goal"
+  }],
+  "evidence_gaps": [{
+    "gap_id": "gap-runtime",
+    "status": "resolved",
+    "evidence_refs": ["evidence:runtime"],
+    "reason": "runtime evidence supplied"
+  }]
+}
+JSON
+rm "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json"
+node "$controller_resolution_bin" --task fixture-v2-visible-follow-up --slice slice-001 --decisions "$controller_decisions" > "$TMP_ROOT/controller-resolution.out"
+grep -q '^controller_resolution:' "$TMP_ROOT/controller-resolution.out"
+grep -Eq '^verdict_digest: [0-9a-f]{64}$' "$TMP_ROOT/controller-resolution.out"
+grep -Eq '^goal_ref: [0-9a-f]{64}$' "$TMP_ROOT/controller-resolution.out"
 node "$artifact_lint_bin" --task fixture-v2-visible-follow-up --strict >/dev/null
 node "$validate_json_bin" --type controller-resolution --file "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json" >/dev/null
+controller_resolution_file="$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json"
+cp "$controller_resolution_file" "$TMP_ROOT/foreign-controller-resolution.json"
+rm "$controller_resolution_file"
+ln -s "$TMP_ROOT/foreign-controller-resolution.json" "$controller_resolution_file"
+expect_fail "artifact lint rejects symlinked v2 controller authority" node "$artifact_lint_bin" --task fixture-v2-visible-follow-up --strict
+rm "$controller_resolution_file"
+cp "$TMP_ROOT/foreign-controller-resolution.json" "$controller_resolution_file"
+controller_before="$(sha256sum "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
+printf '%s\n' '{"records":[],"evidence_gaps":[]}' > "$TMP_ROOT/controller-decisions-incomplete.json"
+expect_fail "controller helper rejects incomplete finding and gap coverage" node "$controller_resolution_bin" --task fixture-v2-visible-follow-up --slice slice-001 --decisions "$TMP_ROOT/controller-decisions-incomplete.json"
+controller_after="$(sha256sum "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
+test "$controller_before" = "$controller_after"
 duplicate_resolution="$TMP_ROOT/duplicate-controller-resolution.json"
 node - "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json" "$duplicate_resolution" <<'NODE'
 const fs = require("fs");

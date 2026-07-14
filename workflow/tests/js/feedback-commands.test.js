@@ -561,6 +561,23 @@ test("rejects internally consistent SDD artifacts replayed across task or slice 
   }
 });
 
+test("rejects symlinked SDD authority artifacts even when their content is valid", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Symlinked SDD authority");
+  const fixture = writeSddAdmissionFixture(paths, taskId);
+  const foreignResolution = path.join(taskArtifactDir(paths, taskId), "foreign-resolution.json");
+  fs.copyFileSync(fixture.resolutionFile, foreignResolution);
+  fs.rmSync(fixture.resolutionFile);
+  fs.symlinkSync(foreignResolution, fixture.resolutionFile);
+
+  const result = runFeedbackCycle(
+    parseFeedbackArgs(sddFeedbackArgs(taskId, fixture.locator)),
+    { clock: clockAt("2026-07-10T12:25:00Z"), environment },
+  );
+  assert.equal(result.lines[4], "status: current-cycle-note");
+  assert.equal(result.lines[7], "admission_reason: missing-sdd-admission-artifact");
+});
+
 test("appends lesson candidates and retains compatibility trigger values", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Lesson candidates");
