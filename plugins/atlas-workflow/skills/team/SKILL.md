@@ -3,7 +3,7 @@ name: team
 description: Use the Atlas team flow with Codex native subagents for discussion, execution, review, and focused repair.
 ---
 
-Use `$atlas-workflow:team` only when the user asks for multiple agents, independent lanes materially reduce latency, or a distinct specialist/reviewer materially reduces risk. Multiple files, behavior changes, or the existence of an implementation contract do not require Team by themselves.
+Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves.
 
 ## Language
 

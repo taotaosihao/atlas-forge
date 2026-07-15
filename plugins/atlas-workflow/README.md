@@ -24,10 +24,12 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
-Atlas has separate native and legacy team entrypoints. Use
-`$atlas-workflow:team` when the user asks for multiple agents, independent lanes
-materially reduce latency, or a distinct specialist/reviewer materially reduces
-risk. Multiple files and behavior changes do not by themselves require Team.
+Atlas has separate native and legacy team entrypoints. Decide whether Team is
+needed from the user's current request, including the requested collaboration
+style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for
+multiple agents or when independent lanes or a distinct specialist/reviewer
+materially serve those needs; otherwise stay with the main Codex. Multiple
+files, behavior changes, and task complexity do not by themselves require Team.
 Native Team records lifecycle state with `team-record-start`,
 `team-record-finalize`, and `team-loop-record`; choose only useful roles and keep
 write ownership disjoint.

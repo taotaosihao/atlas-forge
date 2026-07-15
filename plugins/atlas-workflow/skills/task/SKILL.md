@@ -15,7 +15,7 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 2. Execute clear, low-risk, verifiable work directly. Multiple files or a behavior change do not by themselves require Team, a worktree, or a new documentation bundle.
 3. Use `$atlas-workflow:intake` only when unresolved intent, scope, stakeholder, safety, permission, data, deployment, or ownership decisions block safe progress.
 4. Use `$atlas-workflow:clarify` when a chosen direction still needs explicit boundaries and acceptance before implementation.
-5. Use `$atlas-workflow:team` when the user asks for multiple agents, independent lanes materially reduce latency, or a distinct specialist/reviewer materially reduces risk. Do not spawn roles merely to satisfy a default process.
+5. Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Do not infer Team from task complexity, file count, or a default process.
 6. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
 7. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision`; tiny or already-documented work needs no duplicate routing artifact.
 
