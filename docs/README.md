@@ -13,6 +13,7 @@
 | [Workflow helper README](../workflow/README.md) | `codex-workflow` 命令、artifact 和 helper 使用边界 |
 | [Atlas Workflow plugin README](../plugins/atlas-workflow/README.md) | Atlas skill 入口和合同概览；source/cache 路径以项目约束为准 |
 | [发布完整性与治理 bundle](atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/README.md) | 当前 Atlas release integrity、semantic lint 和治理合同及 phase evidence |
+| [业务验收中文阅读层合同](atlas-workflow/20260718-004-atlas-business-acceptance-readable-report/README.md) | BAF v2 中文派生报告、freshness/tamper 与 presentation-strict；底层 machine semantics 继续继承发布完整性与治理 bundle |
 | [远端 Agent 部署手册](remote-agent-deployment.md) | 仅 legacy/full-stack 兼容部署；包含冻结 Multica 资产，不是 Atlas dev/release 路径 |
 | [Daily Agent Benchmark](daily-agent-benchmark.md) | benchmark 的当前运行说明 |
 
