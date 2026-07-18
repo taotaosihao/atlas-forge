@@ -24,6 +24,19 @@ artifact_category: phase_conclusion
 | Forbidden paths | `git diff --exit-code -- plugins/multica-sdlc .agents` | 通过；无 diff |
 | Hard fingerprints | 只读 `git rev-parse HEAD:plugins/multica-sdlc HEAD:.agents` | `8b87ecd1c5decce18f31e65442747661debfcb5e` / `3e3f8d512d88d309830ceb180baf694149ffa657` |
 
+## 第一性原理人工审查摘要补充验证
+
+followup_workflow_id: `20260718-005-atlas`
+
+| Gate | 命令或动作 | 结果 |
+| --- | --- | --- |
+| 双入口合同 | 检查权威实施合同自身摘要、生成报告固定结构、`AC-16` 和 presentation diagnostic | 通过；合同与报告均强制使用“要确认什么、事实从哪里来、为什么是这个结论、人工还要判断什么”四问 |
+| Markdown links | `scripts/check-relative-markdown-links.py --root .` | 通过；检查 228 个 Markdown 文件和 73 个相对链接 |
+| Contract index | `node plugins/atlas-workflow/scripts/codex-contract-index-lint --root docs/atlas-workflow/20260718-004-atlas-business-acceptance-readable-report` | `contract_index_lint: true` |
+| Implementation contract | `node plugins/atlas-workflow/scripts/codex-implementation-contract-lint --strict --file docs/atlas-workflow/20260718-004-atlas-business-acceptance-readable-report/implementation-contract.final.md` | semantics v1，0 errors，0 warnings |
+| Markdown diff | `git diff --check` | 通过 |
+| Forbidden paths | `git diff --exit-code -- plugins/multica-sdlc .agents` | 通过；无 diff |
+
 ## 实施阶段证据预算
 
 - Git 只保留最终代码、测试、必要 golden fixture、权威合同和一个精简 phase conclusion。

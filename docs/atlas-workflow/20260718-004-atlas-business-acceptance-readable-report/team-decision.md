@@ -32,3 +32,9 @@ decision_status: accepted_with_guards
 - 一份业务入口：生成的中文 report。
 - 两类门禁：现有 machine lint 与新增 presentation policy 各司其职。
 - 不猜测现实事实：renderer 不推断 owner、deadline、风险、现场真实性或生产就绪。
+
+## 用户后续补充要求
+
+用户在方案形成后进一步要求：实施合同自身和最终验收结果都必须包含一段从底层原理出发、通俗简短、便于人工审查的说明。该要求补强业务阅读入口，不改变三席共识和 machine semantics。
+
+最终合同将其固定为同结构四问：要确认什么、事实从哪里来、为什么是这个结论、人工还要判断什么。实施合同直接给出通俗摘要；生成报告在一句话结论后确定性生成四问摘要，并由 presentation strict 与专项测试强制检查，禁止退化为手工自由摘要。

@@ -9,10 +9,12 @@ contract_semantics_version: 1
 work_type: implementation
 created: 2026-07-18
 finalized: 2026-07-18
+last_revised: 2026-07-18
+revision_workflow_id: 20260718-005-atlas
 
 first_code_guard: required
 first_code_not_applicable_reason:
-first_code_slice: 新增 `plugins/atlas-workflow/scripts/codex-team-business-report`，复用现有 strict business artifact lint，从一个有效 standard accepted v2 bundle 确定性输出中文 Markdown 到 stdout
+first_code_slice: 新增 `plugins/atlas-workflow/scripts/codex-team-business-report`，复用现有 strict business artifact lint，从一个有效 standard accepted v2 bundle 确定性输出含四问人工审查摘要的中文 Markdown 到 stdout
 first_code_slice_kind: cli
 first_code_owner: 单一 Atlas workflow implementer
 first_code_verification: `bash workflow/tests/contract_team_business_acceptance.sh`
@@ -30,6 +32,15 @@ required_safety_gates: strict BAF v2 artifact lint、renderer 专项测试、plu
 allowed_headless_only_until: task completion
 stop_if_no_ui_by_phase: not_applicable
 
+## 给人工审查者的底层原理摘要
+
+从底层看，验收只是在回答四个问题：想达到什么、材料记录了什么、两者是否一致、剩余差距由谁判断是否可接受。
+
+- **要确认什么**：业务验收不是检查“文件有没有交齐”，而是确认约定业务目标在约定范围内是否达到，以及还有什么没有完成。
+- **事实从哪里来**：结论只来自已登记的场景结果、验证环境、验收材料和未解决事项。中文报告不创造新事实，只把同一批事实换成容易审查的表达。
+- **为什么是这个结论**：先确认材料之间能否互相对应、是否缺项，再把已登记结论、场景结果和剩余问题放到一起供业务判断。材料检查通过，不代表业务已经同意。
+- **人工还要判断什么**：目标和范围是否符合真实需要、材料内容是否可信、剩余风险是否可以接受。报告不能替代现场核实，也不能自动证明生产可用或批准发布。
+
 ## 范围
 
 ### 目标
@@ -44,11 +55,13 @@ stop_if_no_ui_by_phase: not_applicable
 - 哪些登记材料支持判断，材料不覆盖什么；
 - 当前阻断、后续事项和偏差是什么；
 - 本报告是否仍与当前 JSON bundle 一致并具备业务交付完整性。
+- 人工审查者能否先用四个通俗问题理解验收原理，再进入场景和证据细节。
 
 ### 用户可见行为
 
 - `business-acceptance-report.md` 成为自动生成的唯一业务主入口。
 - 报告首屏使用固定中文结论、范围、技术资格和环境表达。
+- 一句话结论之后固定提供“给人工审查者的底层原理摘要”，回答目的、事实来源、结论形成方式和人工责任边界。
 - dual-goal 以“外部系统或设备链路”“业务人员实际操作”两个中文区块呈现，各自列出独立证据。
 - blocked 和 rejected 仍生成报告并清楚解释原因。
 - conditional 缺少签署所需信息时，报告可阅读但明确标记为不可作为完整签署依据。
@@ -76,6 +89,7 @@ stop_if_no_ui_by_phase: not_applicable
 4. machine lint 只证明结构、引用、状态、路径和证据身份；报告不得声称机器已经鉴定现场真实性。
 5. 业务验收不是生产发布批准；报告固定说明其不证明生产就绪。
 6. 生成目标固定在当前 task 的 `team/acceptance/business-acceptance-report.md`，不接受调用者提供任意写入路径。
+7. 实施合同自身和生成报告都必须先用通俗语言解释底层原理；该摘要不能引入第二套事实、重新计算 verdict 或替代人工判断。
 
 ## 目标架构
 
@@ -196,13 +210,14 @@ do_not_edit: true
 
 1. `# 业务验收报告：<business_goal>`
 2. `## 一句话结论`
-3. `## 本次验收范围`
-4. `## 场景结果`
-5. dual-goal 时的 `## 两类闭环`
-6. `## 验收依据`
-7. `## 未解决事项`
-8. `## 证据与结论边界`
-9. `## 技术明细`
+3. `## 给人工审查者的底层原理摘要`
+4. `## 本次验收范围`
+5. `## 场景结果`
+6. dual-goal 时的 `## 两类闭环`
+7. `## 验收依据`
+8. `## 未解决事项`
+9. `## 证据与结论边界`
+10. `## 技术明细`
 
 ### 一句话结论
 
@@ -214,6 +229,28 @@ do_not_edit: true
 - 验收范围限定语；
 - 验证环境或“当前合同未结构化记录验证环境”；
 - 固定声明“本报告不等同于生产发布批准”。
+
+### 报告中的“给人工审查者的底层原理摘要”
+
+该区块紧跟“一句话结论”，固定为四个 bullet，不使用表格、代码块、原始 ID、路径、命令、内部字段或机器枚举：
+
+1. **要确认什么**：指向报告标题和下一节的业务目标与范围，不在摘要中重复长段自由文本。
+2. **事实从哪里来**：用场景数、已登记材料数和中文环境表达说明事实基础；缺失时直说“未登记”，不补猜。
+3. **为什么是这个结论**：并列展示已登记总判断、基础检查中文状态、业务结果中文状态、阻断数和后续事项数；明确 renderer 不另行重算 verdict。
+4. **人工还要判断什么**：固定提醒审查目标与范围是否正确、材料内容是否可信、剩余风险是否可接受，以及本报告不等于生产发布批准。
+
+输出语义和简洁度以以下固定模板为准：
+
+```text
+- 要确认什么：确认本报告标题和“本次验收范围”列出的业务目标，在约定范围内是否达到。
+- 事实从哪里来：本报告汇总 <场景数> 个场景结果和 <材料数> 项已登记材料；验证环境为 <中文环境表达>。
+- 为什么是这个结论：验收记录中的总判断为 <中文结论>；基础检查 <中文状态>，业务结果 <中文状态>，另有 <阻断数> 个阻断和 <后续事项数> 项后续。本报告只转述已登记判断，不另造结论。
+- 人工还要判断什么：请确认目标和范围是否正确、材料内容是否可信、剩余风险是否可接受；本报告不等于生产发布批准。
+```
+
+实际 Markdown 为四个带加粗标签的 bullet。每个 bullet 最多两句；renderer-owned 固定说明使用日常中文。动态内容仅限中文状态、中文环境说明和整数计数，不把业务自由文本复制进该摘要。
+
+摘要不是新的结论来源。即使 acceptance report、evidence map 或环境信息在 machine contract 允许的非通过分支中缺失，四问仍必须完整出现，并明确显示哪些事实尚未登记。
 
 ### 本次验收范围
 
@@ -344,6 +381,7 @@ stale 与 tampered 都是 exit 1；`--check` 不自动修复，调用者必须�
 | `PRESENTATION_CONDITION_METADATA_UNSTRUCTURED` | conditional 有 followup，但当前合同没有可关联的结构化 owner 与 deadline；当前 v2 因此不能成为完整签署材料 |
 | `PRESENTATION_INTERNAL_TERM_LEAK` | `## 技术明细` 前的可见文本出现内部字段、Goal A/B 或原始枚举 |
 | `PRESENTATION_EVIDENCE_RESULT_UNKNOWN` | 业务区需要显示 validator 尚未枚举的 evidence result |
+| `PRESENTATION_PRINCIPLE_SUMMARY_INVALID` | 给人工审查者的底层原理摘要缺失、重复、顺序错误、不是四个非空 bullet、超出每项两句，或 renderer-owned 说明泄漏内部术语 |
 
 ### Warning
 
@@ -356,7 +394,7 @@ stale 与 tampered 都是 exit 1；`--check` 不自动修复，调用者必须�
 
 ### 业务区术语检查
 
-扫描范围是去除 HTML comments 和 fenced code 后、`## 技术明细` 之前的可见文本，至少禁止以下 case-insensitive token：
+扫描范围是去除 HTML comments 和 fenced code 后、`## 技术明细` 之前的可见文本，包含给人工审查者的底层原理摘要，至少禁止以下 case-insensitive token：
 
 ```text
 Goal A
@@ -378,9 +416,12 @@ not_run
 
 技术附录不应用该禁令，否则会损害审计和可复现能力。
 
+给人工审查者的底层原理摘要另做结构检查；其固定说明不得出现 `JSON`、`JSONL`、`schema`、`validator`、`lint`、`artifact`、`digest`、`CLI` 等实现词。摘要不复制业务自由文本，因此该检查可以只针对确定性生成内容执行；报告标题和详细范围仍忠实展示业务原文，并继续受现有业务区术语门禁约束。
+
 ## 模板和 Team 使用规则
 
 - `workflow/templates/business-acceptance-report.md` 改为“自动生成报告说明与固定可见结构”，不再作为手填结论模板。
+- 模板说明和 Team reference 必须把“给人工审查者的底层原理摘要”列为首屏固定部分，不允许调用者删除、后移到技术明细或改为自由发挥的手工摘要。
 - `business-evidence-map.md` 和 `business-verdict.md` 保留兼容文件名，但顶部明确标记为内部技术编制材料，业务人员应阅读生成报告。
 - `plugins/atlas-workflow/skills/team/references/business-acceptance.md` 增加 human-first handoff：
   1. 业务 artifact 最终冻结后运行 `--write`；
@@ -427,6 +468,7 @@ scripts/sync-live-agents.sh
 ## First Code Slice Guard
 
 - Phase 1 的首个 keeper behavior 是 CLI 从 strict-valid standard accepted v2 fixture 输出中文报告到 stdout。
+- 首个 stdout 报告必须已经包含完整四问摘要；不得把这项人工审查入口延迟到文档收尾阶段。
 - 首个代码切片可以同时加入 artifact-lint export guard 和最小 test，但不能只包含模板、fixture、文档或空 CLI 骨架。
 - 在 renderer 行为成立前，不扩展 stale、presentation、README、cachebuster 或全量证据。
 - hard safety gate 不因 first-code slice 延后或削弱；无效 bundle 必须从第一切片起 fail closed。
@@ -441,7 +483,7 @@ scripts/sync-live-agents.sh
 
 | Phase | Keeper outcome | 主要路径 | Required verification |
 | --- | --- | --- | --- |
-| 1 | strict-valid v2 bundle 可确定性输出中文报告到 stdout；invalid bundle fail closed | new CLI、artifact-lint export、focused fixture | `node --check`、business acceptance focused test |
+| 1 | strict-valid v2 bundle 可确定性输出含四问摘要的中文报告到 stdout；invalid bundle fail closed | new CLI、artifact-lint export、focused fixture | `node --check`、business acceptance focused test |
 | 2 | digest、local evidence identity、atomic write、stale/tamper、四态/环境/dual-goal、presentation strict 完成 | CLI、focused tests、必要 golden fixture | focused test 全矩阵、artifact-lint compatibility |
 | 3 | 模板/Team reference/README 收敛，冻结审查，最后 cachebuster，完成全量集成 | templates、skill、README、manifest | plugin validate/integrity、contract_repo、contract.sh、docs/forbidden checks |
 
@@ -453,6 +495,7 @@ Phase 是调度边界，不新增 scope 或授权。全部实施可以在一个�
 
 - CLI help、必填参数、未知参数、互斥 mode、presentation flag 组合。
 - standard accepted v2 stdout 与一份完整 golden Markdown。
+- golden 首屏包含顺序固定的四问摘要；每项不超过两句，renderer-owned 说明无实现术语。
 - dual accepted real：两个闭环、独立 evidence、同链路业务表达。
 - dual accepted approved simulator：明确模拟环境且没有真实/生产通过表述。
 - conditional empty followups：普通 render/check 可读；presentation strict 报 `PRESENTATION_CONDITION_MISSING`。
@@ -462,6 +505,7 @@ Phase 是调度边界，不新增 scope 或授权。全部实施可以在一个�
 - evidence source 为 local、external、manual；unknown result 的 strict failure。
 - standard environment warning。
 - visible business section 内部术语泄漏 failure；技术附录允许原始字段。
+- 四问摘要缺失、重复、乱序、空项、过长或固定说明泄漏实现词时，presentation strict 报 `PRESENTATION_PRINCIPLE_SUMMARY_INVALID`。
 - 同一输入重复 render bytes 相同。
 - `--write` 后 `--check` 通过。
 - 修改 JSON 或 local evidence 后 stale；重新 `--write` 后恢复。
@@ -497,6 +541,7 @@ Phase 是调度边界，不新增 scope 或授权。全部实施可以在一个�
 | AC-13 | skill 和模板把生成报告设为唯一业务 handoff，不再要求业务人员阅读原始 JSON/技术 Markdown | yes | source assertions + relative links |
 | AC-14 | plugin 内容冻结后生成唯一新 cachebuster，manifest/release identity 通过 | yes | official validate + integrity manifest/release gate |
 | AC-15 | repo/full contract、docs、forbidden paths 与 Multica hard fingerprints 通过 | yes | final validation matrix |
+| AC-16 | 实施合同自身含通俗四问摘要；生成报告首屏也含同结构摘要，并由 presentation strict 强制完整、简短且不泄漏实现术语 | yes | contract source assertion + golden structure/length/term assertions + negative fixtures |
 
 ## Edge Cases
 
@@ -504,6 +549,7 @@ Phase 是调度边界，不新增 scope 或授权。全部实施可以在一个�
 | --- | --- | --- |
 | standard closure 没有 environment mode | 中文声明未结构化记录；warning，不推断真实环境 | yes |
 | blocked/rejected 缺 acceptance report 或 evidence map，但 machine lint 允许 | 仍生成保守报告，明确哪些材料未登记 | yes |
+| 四问所需的场景、材料或环境信息缺失 | 保留四个问题，用“未登记”和零计数说明未知，不省略问题、不补猜事实 | yes |
 | conditional 无 followup | 报告可读，presentation strict failure | yes |
 | conditional 有 followup但无结构化责任信息 | 原文展示且声明缺失，presentation strict failure | yes |
 | external/manual evidence | 不联网、不鉴真，显示边界 warning | yes |
@@ -584,6 +630,7 @@ required safe fallback: not_applicable
 - [x] 首个代码切片改变真实 CLI 行为，不是纯准备工作。
 - [x] machine BAF v2 与业务阅读层的兼容边界锁定。
 - [x] 四态、环境、双目标证据、conditional 和证据真实性边界可验证。
+- [x] 实施合同和生成报告都提供同结构、简短、通俗且可测试的底层原理人工审查摘要。
 - [x] 文件范围、测试矩阵、release identity、停止条件和禁写路径明确。
 - [x] 没有把 schema v3、签署、production readiness 或历史迁移夹带进当前目标。
 - [x] 没有授权发布、安装、cache refresh、marketplace mutation 或 Multica 操作。
