@@ -32,7 +32,8 @@ Atlas BAF v2 继续负责业务事实、strict closure 和最终 verdict。新�
 - 必经路径：UI 创建/发布工单并启动 LineTask；project config 冻结非 CNC、`plc_report_only` reference target 并提供 CNC/file readiness 不适用证据；signed ingress 完成 material chain。
 - 正向终点：目标 `DeviceTask` 为 `running`，UI/API/DB/audit/attempt-1 Trace 一致。
 - 反证：无效签名被拒绝且同一任务状态不变。
-- 人工门禁：acceptance owner 对绑定当前 digest 的中文审核卡记录“符合”，并通过 Core-owned `acceptance-owner-design-intent` 校验后，才能支持 final accepted。
+- 中文交付：精简 scenario handoff/review card 让非专业验收人按场景操作，对照预期、实际结果和已登记证据；缺失写“未登记/当前无法判断”，不重算 verdict、不鉴真、不签字。只有 BAF 登记 `integration_mode: real` 时才称真实运行。
+- 人工门禁：acceptance owner 对当前 contract/reference/actual screenshot/evidence 引用对应的中文审核卡记录“符合”，并通过 Core-owned `acceptance-owner-design-intent` 对引用对应关系与判断登记做校验后，才能支持 final accepted。
 
 ## 修复归责
 

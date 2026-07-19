@@ -22,7 +22,7 @@ workflow_id: `20260719-005-ai-ui-intake`
 - `audit`：不依赖完整 project config 扫描 Playwright 源码与配置；JSON 模式 stdout 仅输出单 envelope，人类模式输出中文摘要。
 - `run`：创建不可变 run identity，按 project config 调用 adapter phases，保存 attempts 与 evidence。
 - `check-run`：验证 required evidence、attempt history、digest、secret policy 和 failure class，输出 technical run result。
-- `review`：从已验证 contract/evidence 生成绑定 digest 的中文 scenario 审核卡；不重算 verdict。
+- `review`：校验精简中文 scenario handoff/review card 对当前 BAF 与参考图/实际截图的引用对应关系及人工判断登记；不负责 renderer、presentation check 或 verdict。
 
 ### Project Adapter Protocol
 
@@ -34,6 +34,7 @@ workflow_id: `20260719-005-ai-ui-intake`
 
 ### BAF Bridge
 
+- BAF v2 JSON/JSONL 当前记录是唯一 machine facts；既有 schema、validator 和 strict artifact lint 只判定记录与 closure 合法性，不提供或补全业务事实。
 - Web run result 作为 technical/business evidence 引用进入现有 `business-evidence-map.json`。
 - strict `codex-team-artifact-lint --business-acceptance` 继续判断 bundle legality。
 - 现有 `business-verdict.json` 是唯一最终业务 verdict；Web CLI 不新增同义状态。
@@ -45,8 +46,8 @@ workflow_id: `20260719-005-ai-ui-intake`
 - 首试失败后重试成功不能通过；缺证据、局部 pass 和 non-claim 不能通过。
 - 三次 fresh-seed 新 run 均首次通过后完成 v1。
 - Sharp Cell 锚点覆盖 UI 工单发布、LineTask 启动、非 CNC `plc_report_only` target 冻结与 CNC/file 不适用证据、material chain、invalid/valid callback 对照和 running 回显。
-- 中文审核卡显示参考图与实际截图，且与机器 contract/evidence digest 一致；acceptance owner 对当前 digest 的“符合”判断是 final accepted 必需证据，并由 Core-owned `acceptance-owner-design-intent` 确定性校验。
-- 中文 renderer 依赖由 `20260718-004-atlas` 独立交付；缺失时 Phase 2 记录 `blocked_dependency`，不扩大当前任务。
+- 精简中文审核卡指导非专业验收人按场景操作，并忠实对照当前 BAF 的预期、实际结果和证据；缺失写“未登记/当前无法判断”，只有 `integration_mode: real` 才称真实运行，不新增 renderer 或第二 verdict。
+- acceptance owner 对当前 contract/reference/actual screenshot/evidence 引用的“符合”判断是 final accepted 必需证据，并由 Core-owned `acceptance-owner-design-intent` 只校验引用对应关系与人工登记。
 
 ## 验证
 

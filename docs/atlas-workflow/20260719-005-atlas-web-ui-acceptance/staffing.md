@@ -7,9 +7,9 @@ workflow_id: `20260719-005-ai-ui-intake`
 | 责任 | Owner | 路径或结果 |
 | --- | --- | --- |
 | Atlas Web audit/runner/protocol | Atlas Forge implementer | `workflow/bin/**`、内置 contracts、sync/shim 边界与专项测试 |
-| BAF bridge、owner decision validator 与中文阅读依赖 | Atlas Forge implementer | 复用既有 BAF；实现 Core-owned `acceptance-owner-design-intent`；仅检查 `20260718-004-atlas` renderer prerequisite，不代为实施 |
+| BAF bridge、owner decision validator 与精简中文 handoff | Atlas Forge implementer | 复用既有 BAF；提供 human-first review card；实现 Core-owned `acceptance-owner-design-intent`，只校验当前引用对应关系和人工判断登记，不实现 renderer 平台 |
 | Sharp Cell project config/adapter/validator/scenario | Sharp Cell implementer | `acceptance/web/**`、planner provisioning、目标 E2E 与必要产品可测试性改动 |
-| 业务/design 最终符合性 | acceptance owner（用户） | 对绑定当前 digest 的中文审核卡记录“符合/不符合/需修改” |
+| 业务/design 最终符合性 | acceptance owner（用户） | 按场景操作、对照预期与实际/运行证据，并对当前引用对应的中文审核卡记录“符合/不符合/需修改” |
 | 最终集成与范围控制 | 主 Codex | 跨仓库验证、精确提交、无 push/部署/安装刷新 |
 
 ## 写入规则
