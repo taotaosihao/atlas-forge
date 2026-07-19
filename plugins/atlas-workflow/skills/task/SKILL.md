@@ -29,6 +29,7 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 
 - Create durable documentation only when ambiguity, risk, handoff, audit, or release value justifies it. Reuse existing issues, PRDs, specs, or contracts instead of mirroring them.
 - A lightweight contract should name goal, non-goals, acceptance, real verification, and true return conditions. Do not add staffing/evidence files solely to satisfy a file checklist.
+- When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Keep raw logs, traces, screenshots, dumps, retry output, and intermediate repair output outside Git by default.
 - Long work crossing compaction or handoff uses one non-Git rolling checkpoint that is overwritten rather than appended.
 

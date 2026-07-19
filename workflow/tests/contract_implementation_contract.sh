@@ -628,6 +628,13 @@ grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plug
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+for contract_authoring_skill in task clarify team team-v1; do
+  contract_authoring_file="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/$contract_authoring_skill/SKILL.md"
+  grep -q 'authority-backed facts determine an environment, status, verification level, or conclusion' "$contract_authoring_file"
+  grep -q 'state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case' "$contract_authoring_file"
+  grep -q 'replace it in place.*do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose' "$contract_authoring_file"
+done
+grep -q 'the goal neutral, place the condition once in the existing contract structure' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 grep -q 'every validated controller finding with `disposition: current-required` remains an executable requirement' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'every validated controller resolution with `disposition: current-required` remains part of the current delivery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
 grep -q 'validated controller resolution is the sole finding-scope authority' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"

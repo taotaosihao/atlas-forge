@@ -69,7 +69,10 @@ or release value justifies the extra artifact. Reuse an existing issue, PRD,
 spec, or contract whenever it already supplies the required boundary. Multiple
 files alone do not require a new contract or Team round. A contract should stay
 small and record only goal, non-goals, acceptance, real validation, and true
-return conditions.
+return conditions. When authority-backed facts make a claim conditional, keep
+the goal neutral, place the condition once in the existing contract structure,
+and replace stale wording instead of appending exception sections or mirrored
+requirements.
 
 ## Concise Phase Evidence
 
