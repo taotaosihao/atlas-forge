@@ -29,13 +29,13 @@ Atlas BAF v2 继续负责业务事实、strict closure 和最终 verdict。新�
 - viewport：项目配置 `1366x768`。
 - 数据：隔离 fresh seed 的本地 Web/API/DB/worker/queue。
 - 设备侧：approved simulator，通过真实 Beezer token/timestamp/HMAC ingress。
-- 必经路径：UI 创建/发布工单并启动 LineTask；signed ingress 完成 material chain；根据冻结设备能力完成 CNC/file readiness 或提供不适用证据。
+- 必经路径：UI 创建/发布工单并启动 LineTask；project config 冻结非 CNC、`plc_report_only` reference target 并提供 CNC/file readiness 不适用证据；signed ingress 完成 material chain。
 - 正向终点：目标 `DeviceTask` 为 `running`，UI/API/DB/audit/attempt-1 Trace 一致。
 - 反证：无效签名被拒绝且同一任务状态不变。
-- 人工门禁：acceptance owner 对绑定当前 digest 的中文审核卡记录“符合”后，才能支持 final accepted。
+- 人工门禁：acceptance owner 对绑定当前 digest 的中文审核卡记录“符合”，并通过 Core-owned `acceptance-owner-design-intent` 校验后，才能支持 final accepted。
 
 ## 修复归责
 
-- 产品行为、项目环境、seed、locator、项目 adapter：Sharp Cell 仓库。
+- 产品行为、项目环境、seed、locator、项目 adapter/validator：Sharp Cell 仓库。
 - runner、通用审计、JSON 协议、证据完整性、BAF bridge：Atlas Forge。
 - 关键业务或 design 意图歧义：停止自动修复，生成中文差异卡交用户决定。

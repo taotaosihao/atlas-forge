@@ -23,16 +23,17 @@ artifact_category: clarification_conclusion
 - v1 只使用 Sharp Cell 一条 scenario，Core 无项目业务/viewport 常量。
 - 历史 Multica 范围保持禁止修改与运行。
 - 2026-07-19 native Team 只读评审结论为 BLOCK；用户随后授权“修正”，最终合同已对业务路径可达性、planner、attempt-1 Trace、Phase 依赖、独立 validators、UI-intent gate 和 CLI/schema 分发边界做替换式修订。
+- Kimi Code K3（thinking on、YOLO）只读 Epic 复审结论 PASS：8/8 blocker 闭合，无 P0/P1，thin layer 未演化为平台；用户随后授权收敛 P2，Sharp Cell v1 因此冻结非 CNC、`plc_report_only` reference target，owner decision digest check 归属 Core-owned `acceptance-owner-design-intent`。
 
 ## 澄清阶段验证
 
 | Gate | 命令或动作 | 结果 |
 | --- | --- | --- |
-| Implementation contract | installed Atlas skill root 的 `codex-implementation-contract-lint --strict` | semantics v1，0 errors，0 warnings |
+| Implementation contract | `node plugins/atlas-workflow/scripts/codex-implementation-contract-lint --strict --file docs/atlas-workflow/20260719-005-atlas-web-ui-acceptance/implementation-contract.final.md` | semantics v1，0 errors，0 warnings |
 | Contract index | `node plugins/atlas-workflow/scripts/codex-contract-index-lint --root docs/atlas-workflow/20260719-005-atlas-web-ui-acceptance` | `contract_index_lint: true` |
 | Markdown links | `scripts/check-relative-markdown-links.py --root .` | 通过；235 个 Markdown 文件、81 个相对链接 |
 | Markdown diff | `git diff --check` | 通过 |
-| Workflow readiness | `codex-workflow ready 20260719-005-ai-ui-intake --require context,spec,decision` | `status: ready`，issues 为空 |
+| Workflow readiness | `/home/gewu/.codex/workflow/bin/codex-workflow ready 20260719-005-ai-ui-intake --require context,spec,decision` | installed runtime task `status: ready`，issues 为空；repo-local binary 不是该 Git 外 task state 的查询入口 |
 | Forbidden paths | `git diff --exit-code -- plugins/multica-sdlc .agents` | 通过；无 diff |
 | Multica fingerprints | 只读 `git rev-parse HEAD:plugins/multica-sdlc HEAD:.agents` | `8b87ecd1c5decce18f31e65442747661debfcb5e` / `3e3f8d512d88d309830ceb180baf694149ffa657` |
 
@@ -40,10 +41,10 @@ artifact_category: clarification_conclusion
 
 | Gate | 结果 |
 | --- | --- |
-| `codex-implementation-contract-lint --strict` | semantics v1，0 errors，0 warnings |
+| `node plugins/atlas-workflow/scripts/codex-implementation-contract-lint --strict --file docs/atlas-workflow/20260719-005-atlas-web-ui-acceptance/implementation-contract.final.md` | semantics v1，0 errors，0 warnings |
 | `codex-contract-index-lint` | `contract_index_lint: true` |
 | Markdown links | 235 个 Markdown 文件、81 个相对链接通过 |
-| Workflow readiness | task `20260719-005-ai-ui-intake` ready，issues 为空 |
+| `/home/gewu/.codex/workflow/bin/codex-workflow ready 20260719-005-ai-ui-intake --require context,spec,decision` | installed runtime task ready，issues 为空 |
 | Diff/forbidden paths | `git diff --check` 通过；Multica paths 无 diff，hard fingerprints 不变 |
 
 ## 实施阶段证据预算

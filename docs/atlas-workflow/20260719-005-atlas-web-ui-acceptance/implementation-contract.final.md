@@ -37,7 +37,6 @@ Atlas Forge owned paths:
 
 - `workflow/bin/codex-web-acceptance`
 - `workflow/bin/lib/codex-web-acceptance/**`
-- `workflow/bin/lib/codex-web-acceptance/contracts/**`
 - `workflow/tests/contract_web_acceptance.sh`
 - `workflow/tests/contract.sh`
 - `scripts/sync-live-atlas-workflow.sh` 中新 CLI shim/managed-command 的分发边界与对应集成测试
@@ -74,11 +73,11 @@ Sharp Cell owned paths:
 
 ## Product/UI Acceptance Gate
 
-- first_operable_user_flow: acceptance-only 计划员从真实登录页登录，通过 served Sharp Cell UI 创建并发布工单，再通过 UI 启动目标 `LineTask`，使其与父 `WorkOrder` 进入 `in_progress`；系统形成任务树、资源分配和 occupancy；approved simulator 通过真实 signed ingress 形成必需 material-event chain；项目配置冻结目标设备能力，若为 CNC/file-driven 任务，还必须通过 UI 绑定并下发文件，由 approved Beezer simulator 完成 verified transfer readback；无效签名 task-state callback 被拒绝且目标任务及关联事实不变；有效 signed callback 推动同一 `DeviceTask` 到 `running`；计划员在 UI 刷新后看到一致状态。
+- first_operable_user_flow: acceptance-only 计划员从真实登录页登录，通过 served Sharp Cell UI 创建并发布工单，再通过 UI 启动目标 `LineTask`，使其与父 `WorkOrder` 进入 `in_progress`；系统形成任务树、资源分配和 occupancy；Sharp Cell v1 project config 冻结一个非 CNC、`plc_report_only` 的 reference target，并以设备能力快照证明本场景不适用文件绑定、下发和 CNC transfer；approved simulator 通过真实 signed ingress 形成必需 material-event chain；无效签名 task-state callback 被拒绝且目标任务及关联事实不变；有效 signed callback 推动同一 `DeviceTask` 到 `running`；计划员在 UI 刷新后看到一致状态。
 - browser_entrypoint: http://127.0.0.1:5174/login
 - served_ui_validation_action: `page.goto('http://127.0.0.1:5174/login')` 打开真实 Vite-served HTML 与 JS/CSS，使用 planner 在登录表单输入凭据，按项目 contract 经真实菜单和 UI 完成工单路径；不得 fulfill 主文档或 app bundle，不得 API login、cookie 注入或深层 URL 起步。
 - ui_data_mode: 隔离 fresh-seed 的真实本地 Web/API/DB/worker/queue；只有外部设备输入使用项目批准的 signed Beezer simulator。
-- required_safety_gates: acceptance-only planner 可重复 provisioning、权限与组织 scope、parent task readiness、material-event chain、CNC/file readiness 或绑定设备能力的不适用证据、invalid signature fail-closed、no direct task transition、no DB success mutation、secret redaction、attempt immutability、evidence digest、served asset identity、attempt-1 Trace、API/DB/audit/trace correlation。
+- required_safety_gates: acceptance-only planner 可重复 provisioning、权限与组织 scope、parent task readiness、material-event chain、非 CNC `plc_report_only` target 能力冻结与 CNC/file readiness 不适用证据、invalid signature fail-closed、no direct task transition、no DB success mutation、secret redaction、attempt immutability、evidence digest、served asset identity、attempt-1 Trace、API/DB/audit/trace correlation。
 - allowed_headless_only_until: Phase 2 完成 Core audit/run/check-run 行为
 - stop_if_no_ui_by_phase: Phase 3
 - Served UI evidence: HTML、JS 和 CSS 必须来自真实 HTTP server；backend mock、`page.setContent`、fulfilled main document/app bundle、build/typecheck、fixture-only test 和截图本身都不能满足本锚点。
@@ -97,7 +96,7 @@ Sharp Cell owned paths:
 1. `audit`：静态扫描 Playwright 配置与 specs；可直接接收 project root 与 Playwright config/source roots，不强制完整 project config；结果分类为 blocking、warning、approved waiver，不自动改代码。`--format json` 时 stdout 只允许单一 JSON envelope，人类摘要写 stderr；`--format human` 时 stdout 输出中文摘要。blocking=2，warning-only/clean=0，usage/protocol/internal error=1。
 2. `run`：创建 run identity，冻结 project/contract digest，按 phase 调用 project adapter，保存全部 attempts 和 evidence refs。
 3. `check-run`：验证 attempts、required evidence、digest、路径、secret 和 failure class，产生 technical run result；不产生业务 accepted verdict。
-4. `review`：从已验证 contract/evidence 确定性生成中文 scenario 审核卡；不推断未登记事实，不覆盖 BAF 报告。
+4. `review`：从已验证 contract/evidence 确定性生成中文 scenario 审核卡；不推断未登记事实，不覆盖 BAF 报告。Owner 判断登记后，`review --check-owner-decision` 运行 Core-owned `acceptance-owner-design-intent` 确定性校验，仅输出 evidence validation result，不产生 verdict。
 
 ### Project config and adapter protocol
 
@@ -126,6 +125,7 @@ Sharp Cell owned paths:
 - `business-verdict.json` 是唯一最终业务 verdict；不得新增 `finalStatus` 同义业务结论。
 - 中文业务主报告复用 `20260718-004-atlas` 合同规定的 `codex-team-business-report`；Web review card 是场景材料，不是第二 verdict。
 - Sharp Cell v1 的 design-intent decision 作为现有 BAF evidence 登记，由 acceptance owner 对绑定 contract/reference/actual screenshot digest 的中文审核卡选择“符合”、“不符合”或“需修改”；只有当前 digest 的“符合”可支持 final accepted，不新增平行 verdict。
+- Phase 2 Web review/BAF bridge 拥有 Core-owned `acceptance-owner-design-intent` validator；它在 owner decision 之后、final strict BAF closure 之前验证 decision value、owner identity、contract digest、reference digest、actual screenshot/evidence digest 和 freshness，不重算业务 verdict。
 
 ## Phases
 
@@ -139,14 +139,14 @@ Sharp Cell owned paths:
 
 - 先通过 prerequisite gate 确认 `codex-team-business-report` 已由独立合同交付；未通过则记录 `blocked_dependency` 并停止。
 - 实现 project config、adapter/validator envelope、run/check-run、attempt immutability、evidence digest、path/secret guards 和 BAF bridge。
-- 实现无 verdict 权限的中文 Web scenario review card。
+- 实现无 verdict 权限的中文 Web scenario review card 和 Core-owned `acceptance-owner-design-intent` validator。
 
 ### Phase 3 — Sharp Cell operable UI slice
 
 - 新增 Sharp Cell project config、adapter 和单条 anchor。
 - 在 fresh seed 中可重复创建 acceptance-only planner，冻结组织 scope 与凭据来源，正式运行不得回退到 operator/systemadmin。
 - 使用真实 Vite app、planner UI login、真实 Web/API/DB/worker/queue 和 signed Beezer ingress；项目 adapter 必须从 config 设置/解析 URL 并进行 served-asset preflight，Core 不写死 port。
-- 通过 UI 完成工单发布和 LineTask 启动，通过 signed ingress 完成 material-event chain；若目标设备需要 CNC/file readiness，完成文件绑定、下发和 verified transfer readback。
+- 通过 UI 完成工单发布和 LineTask 启动，通过 signed ingress 完成 material-event chain；project config 必须冻结非 CNC、`plc_report_only` reference target，并以能力快照和 `running-readiness` validator 证明 CNC/file readiness 不适用。
 - 先证明 invalid signature 被拒绝且状态不变，再证明 valid callback 推进同一 task 到 running；anchor 专用 Playwright 配置或 adapter 必须使 attempt 1 保留 Trace。
 - 若 Phase 3 结束无真实 served UI evidence，停止，不扩张 scanners、fixtures、release、perf 或 soak。
 
@@ -172,13 +172,13 @@ Sharp Cell owned paths:
 | AC-10 | Sharp Cell viewport/browser/role/URL/连续运行次数只存在项目 config；Core 不写死 | yes | project config schema + Core source scan |
 | AC-11 | fresh seed 可重复创建受限 acceptance-only planner，凭据由 secret source 提供并在运行后清理；anchor 从真实 `/login` 登录，不使用 API login、cookie 注入、operator/systemadmin 回退或深层 URL 起步 | yes | seed/setup/cleanup assertions + attempt-1 Playwright Trace、route manifest、actor session evidence |
 | AC-12 | 工单通过 UI 创建并发布，目标 LineTask 通过 UI 启动，父 WorkOrder/LineTask 为 `in_progress`，task tree、assignment、occupancy 与目标 DeviceTask 真实持久化 | yes | UI checkpoints + API/DB readback + `same-business-object-chain` validator |
-| AC-13 | required material-event chain 经真实 signed ingress 成立；CNC/file-driven 目标完成 UI 文件绑定/下发和 verified transfer readback，非 CNC 目标提供绑定设备能力的不适用证据 | yes | readiness snapshots + signed receipts + `running-readiness` validator |
+| AC-13 | required material-event chain 经真实 signed ingress 成立；Sharp Cell v1 target 被冻结为非 CNC、`plc_report_only`，能力快照和任务事实证明文件绑定/下发与 CNC transfer 不适用 | yes | readiness/capability snapshots + signed receipts + `running-readiness` validator |
 | AC-14 | 无效签名 task-state callback 经真实 ingress 被拒绝，且目标状态、关键行版本和关联事实不变 | yes | HTTP receipt、before/after API/DB snapshot、audit/Trace + `invalid-callback-no-mutation` validator |
 | AC-15 | 有效 signed callback 与本次 device/task/assignment/run/attempt/trace 关联，且 `running` 变更发生在 callback 之后 | yes | callback receipt、API/DB/audit/Trace + `valid-callback-correlation` validator |
 | AC-16 | UI 刷新后显示 running，并与 API/DB/callback/audit/Trace 一致；所有 required claim 由 adapter 之外的确定性 validator 判定 | yes | Playwright assertion、截图、`same-run-attempt-evidence` 与 join validators |
 | AC-17 | Anchor 无未经批准的 nth/deep CSS/fuzzy text/force click；每个关键动作有唯一 locator、actionability 和后置断言 | yes | audit blocking rules + anchor source/attempt-1 Trace inspection |
 | AC-18 | 中文审核卡并排显示项目参考图/AI 效果图与 `1366x768` 实际关键截图，固定展示目标、实际步骤、禁止绕过、invalid/valid 对照、required claim 材料、fresh-run 摘要、阻断和未覆盖范围 | yes | Web review golden/tamper tests + digest check |
-| AC-19 | acceptance owner 必须对绑定 contract/reference/actual screenshot digest 的审核卡记录“符合”；未判断、“不符合”、“需修改”或 digest 变化均阻止 final accepted | yes | 既有 BAF evidence map/strict lint + acceptance-owner decision digest check |
+| AC-19 | acceptance owner 必须对绑定 contract/reference/actual screenshot digest 的审核卡记录“符合”；未判断、“不符合”、“需修改”或 digest 变化均阻止 final accepted | yes | 既有 BAF evidence map/strict lint + Core-owned `acceptance-owner-design-intent` validator |
 | AC-20 | Sharp Cell 连续 3 个 fresh-seed 新 run 在 attempt 1 通过且每次都保留当次 Trace；任一失败重新从新 run 计数 | yes | immutable run index、`fresh-seed-isolation` validator 与三份 strict BAF evidence bundle |
 | AC-21 | repo/staged/live 中新 CLI shim 与内置 schema 一致；使用同一 fixture/config 得到一致结果 | yes | Atlas scoped sync integration test + command/schema equality assertions |
 | AC-22 | Sharp Cell project config 记录 `1366x768` 为本 v1 用户批准矩阵，并对项目其他默认 viewport 记录显式 waiver；Core 不包含该值 | yes | config/phase conclusion waiver check + Core forbidden-value scan |
@@ -195,9 +195,9 @@ Sharp Cell owned paths:
 | V-04 | Atlas plugin | 官方 `validate_plugin.py plugins/atlas-workflow` | plugin valid | 同上 |
 | V-05 | Atlas identity | `workflow/bin/atlas-plugin-integrity manifest --plugin-root plugins/atlas-workflow` | manifest identity valid | 同上 |
 | V-06 | Sharp Cell static | `corepack pnpm --filter fms-web typecheck` 与相关目标测试 | 通过 | Sharp Cell phase conclusion |
-| V-07 | Sharp Cell preflight/anchor | 项目 config/adapter 显式设置或解析 served URL，确认 `1366x768` waiver、planner、fresh seed 与 attempt-1 Trace 策略后驱动 `codex-web-acceptance run` | 真实打开项目 config 的 `/login`，完成 AC-11 至 AC-19 | Git 外 run artifacts + 精简 evidence index |
+| V-07 | Sharp Cell preflight/anchor | 项目 config/adapter 显式设置或解析 served URL，确认 `1366x768` waiver、planner、非 CNC `plc_report_only` target、fresh seed 与 attempt-1 Trace 策略后驱动 `codex-web-acceptance run` | 真实打开项目 config 的 `/login`，完成 AC-11 至 AC-18 | Git 外 run artifacts + 精简 evidence index |
 | V-08 | Fresh-run convergence | 连续执行 3 个新 run ID，每次 fresh seed、attempt 1 通过且留存当次 Trace | immutable run index 显示 3/3，validator 证明无共享成功状态 | final gate checklist |
-| V-09 | BAF/readable/owner | 先检查独立 renderer prerequisite，再运行 strict artifact lint、`codex-team-business-report --check --presentation-strict` 和 acceptance-owner decision digest check | machine verdict 合法、中文报告新鲜且未手改、owner 对当前 digest 判断“符合” | final evidence index |
+| V-09 | BAF/readable/owner | 先检查独立 renderer prerequisite，再运行 strict artifact lint、`codex-team-business-report --check --presentation-strict` 和 `codex-web-acceptance review --check-owner-decision` | machine verdict 合法、中文报告新鲜且未手改、`acceptance-owner-design-intent` 确认 owner 对当前 digest 判断“符合” | final evidence index |
 | V-10 | Docs | `scripts/check-relative-markdown-links.py --root .`、contract-index lint、implementation-contract lint | 全部通过 | clarify conclusion |
 | V-11 | Diff | 两仓库分别执行 `git diff --check` 和 owned/forbidden path audit | 无格式或越界变更 | final conclusion |
 | V-12 | Multica | 只读比较 `HEAD:plugins/multica-sdlc` 与 `HEAD:.agents` fingerprints | 与实施前一致 | final conclusion |
@@ -227,7 +227,7 @@ Sharp Cell owned paths:
 | Phase 2 开始时 readable renderer 不可用 | `blocked_dependency`；保留 Phase 1 成果，不代为实施 renderer | yes |
 | attempt 1 passed 但没有同 attempt Trace | technical gate failed | yes |
 | planner 不存在或运行时回退 operator/systemadmin | actor gate failed | yes |
-| parent readiness、material chain 或适用的 CNC/file readiness 不成立 | callback 不得被解释为业务闭环 | yes |
+| parent readiness、material chain、非 CNC `plc_report_only` target 能力冻结或 CNC/file 不适用证据不成立 | callback 不得被解释为业务闭环 | yes |
 | Core 需要项目特有常量才能继续 | 停止并修正 adapter boundary | yes |
 
 ## Implementation Notes
@@ -267,7 +267,7 @@ Sharp Cell owned paths:
   - `/home/gewu/work/sharp-cell/AGENTS.md`
   - `/home/gewu/work/sharp-cell/apps/fms-web/e2e/follow-up-work-order-business-closure.spec.ts`
 - Supersedes: none.
-- Review history: 用户逐分支确认 intake；main-agent brownfield clarification；2026-07-19 native Team 只读对抗评审结论 BLOCK，随后按用户“修正”授权对可达业务路径、阶段依赖、独立 validators、UI-intent gate 和分发边界做替换式收敛。
+- Review history: 用户逐分支确认 intake；main-agent brownfield clarification；2026-07-19 native Team 只读对抗评审结论 BLOCK，随后按用户“修正”授权做替换式收敛；Kimi Code K3 YOLO 只读 Epic 复审结论 PASS、无 P0/P1，本轮按用户授权收敛其 P2 findings。
 
 ## Final Contract Cleanliness Gate
 

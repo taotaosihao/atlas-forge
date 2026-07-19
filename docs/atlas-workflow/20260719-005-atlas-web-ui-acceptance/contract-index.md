@@ -21,7 +21,7 @@ supporting_evidence:
 authority_rules:
 - `implementation-contract.final.md` 是本 v1 后续实施范围、验收、验证与停止条件的唯一权威。
 - BAF machine semantics 继续由既有 release integrity bundle 决定；本合同只增加 Web execution/audit/evidence 薄层。
-- 中文业务报告能力必须由既有 readable-report 独立合同先行交付；本合同只做 prerequisite 检查，不弱化、复制或顺带实现。
+- 中文业务报告能力必须在 Phase 2 开始前由既有 readable-report 独立合同交付；Phase 1 audit 不受阻塞，本合同只做 prerequisite 检查，不弱化、复制或顺带实现。
 - `clarify.md` 与 `spec.md` 解释背景，不得扩展最终合同。
 - workflow artifacts 是 Git 外工作记录，不替代本 bundle。
 

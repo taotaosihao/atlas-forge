@@ -44,8 +44,8 @@ workflow_id: `20260719-005-ai-ui-intake`
 - Core 源码不出现 Sharp Cell 业务/viewport/账号常量。
 - 首试失败后重试成功不能通过；缺证据、局部 pass 和 non-claim 不能通过。
 - 三次 fresh-seed 新 run 均首次通过后完成 v1。
-- Sharp Cell 锚点覆盖 UI 工单发布、LineTask 启动、material chain、适用的 CNC/file readiness、invalid/valid callback 对照和 running 回显。
-- 中文审核卡显示参考图与实际截图，且与机器 contract/evidence digest 一致；acceptance owner 对当前 digest 的“符合”判断是 final accepted 必需证据。
+- Sharp Cell 锚点覆盖 UI 工单发布、LineTask 启动、非 CNC `plc_report_only` target 冻结与 CNC/file 不适用证据、material chain、invalid/valid callback 对照和 running 回显。
+- 中文审核卡显示参考图与实际截图，且与机器 contract/evidence digest 一致；acceptance owner 对当前 digest 的“符合”判断是 final accepted 必需证据，并由 Core-owned `acceptance-owner-design-intent` 确定性校验。
 - 中文 renderer 依赖由 `20260718-004-atlas` 独立交付；缺失时 Phase 2 记录 `blocked_dependency`，不扩大当前任务。
 
 ## 验证
