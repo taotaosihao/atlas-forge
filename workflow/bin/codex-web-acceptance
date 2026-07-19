@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 "use strict";
 
-const { main } = require("./lib/codex-web-acceptance/audit");
+const { main } = require("./lib/codex-web-acceptance/cli");
 
 main(process.argv.slice(2));

@@ -147,6 +147,25 @@ Lightweight implementation contracts:
   steps, evidence paths, and stop conditions. It is the Atlas workflow
   lightweight counterpart to the full Multica sprint contract.
 
+Web UI acceptance uses the dependency-free `codex-web-acceptance` thin layer:
+
+```bash
+workflow/bin/codex-web-acceptance audit --project <root> --playwright-config <file> --format json
+workflow/bin/codex-web-acceptance run --project-config <config.json> --contract <contract> --artifact-root <run-root> --format json
+workflow/bin/codex-web-acceptance check-run --run-root <run-directory> --format json
+workflow/bin/codex-web-acceptance review --baf-root <team/acceptance> --card <review-card.json> [--contract <contract> --check-owner-decision] --format json
+```
+
+Project adapters and independent claim validators exchange one JSON envelope on
+stdin/stdout and are always launched as argv arrays without a shell. Runtime
+contracts and TypeScript declarations live under
+`workflow/bin/lib/codex-web-acceptance/contracts/`. `run` and `check-run`
+produce only a technical result; BAF v2 remains the machine-fact authority and
+`business-verdict.json` remains the sole final verdict. The concise Chinese
+handoff template is `workflow/templates/web-scenario-review-card.md`; missing
+facts must stay explicit and only BAF `integration_mode: real` may be described
+as a real run.
+
 Refresh Atlas workflow after changing plugin source, workflow helper source, or
 native Codex agent source from the Atlas Forge checkout:
 

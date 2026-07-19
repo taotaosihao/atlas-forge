@@ -662,6 +662,22 @@ write_sdd_lint_fixture business-v2-dual-valid
 write_business_acceptance_v2_fixture business-v2-dual-valid dual_goal accepted
 node "$artifact_lint_bin" --task business-v2-dual-valid --strict --business-acceptance >/dev/null
 
+# Human-first review composes after strict BAF v2 closure and only validates
+# current scenario/evidence references; it never returns a parallel verdict.
+web_acceptance_bin="$ATLAS_FORGE_ROOT/workflow/bin/codex-web-acceptance"
+web_acceptance_dir="$business_root/artifacts/business-v2-dual-valid/team/acceptance"
+web_review_dir="$TMP_ROOT/business-v2-web-review"
+mkdir -p "$web_review_dir"
+node - "$web_acceptance_dir" "$web_review_dir/review-card.json" <<'NODE'
+const crypto=require('crypto'),fs=require('fs'),path=require('path'),root=process.argv[2],target=process.argv[3],sha=f=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+const scenario=path.join(root,'scenarios/business-scenario-card.close-loop.json'),verdict=path.join(root,'business-verdict.json'),map=path.join(root,'business-evidence-map.json');
+fs.writeFileSync(target,JSON.stringify({schema_version:1,task_id:'business-v2-dual-valid',scenario_id:'close-loop',title:'Close loop scenario',baf_refs:{verdict:'accepted',technical_status:'passed',business_status:'passed',evidence_refs:['ev-ui'],verdict_digest:sha(verdict),evidence_map_digest:sha(map),scenario_digest:sha(scenario)},integration_mode:'real',steps:[{operation:'Review source refs',expected:'Business acceptance can be judged',actual:'Operator UI evidence for Goal B（结果：passed）',evidence_refs:['ev-ui']}],reference_images:['未登记'],actual_screenshots:['当前无法判断'],limitations:['当前无法判断']})+'\n');
+NODE
+"$web_acceptance_bin" review --baf-root "$web_acceptance_dir" --card "$web_review_dir/review-card.json" --format json > "$TMP_ROOT/business-v2-web-review.json"
+node - "$TMP_ROOT/business-v2-web-review.json" <<'NODE'
+const value=JSON.parse(require('fs').readFileSync(process.argv[2])); if(!value.ok||value.command!=='review'||'verdict' in value||'accepted' in value)process.exit(1);
+NODE
+
 write_sdd_lint_fixture business-v2-dual-conditional-valid
 write_business_acceptance_v2_fixture business-v2-dual-conditional-valid dual_goal conditionally_accepted approved_simulator
 node "$artifact_lint_bin" --task business-v2-dual-conditional-valid --strict --business-acceptance >/dev/null

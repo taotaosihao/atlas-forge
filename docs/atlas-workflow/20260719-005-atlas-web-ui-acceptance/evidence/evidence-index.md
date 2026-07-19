@@ -55,7 +55,7 @@ artifact_category: clarification_conclusion
 - 评审结论：[phase-review-report.md](./phase-review-report.md)。
 - 实施提交：`a5921957a3f4b16ed1a112032f02fc1e41eb7152`（`feat(atlas): add executable web acceptance audit`）。
 - Phase 1 状态：可执行 audit、专项正负合同、Sharp Cell 只读风险扫描和独立 reviewer focused repair 均完成。
-- Phase 2 状态：`blocked_dependency`；repository、`workflow/bin` 与安装态均无 `codex-team-business-report`，未代为实施或合入 readable renderer。
+- Phase 2 恢复状态：原 `blocked_dependency` 是 Phase 1 当时真实记录；提交 `8714e47` 的替换式权威合同修订已删除该过时 renderer 前置条件。恢复实施不依赖、不合入也不重实现 `codex-team-business-report`，继续以 BAF v2 JSON/JSONL 为唯一 machine facts、`business-verdict.json` 为唯一 verdict。
 - Sharp Cell 与 Multica：两个范围均零修改，Multica hard fingerprints 不变。
 
 ## 实施阶段证据预算

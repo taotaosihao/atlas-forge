@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "atlas-web-acceptance-adapter-input-v1", "type": "object",
+  "required": ["protocol_version", "phase", "task_id", "scenario_id", "run_id", "attempt", "project_root", "artifact_root", "contract_digest"],
+  "properties": {"protocol_version": {"const": "1"}, "phase": {"type": "string", "minLength": 1}, "task_id": {"type": "string", "minLength": 1}, "scenario_id": {"type": "string", "minLength": 1}, "run_id": {"type": "string", "minLength": 1}, "attempt": {"type": "integer", "minimum": 1}, "project_root": {"type": "string", "minLength": 1}, "artifact_root": {"type": "string", "minLength": 1}, "contract_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "additionalProperties": false
+}

@@ -84,6 +84,7 @@ ATLAS_COMMAND_NAMES=(
   atlas-plugin-integrity
   codex-design-review
   codex-refresh-local-plugin
+  codex-web-acceptance
   codex-workflow
 )
 

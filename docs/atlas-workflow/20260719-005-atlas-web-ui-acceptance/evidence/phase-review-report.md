@@ -2,7 +2,7 @@
 
 workflow_id: `20260719-005-ai-ui-intake`
 phase: `Phase 1 — Executable audit`
-status: `passed_then_blocked_dependency`
+status: `phase_1_passed_dependency_block_historically_resolved`
 reviewed_commit: `a5921957a3f4b16ed1a112032f02fc1e41eb7152`
 
 ## 集成结论
@@ -40,11 +40,11 @@ AC-01、AC-02 和 AC-04 的 Phase 1 交付已满足。AC-17 仅完成 audit bloc
 | Forbidden paths | `plugins/multica-sdlc/**`、`.agents/**` 无 diff |
 | Multica hard fingerprints | `8b87ecd1c5decce18f31e65442747661debfcb5e` / `3e3f8d512d88d309830ceb180baf694149ffa657` |
 
-## Phase 2 prerequisite gate
+## Phase 2 恢复记录
 
-Phase 2 未开始。当前 repository、`workflow/bin` 与安装态均不存在 `codex-team-business-report`，独立 readable-report 合同仍未进入当前 checkout。虽然本地 refs 中存在候选独立提交 `5963d6c`，但它不在当前 ancestry；本任务未 cherry-pick、merge、复制或代为实施 renderer。
+Phase 1 结束时 Phase 2 尚未开始。当时 repository、`workflow/bin` 与安装态均不存在 `codex-team-business-report`；该事实和停止决定在当时均真实。历史候选提交 `5963d6c` 与 `358cf49` 未 cherry-pick、merge 或复制。
 
-按最终实施合同记录 `blocked_dependency`，保留 Phase 1 成果并停止在 Phase 1 边界。恢复条件是独立 readable-report 交付已正式进入当前实施基线，并能在该 checkout 通过 `codex-team-business-report --help` 与其专项合同。
+提交 `8714e47` 后，最新权威合同以替换式修订删除了 renderer prerequisite，并明确禁止依赖或实现 `codex-team-business-report`、自动 renderer 或平行报告状态机。用户随后恢复同一 Goal；因此旧 `blocked_dependency` 只保留为历史 Phase 1 证据，不再是 Phase 2 执行门禁，也不要求 renderer 进入当前基线。
 
 ## 非阻断 follow-up
 

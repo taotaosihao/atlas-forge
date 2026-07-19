@@ -1,0 +1,11 @@
+export type Argv = [string, ...string[]];
+export interface ProjectConfigV1 { schema_version: 1; protocol_version: "1"; task_id: string; scenario_id: string; project_root: string; entrypoint?: string; browser?: string; viewport?: {width: number; height: number}; role?: string; consecutive_successes?: number; adapter: {argv: Argv}; phases: string[]; validators: Array<{id: string; claim_id: string; argv: Argv}>; required_evidence: Array<{id: string; claim_id: string}>; }
+export interface AdapterInputV1 { protocol_version: "1"; phase: string; task_id: string; scenario_id: string; run_id: string; attempt: number; project_root: string; artifact_root: string; contract_digest: string; }
+export interface EvidenceRefV1 { id: string; claim_id: string | null; status: "passed"|"failed"|"blocked"|"skipped"|"missing"; path: string; sha256: string; }
+export interface AdapterOutputV1 { protocol_version: "1"; phase: string; facts: Record<string, unknown>; evidence_refs: EvidenceRefV1[]; failure_facts: Array<{class: "project"|"environment"|"safety"|"protocol"; reason: string}>; }
+export interface ValidatorOutputV1 { protocol_version: "1"; validator_id: string; claim_id: string; input_digest: string; evidence_digest: string; status: "passed"|"failed"; reason: string; }
+export interface ValidatorInputV1 { protocol_version: "1"; validator_id: string; claim_id: string; input_digest: string; evidence_digest: string; facts: Array<Record<string, unknown>>; evidence_refs: EvidenceRefV1[]; }
+export type FailureClass = "project"|"environment"|"safety"|"protocol"|"internal";
+export interface AttemptSummaryV1 { attempt: number; status: "passed"|"failed"; failure_class: FailureClass|null; reason?: string; }
+export interface EvidenceIndexV1 { schema_version: 1; run_id: string; attempts: AttemptSummaryV1[]; evidence_refs: Array<EvidenceRefV1 & {attempt: number}>; validators: Array<ValidatorOutputV1 & {attempt: number}>; }
+export interface RunResultV1 { schema_version: 1; tool: "codex-web-acceptance"; run_id: string; task_id: string; scenario_id: string; technical_status: "passed"|"unstable"|"failed"; failure_class: FailureClass|null; attempts: AttemptSummaryV1[]; contract_digest: string; config_digest: string; evidence_index_digest: string; }
