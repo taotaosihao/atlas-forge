@@ -15,15 +15,15 @@ supporting_evidence:
 - team_decision: ./clarify.md
 - staffing: ./staffing.md
 - evidence_index: ./evidence/evidence-index.md
-- workflow_team_decision: not applicable; user-confirmed intake and main-agent clarify were used
-- workflow_team_staffing: not applicable; no multi-agent execution was requested
+- workflow_team_decision: native Team read-only review recorded outside Git under task `20260719-005-ai-ui-intake`; integrated verdict was BLOCK before the authorized replacement repair
+- workflow_team_staffing: contract architect, business acceptance critic, adversarial verifier, integrated by main Codex
 
 authority_rules:
 - `implementation-contract.final.md` 是本 v1 后续实施范围、验收、验证与停止条件的唯一权威。
 - BAF machine semantics 继续由既有 release integrity bundle 决定；本合同只增加 Web execution/audit/evidence 薄层。
-- 中文业务报告能力必须复用既有 readable-report 合同，不在本合同中弱化或平行实现。
+- 中文业务报告能力必须由既有 readable-report 独立合同先行交付；本合同只做 prerequisite 检查，不弱化、复制或顺带实现。
 - `clarify.md` 与 `spec.md` 解释背景，不得扩展最终合同。
 - workflow artifacts 是 Git 外工作记录，不替代本 bundle。
 
 next_action:
-- 等待用户明确授权实施当前最终合同；clarify 完成不授权代码、commit、push、安装刷新、部署或发布。
+- 本轮“修正”仅授权合同收敛与提交；后续仍等待用户明确授权实施代码，不自动 push、安装刷新、部署或发布。

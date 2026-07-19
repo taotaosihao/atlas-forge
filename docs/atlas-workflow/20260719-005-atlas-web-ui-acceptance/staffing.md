@@ -2,14 +2,14 @@
 
 workflow_id: `20260719-005-ai-ui-intake`
 
-本 clarify 未使用多 Agent，后续实施也不预设固定 Team。主 Codex 是集成 owner；是否增加只读 reviewer 由实施时风险和用户授权决定。
+最终合同已使用 native Team 做只读对抗评审，并按用户“修正”授权由主 Codex 收敛。后续实施不预设固定 Team；主 Codex 是集成 owner，是否增加 reviewer 由实施时风险和用户要求决定。
 
 | 责任 | Owner | 路径或结果 |
 | --- | --- | --- |
-| Atlas Web audit/runner/protocol | Atlas Forge implementer | `workflow/bin/**`、`workflow/contracts/web-acceptance/**`、专项测试 |
-| BAF bridge 与中文阅读依赖 | Atlas Forge implementer | 复用既有 BAF；中文 renderer 按 `20260718-004-atlas` 合同实施 |
-| Sharp Cell project config/adapter/scenario | Sharp Cell implementer | `acceptance/web/**`、目标 E2E 与必要产品可测试性改动 |
-| 业务/design 关键变化 | 用户 | 中文验收卡或差异卡确认 |
+| Atlas Web audit/runner/protocol | Atlas Forge implementer | `workflow/bin/**`、内置 contracts、sync/shim 边界与专项测试 |
+| BAF bridge 与中文阅读依赖 | Atlas Forge implementer | 复用既有 BAF；仅检查 `20260718-004-atlas` renderer prerequisite，不代为实施 |
+| Sharp Cell project config/adapter/validator/scenario | Sharp Cell implementer | `acceptance/web/**`、planner provisioning、目标 E2E 与必要产品可测试性改动 |
+| 业务/design 最终符合性 | acceptance owner（用户） | 对绑定当前 digest 的中文审核卡记录“符合/不符合/需修改” |
 | 最终集成与范围控制 | 主 Codex | 跨仓库验证、精确提交、无 push/部署/安装刷新 |
 
 ## 写入规则

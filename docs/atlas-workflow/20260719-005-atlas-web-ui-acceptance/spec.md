@@ -19,7 +19,7 @@ workflow_id: `20260719-005-ai-ui-intake`
 
 ### Core CLI
 
-- `audit`：扫描 Playwright 源码与配置，输出稳定 JSON 和中文摘要。
+- `audit`：不依赖完整 project config 扫描 Playwright 源码与配置；JSON 模式 stdout 仅输出单 envelope，人类模式输出中文摘要。
 - `run`：创建不可变 run identity，按 project config 调用 adapter phases，保存 attempts 与 evidence。
 - `check-run`：验证 required evidence、attempt history、digest、secret policy 和 failure class，输出 technical run result。
 - `review`：从已验证 contract/evidence 生成绑定 digest 的中文 scenario 审核卡；不重算 verdict。
@@ -28,7 +28,8 @@ workflow_id: `20260719-005-ai-ui-intake`
 
 - project config 只允许 argv 数组命令，不允许 shell command string。
 - Core 以 JSON stdin 提供 protocol version、phase、task/run/scenario identity、project root 和 artifact root。
-- adapter 以单个 JSON stdout envelope 返回 phase status、evidence refs、diagnostics 和 project failure facts。
+- adapter 以单个 JSON stdout envelope 返回原始 phase facts、evidence refs、diagnostics 和 project failure facts。
+- project config 为 required claim 声明独立 validator argv；validator 绑定 claim/input/evidence digest 并确定性输出 passed/failed。
 - 非 JSON stdout、未知字段、协议版本不匹配、绝对逃逸路径、symlink evidence 或 secret diagnostic 均失败关闭。
 
 ### BAF Bridge
@@ -42,9 +43,10 @@ workflow_id: `20260719-005-ai-ui-intake`
 - 静态 audit 能检出当前 Sharp Cell 的 API login/cookie 注入、脆弱 locator、route mock、弱后置断言和 retry 风险。
 - Core 源码不出现 Sharp Cell 业务/viewport/账号常量。
 - 首试失败后重试成功不能通过；缺证据、局部 pass 和 non-claim 不能通过。
-- Sharp Cell 锚点从真实登录到 `running`，含 invalid/valid signed callback 对照和完整关联证据。
 - 三次 fresh-seed 新 run 均首次通过后完成 v1。
-- 中文审核卡显示参考图与实际截图，且与机器 contract/evidence digest 一致。
+- Sharp Cell 锚点覆盖 UI 工单发布、LineTask 启动、material chain、适用的 CNC/file readiness、invalid/valid callback 对照和 running 回显。
+- 中文审核卡显示参考图与实际截图，且与机器 contract/evidence digest 一致；acceptance owner 对当前 digest 的“符合”判断是 final accepted 必需证据。
+- 中文 renderer 依赖由 `20260718-004-atlas` 独立交付；缺失时 Phase 2 记录 `blocked_dependency`，不扩大当前任务。
 
 ## 验证
 

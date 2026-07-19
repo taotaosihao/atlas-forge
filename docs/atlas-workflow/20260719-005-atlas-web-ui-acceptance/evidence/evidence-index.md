@@ -12,6 +12,9 @@ artifact_category: clarification_conclusion
 - Sharp Cell 现有闭环：`/home/gewu/work/sharp-cell/apps/fms-web/e2e/follow-up-work-order-business-closure.spec.ts` 明确把 final business acceptance 列为 non-claim。
 - Sharp Cell 状态与 callback：`tasks.service.ts` 要求 PLC 控制任务通过 signed callback；`beezer-ingest.controller.ts` 提供真实 ingress。
 - Sharp Cell 权限：`packages/fms-db/src/index.ts` 显示 planner 具备锚点所需 task 权限，operator 不具备完整 line/device write。
+- Sharp Cell seed：`packages/fms-db/src/seed.ts` 当前只创建 admin/operator，未创建 acceptance-only planner。
+- Sharp Cell running readiness：`tasks.service.ts` 要求父 WorkOrder/LineTask `in_progress`、material-event chain，CNC/file-driven 任务还要求绑定文件和 verified transfer readback。
+- Sharp Cell Trace：`apps/fms-web/playwright.config.ts` 当前为 `on-first-retry`，attempt 1 通过时不会自动留 Trace。
 
 ## 澄清阶段结论
 
@@ -19,6 +22,7 @@ artifact_category: clarification_conclusion
 - 不依赖历史 Trace/视频做最终归因；首轮在隔离 fresh-seed 环境主动采集。
 - v1 只使用 Sharp Cell 一条 scenario，Core 无项目业务/viewport 常量。
 - 历史 Multica 范围保持禁止修改与运行。
+- 2026-07-19 native Team 只读评审结论为 BLOCK；用户随后授权“修正”，最终合同已对业务路径可达性、planner、attempt-1 Trace、Phase 依赖、独立 validators、UI-intent gate 和 CLI/schema 分发边界做替换式修订。
 
 ## 澄清阶段验证
 
@@ -31,6 +35,16 @@ artifact_category: clarification_conclusion
 | Workflow readiness | `codex-workflow ready 20260719-005-ai-ui-intake --require context,spec,decision` | `status: ready`，issues 为空 |
 | Forbidden paths | `git diff --exit-code -- plugins/multica-sdlc .agents` | 通过；无 diff |
 | Multica fingerprints | 只读 `git rev-parse HEAD:plugins/multica-sdlc HEAD:.agents` | `8b87ecd1c5decce18f31e65442747661debfcb5e` / `3e3f8d512d88d309830ceb180baf694149ffa657` |
+
+## Team 修订后验证
+
+| Gate | 结果 |
+| --- | --- |
+| `codex-implementation-contract-lint --strict` | semantics v1，0 errors，0 warnings |
+| `codex-contract-index-lint` | `contract_index_lint: true` |
+| Markdown links | 235 个 Markdown 文件、81 个相对链接通过 |
+| Workflow readiness | task `20260719-005-ai-ui-intake` ready，issues 为空 |
+| Diff/forbidden paths | `git diff --check` 通过；Multica paths 无 diff，hard fingerprints 不变 |
 
 ## 实施阶段证据预算
 
