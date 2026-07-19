@@ -7,7 +7,8 @@ artifact_category: clarification_conclusion
 
 - BAF schema/validator：`plugins/atlas-workflow/contracts/team-sdd/business-*.schema.json`、`validators/business-*.js`。
 - strict closure：`plugins/atlas-workflow/scripts/codex-team-artifact-lint`、`workflow/tests/contract_team_business_acceptance.sh`。
-- 中文阅读层状态：`../20260718-004-atlas-business-acceptance-readable-report/implementation-contract.final.md` 已 ready-for-implementation；目标 renderer 当前不存在。
+- 历史完整 renderer 证据：提交 `5963d6c` 位于 `codex/atlas-business-acceptance-readable-report`，未合入当前 `main`，仅作为后来明确保留的重实现备份，不是本合同前置条件。
+- 历史精简替代证据：提交 `358cf49` 位于 `codex/atlas-business-acceptance-readable-report-minimal`，同样未合入当前 `main`；其 human-first、非签字、BAF machine facts 唯一权威语义由用户本轮明确要求恢复到本合同。
 - Sharp Cell Playwright：`/home/gewu/work/sharp-cell/apps/fms-web/playwright.config.ts`。
 - Sharp Cell 现有闭环：`/home/gewu/work/sharp-cell/apps/fms-web/e2e/follow-up-work-order-business-closure.spec.ts` 明确把 final business acceptance 列为 non-claim。
 - Sharp Cell 状态与 callback：`tasks.service.ts` 要求 PLC 控制任务通过 signed callback；`beezer-ingest.controller.ts` 提供真实 ingress。
@@ -24,6 +25,8 @@ artifact_category: clarification_conclusion
 - 历史 Multica 范围保持禁止修改与运行。
 - 2026-07-19 native Team 只读评审结论为 BLOCK；用户随后授权“修正”，最终合同已对业务路径可达性、planner、attempt-1 Trace、Phase 依赖、独立 validators、UI-intent gate 和 CLI/schema 分发边界做替换式修订。
 - Kimi Code K3（thinking on、YOLO）只读 Epic 复审结论 PASS：8/8 blocker 闭合，无 P0/P1，thin layer 未演化为平台；用户随后授权收敛 P2，Sharp Cell v1 因此冻结非 CNC、`plc_report_only` reference target，owner decision digest check 归属 Core-owned `acceptance-owner-design-intent`。
+- 本轮新授权纠正过时依赖：当前 `main` 未包含 `5963d6c` 或 `358cf49`，因此删除 `codex-team-business-report` 的 Phase 2 prerequisite、V-09、停止条件与所有执行性引用；精简中文 handoff/review card 只服务非专业人员按场景操作并对照当前 BAF 事实。
+- 本轮独立只读 Reviewer 最终结论 PASS，P0/P1/P2 actionable findings 均为 0；确认无残留 renderer 执行依赖、无平行 verdict、无 human-first 换名平台，且真实 UI、BAF strict closure 与 Multica 禁区均未削弱。
 
 ## 澄清阶段验证
 

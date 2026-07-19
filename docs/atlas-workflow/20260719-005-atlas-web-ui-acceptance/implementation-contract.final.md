@@ -28,6 +28,7 @@ product_ui_not_applicable_reason:
 - 不迁移或重写 Sharp Cell 其余 Playwright 用例，不接入第二个项目。
 - 不把 Sharp Cell 业务对象、账号、DOM、port、browser 或 viewport 写入 Core。
 - 不允许 API/DB 代替用户 UI 操作，不允许内部 transition API、通用 simulator tick 或 DB 直改制造 `running`。
+- 不新增 `codex-team-business-report`、自动 renderer、presentation checker、中文报告 digest/freshness/tamper 状态机、精确字数预算或穷举展示矩阵；通俗验收材料不是签字、鉴真或第二 verdict 平台。
 - 不刷新真实 plugin cache、marketplace snapshot、workflow runtime 或 agent runtime，不 push、不建 PR、不部署、不发布。
 - 不修改、运行、测试、同步、bump、迁移或删除 Multica。
 
@@ -41,7 +42,7 @@ Atlas Forge owned paths:
 - `workflow/tests/contract.sh`
 - `scripts/sync-live-atlas-workflow.sh` 中新 CLI shim/managed-command 的分发边界与对应集成测试
 - 必要的 `workflow/README.md` 与 Atlas plugin skill/reference 接入说明
-- 既有中文阅读层是显式 prerequisite，严格受 `../20260718-004-atlas-business-acceptance-readable-report/implementation-contract.final.md` 约束；本合同只做能力检查，不实施、复制或弱化 renderer
+- 必要的精简中文场景 handoff/review card 模板与说明；只忠实引用当前 BAF 事实，不新增 renderer CLI 或平行事实源
 
 Sharp Cell owned paths:
 
@@ -56,7 +57,7 @@ Sharp Cell owned paths:
 ### User-visible behavior
 
 - AI 或开发者能运行 Web audit，看到中文风险摘要和机器 JSON，不再以 Playwright 绿色退出码代替业务验收。
-- 业务负责人能阅读绑定 contract/evidence digest 的中文 scenario 审核卡，看到业务路径、禁止绕过、参考图、实际截图、证据状态与阻断。
+- 非专业验收人能按精简中文 scenario handoff/review card 在已登记系统中完成场景操作，对照预期与实际结果、参考图与实际截图、证据状态和阻断；缺失事实写“未登记”或“当前无法判断”。
 - Sharp Cell reference run 从真实登录开始，通过真实 UI 完成工单与父任务的必需状态推进，通过 signed ingress 完成设备侧前置事实和 callback，最终在 UI 显示同一目标设备任务为“运行中”。
 
 ## First Code Slice Guard
@@ -67,7 +68,7 @@ Sharp Cell owned paths:
 - first_code_verification: `bash workflow/tests/contract_web_acceptance.sh`，并使用 `audit --project /home/gewu/work/sharp-cell --playwright-config apps/fms-web/playwright.config.ts` 对 Sharp Cell 只读运行；audit 不依赖 Phase 3 project config
 - allowed_contract_gate_only_until: 本合同获实施授权之前
 - stop_if_no_code_by_phase: Phase 1
-- gate_parallelization_or_deferral_plan: Sharp Cell adapter 事实核对可并行准备；BAF readable renderer 只做 prerequisite 检查；schema、fixtures、文档和 evidence-only 工作不得取代 Phase 1 的可执行 audit 行为。
+- gate_parallelization_or_deferral_plan: Sharp Cell adapter 事实核对可并行准备；精简中文 handoff/review card 随 BAF bridge 实现；schema、fixtures、文档和 evidence-only 工作不得取代 Phase 1 的可执行 audit 行为。
 - Ordering rule: contract、schema、fixture 和 evidence-only 准备必须在 Phase 1 内结束为可运行 CLI；不得连续扩张准备材料而没有行为 diff。
 - Safety rule: first code slice 不授权弱化 BAF strict lint、secret policy、signed callback、真实 UI 或 forbidden-path gates。
 
@@ -83,12 +84,6 @@ Sharp Cell owned paths:
 - Served UI evidence: HTML、JS 和 CSS 必须来自真实 HTTP server；backend mock、`page.setContent`、fulfilled main document/app bundle、build/typecheck、fixture-only test 和截图本身都不能满足本锚点。
 - Reverse guard: served UI 不替代 signed callback、权限、DB、audit、trace 或 BAF strict evidence。
 
-## Prerequisite Gate
-
-- `codex-team-business-report` 是本合同 Phase 2 的外部前置条件，由 `20260718-004-atlas` 独立合同实施、验证和提交。
-- Phase 1 audit 不受该依赖阻塞；进入 Phase 2 前必须验证 `codex-team-business-report --help` 与其专项合同。
-- 依赖不可用时，本任务记录 `blocked_dependency`并停止在 Phase 1 边界；不自动实施 renderer、不修改其 plugin tree，不借此扩大当前授权。
-
 ## Architecture And Protocol
 
 ### Core CLI modes
@@ -96,7 +91,7 @@ Sharp Cell owned paths:
 1. `audit`：静态扫描 Playwright 配置与 specs；可直接接收 project root 与 Playwright config/source roots，不强制完整 project config；结果分类为 blocking、warning、approved waiver，不自动改代码。`--format json` 时 stdout 只允许单一 JSON envelope，人类摘要写 stderr；`--format human` 时 stdout 输出中文摘要。blocking=2，warning-only/clean=0，usage/protocol/internal error=1。
 2. `run`：创建 run identity，冻结 project/contract digest，按 phase 调用 project adapter，保存全部 attempts 和 evidence refs。
 3. `check-run`：验证 attempts、required evidence、digest、路径、secret 和 failure class，产生 technical run result；不产生业务 accepted verdict。
-4. `review`：从已验证 contract/evidence 确定性生成中文 scenario 审核卡；不推断未登记事实，不覆盖 BAF 报告。Owner 判断登记后，`review --check-owner-decision` 运行 Core-owned `acceptance-owner-design-intent` 确定性校验，仅输出 evidence validation result，不产生 verdict。
+4. `review`：校验精简中文 scenario handoff/review card 引用的是当前 BAF scenario/verdict/status/evidence 与当前参考图、实际截图，不渲染或改写业务结论。Owner 判断登记后，`review --check-owner-decision` 运行 Core-owned `acceptance-owner-design-intent` 确定性校验，只校验当前引用对应关系与人工判断登记，仅输出 evidence validation result，不产生 verdict。
 
 ### Project config and adapter protocol
 
@@ -120,12 +115,13 @@ Sharp Cell owned paths:
 
 ### BAF authority
 
+- BAF v2 JSON/JSONL 当前记录是唯一 machine facts；既有 schema、validator 与 strict `codex-team-artifact-lint` 只决定 BAF bundle、evidence identity 和 closure 是否合法，不提供、补全或改写业务事实。
 - Web technical run result 只能作为现有 `business-evidence-map.json` 引用的 evidence。
-- strict `codex-team-artifact-lint` 继续校验 BAF bundle、evidence identity 和 closure。
 - `business-verdict.json` 是唯一最终业务 verdict；不得新增 `finalStatus` 同义业务结论。
-- 中文业务主报告复用 `20260718-004-atlas` 合同规定的 `codex-team-business-report`；Web review card 是场景材料，不是第二 verdict。
-- Sharp Cell v1 的 design-intent decision 作为现有 BAF evidence 登记，由 acceptance owner 对绑定 contract/reference/actual screenshot digest 的中文审核卡选择“符合”、“不符合”或“需修改”；只有当前 digest 的“符合”可支持 final accepted，不新增平行 verdict。
-- Phase 2 Web review/BAF bridge 拥有 Core-owned `acceptance-owner-design-intent` validator；它在 owner decision 之后、final strict BAF closure 之前验证 decision value、owner identity、contract digest、reference digest、actual screenshot/evidence digest 和 freshness，不重算业务 verdict。
+- 精简中文 handoff/review card 只把当前 BAF verdict/status/scenario/evidence 翻译成可操作、可对照的材料；缺失写“未登记”，记录不足写“当前无法判断”，不重算 verdict、不证明证据真实性，也不构成签字或发布批准。
+- 只有 BAF 权威事实登记 `integration_mode: real` 时才能称为真实运行；`approved_simulator`、`mock`、`synthetic`、`not_run` 必须如实说明，不得包装成真实系统验收。
+- Sharp Cell v1 的 design-intent decision 作为现有 BAF evidence 登记，由 acceptance owner 对当前 contract/reference/actual screenshot/evidence 引用的中文审核卡选择“符合”、“不符合”或“需修改”；只有当前引用对应的“符合”可支持 final accepted，不新增平行 verdict。
+- Phase 2 Web review/BAF bridge 拥有 Core-owned `acceptance-owner-design-intent` validator；它在 owner decision 之后、final strict BAF closure 之前只验证 decision value、owner identity、当前 contract/reference/actual screenshot/evidence 引用对应关系，不评价业务结论、不鉴真、不重算 verdict。
 
 ## Phases
 
@@ -135,11 +131,10 @@ Sharp Cell owned paths:
 - 对 Sharp Cell 现有 specs 只读运行，证明已知 API login/cookie、locator、route mock、弱断言和 retry 风险被识别。
 - 不在此阶段修复或迁移 Sharp Cell 全量测试。
 
-### Phase 2 — Run protocol, evidence and readable dependency
+### Phase 2 — Run protocol, evidence and human-first handoff
 
-- 先通过 prerequisite gate 确认 `codex-team-business-report` 已由独立合同交付；未通过则记录 `blocked_dependency` 并停止。
 - 实现 project config、adapter/validator envelope、run/check-run、attempt immutability、evidence digest、path/secret guards 和 BAF bridge。
-- 实现无 verdict 权限的中文 Web scenario review card 和 Core-owned `acceptance-owner-design-intent` validator。
+- 提供精简、通俗、无 verdict 权限的中文 Web scenario handoff/review card，并实现 Core-owned `acceptance-owner-design-intent` validator；不得新增自动 renderer 或 presentation/digest/freshness/tamper 检查平台。
 
 ### Phase 3 — Sharp Cell operable UI slice
 
@@ -153,7 +148,7 @@ Sharp Cell owned paths:
 ### Phase 4 — Convergence and stop
 
 - 在项目配置的 `1366x768` 下完成连续 3 个 fresh-seed 新 run，每个 attempt 1 通过。
-- 完成 BAF strict closure、中文审核卡、acceptance owner 对当前 digest 的“符合”判断、关联证据、专项/回归/forbidden-path 检查。
+- 完成 BAF strict closure、精简中文审核卡、acceptance owner 对当前引用的“符合”判断、关联证据、专项/回归/forbidden-path 检查。
 - 达成合同即停止；不迁移其他用例、不实现第二项目、不进入发布或安装刷新。
 
 ## Acceptance Criteria
@@ -168,7 +163,7 @@ Sharp Cell owned paths:
 | AC-06 | attempt 1 失败后 retry passed 的 run 只能为 unstable/failed；新 run 才可重新争取 passed | yes | attempt history fixtures 与 end-to-end CLI test |
 | AC-07 | required evidence 的 failed/blocked/skipped/missing/non-claim、digest mismatch、path escape、symlink 和 secret diagnostic 均失败关闭 | yes | tamper/path/secret negative fixtures |
 | AC-08 | Web CLI 不产生最终业务 accepted verdict；BAF bridge 复用 strict artifact lint 和现有 business verdict | yes | BAF fixture integration + `bash workflow/tests/contract.sh` |
-| AC-09 | Phase 2 开始前中文业务报告 prerequisite 已按 `20260718-004-atlas` 独立合同可用；缺失时为 `blocked_dependency`，Web 任务不代为实施 | yes | `codex-team-business-report --help` + renderer 专项合同；Web review golden/tamper tests |
+| AC-09 | 精简中文 handoff/review card 让非专业验收人按场景操作并对照预期、实际结果和已登记证据；只忠实引用当前 BAF verdict/status/scenario/evidence，缺失写“未登记/当前无法判断”，且不依赖任何 renderer CLI | yes | BAF fixture integration + handoff/review focused assertions |
 | AC-10 | Sharp Cell viewport/browser/role/URL/连续运行次数只存在项目 config；Core 不写死 | yes | project config schema + Core source scan |
 | AC-11 | fresh seed 可重复创建受限 acceptance-only planner，凭据由 secret source 提供并在运行后清理；anchor 从真实 `/login` 登录，不使用 API login、cookie 注入、operator/systemadmin 回退或深层 URL 起步 | yes | seed/setup/cleanup assertions + attempt-1 Playwright Trace、route manifest、actor session evidence |
 | AC-12 | 工单通过 UI 创建并发布，目标 LineTask 通过 UI 启动，父 WorkOrder/LineTask 为 `in_progress`，task tree、assignment、occupancy 与目标 DeviceTask 真实持久化 | yes | UI checkpoints + API/DB readback + `same-business-object-chain` validator |
@@ -177,8 +172,8 @@ Sharp Cell owned paths:
 | AC-15 | 有效 signed callback 与本次 device/task/assignment/run/attempt/trace 关联，且 `running` 变更发生在 callback 之后 | yes | callback receipt、API/DB/audit/Trace + `valid-callback-correlation` validator |
 | AC-16 | UI 刷新后显示 running，并与 API/DB/callback/audit/Trace 一致；所有 required claim 由 adapter 之外的确定性 validator 判定 | yes | Playwright assertion、截图、`same-run-attempt-evidence` 与 join validators |
 | AC-17 | Anchor 无未经批准的 nth/deep CSS/fuzzy text/force click；每个关键动作有唯一 locator、actionability 和后置断言 | yes | audit blocking rules + anchor source/attempt-1 Trace inspection |
-| AC-18 | 中文审核卡并排显示项目参考图/AI 效果图与 `1366x768` 实际关键截图，固定展示目标、实际步骤、禁止绕过、invalid/valid 对照、required claim 材料、fresh-run 摘要、阻断和未覆盖范围 | yes | Web review golden/tamper tests + digest check |
-| AC-19 | acceptance owner 必须对绑定 contract/reference/actual screenshot digest 的审核卡记录“符合”；未判断、“不符合”、“需修改”或 digest 变化均阻止 final accepted | yes | 既有 BAF evidence map/strict lint + Core-owned `acceptance-owner-design-intent` validator |
+| AC-18 | 中文审核卡并排显示项目参考图/AI 效果图与 `1366x768` 实际关键截图，按场景展示验收目标与条件、操作与预期、实际结果与材料、禁止绕过、invalid/valid 对照、阻断和未覆盖范围；仅 `integration_mode: real` 可称真实运行，其他模式如实说明 | yes | handoff/review focused assertions + BAF reference check |
+| AC-19 | acceptance owner 必须对当前 contract/reference/actual screenshot/evidence 引用对应的审核卡记录“符合”；未判断、“不符合”、“需修改”或引用变化均阻止 final accepted | yes | 既有 BAF evidence map/strict lint + Core-owned `acceptance-owner-design-intent` validator |
 | AC-20 | Sharp Cell 连续 3 个 fresh-seed 新 run 在 attempt 1 通过且每次都保留当次 Trace；任一失败重新从新 run 计数 | yes | immutable run index、`fresh-seed-isolation` validator 与三份 strict BAF evidence bundle |
 | AC-21 | repo/staged/live 中新 CLI shim 与内置 schema 一致；使用同一 fixture/config 得到一致结果 | yes | Atlas scoped sync integration test + command/schema equality assertions |
 | AC-22 | Sharp Cell project config 记录 `1366x768` 为本 v1 用户批准矩阵，并对项目其他默认 viewport 记录显式 waiver；Core 不包含该值 | yes | config/phase conclusion waiver check + Core forbidden-value scan |
@@ -197,7 +192,7 @@ Sharp Cell owned paths:
 | V-06 | Sharp Cell static | `corepack pnpm --filter fms-web typecheck` 与相关目标测试 | 通过 | Sharp Cell phase conclusion |
 | V-07 | Sharp Cell preflight/anchor | 项目 config/adapter 显式设置或解析 served URL，确认 `1366x768` waiver、planner、非 CNC `plc_report_only` target、fresh seed 与 attempt-1 Trace 策略后驱动 `codex-web-acceptance run` | 真实打开项目 config 的 `/login`，完成 AC-11 至 AC-18 | Git 外 run artifacts + 精简 evidence index |
 | V-08 | Fresh-run convergence | 连续执行 3 个新 run ID，每次 fresh seed、attempt 1 通过且留存当次 Trace | immutable run index 显示 3/3，validator 证明无共享成功状态 | final gate checklist |
-| V-09 | BAF/readable/owner | 先检查独立 renderer prerequisite，再运行 strict artifact lint、`codex-team-business-report --check --presentation-strict` 和 `codex-web-acceptance review --check-owner-decision` | machine verdict 合法、中文报告新鲜且未手改、`acceptance-owner-design-intent` 确认 owner 对当前 digest 判断“符合” | final evidence index |
+| V-09 | BAF/handoff/owner | 运行 strict artifact lint、handoff/review focused assertions 和 `codex-web-acceptance review --check-owner-decision` | BAF machine facts 与唯一 verdict 合法；通俗材料忠实引用当前记录；`acceptance-owner-design-intent` 只确认当前引用与 owner 判断登记 | final evidence index |
 | V-10 | Docs | `scripts/check-relative-markdown-links.py --root .`、contract-index lint、implementation-contract lint | 全部通过 | clarify conclusion |
 | V-11 | Diff | 两仓库分别执行 `git diff --check` 和 owned/forbidden path audit | 无格式或越界变更 | final conclusion |
 | V-12 | Multica | 只读比较 `HEAD:plugins/multica-sdlc` 与 `HEAD:.agents` fingerprints | 与实施前一致 | final conclusion |
@@ -223,8 +218,7 @@ Sharp Cell owned paths:
 | contract 或 project config 在 run 中变化 | run blocked by digest mismatch | yes |
 | 视觉对照缺参考图或实际截图 | design review not complete；不得伪装为符合 | yes |
 | acceptance owner 未判断、判定不符合/需修改或判断后 digest 变化 | final accepted blocked | yes |
-| 中文报告被手改或 source digest 陈旧 | presentation check failed | yes |
-| Phase 2 开始时 readable renderer 不可用 | `blocked_dependency`；保留 Phase 1 成果，不代为实施 renderer | yes |
+| handoff/review card 缺失 BAF 事实或把非 real 运行包装为真实运行 | review validation failed；不得形成完成态验收说明 | yes |
 | attempt 1 passed 但没有同 attempt Trace | technical gate failed | yes |
 | planner 不存在或运行时回退 operator/systemadmin | actor gate failed | yes |
 | parent readiness、material chain、非 CNC `plc_report_only` target 能力冻结或 CNC/file 不适用证据不成立 | callback 不得被解释为业务闭环 | yes |
@@ -243,12 +237,11 @@ Sharp Cell owned paths:
 ## Failure And Stop Conditions
 
 - Stop and ask the user when:
-  - 继续需要修改 BAF v2 machine semantics、创建平行 verdict 或弱化 readable-report 合同；
+  - 继续需要修改 BAF v2 machine semantics、创建平行 verdict 或把精简 handoff 扩展为 renderer/签字/鉴真平台；
   - 继续需要真实 CNC、生产/共享数据库、部署、push、PR、安装态刷新或 marketplace mutation；
   - 关键业务/design 意图存在歧义，且无法从已批准中文差异卡确定；
   - 两仓库 dirty worktree 与 owned paths 重叠且无法安全隔离；
   - 失败无法确定归属为项目、Core 或用户决策。
-- Stop at the dependency gate without asking for expanded authority when `codex-team-business-report` 未按其独立合同交付；记录 `blocked_dependency` 后仅等待该外部状态变化或新授权。
 - Treat the task as failed when:
   - Phase 1 结束没有可执行 audit CLI 行为；
   - Phase 3 结束没有真实 served UI anchor；
@@ -263,11 +256,11 @@ Sharp Cell owned paths:
 - Based on:
   - 用户确认的 workflow intake `20260719-005-ai-ui-intake`
   - `../20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md`
-  - `../20260718-004-atlas-business-acceptance-readable-report/implementation-contract.final.md`
+  - 用户本轮合同纠正授权与已确认的 human-first BAF 阅读语义
   - `/home/gewu/work/sharp-cell/AGENTS.md`
   - `/home/gewu/work/sharp-cell/apps/fms-web/e2e/follow-up-work-order-business-closure.spec.ts`
 - Supersedes: none.
-- Review history: 用户逐分支确认 intake；main-agent brownfield clarification；2026-07-19 native Team 只读对抗评审结论 BLOCK，随后按用户“修正”授权做替换式收敛；Kimi Code K3 YOLO 只读 Epic 复审结论 PASS、无 P0/P1，本轮按用户授权收敛其 P2 findings。
+- Review history: 用户逐分支确认 intake；main-agent brownfield clarification；2026-07-19 native Team 只读对抗评审结论 BLOCK，随后按用户“修正”授权做替换式收敛；Kimi Code K3 YOLO 只读 Epic 复审结论 PASS、无 P0/P1；本轮依据新授权删除未合入 renderer 依赖并恢复 human-first、非签字、BAF 唯一权威语义，独立只读复核最终 PASS、无 actionable finding。
 
 ## Final Contract Cleanliness Gate
 

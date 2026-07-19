@@ -26,8 +26,8 @@ v1 只证明一条可信闭环：acceptance-only 计划员从真实登录页进�
 - Sharp Cell 当前 `1366x768` 和本地 `/login` 地址属于 project config，不属于 Core。
 - API/DB 只取证；用户业务动作必须走 UI，设备输入必须走真实 signed callback ingress。
 - 项目 adapter 只提交原始证据；required claim 由 adapter 之外的确定性 validator 校验。
-- 中文审核材料是确定性派生物并绑定 digest；它不重算 verdict，但 v1 final accepted 必须有 acceptance owner 对当前 digest 的“符合”判断，并通过 Core-owned `acceptance-owner-design-intent` 校验。
-- `codex-team-business-report` 是 Phase 2 显式外部 prerequisite；本合同不顺带实施 renderer。
+- 精简中文 handoff/review card 面向非专业验收人：按场景操作并对照预期、实际结果和当前 BAF 证据；缺失写“未登记/当前无法判断”，不重算 verdict、不鉴真、不签字。
+- 只有 BAF 登记 `integration_mode: real` 时才称真实运行；其他模式必须如实说明。v1 final accepted 仍要求 acceptance owner 对当前引用记录“符合”，并通过 Core-owned `acceptance-owner-design-intent` 对引用对应关系和人工登记做校验。
 - v1 达成三次 fresh-seed 新 run 首次通过后立即停止，不迁移其余用例，不接第二项目。
 
 ## 下一步
