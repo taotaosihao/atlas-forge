@@ -134,6 +134,19 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 - Return when the whole authorized goal is complete, continuing needs new authority or a user-owned decision, an external state must change, or safe work can no longer make material progress.
 - Elapsed time, rounds, agents, commits, tokens, and tool calls are telemetry, not default semantic stop conditions.
 
+## Deliberative Team Review
+
+For a substantive Team review, first define the actual review scope: the working tree, commit range, pull request, phase, or named files; the applicable goal and authoritative contract; and the evidence or checks already available.
+
+- Recommend complementary review perspectives and agent count from the actual task. There is no required council shape. Two or three perspectives are often useful, but this is guidance rather than a staffing gate. When the risk justifies it, include a perspective that owns the strongest evidence-backed counterargument or tradeoff instead of duplicating another general reviewer.
+- Let each selected reviewer form an independent first-round position before seeing the other reviewers' conclusions. Findings should state the affected path and line when applicable, the concrete evidence, impact, and recommendation; uncertainty belongs in an explicit evidence gap rather than a clean verdict.
+- Keep useful review agents available after their initial findings. The main Codex integrates the first-round results, combines duplicates without erasing provenance or dissent, makes an evidence-backed interim ruling, and sends only the material objections and ruling back to the same relevant agents with `paseo send` or native `followup_task`. Do not replay the full history or involve every role in every finding.
+- Review discussion should normally converge within two or three rounds. This is an operating target, not a hard semantic limit. Continue beyond it only while a material disagreement remains and another focused exchange or verification can add evidence or change the final recommendation. The main Codex may adjudicate ordinary duplication, wording, severity, and scope differences from the user goal, authoritative contract, and repository evidence.
+- If a material disagreement persists after several useful exchanges, or the decision depends on product intent, risk acceptance, compatibility, permissions, ownership, or another user choice, stop the internal loop and return a concise human decision packet: agreed facts, the remaining disagreement, each side's strongest evidence, the main Codex's recommendation, and the concrete options. After the user decides, return that authority to the relevant agents only when a final consistency check is useful.
+- Silence, timeout, an unavailable reviewer, or unsupported agreement is not consensus. Replace a missing perspective when useful or disclose that independent review is unavailable; the main Codex may inspect and adjudicate evidence but must not present itself as the missing independent reviewer.
+- Convergence means no unresolved disagreement remains that would materially change the final recommendation, not that every role shares the same design preference. Use `CONSENSUS`, `CONSENSUS_WITH_RESERVATIONS`, or `HUMAN_DECISION_REQUIRED` when those labels make the outcome clearer.
+- Lead the final synthesis with the recommendation, convergence state, blockers, material reservations, and unresolved evidence. An open current-goal blocker or material evidence gap prevents approval; non-blocking watch items and follow-ups remain visible; approval requires adequate independent evidence for the review that was actually claimed.
+
 ## Review And Focused Repair
 
 - Reviewer discovery is unrestricted. Report real findings at their natural severity.
@@ -159,6 +172,7 @@ Load optional protocol references only when the current contract actually requir
 
 - Read `references/sdd.md` for Codex-native SDD JSON contracts, slice ledger, implementer/reviewer reports, or `codex-team-*` helpers.
 - Read `references/business-acceptance.md` for business scenario, stakeholder, protocol/device, or dual-goal UI acceptance.
+- Read `references/code-review.md` when a substantive code or merge-readiness review needs the optional perspective menu, evidence checklist, focused deliberation prompts, or synthesis shape.
 - First-code and Product/UI gates belong to the selected implementation contract and the clarify/task skills; do not duplicate their full rules here.
 
 ## Lifecycle Recording

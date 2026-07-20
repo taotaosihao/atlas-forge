@@ -44,6 +44,12 @@ Team records lifecycle state with `team-record-start`,
 `team-record-finalize`, and `team-loop-record`; use `--backend native|paseo`,
 require a single-line `--providers` summary for Paseo starts, and keep artifact
 backend markers aligned with the active backend.
+For substantive Team review, Atlas recommends complementary perspectives from
+the actual task rather than fixing roles or agent count. Reviewers form an
+independent first-round position and remain available for focused follow-up;
+the main Codex synthesizes and adjudicates disagreements, normally converges in
+two or three rounds, and returns persistent material disputes for human
+decision instead of extending an unproductive agent loop.
 
 Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
 flow debugging, or explicit user acceptance of the CLI-backed team behavior.
@@ -130,6 +136,7 @@ primitive used by the update command.
 - `skills/clarify/SKILL.md`: brownfield clarification entry
 - `skills/intake/SKILL.md`: grilling-style intake and plan stress-test entry
 - `skills/team/SKILL.md`: Atlas-managed Paseo multi-provider team entry with explicit Codex native fallback
+- `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry
