@@ -1,6 +1,6 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260720084512",
+  "version": "0.1.0+codex.20260720092057",
   "description": "Atlas workflow plugin for bounded local Codex work with Paseo-managed multi-provider team coordination.",
   "author": {
     "name": "Local Atlas",

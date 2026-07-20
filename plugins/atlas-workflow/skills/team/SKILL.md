@@ -16,7 +16,8 @@ Atlas Team defaults to Paseo as the agent management layer. Do not reuse, invoke
 - Discover providers at runtime with `paseo provider ls --json`.
 - Discover models for a concrete provider with `paseo provider models <provider> --json`.
 - Do not hardcode provider or model availability from repo assumptions.
-- Before selecting a provider, read `${PASEO_HOME:-$HOME/.paseo}/orchestration-preferences.json` when it exists. An explicit user provider/model request wins, followed by task constraints, the matching role preference, and finally an available runtime default.
+- Never read or apply Paseo orchestration preferences. Atlas owns provider/model routing; Paseo only manages agent lifecycle.
+- An explicit user provider/model request wins. Otherwise, select the latest available stable model from the provider's live model catalog for every lane.
 - Record Paseo rounds with `codex-workflow team-record-start ... --backend paseo --providers "<single-line providers>"`.
 - The `--providers` field is required for `--backend paseo`, must stay on one line, and should summarize the actual provider/model routing selected for the round.
 
@@ -30,13 +31,21 @@ Atlas Team defaults to Paseo as the agent management layer. Do not reuse, invoke
 
 Prefer a single concise provider summary line such as `planner=claude/<model-id>; implementer=deepseek/<model-id>; reviewer=<provider>/<glm-model-id>; verifier=kimi/<model-id>`.
 
+### Latest Model Contract
+
+1. If the user specifies a model, use that exact discovered model when available; do not replace it with an Atlas default.
+2. Otherwise, query `paseo provider models <provider> --json` immediately before starting the lane. Prefer the catalog entry explicitly marked as latest or current.
+3. If the catalog has no latest/current marker, use its first stable, non-preview model. Treat the live catalog order as authoritative instead of comparing hardcoded version strings.
+4. Do not select an older, free, preview, compatibility, or fallback model merely because it is cheaper. Use one only when the user requests it or the latest stable model is unavailable, and disclose the fallback.
+5. Resolve the model separately for every selected provider. Never copy one provider's model, thinking option, or mode onto another provider.
+
 ### Minimal Paseo Control Plane
 
 - Start one bounded lane with `paseo run --detach --json --provider <provider> [--model <model-id>] --cwd <repo> "<prompt>"`. Capture the returned agent and workspace identifiers; reuse the workspace for related lanes instead of creating unrelated workspaces.
 - Send focused follow-up work with `paseo send <agent-id> --no-wait --json "<prompt>"`.
 - Wait for real completion with `paseo wait <agent-id> --json`; do not busy-poll `paseo ls` or `paseo inspect`.
 - Stop a lane that is out of scope, stalled, or no longer useful with `paseo stop <agent-id> --json`. Do not restart the Paseo daemon, delete agents, archive worktrees, or mutate provider configuration without separate authority.
-- Provider modes are provider-specific. Omit `--mode` unless its exact ID has been discovered for that provider; never copy a Codex mode onto Claude, DeepSeek, GLM, or Kimi.
+- Provider models, thinking options, and modes are provider-specific. Omit `--mode` and `--thinking` unless their exact IDs have been discovered for that provider; never copy Codex settings onto Claude, DeepSeek, GLM, or Kimi.
 - Prompts must carry the repository instructions, owned paths, forbidden paths, authority mode, expected evidence, and stop condition. Paseo manages lifecycle; it does not expand the lane's permissions.
 
 ## Explicit Native Fallback

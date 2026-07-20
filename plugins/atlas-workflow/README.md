@@ -36,7 +36,10 @@ CLI. Discover providers and models at runtime with `paseo provider ls --json`
 and `paseo provider models <provider> --json`; for GLM, choose the first
 provider whose discovered model list contains the required GLM family rather
 than assuming a `glm` provider exists, and use the `kimi` provider explicitly
-for Kimi Code CLI. Codex native collaboration is explicit fallback only.
+for Kimi Code CLI. Atlas never reads Paseo orchestration preferences: an
+explicit user provider/model selection wins, otherwise every lane uses the
+latest stable model from its provider's live catalog. Codex native
+collaboration is explicit fallback only.
 Team records lifecycle state with `team-record-start`,
 `team-record-finalize`, and `team-loop-record`; use `--backend native|paseo`,
 require a single-line `--providers` summary for Paseo starts, and keep artifact
