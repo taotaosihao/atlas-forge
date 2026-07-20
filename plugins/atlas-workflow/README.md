@@ -40,6 +40,12 @@ for Kimi Code CLI. Atlas never reads Paseo orchestration preferences: an
 explicit user provider/model selection wins, otherwise every lane uses the
 latest stable model from its provider's live catalog. Codex native
 collaboration is explicit fallback only.
+Without explicit provider choices, Atlas routes planning to Claude,
+implementation to DeepSeek, independent review to the latest discovered GLM,
+verification to Kimi Code CLI, and keeps the main Codex as integrator rather
+than defaulting every Paseo lane to Codex. Every Paseo lane must use its
+provider's full-access equivalent mode and fail closed when that mode is not
+available; runtime permission never expands discuss/review authority.
 Team records lifecycle state with `team-record-start`,
 `team-record-finalize`, and `team-loop-record`; use `--backend native|paseo`,
 require a single-line `--providers` summary for Paseo starts, and keep artifact

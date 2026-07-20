@@ -31,6 +31,18 @@ Atlas Team defaults to Paseo as the agent management layer. Do not reuse, invoke
 
 Prefer a single concise provider summary line such as `planner=claude/<model-id>; implementer=deepseek/<model-id>; reviewer=<provider>/<glm-model-id>; verifier=kimi/<model-id>`.
 
+### Default Provider Assignment
+
+An explicit user role/provider assignment always wins. When the user does not choose providers, assign only the roles the task actually needs with these Atlas-owned defaults:
+
+- planning, architecture, product reasoning, and difficult tradeoffs: `claude`;
+- implementation and focused repair: `deepseek`;
+- independent review, adversarial review, and security/architecture counterarguments: the discovered provider carrying the latest stable `glm` model;
+- verification, test evidence, and long-context repository checking: `kimi` through Kimi Code CLI;
+- integration and final adjudication: the main Codex controller, not another default Paseo lane.
+
+Do not default every lane to Codex. If a default non-Codex route is unavailable, prefer another discovered non-Codex provider that can satisfy the role, keep reviewer and implementer providers distinct when independent review matters, and disclose the substitution. Use a Codex Paseo lane only when the user requests it or no suitable non-Codex route remains.
+
 ### Latest Model Contract
 
 1. If the user specifies a model, use that exact discovered model when available; do not replace it with an Atlas default.
@@ -41,11 +53,12 @@ Prefer a single concise provider summary line such as `planner=claude/<model-id>
 
 ### Minimal Paseo Control Plane
 
-- Start one bounded lane with `paseo run --detach --json --provider <provider> [--model <model-id>] --cwd <repo> "<prompt>"`. Capture the returned agent and workspace identifiers; reuse the workspace for related lanes instead of creating unrelated workspaces.
+- Every Atlas-managed Paseo lane requires the provider's full-access mode. Resolve the live provider-specific mode and start one bounded lane with `paseo run --detach --json --provider <provider> [--model <model-id>] --mode <full-access-mode-id> --cwd <repo> "<prompt>"`. Capture the returned agent and workspace identifiers; reuse the workspace for related lanes instead of creating unrelated workspaces.
+- Current full-access mode IDs are `full-access` for Codex, `bypass` for Claude/DeepSeek and gateway providers such as ZenMux, and `yolo` for Kimi Code CLI. Confirm that the selected provider still exposes the required mode before launch. If it does not, fail closed; do not silently start in a less permissive mode.
 - Send focused follow-up work with `paseo send <agent-id> --no-wait --json "<prompt>"`.
 - Wait for real completion with `paseo wait <agent-id> --json`; do not busy-poll `paseo ls` or `paseo inspect`.
 - Stop a lane that is out of scope, stalled, or no longer useful with `paseo stop <agent-id> --json`. Do not restart the Paseo daemon, delete agents, archive worktrees, or mutate provider configuration without separate authority.
-- Provider models, thinking options, and modes are provider-specific. Omit `--mode` and `--thinking` unless their exact IDs have been discovered for that provider; never copy Codex settings onto Claude, DeepSeek, GLM, or Kimi.
+- Provider models, thinking options, and modes are provider-specific. Omit `--thinking` unless its exact ID has been discovered for that provider; never copy Codex settings onto Claude, DeepSeek, GLM, or Kimi. Full-access runtime permission does not grant implementation authority: discuss and review prompts remain read-only unless the user separately authorizes writes.
 - Prompts must carry the repository instructions, owned paths, forbidden paths, authority mode, expected evidence, and stop condition. Paseo manages lifecycle; it does not expand the lane's permissions.
 
 ## Explicit Native Fallback
