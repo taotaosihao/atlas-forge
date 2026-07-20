@@ -57,6 +57,31 @@ run_v2_valid() {
   pass "$label"
 }
 
+run_v2_new_authoring_valid() {
+  local label="$1" file="$2" authority_slice="$3"
+  case_paths
+  if ! "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+    show_failure "$label"
+  fi
+  grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^semantics_version: 2$' "$CASE_STDOUT" || show_failure "$label"
+  [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
+  pass "$label"
+}
+
+run_v1_new_authoring_invalid() {
+  local label="$1" file="$2" status
+  case_paths
+  set +e
+  "$BIN" --strict --new-authoring --file "$file" >"$CASE_STDOUT" 2>"$CASE_STDERR"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V2 ' "$CASE_STDERR" || show_failure "$label"
+  pass "$label"
+}
+
 run_v2_authority_invalid() {
   local label="$1" file="$2" expected_code="$3" authority_slice="${4:-$AUTHORITY_SLICE}"
   local status
@@ -141,6 +166,7 @@ run_usage_invalid() {
 node --check "$BIN"
 "$BIN" --help >"$TMP_ROOT/help.stdout"
 grep -q -- '--strict' "$TMP_ROOT/help.stdout"
+grep -q -- '--new-authoring' "$TMP_ROOT/help.stdout"
 grep -q -- '--authority-slice' "$TMP_ROOT/help.stdout"
 grep -q 'Exit codes:' "$TMP_ROOT/help.stdout"
 pass 'CLI help and syntax are valid'
@@ -268,6 +294,45 @@ const resolution = {
 fs.writeFileSync(path.join(sliceDir, "controller-resolution.json"), `${JSON.stringify(resolution, null, 2)}\n`);
 NODE
 run_v2_valid 'scope admission v2 contract passes' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
+GOAL_ONLY_SLICE="$CODEX_WORKFLOW_ROOT/artifacts/fixture/team/sdd/slices/slice-goal-only"
+mkdir -p "$GOAL_ONLY_SLICE"
+node - "$AUTHORITY_SLICE/brief.json" "$GOAL_ONLY_SLICE" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [source, target] = process.argv.slice(2);
+const brief = JSON.parse(fs.readFileSync(source, "utf8"));
+brief.slice_id = "slice-goal-only";
+fs.writeFileSync(path.join(target, "brief.md"), "# Goal-only requirements\n\n- REQ-1\n");
+fs.writeFileSync(path.join(target, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`);
+NODE
+goal_only_contract="$TMP_ROOT/scope-admission-v2-goal-only.md"
+sed 's/current-required:finding-resolved/goal:REQ-1/g' "$scope_v2" > "$goal_only_contract"
+run_v2_new_authoring_valid \
+  'new authoring accepts a v2 goal-only authority slice' \
+  "$goal_only_contract" \
+  "$GOAL_ONLY_SLICE"
+run_v2_authority_invalid \
+  'goal-only authority cannot admit current-required findings' \
+  "$scope_v2" \
+  CURRENT_REQUIRED_AUTHORITY_UNKNOWN \
+  "$GOAL_ONLY_SLICE"
+HALF_AUTHORITY_SLICE="$CODEX_WORKFLOW_ROOT/artifacts/fixture/team/sdd/slices/slice-half-authority"
+mkdir -p "$HALF_AUTHORITY_SLICE"
+node - "$AUTHORITY_SLICE/brief.json" "$HALF_AUTHORITY_SLICE" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [source, target] = process.argv.slice(2);
+const brief = JSON.parse(fs.readFileSync(source, "utf8"));
+brief.slice_id = "slice-half-authority";
+fs.writeFileSync(path.join(target, "brief.md"), "# Half authority requirements\n\n- REQ-1\n");
+fs.writeFileSync(path.join(target, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`);
+fs.writeFileSync(path.join(target, "review-verdict.json"), "{}\n");
+NODE
+run_v2_authority_invalid \
+  'authority slices reject a verdict without controller resolution' \
+  "$goal_only_contract" \
+  AUTHORITY_SLICE_INVALID \
+  "$HALF_AUTHORITY_SLICE"
 grep -q 'current-required:finding-resolved' "$FIXTURE_ROOT/valid/scope-admission-v2.md"
 pass 'scope admission v2 retains resolved current-required behavior in clean rewrites'
 copied_authority="$TMP_ROOT/copied-authority-slice"
@@ -308,6 +373,7 @@ NODE
 run_v2_authority_invalid 'v2 rejects stale verdict authority' "$scope_v2" AUTHORITY_SLICE_INVALID
 mv "$TMP_ROOT/review-verdict.backup.json" "$AUTHORITY_SLICE/review-verdict.json"
 run_v1_valid 'current authoritative implementation contract passes strict lint' "$CURRENT_AUTHORITY"
+run_v1_new_authoring_invalid 'new authoring rejects semantics v1' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
 
@@ -601,6 +667,9 @@ run_usage_invalid 'missing --file value before another option is a usage error' 
 run_usage_invalid 'short option cannot be consumed as a --file value' CLI_USAGE --file -h
 run_usage_invalid 'unknown option is a usage error' CLI_USAGE --wat
 run_usage_invalid 'duplicate --file is a usage error' CLI_USAGE --file "$CURRENT_AUTHORITY" --file "$CURRENT_AUTHORITY"
+run_usage_invalid 'new authoring requires strict mode' CLI_USAGE --new-authoring --file "$CURRENT_AUTHORITY"
+run_usage_invalid 'new authoring rejects values' CLI_USAGE --strict --new-authoring=true --file "$CURRENT_AUTHORITY"
+run_usage_invalid 'duplicate new authoring is a usage error' CLI_USAGE --strict --new-authoring --new-authoring --file "$CURRENT_AUTHORITY"
 
 for template in implementation-contract.md implementation-contract.final.md; do
   file="$ATLAS_FORGE_ROOT/workflow/templates/$template"
@@ -625,6 +694,9 @@ done
 grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROOT/workflow/templates/gate-checklist.md"
 grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q -- '--strict --new-authoring' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'Freeze the smallest user-visible Goal before brownfield discovery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'Discovery cannot rewrite the frozen Goal' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"

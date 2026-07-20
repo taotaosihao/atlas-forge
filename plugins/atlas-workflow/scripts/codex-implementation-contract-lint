@@ -100,7 +100,7 @@ class CliError extends Error {}
 class InputError extends Error {}
 
 function usage() {
-  console.log(`usage: codex-implementation-contract-lint --file <path> [--strict] [--authority-slice <dir>]...
+  console.log(`usage: codex-implementation-contract-lint --file <path> [--strict] [--new-authoring] [--authority-slice <dir>]...
 
 Validates versioned first-code and Product/UI semantics in an implementation
 contract. Unversioned historical contracts pass with a warning unless
@@ -109,6 +109,8 @@ contract. Unversioned historical contracts pass with a warning unless
 Options:
   --file <path>  Markdown implementation contract to validate.
   --strict       Require contract_semantics_version.
+  --new-authoring
+                 Require strict semantics version 2 for newly authored contracts.
   --authority-slice <dir>
                  Canonical Team SDD slice used to validate semantics-v2 goal
                  and current-required authority. Repeat for multiple slices.
@@ -121,8 +123,15 @@ Exit codes:
 }
 
 function parseArgs(argv) {
-  const options = { file: null, strict: false, help: false, authoritySlices: [] };
+  const options = {
+    file: null,
+    strict: false,
+    newAuthoring: false,
+    help: false,
+    authoritySlices: [],
+  };
   let strictSeen = false;
+  let newAuthoringSeen = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -132,6 +141,10 @@ function parseArgs(argv) {
       if (strictSeen) throw new CliError("duplicate --strict option");
       strictSeen = true;
       options.strict = true;
+    } else if (arg === "--new-authoring") {
+      if (newAuthoringSeen) throw new CliError("duplicate --new-authoring option");
+      newAuthoringSeen = true;
+      options.newAuthoring = true;
     } else if (arg === "--file") {
       if (options.file !== null) throw new CliError("duplicate --file option");
       if (index + 1 >= argv.length || argv[index + 1].startsWith("-")) {
@@ -153,12 +166,17 @@ function parseArgs(argv) {
       options.authoritySlices.push(value);
     } else if (arg.startsWith("--strict=")) {
       throw new CliError("--strict does not accept a value");
+    } else if (arg.startsWith("--new-authoring=")) {
+      throw new CliError("--new-authoring does not accept a value");
     } else {
       throw new CliError(`unknown option or positional argument: ${arg}`);
     }
   }
 
   if (!options.help && !options.file) throw new CliError("--file is required");
+  if (!options.help && options.newAuthoring && !options.strict) {
+    throw new CliError("--new-authoring requires --strict");
+  }
   return options;
 }
 
@@ -218,8 +236,6 @@ function loadAuthoritySlices(slicePaths) {
       const verdictFile = path.join(sliceDir, "review-verdict.json");
       const resolutionFile = path.join(sliceDir, "controller-resolution.json");
       const brief = readCanonicalJson(briefFile, "brief.json");
-      const verdict = readCanonicalJson(verdictFile, "review-verdict.json");
-      const resolution = readCanonicalJson(resolutionFile, "controller-resolution.json");
       const briefErrors = validateBrief(brief);
       if (brief.schema_version !== 2 || briefErrors.length > 0) {
         throw new Error(`invalid brief v2: ${briefErrors.join("; ")}`);
@@ -238,6 +254,20 @@ function loadAuthoritySlices(slicePaths) {
           `authority slice is outside the canonical workflow artifact tree: expected ${expectedSliceDir}`,
         );
       }
+      const goalRef = computeGoalRef(brief, sliceDir);
+      taskIds.add(brief.task_id);
+      brief.acceptance_refs.forEach((ref) => goalRefs.add(ref));
+      const hasVerdict = fs.existsSync(verdictFile);
+      const hasResolution = fs.existsSync(resolutionFile);
+      if (hasVerdict !== hasResolution) {
+        throw new Error(
+          "review-verdict.json and controller-resolution.json must either both exist or both be absent",
+        );
+      }
+      if (!hasVerdict) continue;
+
+      const verdict = readCanonicalJson(verdictFile, "review-verdict.json");
+      const resolution = readCanonicalJson(resolutionFile, "controller-resolution.json");
       const verdictErrors = validateReviewVerdict(verdict);
       if (verdict.schema_version !== 2 || verdictErrors.length > 0) {
         throw new Error(`invalid review verdict v2: ${verdictErrors.join("; ")}`);
@@ -246,14 +276,12 @@ function loadAuthoritySlices(slicePaths) {
         brief,
         verdict,
         verdictDigest: digestFile(verdictFile),
-        goalRef: computeGoalRef(brief, sliceDir),
+        goalRef,
         sliceDir,
       });
       if (resolutionErrors.length > 0) {
         throw new Error(`invalid controller resolution: ${resolutionErrors.join("; ")}`);
       }
-      taskIds.add(brief.task_id);
-      brief.acceptance_refs.forEach((ref) => goalRefs.add(ref));
       for (const record of resolution.records) {
         if (record.disposition !== "current-required") continue;
         const owner = findingOwners.get(record.finding_id);
@@ -1270,18 +1298,19 @@ function printDiagnostic(diagnostic, file) {
   );
 }
 
-function printSummary(ok, file, strict, version, diagnostics) {
+function printSummary(ok, file, strict, newAuthoring, version, diagnostics) {
   const errors = diagnostics.filter((item) => item.severity === "ERROR").length;
   const warnings = diagnostics.filter((item) => item.severity === "WARNING").length;
   console.log(`implementation_contract_lint: ${ok}`);
   console.log(`file: ${file}`);
   console.log(`strict: ${strict}`);
+  if (newAuthoring) console.log("new_authoring: true");
   console.log(`semantics_version: ${version}`);
   console.log(`errors: ${errors}`);
   console.log(`warnings: ${warnings}`);
 }
 
-function lint(file, strict, authoritySlices = []) {
+function lint(file, strict, newAuthoring, authoritySlices = []) {
   const { absolute, content } = readUtf8File(file);
   const parsed = parseFields(content);
   const version = parsed.fields.get("contract_semantics_version");
@@ -1293,7 +1322,7 @@ function lint(file, strict, authoritySlices = []) {
     const diagnostics = [diagnostic];
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
     const ok = !diagnostics.some((item) => item.severity === "ERROR");
-    printSummary(ok, absolute, strict, "legacy", diagnostics);
+    printSummary(ok, absolute, strict, newAuthoring, "legacy", diagnostics);
     return ok ? 0 : 1;
   }
 
@@ -1303,12 +1332,22 @@ function lint(file, strict, authoritySlices = []) {
       makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1 or 2 is supported"),
     ]);
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
-    printSummary(false, absolute, strict, version.value || "invalid", diagnostics);
+    printSummary(false, absolute, strict, newAuthoring, version.value || "invalid", diagnostics);
     return 1;
   }
 
-  const diagnostics = sortDiagnostics(
-    version.value === "2"
+  const versionDiagnostics = newAuthoring && version.value !== "2"
+    ? [makeDiagnostic(
+      "ERROR",
+      "NEW_AUTHORING_REQUIRES_V2",
+      version.key,
+      version.line,
+      "newly authored contracts must use contract_semantics_version: 2",
+    )]
+    : [];
+  const diagnostics = sortDiagnostics([
+    ...versionDiagnostics,
+    ...(version.value === "2"
       ? validateVersionTwo(
         content,
         parsed.fields,
@@ -1316,11 +1355,11 @@ function lint(file, strict, authoritySlices = []) {
         authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
         strict,
       )
-      : validateVersionOne(parsed.fields, parsed.diagnostics),
-  );
+      : validateVersionOne(parsed.fields, parsed.diagnostics)),
+  ]);
   diagnostics.forEach((item) => printDiagnostic(item, absolute));
   const ok = !diagnostics.some((item) => item.severity === "ERROR");
-  printSummary(ok, absolute, strict, version.value, diagnostics);
+  printSummary(ok, absolute, strict, newAuthoring, version.value, diagnostics);
   return ok ? 0 : 1;
 }
 
@@ -1330,7 +1369,7 @@ function main() {
     usage();
     return 0;
   }
-  return lint(options.file, options.strict, options.authoritySlices);
+  return lint(options.file, options.strict, options.newAuthoring, options.authoritySlices);
 }
 
 try {

@@ -47,19 +47,20 @@ Follow this loop:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent clarify --risk <low|medium|high> --decision use --reason "<why boundaries must be locked>"`
    - If office-hours or brainstorm is intentionally skipped because the direction is already chosen, record a separate skip reason only when that choice is non-obvious.
 4. Read any existing `workflow/artifacts/<task-id>/context.md`, `decision.md`, `spec.md`, or `analysis.md` before writing new boundaries.
-5. Collect brownfield facts before proposing boundaries.
-6. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
-7. Run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>`, then
+5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, and do not use discovery, review wording, or generic completeness language to broaden it.
+6. Collect brownfield facts after the Goal is frozen. Classify every discovered item as `goal:<requirement-ref>`, controller-resolved `current-required:<finding_id>`, or non-executable `follow-up`. Discovery cannot rewrite the frozen Goal; only a validated controller resolution can admit a non-Goal finding into the current delivery.
+7. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
+8. Run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>`, then
    write `workflow/artifacts/<task-id>/clarify.md` and update `context.md`.
    - current state
    - confirmed facts
    - source of truth files
    - known risks
-8. Preserve or update `workflow/artifacts/<task-id>/decision.md` when the chosen approach matters for execution.
+9. Preserve or update `workflow/artifacts/<task-id>/decision.md` when the chosen approach matters for execution.
    - selected direction
    - rejected alternatives
    - assumptions inherited from brainstorm or office-hours
-9. Write `workflow/artifacts/<task-id>/spec.md`.
+10. Write `workflow/artifacts/<task-id>/spec.md`.
    - Goal
    - Non-goals
    - Decision Boundaries
@@ -68,8 +69,8 @@ Follow this loop:
    - Critical Feedback
    - Tiny Escape Decision
    - Stop Conditions
-10. Make acceptance criteria command-verifiable or user-visible.
-11. When the next step is non-tiny implementation, include an implementation-contract expectation:
+11. Make acceptance criteria command-verifiable or user-visible.
+12. When the next step is non-tiny implementation, include an implementation-contract expectation:
    - whether `workflow/templates/implementation-contract.md` should be filled before coding
    - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
    - which acceptance criteria become required validation rows
@@ -116,7 +117,7 @@ Follow this loop:
    - project those admitted findings only into Goal, Acceptance, Completion, Edge Cases, or Required safe fallback; retain `visible-follow-up` and `informational` findings only in `Finding Provenance` or follow-up records
    - in semantics-v2 contracts, mark required acceptance and edge-case rows with `goal:<requirement-ref>` or `current-required:<finding_id>` so strict lint can validate attribution without interpreting natural language
    Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
-12. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
+13. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
    - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
    - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
    - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
@@ -126,19 +127,19 @@ Follow this loop:
    - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
    - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`; if a non-team flow has no staffing owner, create a brief `staffing.md` that says not applicable and names the human/main-agent owner.
    - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
-13. Self-review artifacts before reporting:
+14. Self-review artifacts before reporting:
    - no placeholders such as `TBD` or `TODO`
    - no contradictions between context, decision, spec, and the project doc
    - assumptions are labelled
    - acceptance criteria match the verification plan
    - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
-   - for a semantics-v2 final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; the lint must validate contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
+   - for a newly authored final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --new-authoring --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; new authoring requires semantics v2, while the lint must validate contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
    - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`
-14. Before claiming the artifacts are execution-ready, run:
+15. Before claiming the artifacts are execution-ready, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
     - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
-15. Use `$atlas-workflow:team` when the task should go through Codex native subagent discussion or promotion before execution. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
-16. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
+16. Use `$atlas-workflow:team` when the task should go through Codex native subagent discussion or promotion before execution. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
+17. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
 
 Hard rules:
 
