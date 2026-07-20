@@ -12,6 +12,7 @@
 | [项目约束](../AGENTS.md) | source of truth、开发/发布边界、Multica 禁写和最小验证矩阵 |
 | [Workflow helper README](../workflow/README.md) | `codex-workflow` 命令、artifact 和 helper 使用边界 |
 | [Atlas Workflow plugin README](../plugins/atlas-workflow/README.md) | Atlas skill 入口和合同概览；source/cache 路径以项目约束为准 |
+| [Atlas Team Paseo 显式启用与 Codex 连续降级实施方案](atlas-workflow/20260720-011-atlas-team-paseo-codex/implementation-plan.md) | Team 默认 Codex、Paseo 局部 opt-in、运行故障 fallback、多角色审查收敛与实施接管的当前开发目标；实现前以源码和测试的现状行为为准 |
 | [发布完整性与治理 bundle](atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/README.md) | 当前 Atlas release integrity、semantic lint 和治理合同及 phase evidence |
 | [业务验收中文阅读层合同](atlas-workflow/20260718-004-atlas-business-acceptance-readable-report/README.md) | BAF v2 中文派生报告、freshness/tamper 与 presentation-strict；底层 machine semantics 继续继承发布完整性与治理 bundle |
 | [远端 Agent 部署手册](remote-agent-deployment.md) | 仅 legacy/full-stack 兼容部署；包含冻结 Multica 资产，不是 Atlas dev/release 路径 |
