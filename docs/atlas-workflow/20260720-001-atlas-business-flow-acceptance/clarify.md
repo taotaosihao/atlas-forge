@@ -15,7 +15,9 @@ workflow_id: `20260720-001-atlas`
 - 现有 review-card v1 的 `steps[].actual` 只能由 evidence map 的描述和结果拼接，Sharp Cell 当前三步分别只指向 run29、run30、run31 的总 technical result。
 - 当前 evidence map 登记三次 run-result、Trace、最终 running 截图和 owner decision；更细的 WorkOrder、LineTask、DeviceTask、assignment、callback 和状态事实位于复制的 run artifact 内，没有逐节点登记成 human-first 材料。
 - Core 已能校验 card 对当前 scenario/verdict/evidence map 的 digest、canonical 图片路径、evidence ID 和 owner decision 当前引用，但还没有业务单据链、状态前后值、证据类别或时间顺序的完整性要求。
+- Core 当前 run evidence ref 只有 bundle 内相对 `path`、`sha256`、attempt 和 status，没有长期 `artifact_locator`、size、media type、敏感级别、retention class 或 policy reference。
 - run29、run30、run31 已证明真实 UI、非 CNC `plc_report_only`、invalid/valid callback、UI running readback 和三次独立 fresh-seed；本方案优先复用这些原始 artifacts，不自动重跑。
+- run29、run30、run31 当前主要位于本机 `.codex/workflow`/`.codex/visualizations` 绝对路径；短期可审阅，但不能独自承担跨机器、清理后或长期审计的可恢复性。
 - 当前 accepted bundle 的准确历史语义是“框架跑通”；本方案不追溯改写它，也不据此宣称完整产品业务验收已经完成。
 
 ## 已锁定边界
@@ -27,6 +29,9 @@ workflow_id: `20260720-001-atlas`
 - Material 必须同时展示正向流转和合同要求的反向控制，例如 invalid callback no-mutation。
 - Owner decision 必须发生在完整材料生成并通过引用校验之后，并绑定 flow 内容摘要；旧 decision 不自动沿用。
 - 现有 raw Trace、HAR、日志、API/DB dump 继续留在 Git 外，human-first Markdown 只展示必要摘要和可定位引用。
+- Git、durable artifact storage、ephemeral artifacts 必须分层；大体积或敏感原件不进入 Git，Git 只留 manifest/digest/规则/小型脱敏样例和结论。
+- accepted durable baseline 的 manifest 必须记录稳定 locator、SHA-256、size、media type、run/attempt identity、sensitivity class、retention class 和 policy reference；仅有本机绝对路径时门禁失败。
+- Core 只验证 manifest 和恢复后内容，不上传、不删除、不选择对象存储 provider，也不硬编码保留天数；实际 export/retention mutation 需要项目配置与单独外部权限。
 
 ## 关键风险
 
@@ -35,6 +40,8 @@ workflow_id: `20260720-001-atlas`
 - 若只列 evidence ID，业务人员仍无法判断流程；因此每个节点必须同时展示预期、actual facts、状态前后值和证据类别。
 - 若允许 AI 自由生成 actual summary，会产生不可验证陈述；因此 v2 卡片使用结构化事实，展示文本由 Core 固定规则组合。
 - 若修改当前 accepted artifact，会破坏历史；因此迁移采用可恢复归档和新的 review bundle，历史结论保留。
+- 若只保存本机路径，后续无法复查；若把所有 raw evidence 放 Git，又会造成永久历史膨胀和 secret/客户数据泄露风险。
+- locator 可访问不等于内容可信；必须在新的临时目录重新取回并逐文件核对 digest、identity 和 strict review，不能只验证 URL 字符串。
 
 ## 简化判断
 
