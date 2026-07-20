@@ -48,10 +48,15 @@ const EXPECTED_ROUTES = {
     "trace-promote",
   ],
   "./team/cli.js": [
+    "team-attempt-record",
+    "team-dispatch-record",
+    "team-fallback-record",
+    "team-lane-record",
     "team-loop-record",
     "team-promote",
     "team-record-finalize",
     "team-record-start",
+    "team-selection-record",
     "team-status",
     "team-stop",
   ],
@@ -95,8 +100,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 34 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 34);
+test("routes exactly 39 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 39);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)
@@ -109,6 +114,13 @@ test("routes exactly 34 migrated commands to their JavaScript domains", () => {
   }
   assert.equal(DIRECT_ROUTES.has(""), false);
   assert.equal(DIRECT_ROUTES.has("unknown-command"), false);
+});
+
+test("legacy help advertises every migrated Team control-plane command", () => {
+  const legacySource = fs.readFileSync(DEFAULT_LEGACY_BIN, "utf8");
+  for (const command of EXPECTED_ROUTES["./team/cli.js"]) {
+    assert.match(legacySource, new RegExp(`\\b${command}\\b`), command);
+  }
 });
 
 test("passes the complete fallback argv and environment to the legacy launcher", () => {

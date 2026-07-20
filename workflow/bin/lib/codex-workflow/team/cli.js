@@ -4,14 +4,24 @@
 const { CommandError } = require("../core/command-runtime");
 const { TaskRepositoryError } = require("../task/repository");
 const {
+  parseAttemptArgs,
+  parseDispatchArgs,
+  parseFallbackArgs,
+  parseLaneArgs,
   parseLoopRecordArgs,
   parsePromoteArgs,
   parseRecordFinalizeArgs,
   parseRecordStartArgs,
+  parseSelectionArgs,
+  runAttemptRecord,
+  runDispatchRecord,
+  runFallbackRecord,
+  runLaneRecord,
   runLoopRecord,
   runPromote,
   runRecordFinalize,
   runRecordStart,
+  runSelectionRecord,
   runStatus,
   runStop,
 } = require("./commands");
@@ -32,9 +42,19 @@ function main(argv) {
       result = runStop(argv.slice(1));
     } else if (command === "team-promote") {
       result = runPromote(parsePromoteArgs(argv.slice(1)));
+    } else if (command === "team-selection-record") {
+      result = runSelectionRecord(parseSelectionArgs(argv.slice(1)));
+    } else if (command === "team-lane-record") {
+      result = runLaneRecord(parseLaneArgs(argv.slice(1)));
+    } else if (command === "team-dispatch-record") {
+      result = runDispatchRecord(parseDispatchArgs(argv.slice(1)));
+    } else if (command === "team-attempt-record") {
+      result = runAttemptRecord(parseAttemptArgs(argv.slice(1)));
+    } else if (command === "team-fallback-record") {
+      result = runFallbackRecord(parseFallbackArgs(argv.slice(1)));
     } else {
       throw new CommandError(
-        "usage: codex-workflow {team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote}",
+        "usage: codex-workflow {team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record}",
       );
     }
     process.stdout.write(`${result.lines.join("\n")}\n`);

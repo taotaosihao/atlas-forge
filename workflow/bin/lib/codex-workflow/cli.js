@@ -38,6 +38,11 @@ const DIRECT_ROUTES = new Map([
   ["team-status", "./team/cli.js"],
   ["team-stop", "./team/cli.js"],
   ["team-promote", "./team/cli.js"],
+  ["team-selection-record", "./team/cli.js"],
+  ["team-lane-record", "./team/cli.js"],
+  ["team-dispatch-record", "./team/cli.js"],
+  ["team-attempt-record", "./team/cli.js"],
+  ["team-fallback-record", "./team/cli.js"],
 ]);
 
 const DEFAULT_LEGACY_BIN = path.resolve(__dirname, "../../codex-workflow-legacy");

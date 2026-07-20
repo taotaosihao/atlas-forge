@@ -95,18 +95,60 @@ Start a legacy CLI-backed team discussion or execution round:
 ~/.codex/workflow/bin/codex-workflow team-stop <task-id>
 ```
 
-Record a Codex native subagent team round. Native subagents are spawned by
-Codex, while `codex-workflow` records auditable task state and artifacts:
+Record a Team run. The backend defaults to Codex native subagents when
+`--backend` is omitted. Any explicit Team-level backend selection, including
+Paseo or an explicit native override, requires a controller-attested user or
+operator reference:
 
 ```bash
-~/.codex/workflow/bin/codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>"
+~/.codex/workflow/bin/codex-workflow team-record-start <task-id> "<objective>" --mode discuss|execute [--agents N] [--roles "<roles>"]
+~/.codex/workflow/bin/codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode discuss|execute --selection-authority-kind user-message --selection-authority-ref <stable-ref> [--fallback-policy codex|none] [--providers "<planning-hints>"]
 ~/.codex/workflow/bin/codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>
 ~/.codex/workflow/bin/codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]
 ```
 
-Native round, decision, staffing, and loop files must live under the current
-task's `team/` artifact directory, include `backend: native` metadata, and
-contain substantive content beyond template headings.
+`--agents`, `--roles`, and `--providers` are planning hints rather than fixed
+staffing gates. Lane and dispatch selections use immutable
+`team-selection-record` events. The control plane is exposed through the
+following commands; every mutation requires a stable `--operation-id` so a
+controller can safely replay after a crash:
+
+```bash
+~/.codex/workflow/bin/codex-workflow team-selection-record <task-id> --operation-id <id> --event-id <id> --kind backend|model --scope team|lane:<id>|dispatch:<id> --authority-kind user-message|operator-input --authority-ref <stable-ref> [--backend native|paseo] [--provider <exact-id>] [--model <exact-id>]
+~/.codex/workflow/bin/codex-workflow team-selection-record <task-id> --operation-id <id> --event-id <snapshot-id> --kind capability --authority-ref <controller-observation-ref> --provider <exact-id> --model <exact-id>
+~/.codex/workflow/bin/codex-workflow team-lane-record <task-id> --operation-id <id> --action open|close --lane <id> [--backend native|paseo] [--selection-event <id>] [--writable --paths <patterns>]
+~/.codex/workflow/bin/codex-workflow team-dispatch-record <task-id> --operation-id <id> --action open|dispose|close --dispatch <id> [--lane <id>] [--required-perspective <id>] [--disposition <value>] [--admitted-attempts <ids>] [--evidence-refs <refs>]
+~/.codex/workflow/bin/codex-workflow team-attempt-record <task-id> --operation-id <id> --action reserve|bind|running|observe|terminal|quiesced --attempt <id> [--dispatch <id>] [--launch-operation-id <id>] [--capability-snapshot <id>] [--perspective <id>]
+~/.codex/workflow/bin/codex-workflow team-fallback-record <task-id> --operation-id <id> --from-attempt <paseo-id> --to-attempt <native-id> --launch-operation-id <id> [--worktree-fingerprint <digest>] [--evidence-refs <refs>]
+```
+
+Backend and fallback policy resolve at dispatch, lane, Team, then default
+scope. A capability selection observes the live structured Paseo provider and
+model catalogs; attempts reference the resulting snapshot instead of accepting
+caller-supplied model-family or digest claims. Claude-family models additionally
+require an exact manual model selection event, and unknown families fail closed.
+A writable Paseo attempt also requires a callable runtime mode present in the
+snapshot. Operational Paseo failures may consume one trusted Retry-After retry,
+then default to an atomic native fallback. `--fallback-policy none` records
+`backend-unavailable` instead.
+
+Attempt terminal state does not admit a result or release a writer lease.
+Admission is a controller disposition. Paseo quiescence requires an adapter
+receipt correlated to the exact attempt, launch, and actor; quiescence and
+fallback evidence must resolve to real files in the current task artifact tree.
+Writable fallback also requires preserved worktree evidence and a takeover
+fingerprint. Finalization derives requested, attempted, and effective backends
+from the v2 ledger and writes `team/backend-v2.json`; strict lint re-derives it
+from `state.json`. A record-only compatibility finalization creates no synthetic
+attempt or admission and therefore has `effective_backend=none`. Mixed or
+no-result v2 runs use `native` only as the legacy Markdown-header projection.
+
+Round, decision, staffing, loop, observation, and provenance files must live
+under the current task artifact tree and contain substantive evidence. The
+fake Team runtime under `tests/fixtures/` proves adapter ordering and
+idempotency only; it does not prove a live Paseo provider, model, or mode is
+available. Live capability remains unverified unless a separately authorized
+isolated check records structured evidence.
 
 Run a legacy Atlas-managed bounded team implementation loop when the old
 CLI-backed team should keep fixing until the objective and verification command

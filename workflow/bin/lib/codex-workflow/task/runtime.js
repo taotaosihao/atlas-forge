@@ -81,11 +81,13 @@ function writeTaskState(paths, taskId, clock = () => new Date()) {
   const activeTeam =
     state.active_team && typeof state.active_team === "object" ? state.active_team : {};
 
-  activeTeam.backend = headerValue(fields, "active_team_backend") || activeTeam.backend || "";
-  activeTeam.mode = headerValue(fields, "active_team_mode") || activeTeam.mode || "";
-  activeTeam.status = headerValue(fields, "active_team_status") || activeTeam.status || "";
-  activeTeam.decision =
-    headerValue(fields, "active_team_decision") || activeTeam.decision || "";
+  if (activeTeam.schema_version !== 2) {
+    activeTeam.backend = headerValue(fields, "active_team_backend") || activeTeam.backend || "";
+    activeTeam.mode = headerValue(fields, "active_team_mode") || activeTeam.mode || "";
+    activeTeam.status = headerValue(fields, "active_team_status") || activeTeam.status || "";
+    activeTeam.decision =
+      headerValue(fields, "active_team_decision") || activeTeam.decision || "";
+  }
 
   Object.assign(state, {
     task_id: task.id,
@@ -146,6 +148,18 @@ function setTaskStateFields(paths, taskId, updates, clock = () => new Date()) {
     }
     cursor[parts.at(-1)] = castStateValue(String(rawValue));
   }
+  state.updated_at = timestampSeconds(clock);
+  atomicWriteJson(stateFile, state);
+  return state;
+}
+
+function replaceActiveTeam(paths, taskId, activeTeam, clock = () => new Date()) {
+  if (!activeTeam || typeof activeTeam !== "object" || Array.isArray(activeTeam)) {
+    throw new TypeError("activeTeam must be an object");
+  }
+  const stateFile = taskStateFile(paths, taskId);
+  const state = readJsonObject(stateFile);
+  state.active_team = activeTeam;
   state.updated_at = timestampSeconds(clock);
   atomicWriteJson(stateFile, state);
   return state;
@@ -244,6 +258,7 @@ module.exports = {
   hasSuccessfulVerification,
   lifecycleEvents,
   readJsonObject,
+  replaceActiveTeam,
   setTaskStateFields,
   syncTaskRuntime,
   taskRuntimeFile,
