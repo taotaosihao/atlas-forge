@@ -50,6 +50,47 @@ artifact_category: clarification_conclusion
 | `/home/gewu/.codex/workflow/bin/codex-workflow ready 20260719-005-ai-ui-intake --require context,spec,decision` | installed runtime task ready，issues 为空 |
 | Diff/forbidden paths | `git diff --check` 通过；Multica paths 无 diff，hard fingerprints 不变 |
 
+## 实施 Phase 1 结论
+
+- 评审结论：[phase-review-report.md](./phase-review-report.md)。
+- 实施提交：`a5921957a3f4b16ed1a112032f02fc1e41eb7152`（`feat(atlas): add executable web acceptance audit`）。
+- Phase 1 状态：可执行 audit、专项正负合同、Sharp Cell 只读风险扫描和独立 reviewer focused repair 均完成。
+- Phase 2 恢复状态：原 `blocked_dependency` 是 Phase 1 当时真实记录；提交 `8714e47` 的替换式权威合同修订已删除该过时 renderer 前置条件。恢复实施不依赖、不合入也不重实现 `codex-team-business-report`，继续以 BAF v2 JSON/JSONL 为唯一 machine facts、`business-verdict.json` 为唯一 verdict。
+- Sharp Cell 与 Multica：两个范围均零修改，Multica hard fingerprints 不变。
+
+## 实施 Phase 2 至 Phase 4 当前结论
+
+### 本地逻辑提交
+
+- Atlas Phase 2：`f4d6154`（`feat(atlas): add web acceptance run protocol`），交付 project protocol、run/check-run、attempt/evidence invariants、独立 validator envelope、BAF review bridge 与 human-first review contract；未引入 `codex-team-business-report`、自动 renderer、presentation check 或平行 verdict。
+- Sharp Cell Phase 3：`8b96d8ed`（`feat(acceptance): add real web UI anchor`），交付非 CNC、`plc_report_only` reference target 的真实 served UI anchor、项目配置、fresh-seed setup、adapter 与独立 validators。
+- Sharp Cell focused repair：`a2effed4`（`fix(acceptance): atomically capture popup evidence`）与 `6d81c440`（`fix(acceptance): pin popup snapshot to option`）。Phase 4 最终三次 convergence 均运行于冻结代码 `6d81c440`；后者把 production-line popup/option 快照绑定到已等待的严格唯一 DOM element，未放宽 validator 或确定性验收条款。
+- Sharp Cell BAF closure：`22f3c37b`（`feat(acceptance): close real runs into BAF`），复用现有 BAF v2 authority 与 Core `check-run`，把三次完整 run artifact 绑定到既有 native Team task `20260719-005-ai-ui-intake`；technical run task ID `atlas-web-ui-acceptance-sharp-cell-v1` 只作为 evidence identity，不形成第二个 roadmap/task。
+
+### Phase 4 convergence
+
+- `sharp-cell-phase4-convergence-1-real-26` 失败，原因属于 production-line popup evidence drift；不计入连续成功。
+- `sharp-cell-phase4-convergence-2-real-28` 失败，确认 `locator.evaluateAll()` 会在调用时重新解析动态 `:visible` selector 并可能得到瞬时空集合；不计入连续成功。
+- 修复冻结后，run29、run30、run31 构成新的连续窗口，三次均为 fresh-seed 新 run、attempt 1 passed、`integration_mode: real`，并各自保存 Trace 与 `1366x768` 实际截图：
+  - `/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-convergence-1-real-29`
+  - `/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-convergence-2-real-30`
+  - `/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-convergence-3-real-31`
+- 三次 run 均通过 Core `check-run` 与五个独立 required validators；frozen contract/config/evidence-index digest、全部 evidence digest、attempt-1 authority facts、fresh-seed nonce、runtime identity、WorkOrder、LineTask、DeviceTask、assignment、业务 Trace、Playwright Trace 与截图均完成绑定并互不共享。
+- 独立只读 implementation reviewer 最终 PASS，P0/P1/P2 为 0。独立 browser-verifier 对真实浏览器动作、network mutation、invalid/valid signed callback、material-event chain、非 CNC `plc_report_only` readiness、UI `running` readback、Trace 与截图完成复核，结论 PASS，P0/P1/P2 为 0。
+
+### BAF、handoff 与最终 closure
+
+- Git 外可审阅 BAF bundle：`/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-baf-closure/20260719-005-ai-ui-intake`。该 bundle 从同一 run29、run30、run31 与 `reference-fms-work-orders-expanded-v3.png` 重新生成，没有替换或重跑 technical evidence。
+- 既有 native Team task artifact：`/home/gewu/.codex/workflow/artifacts/20260719-005-ai-ui-intake`。该 task 已补齐与当前执行事实一致的 minimal SDD 记录；`codex-team-artifact-lint --strict --business-acceptance` 与 Sharp closure `validate --workflow-root /home/gewu/.codex/workflow` 均 PASS，未建立第二套 roadmap 或 gate 平台。
+- 2026-07-20，acceptance owner `gewu` 对当前 contract、reference、三次 actual screenshot 与 evidence 引用最终登记“符合”。此前登记“需修改”的 bundle 已可恢复归档至 `/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-baf-closure/owner-needs-modification-20260720/20260719-005-ai-ui-intake`，没有删除或追溯改写该历史判断。
+- 新 bundle strict validate 为 `valid: true`，owner decision 为“符合”；唯一 `business-verdict.json` 为 `accepted`，`technical_gate_status`、`business_acceptance_status`、`goal_a.status` 与 `goal_b.status` 均为 `passed`，`blockers` 与 `required_followups` 均为空。
+- Owner 的最终意图是当前先接受已经跑通的通用测试框架；未来完整测试框架落地后的大幅调整不属于本合同的阻断项，也不改变本次真实 UI、三次 fresh-seed 与 BAF closure 的既有证据结论。
+
+### 最终范围与禁区核对
+
+- Atlas/Sharp Cell 本地逻辑提交均未 push、创建 PR、部署、发布、安装或刷新真实 Atlas cache/marketplace/workflow runtime。
+- Multica runtime/tests 从未运行，`plugins/multica-sdlc/**` 与 `.agents/**` 未修改；hard fingerprints 仍为 `8b87ecd1c5decce18f31e65442747661debfcb5e` / `3e3f8d512d88d309830ceb180baf694149ffa657`。
+
 ## 实施阶段证据预算
 
 - Git：代码、schema、必要 fixtures/golden、项目 contract、少量最终审核截图、`phase-review-report.md`、`evidence-index.md` 和 `gate-checklist.md`。

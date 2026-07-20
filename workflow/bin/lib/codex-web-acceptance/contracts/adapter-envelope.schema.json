@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "atlas-web-acceptance-adapter-envelope-v1", "type": "object",
+  "required": ["protocol_version", "phase", "facts", "evidence_refs", "failure_facts"],
+  "properties": {
+    "protocol_version": {"const": "1"}, "phase": {"type": "string", "minLength": 1},
+    "facts": {"type": "object"},
+    "evidence_refs": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "failure_facts": {"type": "array", "items": {"type": "object", "required": ["class", "reason"], "properties": {"class": {"enum": ["project", "environment", "safety", "protocol"]}, "reason": {"type": "string", "minLength": 1}}, "additionalProperties": false}}
+  },
+  "$defs": {"evidence": {"type": "object", "required": ["id", "claim_id", "status", "path", "sha256"], "properties": {"id": {"type": "string", "minLength": 1}, "claim_id": {"type": ["string", "null"]}, "status": {"enum": ["passed", "failed", "blocked", "skipped", "missing"]}, "path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "additionalProperties": false}},
+  "additionalProperties": false
+}

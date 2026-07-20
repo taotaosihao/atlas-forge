@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "atlas-web-acceptance-validator-input-v1", "type": "object",
+  "required": ["protocol_version", "validator_id", "claim_id", "input_digest", "evidence_digest", "facts", "evidence_refs"],
+  "properties": {"protocol_version": {"const": "1"}, "validator_id": {"type": "string", "minLength": 1}, "claim_id": {"type": "string", "minLength": 1}, "input_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "evidence_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "facts": {"type": "array", "items": {"type": "object"}}, "evidence_refs": {"type": "array", "items": {"$ref": "adapter-envelope.schema.json#/$defs/evidence"}}}, "additionalProperties": false
+}
