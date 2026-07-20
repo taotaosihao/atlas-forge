@@ -291,6 +291,140 @@ write_lint_fixture() {
 
 write_lint_fixture fixture-artifact-lint-valid valid
 node "$artifact_lint_bin" --task fixture-artifact-lint-valid --strict >/dev/null
+
+write_backend_v2_fixture() {
+  local task="$1"
+  local marker="$2"
+  local effective="$3"
+  local lanes_json="$4"
+  local state_mode="${5:-match}"
+  local artifact="$sdd_root/artifacts/$task"
+  write_lint_fixture "$task" valid
+  mkdir -p "$artifact/evidence"
+  printf '%s\n' 'native backend evidence' > "$artifact/evidence/native.txt"
+  printf '%s\n' 'paseo backend evidence' > "$artifact/evidence/paseo.txt"
+  printf '%s\n' '# Team Decision' '' "- backend: $marker" '' \
+    'Substantive controller decision with backend provenance.' > "$artifact/team/decision.md"
+  printf '%s\n' '# Round' '' "backend: $marker" '' \
+    'Substantive backend round evidence for the sidecar contract.' > "$artifact/team/round-valid.md"
+  printf '%s\n' '# Staffing' '' "backend: $marker" '' \
+    'Substantive staffing evidence for the sidecar contract.' > "$artifact/team/staffing.md"
+  node - "$artifact" "$task" "$effective" "$lanes_json" "$state_mode" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [artifact, taskId, effectiveBackend, lanesJson, stateMode] = process.argv.slice(2);
+const lanes = JSON.parse(lanesJson);
+const requestedBackend = effectiveBackend === "none" ? "native" : effectiveBackend;
+const sidecar = {
+  schema_version: 2,
+  team_run_id: "run-0001",
+  generation: 1,
+  configured_backend: null,
+  resolved_requested_backend: requestedBackend,
+  attempted_backends: effectiveBackend === "none" ? []
+    : effectiveBackend === "mixed" ? ["native", "paseo"] : [effectiveBackend],
+  effective_backend: effectiveBackend,
+  legacy_projection: effectiveBackend === "mixed" || effectiveBackend === "none",
+  lanes,
+};
+const attempts = [];
+const dispatches = [];
+const admissions = [];
+for (const lane of lanes) {
+  const dispatchId = `dispatch-${lane.lane_id}`;
+  dispatches.push({
+    dispatch_id: dispatchId,
+    lane_id: lane.lane_id,
+    resolved_requested_backend: lane.effective_backend,
+  });
+  lane.admitted_attempt_ids.forEach((attemptId, index) => {
+    let backend = lane.effective_backend === "mixed" ? (index % 2 === 0 ? "native" : "paseo")
+      : lane.effective_backend;
+    if (stateMode === "two-native") backend = "native";
+    attempts.push({ attempt_id: attemptId, dispatch_id: dispatchId, backend, launch_invoked: true });
+  });
+  admissions.push({
+    dispatch_id: dispatchId,
+    disposition: "admitted",
+    admitted_attempt_ids: lane.admitted_attempt_ids,
+    evidence_refs: lane.evidence_refs,
+  });
+}
+const state = {
+  task_id: taskId,
+  active_team: {
+    schema_version: 2,
+    team_run_id: "run-0001",
+    generation: 1,
+    default_backend: "native",
+    configured_backend: null,
+    decision: `workflow/artifacts/${taskId}/team/decision.md`,
+    round_file: `workflow/artifacts/${taskId}/team/round-valid.md`,
+    staffing: `workflow/artifacts/${taskId}/team/staffing.md`,
+    lanes: lanes.map((lane) => ({ lane_id: lane.lane_id })),
+    dispatches,
+    attempts,
+    admissions,
+  },
+};
+fs.writeFileSync(path.join(artifact, "team", "backend-v2.json"), `${JSON.stringify(sidecar, null, 2)}\n`);
+fs.writeFileSync(path.join(artifact, "state.json"), `${JSON.stringify(state, null, 2)}\n`);
+NODE
+}
+
+valid_mixed_lanes='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":["evidence/native.txt"]},{"lane_id":"paseo-lane","effective_backend":"paseo","admitted_attempt_ids":["paseo-1"],"evidence_refs":["evidence/paseo.txt"]}]'
+write_backend_v2_fixture fixture-backend-v2-mixed mixed mixed "$valid_mixed_lanes"
+node "$artifact_lint_bin" --task fixture-backend-v2-mixed --strict >/dev/null
+
+write_backend_v2_fixture fixture-backend-v2-marker-mismatch native mixed "$valid_mixed_lanes"
+expect_fail "backend v2 rejects decision marker mismatch" node "$artifact_lint_bin" --task fixture-backend-v2-marker-mismatch --strict
+
+native_only_mixed='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":["evidence/native.txt"]}]'
+write_backend_v2_fixture fixture-backend-v2-missing-provenance mixed mixed "$native_only_mixed"
+expect_fail "backend v2 mixed requires native and paseo provenance" node "$artifact_lint_bin" --task fixture-backend-v2-missing-provenance --strict
+
+absolute_evidence='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":["/tmp/backend-evidence"]}]'
+write_backend_v2_fixture fixture-backend-v2-absolute-ref native native "$absolute_evidence"
+expect_fail "backend v2 rejects absolute evidence ref" node "$artifact_lint_bin" --task fixture-backend-v2-absolute-ref --strict
+
+escape_evidence='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":["../outside.txt"]}]'
+write_backend_v2_fixture fixture-backend-v2-escape-ref native native "$escape_evidence"
+expect_fail "backend v2 rejects parent evidence ref" node "$artifact_lint_bin" --task fixture-backend-v2-escape-ref --strict
+
+symlink_evidence='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":["evidence/native-link.txt"]}]'
+write_backend_v2_fixture fixture-backend-v2-symlink-ref native native "$symlink_evidence"
+ln -s native.txt "$sdd_root/artifacts/fixture-backend-v2-symlink-ref/evidence/native-link.txt"
+expect_fail "backend v2 rejects symlink evidence ref" node "$artifact_lint_bin" --task fixture-backend-v2-symlink-ref --strict
+
+empty_evidence='[{"lane_id":"native-lane","effective_backend":"native","admitted_attempt_ids":["native-1"],"evidence_refs":[]}]'
+write_backend_v2_fixture fixture-backend-v2-empty-evidence native native "$empty_evidence"
+node "$artifact_lint_bin" --task fixture-backend-v2-empty-evidence --strict >/dev/null
+
+write_backend_v2_fixture fixture-backend-v2-none none none '[]'
+node "$artifact_lint_bin" --task fixture-backend-v2-none --strict >/dev/null
+
+mixed_single_lane='[{"lane_id":"mixed-lane","effective_backend":"mixed","admitted_attempt_ids":["native-1","native-2"],"evidence_refs":[]}]'
+write_backend_v2_fixture fixture-backend-v2-fake-mixed mixed mixed "$mixed_single_lane" two-native
+expect_fail "backend v2 rejects two native attempts presented as mixed" node "$artifact_lint_bin" --task fixture-backend-v2-fake-mixed --strict
+
+write_backend_v2_fixture fixture-backend-v2-round-mismatch mixed mixed "$valid_mixed_lanes"
+node -e 'const fs=require("fs"); const file=process.argv[1]; fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("backend: mixed", "backend: native"));' "$sdd_root/artifacts/fixture-backend-v2-round-mismatch/team/round-valid.md"
+expect_fail "backend v2 rejects current round marker mismatch" node "$artifact_lint_bin" --task fixture-backend-v2-round-mismatch --strict
+
+write_backend_v2_fixture fixture-backend-v2-staffing-mismatch mixed mixed "$valid_mixed_lanes"
+node -e 'const fs=require("fs"); const file=process.argv[1]; fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("backend: mixed", "backend: paseo"));' "$sdd_root/artifacts/fixture-backend-v2-staffing-mismatch/team/staffing.md"
+expect_fail "backend v2 rejects current staffing marker mismatch" node "$artifact_lint_bin" --task fixture-backend-v2-staffing-mismatch --strict
+
+write_backend_v2_fixture fixture-backend-v2-tampered native native "$empty_evidence"
+node - "$sdd_root/artifacts/fixture-backend-v2-tampered/team/backend-v2.json" <<'NODE'
+const fs = require("fs");
+const file = process.argv[2];
+const sidecar = JSON.parse(fs.readFileSync(file, "utf8"));
+sidecar.attempted_backends = ["native", "paseo"];
+fs.writeFileSync(file, `${JSON.stringify(sidecar, null, 2)}\n`);
+NODE
+expect_fail "backend v2 rejects sidecar tampering" node "$artifact_lint_bin" --task fixture-backend-v2-tampered --strict
+
 write_lint_fixture fixture-critical-unresolved critical
 expect_fail "artifact lint rejects unresolved critical" node "$artifact_lint_bin" --task fixture-critical-unresolved --strict
 printf '%s\n' '{"status":"resolved","reason":"any truthy v1 controller resolution currently clears the whole verdict"}' > "$sdd_root/artifacts/fixture-critical-unresolved/team/sdd/slices/slice-001/controller-resolution.json"

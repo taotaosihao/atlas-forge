@@ -30,32 +30,49 @@ collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when
 the user asks for multiple agents or when independent lanes or a distinct
 specialist/reviewer materially serve those needs; otherwise stay with the main
 Codex. Multiple files, behavior changes, and task complexity do not by
-themselves require Team. `$atlas-workflow:team` defaults to Atlas-managed Paseo
-multi-provider coordination for Codex, Claude, DeepSeek, GLM, and Kimi Code
-CLI. Discover providers and models at runtime with `paseo provider ls --json`
-and `paseo provider models <provider> --json`; for GLM, choose the first
-provider whose discovered model list contains the required GLM family rather
-than assuming a `glm` provider exists, and use the `kimi` provider explicitly
-for Kimi Code CLI. Atlas never reads Paseo orchestration preferences: an
-explicit user provider/model selection wins, otherwise every lane uses the
-latest stable model from its provider's live catalog. Codex native
-collaboration is explicit fallback only.
-Without explicit provider choices, Atlas routes planning to Claude,
-implementation to DeepSeek, independent review to the latest discovered GLM,
-verification to Kimi Code CLI, and keeps the main Codex as integrator rather
-than defaulting every Paseo lane to Codex. Every Paseo lane must use its
-provider's full-access equivalent mode and fail closed when that mode is not
-available; runtime permission never expands discuss/review authority.
-Team records lifecycle state with `team-record-start`,
-`team-record-finalize`, and `team-loop-record`; use `--backend native|paseo`,
-require a single-line `--providers` summary for Paseo starts, and keep artifact
-backend markers aligned with the active backend.
-For substantive Team review, Atlas recommends complementary perspectives from
-the actual task rather than fixing roles or agent count. Reviewers form an
-independent first-round position and remain available for focused follow-up;
-the main Codex synthesizes and adjudicates disagreements, normally converges in
-two or three rounds, and returns persistent material disputes for human
-decision instead of extending an unproductive agent loop.
+themselves require Team.
+
+Inside `$atlas-workflow:team`, Codex native collaboration is the default.
+Paseo is an explicit, local opt-in for a whole Team, one lane, or one dispatch;
+a review choice does not implicitly select Paseo for implementation. Backend
+and fallback policy resolve independently at dispatch, lane, Team, then default
+scope. Paseo operational failures default to a Codex attempt in the same
+logical lane unless the caller explicitly selected `no-fallback`. The fallback
+keeps the original goal, paths, authority, evidence, and provider-perspective
+disclosure.
+
+When Paseo is explicitly selected, Atlas discovers provider, model, and callable
+mode capability at runtime and never reads Paseo orchestration preferences.
+Provider mode IDs are not portable and must not be hardcoded or copied across
+providers. Generic routing may recommend only models whose trusted capability
+identity is explicitly non-Claude. Any direct or gateway Claude-family model
+requires an exact provider/model manually supplied by the user or operator;
+Atlas never chooses, completes, upgrades, or substitutes a Claude model.
+Unknown model family fails closed as `MODEL_FAMILY_UNVERIFIED`.
+Attempts reference a controller-observed capability snapshot rather than
+accepting caller-authored family or digest claims. Paseo quiescence likewise
+requires a receipt correlated to the exact attempt, launch, and actor before a
+writer lease can be released.
+
+Substantive Team review uses complementary perspectives rather than a fixed
+role or agent count. Reviewers form independent first-round positions and
+remain available for focused follow-up; the main Codex synthesizes and
+adjudicates disagreements. Two or three rounds is a convergence target, not a
+limit. Persistent material disagreement becomes a concise human decision
+packet. For implementation, Atlas may run multiple agents in parallel when
+their owned paths are disjoint and an integration owner is explicit; tightly
+coupled changes retain one writable owner. A failed Paseo writer must be
+quiesced and its diff/worktree evidence preserved before a native writer can
+receive a takeover permit.
+
+Durable Team v2 records distinguish configured, resolved, attempted, admitted,
+and effective backend. Final decisions use `backend: native|paseo|mixed|none`
+matching admitted results and store stable provenance in
+`team/backend-v2.json`; strict lint re-derives that sidecar from the task v2
+state and checks the current decision, round, and staffing markers. `none`
+means no result was admitted and is never a selectable runtime backend; a
+record-only compatibility finalization does not invent attempts, admissions,
+or consensus. Legacy artifacts retain their historical native/Paseo markers.
 
 Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
 flow debugging, or explicit user acceptance of the CLI-backed team behavior.
@@ -141,7 +158,7 @@ primitive used by the update command.
 - `skills/analyze/SKILL.md`: read-only analysis entry
 - `skills/clarify/SKILL.md`: brownfield clarification entry
 - `skills/intake/SKILL.md`: grilling-style intake and plan stress-test entry
-- `skills/team/SKILL.md`: Atlas-managed Paseo multi-provider team entry with explicit Codex native fallback
+- `skills/team/SKILL.md`: Codex-native Team entry with explicit local Paseo selection and operational Codex fallback
 - `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry

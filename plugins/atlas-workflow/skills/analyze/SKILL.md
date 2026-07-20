@@ -34,7 +34,7 @@ Follow this loop:
    - `## 综合排序`
 7. Keep inference and unknown separate.
 8. If the boundary is still unclear, switch to `$atlas-workflow:clarify`.
-9. If discussion or staffing is the next step, switch to `$atlas-workflow:team` for Atlas-managed Paseo multi-provider agents. Use Codex native collaboration only as an explicit fallback when Paseo cannot satisfy the required provider/runtime path within current authority.
+9. If discussion or staffing is the next step, switch to `$atlas-workflow:team`. Team uses Codex native collaboration by default. Use Paseo only when the user or operator explicitly selects it for the Team, lane, or dispatch; an operational Paseo failure follows the recorded Codex fallback policy without expanding scope or authority.
 10. Before claiming the analysis artifact is ready for clarification, team discussion, handoff, or execution planning, run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require analysis`
 11. If the artifact is intentionally partial or exploratory, do not claim execution readiness; report the remaining unknowns instead.

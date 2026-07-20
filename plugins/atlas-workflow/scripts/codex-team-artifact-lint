@@ -277,14 +277,270 @@ function lintSliceReferences(events, slicesDir, errors) {
   }
 }
 
-function lintTeamMetadata(teamDir, errors, strict) {
+function artifactRelativeRegularFile(artifactRoot, value) {
+  if (typeof value !== "string" || value.length === 0 || path.isAbsolute(value)) {
+    return null;
+  }
+  const normalized = path.posix.normalize(value.replaceAll("\\", "/"));
+  if (normalized === ".." || normalized.startsWith("../") || normalized.includes("/../")) {
+    return null;
+  }
+  const absolute = path.resolve(artifactRoot, normalized);
+  const relative = path.relative(artifactRoot, absolute);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return null;
+  }
+  if (!canonicalRegularFile(absolute)) {
+    return null;
+  }
+  return absolute;
+}
+
+function markdownBackend(file, errors) {
+  if (!canonicalRegularFile(file)) {
+    errors.push(`${file}: team artifact must be a canonical regular non-symlink file`);
+    return null;
+  }
+  const text = fs.readFileSync(file, "utf8");
+  const matches = [...text.matchAll(/^\s*-?\s*backend:\s*(native|paseo|mixed|none)\s*$/gim)]
+    .map((match) => match[1].toLowerCase());
+  if (matches.length !== 1) {
+    errors.push(`${file}: expected exactly one backend: native|paseo|mixed|none marker`);
+    return null;
+  }
+  return matches[0];
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function deriveBackendV2(team) {
+  const attempts = Array.isArray(team.attempts) ? team.attempts : [];
+  const admissions = Array.isArray(team.admissions) ? team.admissions : [];
+  const dispatches = Array.isArray(team.dispatches) ? team.dispatches : [];
+  const attemptedBackends = [...new Set(attempts
+    .filter((attempt) => attempt.launch_invoked || attempt.bound_at
+      || attempt.running_at || attempt.runtime_agent_id)
+    .map((attempt) => attempt.backend))].sort();
+  const admittedIds = new Set(admissions
+    .filter((admission) => admission.disposition === "admitted")
+    .flatMap((admission) => admission.admitted_attempt_ids || []));
+  const effectiveBackends = new Set(attempts
+    .filter((attempt) => admittedIds.has(attempt.attempt_id))
+    .map((attempt) => attempt.backend));
+  const effectiveBackend = effectiveBackends.size === 0 ? "none"
+    : effectiveBackends.size === 1 ? [...effectiveBackends][0] : "mixed";
+  const requestedBackends = new Set(dispatches.map((dispatch) => dispatch.resolved_requested_backend));
+  const resolvedRequestedBackend = requestedBackends.size === 0
+    ? (team.configured_backend || team.default_backend || "native")
+    : requestedBackends.size === 1 ? [...requestedBackends][0] : "mixed";
+  const admissionByDispatch = new Map(admissions.map((admission) => [admission.dispatch_id, admission]));
+  const lanes = (Array.isArray(team.lanes) ? team.lanes : []).map((lane) => {
+    const laneDispatches = dispatches.filter((dispatch) => dispatch.lane_id === lane.lane_id);
+    const laneAdmissions = laneDispatches.map((dispatch) => admissionByDispatch.get(dispatch.dispatch_id))
+      .filter((admission) => admission && admission.disposition === "admitted");
+    const admittedAttemptIds = [...new Set(laneAdmissions
+      .flatMap((admission) => admission.admitted_attempt_ids || []))];
+    const laneBackends = new Set(attempts
+      .filter((attempt) => admittedAttemptIds.includes(attempt.attempt_id))
+      .map((attempt) => attempt.backend));
+    return {
+      lane_id: lane.lane_id,
+      effective_backend: laneBackends.size === 0 ? "none"
+        : laneBackends.size === 1 ? [...laneBackends][0] : "mixed",
+      admitted_attempt_ids: admittedAttemptIds,
+      evidence_refs: [...new Set(laneAdmissions.flatMap((admission) => admission.evidence_refs || []))],
+    };
+  }).filter((lane) => lane.admitted_attempt_ids.length > 0);
+  return {
+    schema_version: 2,
+    team_run_id: team.team_run_id,
+    generation: team.generation,
+    configured_backend: team.configured_backend ?? null,
+    resolved_requested_backend: resolvedRequestedBackend,
+    attempted_backends: attemptedBackends,
+    effective_backend: effectiveBackend,
+    legacy_projection: effectiveBackend === "mixed" || effectiveBackend === "none",
+    lanes,
+  };
+}
+
+function validateCurrentTeamArtifacts(artifactRoot, teamDir, team, effectiveBackend, errors) {
+  const references = [
+    ["decision", team.decision],
+    ["round", team.round_file],
+    ["staffing", team.staffing],
+  ];
+  for (const [label, reference] of references) {
+    if (typeof reference !== "string" || !reference.trim()) {
+      errors.push(`${teamDir}: v2 state is missing current ${label} artifact reference`);
+      continue;
+    }
+    const normalized = path.posix.normalize(reference.replaceAll("\\", "/"));
+    const expectedSuffix = `/artifacts/${path.basename(artifactRoot)}/team/${path.posix.basename(normalized)}`;
+    if (path.isAbsolute(reference) || normalized.includes("../")
+      || !`/${normalized}`.endsWith(expectedSuffix)) {
+      errors.push(`${teamDir}: current ${label} artifact reference is outside this task team: ${reference}`);
+      continue;
+    }
+    const file = path.join(teamDir, path.posix.basename(normalized));
+    const marker = markdownBackend(file, errors);
+    if (marker && marker !== effectiveBackend) {
+      errors.push(`${file}: backend ${marker} does not match sidecar effective_backend ${effectiveBackend}`);
+    }
+  }
+}
+
+function validateBackendV2Sidecar(artifactRoot, teamDir, errors) {
+  const file = path.join(teamDir, "backend-v2.json");
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  if (!canonicalRegularFile(file)) {
+    errors.push(`${file}: backend v2 sidecar must be a canonical regular non-symlink file`);
+    return null;
+  }
+  const sidecar = readJson(file, errors);
+  if (!sidecar || typeof sidecar !== "object" || Array.isArray(sidecar)) {
+    return null;
+  }
+  if (sidecar.schema_version !== 2) {
+    errors.push(`${file}: schema_version must be 2`);
+  }
+  try {
+    safeId("team_run_id", sidecar.team_run_id);
+  } catch (error) {
+    errors.push(`${file}: ${error.message}`);
+  }
+  if (!Number.isInteger(sidecar.generation) || sidecar.generation < 1) {
+    errors.push(`${file}: generation must be a positive integer`);
+  }
+  const configured = new Set([null, "native", "paseo"]);
+  if (!configured.has(sidecar.configured_backend)) {
+    errors.push(`${file}: configured_backend must be null|native|paseo`);
+  }
+  if (!new Set(["native", "paseo", "mixed"]).has(sidecar.resolved_requested_backend)) {
+    errors.push(`${file}: resolved_requested_backend must be native|paseo|mixed`);
+  }
+  if (!Array.isArray(sidecar.attempted_backends)
+    || sidecar.attempted_backends.some((backend) => !new Set(["native", "paseo"]).has(backend))
+    || new Set(sidecar.attempted_backends).size !== sidecar.attempted_backends.length) {
+    errors.push(`${file}: attempted_backends must be a unique native|paseo array`);
+  }
+  if (!new Set(["native", "paseo", "mixed", "none"]).has(sidecar.effective_backend)) {
+    errors.push(`${file}: effective_backend must be native|paseo|mixed|none`);
+  }
+  if (typeof sidecar.legacy_projection !== "boolean") {
+    errors.push(`${file}: legacy_projection must be boolean`);
+  }
+  if (!Array.isArray(sidecar.lanes)) {
+    errors.push(`${file}: lanes must be an array`);
+    return sidecar;
+  }
+
+  const laneIds = new Set();
+  const admittedLaneBackends = new Set();
+  let mixedLaneProvenance = false;
+  for (const [index, lane] of sidecar.lanes.entries()) {
+    const label = `${file}: lanes[${index}]`;
+    if (!lane || typeof lane !== "object" || Array.isArray(lane)) {
+      errors.push(`${label} must be an object`);
+      continue;
+    }
+    try {
+      safeId("lane_id", lane.lane_id);
+    } catch (error) {
+      errors.push(`${label}: ${error.message}`);
+      continue;
+    }
+    if (laneIds.has(lane.lane_id)) {
+      errors.push(`${label}: duplicate lane_id ${lane.lane_id}`);
+    }
+    laneIds.add(lane.lane_id);
+    if (!new Set(["native", "paseo", "mixed"]).has(lane.effective_backend)) {
+      errors.push(`${label}: effective_backend must be native|paseo|mixed`);
+    } else {
+      admittedLaneBackends.add(lane.effective_backend);
+    }
+    if (!Array.isArray(lane.admitted_attempt_ids) || lane.admitted_attempt_ids.length === 0) {
+      errors.push(`${label}: admitted_attempt_ids must be a non-empty array`);
+    } else {
+      const attemptIds = new Set();
+      for (const attemptId of lane.admitted_attempt_ids) {
+        try {
+          safeId("admitted attempt id", attemptId);
+        } catch (error) {
+          errors.push(`${label}: ${error.message}`);
+          continue;
+        }
+        if (attemptIds.has(attemptId)) {
+          errors.push(`${label}: duplicate admitted attempt id ${attemptId}`);
+        }
+        attemptIds.add(attemptId);
+      }
+      if (lane.effective_backend === "mixed" && attemptIds.size >= 2) {
+        mixedLaneProvenance = true;
+      }
+    }
+    if (!Array.isArray(lane.evidence_refs)) {
+      errors.push(`${label}: evidence_refs must be an array`);
+    } else {
+      for (const evidenceRef of lane.evidence_refs) {
+        if (!artifactRelativeRegularFile(artifactRoot, evidenceRef)) {
+          errors.push(`${label}: invalid or missing artifact-relative evidence_ref ${String(evidenceRef)}`);
+        }
+      }
+    }
+  }
+
+  if (sidecar.effective_backend === "mixed"
+    && !(admittedLaneBackends.has("native") && admittedLaneBackends.has("paseo"))
+    && !mixedLaneProvenance) {
+    errors.push(`${file}: mixed effective_backend requires admitted native+paseo lane provenance or a mixed lane with at least two admitted attempts`);
+  }
+  if (sidecar.effective_backend === "native"
+    && [...admittedLaneBackends].some((backend) => backend !== "native")) {
+    errors.push(`${file}: native effective_backend conflicts with admitted lane backend provenance`);
+  }
+  if (sidecar.effective_backend === "paseo"
+    && [...admittedLaneBackends].some((backend) => backend !== "paseo")) {
+    errors.push(`${file}: paseo effective_backend conflicts with admitted lane backend provenance`);
+  }
+  if (sidecar.effective_backend === "none" && sidecar.lanes.length > 0) {
+    errors.push(`${file}: none effective_backend cannot contain admitted lanes`);
+  }
+
+  const stateFile = path.join(artifactRoot, "state.json");
+  if (!canonicalRegularFile(stateFile)) {
+    errors.push(`${file}: backend v2 sidecar requires canonical task state.json`);
+    return sidecar;
+  }
+  const state = readJson(stateFile, errors);
+  const team = state && state.active_team;
+  if (!team || team.schema_version !== 2) {
+    errors.push(`${stateFile}: active_team schema_version must be 2 for backend v2 sidecar`);
+    return sidecar;
+  }
+  const derived = deriveBackendV2(team);
+  if (JSON.stringify(stableValue(sidecar)) !== JSON.stringify(stableValue(derived))) {
+    errors.push(`${file}: sidecar does not match backend provenance derived from state.json`);
+  }
+  validateCurrentTeamArtifacts(artifactRoot, teamDir, team, sidecar.effective_backend, errors);
+  return sidecar;
+}
+
+function lintTeamMetadata(artifactRoot, teamDir, errors, strict) {
   if (!strict) {
     return;
   }
+  const sidecar = validateBackendV2Sidecar(artifactRoot, teamDir, errors);
   for (const file of walkFiles(teamDir).filter((item) => /round-.*\.md$/.test(path.basename(item)))) {
     const text = fs.readFileSync(file, "utf8");
-    if (!/(^|\n)-?\s*backend:\s*native(\n|$)/.test(text)) {
-      errors.push(`${file}: missing backend: native metadata`);
+    if (!sidecar && !/(^|\n)-?\s*backend:\s*native(\n|$)/.test(text)) {
+      errors.push(`${file}: missing backend: native metadata for legacy/native v1 artifact`);
     }
   }
 }
@@ -693,7 +949,7 @@ function lint(options) {
   lintBriefs(sliceDirs, errors);
   lintReviewVerdicts(sliceDirs, errors, options.strict, options.task);
   lintPathLeases(sddDir, errors);
-  lintTeamMetadata(teamDir, errors, options.strict);
+  lintTeamMetadata(artifactRoot, teamDir, errors, options.strict);
   lintPlaceholderArtifacts(teamDir, errors, options.strict);
   lintForbiddenTerms(sddDir, errors);
   if (options.businessAcceptance) {

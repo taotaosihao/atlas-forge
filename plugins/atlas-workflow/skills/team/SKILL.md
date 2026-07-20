@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use the Atlas team flow with Paseo-managed multi-provider agents, with Codex native collaboration only as an explicit fallback.
+description: Use the Atlas team flow with Codex native collaboration by default and Paseo only when it is explicitly selected for a Team, lane, or dispatch.
 ---
 
 Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves.
@@ -9,61 +9,23 @@ Decide whether Team is needed from the user's current request, including the req
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors when accuracy benefits.
 
-## Default Management Layer
+## Backend Selection
 
-Atlas Team defaults to Paseo as the agent management layer. Do not reuse, invoke, or mirror the Paseo skill workflow. Atlas owns the management rules here and uses Paseo only as a runtime/control plane.
+Team selection and backend selection are separate decisions. A request for `$atlas-workflow:team`, multiple agents, parallel work, specialist review, or a difficult task does not select Paseo.
 
-- Discover providers at runtime with `paseo provider ls --json`.
-- Discover models for a concrete provider with `paseo provider models <provider> --json`.
-- Do not hardcode provider or model availability from repo assumptions.
-- Never read or apply Paseo orchestration preferences. Atlas owns provider/model routing; Paseo only manages agent lifecycle.
-- An explicit user provider/model request wins. Otherwise, select the latest available stable model from the provider's live model catalog for every lane.
-- Record Paseo rounds with `codex-workflow team-record-start ... --backend paseo --providers "<single-line providers>"`.
-- The `--providers` field is required for `--backend paseo`, must stay on one line, and should summarize the actual provider/model routing selected for the round.
+- Outside Team, stay with the main Codex unless Team materially reduces latency or risk.
+- Inside Team, default to Codex native collaboration.
+- Select Paseo only from an explicit user or operator choice scoped to the Team, a lane, or one dispatch. Resolve backend and fallback policy independently in this order: dispatch, lane, Team, then `backend=native` and `fallback_policy=codex`.
+- A review-lane Paseo choice does not transfer to implementation. A Team-level Paseo choice may be overridden by an explicit native lane or dispatch.
+- `no-fallback` is an explicit opt-out and normalizes to `fallback_policy=none`; otherwise an operational Paseo failure falls back to Codex in the same logical lane.
+- Preserve the resolved backend, policy, authority, goal, paths, and mutation permissions when work starts. Later configuration changes do not rewrite an active dispatch.
+- Never read or apply Paseo orchestration preferences. Atlas owns routing; Paseo only manages an explicitly selected runtime lifecycle.
 
-### Provider Selection Contract
+When durable Team state has audit or handoff value, use the v2 Team ledger commands to record controller-attested selection, dispatch, attempt, admission, fallback, and convergence. A free-form provider summary or the presence of Paseo is not proof that Paseo was selected.
 
-- `codex`: prefer the discovered `codex` provider for Codex CLI; otherwise report that the requested route is unavailable.
-- `claude`: prefer the discovered `claude` provider for Claude Code; use another provider only when the user asked for that gateway/model route.
-- `deepseek`: prefer the discovered `deepseek` provider for DeepSeek CLI; use another provider only when the user asked for that gateway/model route.
-- `glm`: select the first discovered provider whose model list contains the required GLM model family. Do not assume a `glm` provider exists.
-- `kimi code cli`: use the `kimi` provider explicitly and discover its available models with `paseo provider models kimi --json`.
+## Codex Native Collaboration
 
-Prefer a single concise provider summary line such as `planner=claude/<model-id>; implementer=deepseek/<model-id>; reviewer=<provider>/<glm-model-id>; verifier=kimi/<model-id>`.
-
-### Default Provider Assignment
-
-An explicit user role/provider assignment always wins. When the user does not choose providers, assign only the roles the task actually needs with these Atlas-owned defaults:
-
-- planning, architecture, product reasoning, and difficult tradeoffs: `claude`;
-- implementation and focused repair: `deepseek`;
-- independent review, adversarial review, and security/architecture counterarguments: the discovered provider carrying the latest stable `glm` model;
-- verification, test evidence, and long-context repository checking: `kimi` through Kimi Code CLI;
-- integration and final adjudication: the main Codex controller, not another default Paseo lane.
-
-Do not default every lane to Codex. If a default non-Codex route is unavailable, prefer another discovered non-Codex provider that can satisfy the role, keep reviewer and implementer providers distinct when independent review matters, and disclose the substitution. Use a Codex Paseo lane only when the user requests it or no suitable non-Codex route remains.
-
-### Latest Model Contract
-
-1. If the user specifies a model, use that exact discovered model when available; do not replace it with an Atlas default.
-2. Otherwise, query `paseo provider models <provider> --json` immediately before starting the lane. Prefer the catalog entry explicitly marked as latest or current.
-3. If the catalog has no latest/current marker, use its first stable, non-preview model. Treat the live catalog order as authoritative instead of comparing hardcoded version strings.
-4. Do not select an older, free, preview, compatibility, or fallback model merely because it is cheaper. Use one only when the user requests it or the latest stable model is unavailable, and disclose the fallback.
-5. Resolve the model separately for every selected provider. Never copy one provider's model, thinking option, or mode onto another provider.
-
-### Minimal Paseo Control Plane
-
-- Every Atlas-managed Paseo lane requires the provider's full-access mode. Resolve the live provider-specific mode and start one bounded lane with `paseo run --detach --json --provider <provider> [--model <model-id>] --mode <full-access-mode-id> --cwd <repo> "<prompt>"`. Capture the returned agent and workspace identifiers; reuse the workspace for related lanes instead of creating unrelated workspaces.
-- Current full-access mode IDs are `full-access` for Codex, `bypass` for Claude/DeepSeek and gateway providers such as ZenMux, and `yolo` for Kimi Code CLI. Confirm that the selected provider still exposes the required mode before launch. If it does not, fail closed; do not silently start in a less permissive mode.
-- Send focused follow-up work with `paseo send <agent-id> --no-wait --json "<prompt>"`.
-- Wait for real completion with `paseo wait <agent-id> --json`; do not busy-poll `paseo ls` or `paseo inspect`.
-- Stop a lane that is out of scope, stalled, or no longer useful with `paseo stop <agent-id> --json`. Do not restart the Paseo daemon, delete agents, archive worktrees, or mutate provider configuration without separate authority.
-- Provider models, thinking options, and modes are provider-specific. Omit `--thinking` unless its exact ID has been discovered for that provider; never copy Codex settings onto Claude, DeepSeek, GLM, or Kimi. Full-access runtime permission does not grant implementation authority: discuss and review prompts remain read-only unless the user separately authorizes writes.
-- Prompts must carry the repository instructions, owned paths, forbidden paths, authority mode, expected evidence, and stop condition. Paseo manages lifecycle; it does not expand the lane's permissions.
-
-## Explicit Native Fallback
-
-Codex native collaboration is fallback-only. Use it only when the user explicitly asks for native collaboration or when Paseo cannot satisfy the required provider/runtime path and the fallback remains within current authority.
+Native collaboration is the normal Team backend. Use the smallest useful set of concrete lanes:
 
 - `collaboration.spawn_agent` for concrete bounded lanes that can run independently.
 - `collaboration.send_message` for information that does not need a new turn.
@@ -72,11 +34,43 @@ Codex native collaboration is fallback-only. Use it only when the user explicitl
 - `collaboration.list_agents` to inspect current capacity and status.
 - `collaboration.interrupt_agent` only to stop work that is still running and should no longer continue.
 
-If native fallback is used, record it with `--backend native`. Do not silently fall back to legacy CLI lanes, and do not treat native fallback as the default.
+Start with the main Codex, but prefer parallel native agents when the authorized implementation decomposes into genuinely independent path/module ownership and parallelism materially improves latency. Do not impose a fixed role set or agent count. Tightly coupled changes keep one writable owner; multiple writers require disjoint path ownership, an integration owner, and no overlapping writer lease. Agent completion is evidence, not controller admission.
 
-## Native Fallback Model Preferences And Calibration
+## Explicit Paseo Lanes
 
-Before the first native fallback lane that may select an Atlas SDD custom agent, prefer running:
+Only after a Team/lane/dispatch has resolved to Paseo:
+
+- Discover providers with `paseo provider ls --json`, and discover models and callable modes from the selected provider's live structured capability.
+- Do not hardcode provider/model availability, catalog order, “latest” status, thinking options, or mode IDs. Never copy a Codex mode or model option to another provider.
+- Generic Atlas recommendations may consider only models whose trusted capability identity is explicitly non-Claude. Keep implementer and independent reviewer providers distinct when that perspective matters, but do not create lanes only to achieve provider diversity.
+- An explicit provider/model request wins when the exact live capability exists. Do not silently replace an unavailable exact provider/model with another provider/model; apply the recorded Codex fallback policy and disclose the lost perspective.
+- Resolve a provider-specific mode that satisfies the lane. If the live capability exposes only a display label or no callable mode ID, treat the Paseo path as unavailable; do not guess `full-access`, `bypass`, `bypassPermissions`, `yolo`, or any other ID.
+- Runtime permission does not grant workflow authority. Review/discuss stays read-only; writable execution still requires explicit user authorization, owned and forbidden paths, acceptance, verification, and a stop condition.
+- Prompts carry repository instructions, scope, authority, expected evidence, and stop conditions.
+
+### Claude Manual-Only Gate
+
+Claude-family models are never eligible for automatic routing or model recommendation, whether exposed by the direct `claude` provider or through a gateway.
+
+- Use Claude only when the user or operator manually supplies an exact provider and model ID in a controller-attested model-selection event for the current Team run and scope.
+- Live catalog discovery may validate that exact selection; it must not choose, complete, upgrade, or substitute a Claude model.
+- Classify model identity from trusted structured capability as `claude`, `non-claude`, or `unknown`. A gateway alias or insufficient metadata is `unknown`, not non-Claude.
+- Missing exact manual Claude selection returns `CLAUDE_MODEL_SELECTION_REQUIRED`. Unknown family returns `MODEL_FAMILY_UNVERIFIED`. Neither condition starts an agent or counts as an operational fallback.
+- If a valid manually selected Claude model is unavailable at runtime, preserve the requested perspective and use the recorded Codex fallback policy; never silently choose another Claude model.
+
+### Paseo Lifecycle And Codex Fallback
+
+- Reserve the attempt and any path-scoped writer lease before `paseo run`; bind the returned exact agent/workspace/worktree identity immediately after launch. Use a stable launch operation ID so recovery can reconcile a run/bind crash window without launching a second actor.
+- If the runtime cannot reconcile an indeterminate launch, keep the attempt `launch-state-unknown`, retain its writer lease, and return for human handling. Do not retry, fall back, or start a second actor.
+- Reuse an existing reviewer with exact-ID `send` and wait for real completion; do not busy-poll. Stop only the exact actor when continued execution would conflict, exceed scope, or waste material resources. Never use broad stop, daemon restart, agent delete, or provider mutation.
+- Treat quota/credits, trusted 429/Retry-After, provider/model/mode/auth unavailability, CLI/daemon failure, runtime crash, and timeout with no useful output as operational failures only when a trusted control/runtime observation supports the classification. Task output, tests, code defects, review findings, disagreement, or missing authority are not backend failures.
+- An automatic retry is a new append-only attempt, happens at most once for a dispatch, and requires the predecessor to be quiesced. Fallback likewise requires a quiesced Paseo predecessor.
+- Before a writable fallback, preserve diff/worktree/base/head/untracked evidence, prove the original writer is quiesced, and obtain a takeover permit and non-overlapping lease. If any fact is unknown, stop the lane instead of starting another writer.
+- Atomically record the fallback event and reserve the native attempt in the same logical lane. The native actor continues the same goal, paths, authority, acceptance, and admitted evidence; fallback never widens scope or hides Paseo provenance.
+
+## Native Model Preferences And Calibration
+
+Before the first native lane that may select an Atlas SDD custom agent, prefer running:
 
 ```bash
 workflow/bin/atlas-agent-model-policy check
@@ -120,10 +114,11 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 ### Execute
 
 - Use execute only after an explicit user implementation request. Do not infer it from a plan, review, decision file, roadmap, or prior discuss round.
-- Record execute start or promotion with the explicit message reference:
+- Record execute start or promotion with the explicit message reference. Native is the default; an explicitly selected Paseo Team also records its controller-attested selection authority:
 
 ```bash
-codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode execute --agents <N> --roles "<roles>" --providers "<providers>" --authorization-ref <user-message-ref>
+codex-workflow team-record-start <task-id> "<objective>" --mode execute --authorization-ref <user-message-ref>
+codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode execute --selection-authority-kind user-message --selection-authority-ref <user-message-ref> --authorization-ref <user-message-ref>
 codex-workflow team-promote <task-id> --to execute --authorization-ref <user-message-ref>
 ```
 
@@ -188,12 +183,16 @@ Load optional protocol references only when the current contract actually requir
 - Read `references/code-review.md` when a substantive code or merge-readiness review needs the optional perspective menu, evidence checklist, focused deliberation prompts, or synthesis shape.
 - First-code and Product/UI gates belong to the selected implementation contract and the clarify/task skills; do not duplicate their full rules here.
 
+## Final Disclosure
+
+When Paseo was selected or a fallback occurred, report the selection scope and authority, configured/resolved/attempted/effective backend, actual provider/model/mode when verified, operational failure class, controlled retry, fallback actor, and preserved output/diff/worktree evidence. State any lost provider perspective or reduction in independent evidence, the review convergence state, and concrete human choices. Mark unavailable live capability as unverified; a fake or hermetic adapter never proves a real provider is usable.
+
 ## Lifecycle Recording
 
 - Use `team-record-start` and `team-record-finalize` only when durable Team state has handoff or audit value.
 - Use `team-loop-record` to record a loop conclusion when an explicit iterative task needs durable telemetry; do not make numeric limits the default goal definition.
 - Use `workflow/artifacts/<task-id>/team/decision.md` as the durable decision only when a substantive Team round occurred.
-- Team round, decision, staffing, and loop artifacts must include a backend marker matching the current backend: `backend: paseo` for Paseo rounds and `backend: native` for explicit native fallback rounds.
+- Team decision artifacts use `backend: native|paseo|mixed|none` matching admitted results; `none` means no result was admitted and is never a selectable runtime backend. A v2 finalization writes stable provenance to `team/backend-v2.json`; mixed results remain traceable to admitted native and Paseo attempts. Legacy artifacts without that sidecar retain their historical native/Paseo marker contract.
 - Keep raw logs and intermediate agent output outside Git. Persist the smallest conclusion required for verification or handoff.
 
 In the final reply, report the task id, actual agents used, integrated outcome, verification, commits, and actionable residual risk.

@@ -1,7 +1,7 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260720095439",
-  "description": "Atlas workflow plugin for bounded local Codex work with Paseo-managed multi-provider team coordination.",
+  "version": "0.1.0+codex.20260720154112",
+  "description": "Atlas workflow plugin for bounded local Codex work with Codex-native team coordination and explicit Paseo lanes.",
   "author": {
     "name": "Local Atlas",
     "email": "local-atlas@example.invalid",
@@ -38,8 +38,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Atlas Workflow",
-    "shortDescription": "Atlas entry plugin for bounded workflow, Paseo-backed $atlas-workflow:team, legacy $atlas-workflow:team-v1, and related planning skills",
-    "longDescription": "Adds Atlas workflow, task, grilling-style intake, office-hours, brainstorm, analyze, clarify, Paseo-backed multi-provider team, legacy team-v1, learning, design-review, worktree, and finish entrypoints as local plugin skills so `$atlas-workflow:cw`, `$atlas-workflow:task`, `$atlas-workflow:intake`, `$atlas-workflow:office-hours`, `$atlas-workflow:brainstorm`, `$atlas-workflow:analyze`, `$atlas-workflow:clarify`, `$atlas-workflow:team`, `$atlas-workflow:team-v1`, `$atlas-workflow:learn`, `$atlas-workflow:design-review`, `$atlas-workflow:worktree`, and `$atlas-workflow:finish` stay available even when custom slash prompts are unavailable. `$atlas-workflow:team` uses Atlas-owned rules over Paseo runtime discovery for Codex, Claude, DeepSeek, GLM, and Kimi Code CLI, while reserving Codex native collaboration for explicit fallback. Use `$atlas-workflow:intake` for grill, grilling, stress-test, and pressure-test requests before building.",
+    "shortDescription": "Atlas entry plugin for bounded workflow, Codex-native $atlas-workflow:team with explicit Paseo lanes, legacy team-v1, and planning skills",
+    "longDescription": "Adds Atlas workflow, task, grilling-style intake, office-hours, brainstorm, analyze, clarify, Codex-native team, legacy team-v1, learning, design-review, worktree, and finish entrypoints as local plugin skills so `$atlas-workflow:cw`, `$atlas-workflow:task`, `$atlas-workflow:intake`, `$atlas-workflow:office-hours`, `$atlas-workflow:brainstorm`, `$atlas-workflow:analyze`, `$atlas-workflow:clarify`, `$atlas-workflow:team`, `$atlas-workflow:team-v1`, `$atlas-workflow:learn`, `$atlas-workflow:design-review`, `$atlas-workflow:worktree`, and `$atlas-workflow:finish` stay available even when custom slash prompts are unavailable. `$atlas-workflow:team` uses Codex native collaboration by default; Paseo is selected explicitly per Team, lane, or dispatch and falls back to Codex on operational failure unless no-fallback was explicitly requested. Claude-family models are manual exact-model selections only. Use `$atlas-workflow:intake` for grill, grilling, stress-test, and pressure-test requests before building.",
     "developerName": "Local Atlas",
     "category": "Productivity",
     "capabilities": [
@@ -49,7 +49,7 @@
     "defaultPrompt": [
       "\u751f\u6210\u9879\u76ee\u6587\u6863\u3001workflow artifacts \u548c\u7528\u6237\u603b\u7ed3\u65f6\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00\u3002",
       "Use $atlas-workflow:task for bounded implementation or diagnosis; use $atlas-workflow:clarify when boundaries are unclear.",
-      "Use Paseo-backed $atlas-workflow:team; use Codex native fallback or $atlas-workflow:team-v1 only when explicitly requested."
+      "Use Codex-native $atlas-workflow:team. Paseo requires explicit Team/lane/dispatch selection; never auto-select Claude models."
     ],
     "brandColor": "#0F766E"
   }
