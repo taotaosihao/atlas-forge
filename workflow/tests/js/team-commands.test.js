@@ -87,6 +87,24 @@ function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000
   );
 }
 
+function startPaseoRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
+  return runRecordStart(
+    parseRecordStartArgs([
+      taskId,
+      "implement the bounded paseo team slice",
+      "--backend=paseo",
+      "--mode",
+      "discuss",
+      "--agents=4",
+      "--roles",
+      "planner,implementer,reviewer,verifier",
+      "--providers",
+      "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
+    ]),
+    { clock: clockAt(clock), environment },
+  );
+}
+
 function writeNativeArtifacts(paths, taskId) {
   const directory = teamDir(paths, taskId);
   const round = path.join(directory, "round-native.md");
@@ -105,6 +123,37 @@ function writeNativeArtifacts(paths, taskId) {
     `# Staffing
 
 - backend: native
+
+## Ownership
+
+Only the integration owner writes the dispatcher.
+
+## Verification
+
+Node tests and repository contracts provide evidence.
+`,
+  );
+  return { decision, round, staffing };
+}
+
+function writePaseoArtifacts(paths, taskId) {
+  const directory = teamDir(paths, taskId);
+  const round = path.join(directory, "round-paseo.md");
+  const decision = teamDecisionFile(paths, taskId);
+  const staffing = teamStaffingFile(paths, taskId);
+  fs.writeFileSync(
+    round,
+    "# Paseo Round\n\n- backend: paseo\n\n## Evidence\nThe paseo execution round completed with contract evidence.\n",
+  );
+  fs.writeFileSync(
+    decision,
+    "# Team Decision\n\n- backend: paseo\n\n## Primary Decision\nUse the bounded JavaScript paseo-team implementation.\n",
+  );
+  fs.writeFileSync(
+    staffing,
+    `# Staffing
+
+- backend: paseo
 
 ## Ownership
 
@@ -148,6 +197,22 @@ test("record-start validates and records native running state", (t) => {
     () =>
       runRecordStart(
         parseRecordStartArgs([
+          taskId,
+          "objective",
+          "--backend=native",
+          "--mode=discuss",
+          "--agents=1",
+          "--roles=executor",
+          "--providers=codex/model",
+        ]),
+        { environment },
+      ),
+    /native team backend does not accept providers/,
+  );
+  assert.throws(
+    () =>
+      runRecordStart(
+        parseRecordStartArgs([
           "missing-task",
           "objective",
           "--backend=native",
@@ -175,11 +240,72 @@ test("record-start validates and records native running state", (t) => {
   const state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.active_team.agents, 3);
   assert.equal(state.active_team.roles, "executor,reviewer,verifier");
+  assert.equal(state.active_team.providers, "");
   assert.equal(state.active_team.temp_dir, "");
   assert.equal(fs.existsSync(`${teamLockFile(taskId, environment)}.dir`), false);
   assert.deepEqual(readEvents(paths, taskId).at(-1), {
     kind: "team-record-start",
     detail: "native/discuss roles=executor,reviewer,verifier",
+    created_at: "2026-07-10T12:01:00Z",
+  });
+});
+
+test("record-start requires single-line providers for paseo backend", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Record paseo start");
+  assert.throws(
+    () =>
+      runRecordStart(
+        parseRecordStartArgs([
+          taskId,
+          "objective",
+          "--backend=paseo",
+          "--mode=discuss",
+          "--agents=2",
+          "--roles=planner,reviewer",
+        ]),
+        { environment },
+      ),
+    /missing paseo providers/,
+  );
+  assert.throws(
+    () =>
+      runRecordStart(
+        parseRecordStartArgs([
+          taskId,
+          "objective",
+          "--backend=paseo",
+          "--mode=discuss",
+          "--agents=2",
+          "--roles=planner,reviewer",
+          "--providers",
+          "codex=gpt-5.6\nclaude=sonnet-4",
+        ]),
+        { environment },
+      ),
+    /unsafe paseo providers: reason must be a single non-empty line/,
+  );
+
+  const result = startPaseoRecord(environment, taskId);
+  assert.deepEqual(result.lines, [
+    `task_id: ${taskId}`,
+    "backend: paseo",
+    "mode: discuss",
+    "status: running",
+    `decision: ${teamDecisionFile(paths, taskId)}`,
+    `staffing: ${teamStaffingFile(paths, taskId)}`,
+    "providers: codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
+  ]);
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.backend, "paseo");
+  assert.equal(
+    state.active_team.providers,
+    "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
+  );
+  assert.equal(state.active_team.temp_dir, "");
+  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+    kind: "team-record-start",
+    detail: "paseo/discuss roles=planner,implementer,reviewer,verifier",
     created_at: "2026-07-10T12:01:00Z",
   });
 });
@@ -300,6 +426,71 @@ test("finalize records complete native artifacts", (t) => {
   });
 });
 
+test("finalize records complete paseo artifacts with matching backend markers", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Finalize paseo record");
+  startPaseoRecord(environment, taskId);
+  const { decision, round, staffing } = writePaseoArtifacts(paths, taskId);
+  const result = runRecordFinalize(
+    parseRecordFinalizeArgs([
+      taskId,
+      "--backend",
+      "paseo",
+      "--status",
+      "complete",
+      "--round",
+      round,
+      "--decision",
+      decision,
+      "--staffing",
+      staffing,
+    ]),
+    { clock: clockAt("2026-07-10T12:02:00.000Z"), environment },
+  );
+  assert.deepEqual(result.lines, [
+    `task_id: ${taskId}`,
+    "backend: paseo",
+    "status: complete",
+    `decision: ${decision}`,
+    `staffing: ${staffing}`,
+    `round: ${round}`,
+  ]);
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.status, "complete");
+  assert.match(state.active_team.round_file, /team\/round-paseo\.md$/);
+  assert.equal(
+    state.active_team.providers,
+    "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
+  );
+  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+    kind: "team-record-finalize",
+    detail: `paseo/complete round=${state.active_team.round_file}`,
+    created_at: "2026-07-10T12:02:00Z",
+  });
+});
+
+test("finalize rejects a backend that does not match the active team", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Reject cross-backend finalize");
+  startNativeRecord(environment, taskId);
+  const { decision, round, staffing } = writePaseoArtifacts(paths, taskId);
+  assert.throws(
+    () =>
+      runRecordFinalize(
+        parseRecordFinalizeArgs([
+          taskId,
+          "--backend=paseo",
+          "--status=complete",
+          `--round=${round}`,
+          `--decision=${decision}`,
+          `--staffing=${staffing}`,
+        ]),
+        { environment },
+      ),
+    /team-record-finalize requires an active paseo team record in running status/,
+  );
+});
+
 test("loop-record validates and records terminal loop state", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Record native loop");
@@ -350,6 +541,43 @@ test("loop-record validates and records terminal loop state", (t) => {
   assert.match(readEvents(paths, taskId).at(-1).detail, /iterations=1$/);
 });
 
+test("loop-record validates paseo backend markers and preserves providers", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Record paseo loop");
+  startPaseoRecord(environment, taskId);
+  const loop = path.join(teamDir(paths, taskId), "loop-paseo.md");
+  fs.writeFileSync(
+    loop,
+    "# Paseo Loop\n\n- backend: paseo\n\n## Evidence\nThe paseo loop completed with sufficient verification evidence.\n",
+  );
+  const result = runLoopRecord(
+    parseLoopRecordArgs([
+      taskId,
+      "--backend=paseo",
+      "--status=loop-done",
+      `--loop=${loop}`,
+      "--iterations=2",
+      "--max-time=15m",
+    ]),
+    { clock: clockAt("2026-07-10T12:03:00.000Z"), environment },
+  );
+  assert.deepEqual(result.lines, [
+    `task_id: ${taskId}`,
+    "backend: paseo",
+    "status: loop-done",
+    `loop: ${loop}`,
+    "iterations: 2",
+  ]);
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.status, "loop-done");
+  assert.equal(state.active_team.loop.iteration, 2);
+  assert.equal(
+    state.active_team.providers,
+    "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
+  );
+  assert.match(readEvents(paths, taskId).at(-1).detail, /paseo\/loop-done .*iterations=2$/);
+});
+
 test("status and stop preserve shared legacy team fields", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Legacy status projection");
@@ -370,6 +598,7 @@ test("status and stop preserve shared legacy team fields", (t) => {
       "active_team.objective": "legacy objective",
       "active_team.agents": "2",
       "active_team.roles": "worker,verifier",
+      "active_team.providers": "claude=sonnet",
       "active_team.round_file": "legacy/round.md",
       "active_team.staffing": "legacy/staffing.md",
       "active_team.temp_dir": "/tmp/legacy-team",
@@ -383,7 +612,7 @@ test("status and stop preserve shared legacy team fields", (t) => {
     clock,
   );
   const status = runStatus([taskId], { clock, environment });
-  assert.equal(status.lines.length, 20);
+  assert.equal(status.lines.length, 21);
   assert.deepEqual(status.lines.slice(4), [
     "team_backend: legacy",
     "team_mode: execute",
@@ -392,6 +621,7 @@ test("status and stop preserve shared legacy team fields", (t) => {
     "team_objective: legacy objective",
     "team_agents: 2",
     "team_roles: worker,verifier",
+    "team_providers: claude=sonnet",
     "team_round: legacy/round.md",
     "team_staffing: legacy/staffing.md",
     "team_temp_dir: /tmp/legacy-team",
@@ -412,6 +642,7 @@ test("status and stop preserve shared legacy team fields", (t) => {
   assert.equal(stopped.active_team.backend, "legacy");
   assert.equal(stopped.active_team.loop.status, "loop-failed");
   assert.equal(stopped.active_team.promoted_to, "worktree");
+  assert.equal(stopped.active_team.providers, "claude=sonnet");
   assert.equal(readEvents(paths, taskId).at(-1).kind, "team-stop");
 });
 

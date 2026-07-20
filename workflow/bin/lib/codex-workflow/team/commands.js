@@ -21,11 +21,11 @@ const {
 } = require("../task/runtime");
 
 const RECORD_START_USAGE =
-  'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native --mode discuss|execute --agents N --roles "<roles>" [--authorization-ref <user-message-ref>]';
+  'usage: codex-workflow team-record-start <task-id> "<objective>" --backend native|paseo --mode discuss|execute --agents N --roles "<roles>" [--providers "<providers>"] [--authorization-ref <user-message-ref>]';
 const RECORD_FINALIZE_USAGE =
-  "usage: codex-workflow team-record-finalize <task-id> --backend native --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>";
+  "usage: codex-workflow team-record-finalize <task-id> --backend native|paseo --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>";
 const LOOP_RECORD_USAGE =
-  "usage: codex-workflow team-loop-record <task-id> --backend native --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]";
+  "usage: codex-workflow team-loop-record <task-id> --backend native|paseo --status loop-done|loop-incomplete|loop-failed|loop-timeout --loop <file> --iterations N [--max-iterations N] [--max-time <duration>]";
 const STATUS_USAGE = "usage: codex-workflow team-status <task-id>";
 const STOP_USAGE = "usage: codex-workflow team-stop <task-id>";
 const PROMOTE_USAGE =
@@ -130,7 +130,7 @@ function validatePositiveInteger(value, label) {
 }
 
 function validateBackend(backend) {
-  if (backend !== "native") {
+  if (!new Set(["native", "paseo"]).has(backend)) {
     throw new CommandError(`invalid team backend: ${backend}`);
   }
 }
@@ -182,12 +182,20 @@ function parseRecordStartArgs(argv) {
   const parsed = parseFlags(argv, 2, {
     name: "team-record-start",
     usage: RECORD_START_USAGE,
-    defaults: { backend: "", mode: "", agents: "", roles: "", authorizationRef: "" },
+    defaults: {
+      backend: "",
+      mode: "",
+      agents: "",
+      roles: "",
+      providers: "",
+      authorizationRef: "",
+    },
     flags: {
       "--backend": "backend",
       "--mode": "mode",
       "--agents": "agents",
       "--roles": "roles",
+      "--providers": "providers",
       "--authorization-ref": "authorizationRef",
     },
     required: [
@@ -206,6 +214,14 @@ function runRecordStart(parsed, options = {}) {
   validatePositiveInteger(parsed.agents, "agents");
   validateQuery(parsed.objective);
   validateReason(parsed.roles, "team roles");
+  if (parsed.backend === "paseo") {
+    if (!parsed.providers) {
+      throw new CommandError("missing paseo providers");
+    }
+    validateReason(parsed.providers, "paseo providers");
+  } else if (parsed.providers) {
+    throw new CommandError("native team backend does not accept providers");
+  }
   validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
   const { clock, environment, paths } = commandOptions(options);
   prepareTaskCommand(paths, parsed.taskId, clock);
@@ -231,6 +247,7 @@ function runRecordStart(parsed, options = {}) {
         "active_team.objective": parsed.objective,
         "active_team.agents": parsed.agents,
         "active_team.roles": parsed.roles,
+        "active_team.providers": parsed.providers,
         "active_team.authorization_ref": parsed.mode === "execute" ? parsed.authorizationRef : "",
         "active_team.staffing": staffing,
         "active_team.temp_dir": "",
@@ -255,6 +272,9 @@ function runRecordStart(parsed, options = {}) {
   ];
   if (parsed.mode === "execute") {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+  }
+  if (parsed.providers) {
+    lines.push(`providers: ${parsed.providers}`);
   }
   return {
     exitCode: 0,
@@ -308,7 +328,7 @@ function validateExistingNonemptyFile(label, file) {
   }
 }
 
-function validateNativeArtifact(paths, taskId, label, file) {
+function validateTeamArtifact(paths, taskId, label, file, backend) {
   validateExistingNonemptyFile(label, file);
   const teamRoot = fs.realpathSync(teamDir(paths, taskId));
   const absolute = fs.realpathSync(file);
@@ -319,8 +339,11 @@ function validateNativeArtifact(paths, taskId, label, file) {
     );
   }
   const text = fs.readFileSync(absolute, "utf8");
-  if (!/(^|\b)backend\s*[:=]\s*native\b/im.test(text)) {
-    throw new CommandError(`${label} file is missing backend: native marker: ${absolute}`);
+  const backendPattern = new RegExp(`(^|\\b)backend\\s*[:=]\\s*${backend}\\b`, "im");
+  if (!backendPattern.test(text)) {
+    throw new CommandError(
+      `${label} file is missing backend: ${backend} marker: ${absolute}`,
+    );
   }
   const ignoredPrefixes = [
     "Task:",
@@ -368,28 +391,31 @@ function runRecordFinalize(parsed, options = {}) {
   const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
   const currentBackend = getTaskField(taskFile, "active_team_backend");
   const currentStatus = getTaskField(taskFile, "active_team_status");
-  if (currentBackend !== "native" || currentStatus !== "running") {
+  if (currentBackend !== parsed.backend || currentStatus !== "running") {
     throw new CommandError(
-      "team-record-finalize requires an active native team record in running status",
+      `team-record-finalize requires an active ${parsed.backend} team record in running status`,
     );
   }
-  const roundAbsolute = validateNativeArtifact(
+  const roundAbsolute = validateTeamArtifact(
     paths,
     parsed.taskId,
     "team round",
     parsed.roundFile,
+    parsed.backend,
   );
-  const decisionAbsolute = validateNativeArtifact(
+  const decisionAbsolute = validateTeamArtifact(
     paths,
     parsed.taskId,
     "team decision",
     parsed.decisionFile,
+    parsed.backend,
   );
-  const staffingAbsolute = validateNativeArtifact(
+  const staffingAbsolute = validateTeamArtifact(
     paths,
     parsed.taskId,
     "team staffing",
     parsed.staffingFile,
+    parsed.backend,
   );
   const round = relativeToCodeHome(paths, roundAbsolute);
   const decision = relativeToCodeHome(paths, decisionAbsolute);
@@ -482,14 +508,15 @@ function runLoopRecord(parsed, options = {}) {
   }
   const { clock, environment, paths } = commandOptions(options);
   const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
-  if (getTaskField(taskFile, "active_team_backend") !== "native") {
-    throw new CommandError("team-loop-record requires a native team record");
+  if (getTaskField(taskFile, "active_team_backend") !== parsed.backend) {
+    throw new CommandError(`team-loop-record requires a ${parsed.backend} team record`);
   }
-  const loopAbsolute = validateNativeArtifact(
+  const loopAbsolute = validateTeamArtifact(
     paths,
     parsed.taskId,
     "team loop",
     parsed.loopFile,
+    parsed.backend,
   );
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const staffingFile = teamStaffingFile(paths, parsed.taskId);
@@ -571,6 +598,7 @@ function runStatus(argv, options = {}) {
     ["team_objective", team.objective],
     ["team_agents", team.agents],
     ["team_roles", team.roles],
+    ["team_providers", team.providers],
     ["team_round", team.round_file],
     ["team_staffing", team.staffing],
     ["team_temp_dir", team.temp_dir],
@@ -714,5 +742,5 @@ module.exports = {
   teamDir,
   teamLockFile,
   teamStaffingFile,
-  validateNativeArtifact,
+  validateTeamArtifact,
 };

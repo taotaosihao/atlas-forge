@@ -24,15 +24,23 @@ Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
 When isolated branch work is complete, use `$atlas-workflow:finish`. By default it waits for user confirmation before merge, PR, discard, or cleanup. Only skip that pause when the user explicitly says to merge straight back to the main branch.
 
-Atlas has separate native and legacy team entrypoints. Decide whether Team is
-needed from the user's current request, including the requested collaboration
-style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for
-multiple agents or when independent lanes or a distinct specialist/reviewer
-materially serve those needs; otherwise stay with the main Codex. Multiple
-files, behavior changes, and task complexity do not by themselves require Team.
-Native Team records lifecycle state with `team-record-start`,
-`team-record-finalize`, and `team-loop-record`; choose only useful roles and keep
-write ownership disjoint.
+Atlas has separate default and compatibility team entrypoints. Decide whether
+Team is needed from the user's current request, including the requested
+collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when
+the user asks for multiple agents or when independent lanes or a distinct
+specialist/reviewer materially serve those needs; otherwise stay with the main
+Codex. Multiple files, behavior changes, and task complexity do not by
+themselves require Team. `$atlas-workflow:team` defaults to Atlas-managed Paseo
+multi-provider coordination for Codex, Claude, DeepSeek, GLM, and Kimi Code
+CLI. Discover providers and models at runtime with `paseo provider ls --json`
+and `paseo provider models <provider> --json`; for GLM, choose the first
+provider whose discovered model list contains the required GLM family rather
+than assuming a `glm` provider exists, and use the `kimi` provider explicitly
+for Kimi Code CLI. Codex native collaboration is explicit fallback only.
+Team records lifecycle state with `team-record-start`,
+`team-record-finalize`, and `team-loop-record`; use `--backend native|paseo`,
+require a single-line `--providers` summary for Paseo starts, and keep artifact
+backend markers aligned with the active backend.
 
 Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
 flow debugging, or explicit user acceptance of the CLI-backed team behavior.
@@ -118,7 +126,7 @@ primitive used by the update command.
 - `skills/analyze/SKILL.md`: read-only analysis entry
 - `skills/clarify/SKILL.md`: brownfield clarification entry
 - `skills/intake/SKILL.md`: grilling-style intake and plan stress-test entry
-- `skills/team/SKILL.md`: Codex native subagent team entry
+- `skills/team/SKILL.md`: Atlas-managed Paseo multi-provider team entry with explicit Codex native fallback
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry

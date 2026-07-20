@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use the Atlas team flow with Codex native subagents for discussion, execution, review, and focused repair.
+description: Use the Atlas team flow with Paseo-managed multi-provider agents, with Codex native collaboration only as an explicit fallback.
 ---
 
 Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves.
@@ -9,9 +9,39 @@ Decide whether Team is needed from the user's current request, including the req
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors when accuracy benefits.
 
-## Native Tool Gate
+## Default Management Layer
 
-This skill is native-only. Use the collaboration tools directly:
+Atlas Team defaults to Paseo as the agent management layer. Do not reuse, invoke, or mirror the Paseo skill workflow. Atlas owns the management rules here and uses Paseo only as a runtime/control plane.
+
+- Discover providers at runtime with `paseo provider ls --json`.
+- Discover models for a concrete provider with `paseo provider models <provider> --json`.
+- Do not hardcode provider or model availability from repo assumptions.
+- Before selecting a provider, read `${PASEO_HOME:-$HOME/.paseo}/orchestration-preferences.json` when it exists. An explicit user provider/model request wins, followed by task constraints, the matching role preference, and finally an available runtime default.
+- Record Paseo rounds with `codex-workflow team-record-start ... --backend paseo --providers "<single-line providers>"`.
+- The `--providers` field is required for `--backend paseo`, must stay on one line, and should summarize the actual provider/model routing selected for the round.
+
+### Provider Selection Contract
+
+- `codex`: prefer the discovered `codex` provider for Codex CLI; otherwise report that the requested route is unavailable.
+- `claude`: prefer the discovered `claude` provider for Claude Code; use another provider only when the user asked for that gateway/model route.
+- `deepseek`: prefer the discovered `deepseek` provider for DeepSeek CLI; use another provider only when the user asked for that gateway/model route.
+- `glm`: select the first discovered provider whose model list contains the required GLM model family. Do not assume a `glm` provider exists.
+- `kimi code cli`: use the `kimi` provider explicitly and discover its available models with `paseo provider models kimi --json`.
+
+Prefer a single concise provider summary line such as `planner=claude/<model-id>; implementer=deepseek/<model-id>; reviewer=<provider>/<glm-model-id>; verifier=kimi/<model-id>`.
+
+### Minimal Paseo Control Plane
+
+- Start one bounded lane with `paseo run --detach --json --provider <provider> [--model <model-id>] --cwd <repo> "<prompt>"`. Capture the returned agent and workspace identifiers; reuse the workspace for related lanes instead of creating unrelated workspaces.
+- Send focused follow-up work with `paseo send <agent-id> --no-wait --json "<prompt>"`.
+- Wait for real completion with `paseo wait <agent-id> --json`; do not busy-poll `paseo ls` or `paseo inspect`.
+- Stop a lane that is out of scope, stalled, or no longer useful with `paseo stop <agent-id> --json`. Do not restart the Paseo daemon, delete agents, archive worktrees, or mutate provider configuration without separate authority.
+- Provider modes are provider-specific. Omit `--mode` unless its exact ID has been discovered for that provider; never copy a Codex mode onto Claude, DeepSeek, GLM, or Kimi.
+- Prompts must carry the repository instructions, owned paths, forbidden paths, authority mode, expected evidence, and stop condition. Paseo manages lifecycle; it does not expand the lane's permissions.
+
+## Explicit Native Fallback
+
+Codex native collaboration is fallback-only. Use it only when the user explicitly asks for native collaboration or when Paseo cannot satisfy the required provider/runtime path and the fallback remains within current authority.
 
 - `collaboration.spawn_agent` for concrete bounded lanes that can run independently.
 - `collaboration.send_message` for information that does not need a new turn.
@@ -20,11 +50,11 @@ This skill is native-only. Use the collaboration tools directly:
 - `collaboration.list_agents` to inspect current capacity and status.
 - `collaboration.interrupt_agent` only to stop work that is still running and should no longer continue.
 
-If native collaboration tools are unavailable, ask for an explicit alternate workflow. Do not silently fall back to legacy CLI lanes.
+If native fallback is used, record it with `--backend native`. Do not silently fall back to legacy CLI lanes, and do not treat native fallback as the default.
 
-## Model Preferences And Calibration
+## Native Fallback Model Preferences And Calibration
 
-Before the first native lane that may select an Atlas SDD custom agent, prefer running:
+Before the first native fallback lane that may select an Atlas SDD custom agent, prefer running:
 
 ```bash
 workflow/bin/atlas-agent-model-policy check
@@ -68,10 +98,10 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 ### Execute
 
 - Use execute only after an explicit user implementation request. Do not infer it from a plan, review, decision file, roadmap, or prior discuss round.
-- Record native execute start or promotion with the explicit message reference:
+- Record execute start or promotion with the explicit message reference:
 
 ```bash
-codex-workflow team-record-start <task-id> "<objective>" --backend native --mode execute --agents <N> --roles "<roles>" --authorization-ref <user-message-ref>
+codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode execute --agents <N> --roles "<roles>" --providers "<providers>" --authorization-ref <user-message-ref>
 codex-workflow team-promote <task-id> --to execute --authorization-ref <user-message-ref>
 ```
 
@@ -124,9 +154,10 @@ Load optional protocol references only when the current contract actually requir
 
 ## Lifecycle Recording
 
-- Use `team-record-start` and `team-record-finalize` only when durable native Team state has handoff or audit value.
+- Use `team-record-start` and `team-record-finalize` only when durable Team state has handoff or audit value.
 - Use `team-loop-record` to record a loop conclusion when an explicit iterative task needs durable telemetry; do not make numeric limits the default goal definition.
 - Use `workflow/artifacts/<task-id>/team/decision.md` as the durable decision only when a substantive Team round occurred.
+- Team round, decision, staffing, and loop artifacts must include a backend marker matching the current backend: `backend: paseo` for Paseo rounds and `backend: native` for explicit native fallback rounds.
 - Keep raw logs and intermediate agent output outside Git. Persist the smallest conclusion required for verification or handoff.
 
 In the final reply, report the task id, actual agents used, integrated outcome, verification, commits, and actionable residual risk.
