@@ -1316,9 +1316,20 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
   const version = parsed.fields.get("contract_semantics_version");
 
   if (!version) {
-    const diagnostic = strict
-      ? makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1 or 2")
-      : makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
+    let diagnostic;
+    if (newAuthoring) {
+      diagnostic = makeDiagnostic(
+        "ERROR",
+        "NEW_AUTHORING_REQUIRES_V2",
+        "contract_semantics_version",
+        0,
+        "newly authored contracts must use contract_semantics_version: 2",
+      );
+    } else if (strict) {
+      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1 or 2");
+    } else {
+      diagnostic = makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
+    }
     const diagnostics = [diagnostic];
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
     const ok = !diagnostics.some((item) => item.severity === "ERROR");

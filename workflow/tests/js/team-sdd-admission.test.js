@@ -187,7 +187,22 @@ test("controller schema closes disposition, basis, authority, and repair combina
     invalidSafety.records[0].authority_refs = authorityRefs;
     assert.notDeepEqual(validateControllerResolutionAgainst(invalidSafety, context), []);
   }
-  for (const reason of ["-", "TODO", "TBD", "待定", "   "]) {
+  for (const reason of [
+    "-",
+    "TODO",
+    "TODO: explain later",
+    "TBD.",
+    "TBD!",
+    "`TODO`",
+    "placeholder reason",
+    "FIXME",
+    "N/A",
+    "ＴＢＤ",
+    "待定",
+    "待补充：后续填写",
+    "TODO，稍后补充",
+    "   ",
+  ]) {
     const invalidSafety = structuredClone(safety);
     invalidSafety.records[0].reason = reason;
     assert.ok(validateControllerResolutionAgainst(invalidSafety, context)
@@ -196,6 +211,9 @@ test("controller schema closes disposition, basis, authority, and repair combina
   const conciseSafety = structuredClone(safety);
   conciseSafety.records[0].reason = "blocks AC-1";
   assert.deepEqual(validateControllerResolutionAgainst(conciseSafety, context), []);
+  const literalTokenSafety = structuredClone(safety);
+  literalTokenSafety.records[0].reason = "Reject literal TODO values to satisfy AC-1";
+  assert.deepEqual(validateControllerResolutionAgainst(literalTokenSafety, context), []);
   fs.rmSync(context.constraintsFile);
   assert.ok(validateControllerResolutionAgainst(safety, context)
     .some((error) => error.includes("global constraints")));

@@ -42,14 +42,64 @@ const SAFETY_INVARIANTS = new Set([
   "invariant:data-integrity",
   "invariant:permission-boundary",
 ]);
-const PLACEHOLDER_REASONS = new Set([
+const PLACEHOLDER_REASON_TOKENS = new Set([
   "-",
+  "—",
+  "fixme",
+  "n/a",
+  "na",
+  "none",
+  "null",
   "placeholder",
   "tbd",
   "todo",
+  "unknown",
+  "unset",
+  "占位",
   "待定",
+  "待确认",
   "待补充",
+  "未定",
+  "暂无",
 ]);
+const PLACEHOLDER_REASON_SEPARATORS = new Set([
+  " ",
+  "\t",
+  ":",
+  "：",
+  ".",
+  "。",
+  ",",
+  "，",
+  ";",
+  "；",
+  "!",
+  "！",
+  "?",
+  "？",
+  "-",
+  "—",
+  "–",
+]);
+
+function isPlaceholderReason(value) {
+  if (typeof value !== "string") return true;
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/^[`'"“”‘’()[\]{}<>《》【】]+|[`'"“”‘’()[\]{}<>《》【】]+$/gu, "")
+    .trim();
+  if (!normalized) return true;
+  for (const token of PLACEHOLDER_REASON_TOKENS) {
+    if (normalized === token) return true;
+    if (
+      normalized.startsWith(token)
+      && PLACEHOLDER_REASON_SEPARATORS.has(normalized[token.length])
+    ) return true;
+  }
+  return false;
+}
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -276,10 +326,7 @@ function validateAuthority(record, index, verdict, brief, sliceDir, errors) {
     if (!brief.acceptance_refs.some((ref) => refs.has(`acceptance:${ref}`))) {
       errors.push(`${label} safety-data-permission-risk requires an authority ref for a current acceptance`);
     }
-    const normalizedReason = typeof record.reason === "string"
-      ? record.reason.trim().toLowerCase()
-      : "";
-    if (!normalizedReason || PLACEHOLDER_REASONS.has(normalizedReason)) {
+    if (isPlaceholderReason(record.reason)) {
       errors.push(`${label} safety-data-permission-risk requires a substantive causal reason`);
     }
     if (brief.global_constraints_path !== CANONICAL_GLOBAL_CONSTRAINTS_PATH) {

@@ -50,7 +50,7 @@ Follow this loop:
 5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, and do not use discovery, review wording, or generic completeness language to broaden it.
 6. Collect brownfield facts after the Goal is frozen. Classify every discovered item as `goal:<requirement-ref>`, controller-resolved `current-required:<finding_id>`, or non-executable `follow-up`. Discovery cannot rewrite the frozen Goal; only a validated controller resolution can admit a non-Goal finding into the current delivery.
 7. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
-8. Select one canonical scope source. Reuse a substantive existing issue, PRD, design, or contract when it already contains the locked scope; otherwise run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>` and make `workflow/artifacts/<task-id>/clarify.md` canonical. Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope. Any necessary supporting note must cite the canonical source instead of repeating it.
+8. Select one canonical scope source. Reuse a substantive existing issue, PRD, design, or contract when it already contains the locked scope. When implementation-contract value is already known, author that contract as the canonical source instead of first creating a duplicate `clarify.md`; otherwise run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>` and make `workflow/artifacts/<task-id>/clarify.md` canonical. Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope. Any necessary supporting note must cite the canonical source instead of repeating it.
 9. Keep the canonical scope source compact but execution-ready:
    - Goal and stable requirement refs
    - Non-goals and decision boundaries
@@ -59,6 +59,7 @@ Follow this loop:
    - Critical feedback and stop conditions
 10. Make acceptance criteria command-verifiable or user-visible.
 11. Create an implementation contract only when machine-checkable scope admission, cross-session handoff, audit, or release value justifies it. When a contract is required:
+   - if `clarify.md` was previously canonical, promote the finalized implementation contract to the sole canonical scope source and reduce `clarify.md` to links plus non-duplicated background; do not retain two scope bodies
    - whether `workflow/templates/implementation-contract.md` should be filled before coding
    - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
    - which acceptance criteria become required validation rows

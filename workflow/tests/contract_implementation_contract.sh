@@ -82,6 +82,21 @@ run_v1_new_authoring_invalid() {
   pass "$label"
 }
 
+run_unversioned_new_authoring_invalid() {
+  local label="$1" file="$2" status
+  case_paths
+  set +e
+  "$BIN" --strict --new-authoring --file "$file" >"$CASE_STDOUT" 2>"$CASE_STDERR"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V2 ' "$CASE_STDERR" || show_failure "$label"
+  grep -q 'contract_semantics_version: 2' "$CASE_STDERR" || show_failure "$label"
+  grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
+  ! grep -q 'contract_semantics_version: 1 or 2' "$CASE_STDERR" || show_failure "$label"
+  pass "$label"
+}
+
 run_v2_authority_invalid() {
   local label="$1" file="$2" expected_code="$3" authority_slice="${4:-$AUTHORITY_SLICE}"
   local status
@@ -376,6 +391,7 @@ run_v1_valid 'current authoritative implementation contract passes strict lint' 
 run_v1_new_authoring_invalid 'new authoring rejects semantics v1' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
+run_unversioned_new_authoring_invalid 'new authoring gives a v2-only diagnostic for unversioned contracts' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 
 run_semantic_invalid 'template enum placeholders are rejected' "$FIXTURE_ROOT/invalid/template-enums.md" WORK_TYPE_INVALID FIRST_CODE_GUARD_INVALID PRODUCT_UI_GATE_INVALID
 run_semantic_invalid 'missing first-code owner verification stop and gate plan are rejected' "$FIXTURE_ROOT/invalid/missing-first-code-fields.md" \
@@ -700,6 +716,8 @@ grep -q 'Discovery cannot rewrite the frozen Goal' "$ATLAS_FORGE_ROOT/plugins/at
 grep -q 'binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Select one canonical scope source' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'author that contract as the canonical source instead of first creating a duplicate `clarify.md`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'promote the finalized implementation contract to the sole canonical scope source and reduce `clarify.md` to links plus non-duplicated background' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Create a repo docs bundle, `contract-index.md`, staffing file, or durable evidence index only when explicit handoff, audit, release' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
