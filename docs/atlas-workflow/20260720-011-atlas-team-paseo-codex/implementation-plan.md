@@ -39,13 +39,14 @@ Claude-family model 只能由用户或操作方手工给出精确 model ID。Atl
 | `G-05` | 持久状态可唯一说明 configured、resolved、attempted、admitted 和 effective backend。 |
 | `G-06` | Paseo writer 失败后，只有取得 takeover permit 的 Codex writer 可以接管既有工作。 |
 | `G-07` | 最终交付披露实际 backend、fallback、证据保留和缺失视角。 |
-| `G-08` | staffing、轮数和 provider 组合是建议与遥测，不是固定 gate 或完成上限。 |
+| `G-08` | staffing、轮数和 provider 组合不固定；Team implementation 存在可独立且路径不重叠的 lane 时，倾向多 agent 并行以缩短关键路径。 |
 | `G-09` | Claude-family model 只接受有不可变人工来源的精确 model ID。 |
 
 非目标：
 
 - 不让所有 Team、所有 round 或所有 slice 默认使用 Paseo，也不把 Team 变成普通任务默认工作流。
-- 不固定角色、agent/provider 数量或 review 轮数，不因 finding 自动扩展当前 Goal。
+- 不固定角色、agent/provider 数量或 review 轮数，不因 finding 自动扩展当前 Goal；并行是实施倾向，
+  不是无视依赖、路径冲突或单写者约束的硬 gate。
 - 不读取或修改 Paseo 全局 preferences、凭证、provider/daemon 配置，不执行 broad stop/restart。
 - 不把 runtime full-access mode 当作写入授权；`execute` 仍要求当前用户明确授权。
 - 不创建统一启动 Paseo/native 的新 runtime wrapper；helper 只管理控制面与事实账本。
@@ -299,6 +300,10 @@ fallback 顺序固定为：
 implementation lane 启动前必须具备 `execute` authorization、owned/forbidden paths、acceptance、验证
 命令和 stop condition，并为本 lane/dispatch 显式解析 Paseo。review 选择不能隐式授权 implementation。
 
+Team execute 先识别关键路径上的独立 lane；当 owned paths 不重叠、输入已就绪且不存在先后依赖时，
+倾向同时 dispatch 多个 agent 加快实施。路径重叠、共享可变状态或后续工作依赖前序结果时保持串行/
+单写者；并行不得绕过 authorization、writer lease、controller admission 或最终集成验证。
+
 Paseo implementer 只在已记录 worktree/workspace 修改；controller 检查 status、diff、untracked、
 base/head、越界路径和测试后才能 admission。部分写入后失败时按第 4.3 与 6.2 节取得 quiescence、
 证据和 takeover permit，native writer 先审阅既有 diff 再补缺口，不从头覆盖 provenance。
@@ -424,7 +429,7 @@ artifact 或处理 reviewer 发现的相邻改进。commit 不授权 push、安�
 | --- | --- | --- |
 | `AC-01` | Team 未指定 backend 时为 native；首次 Paseo start 原子创建 run+attestation；显式 native override 可表达。 | team unit + native/Paseo contracts |
 | `AC-02` | dispatch > lane > Team > defaults 正确；effective policy 在 reserve 后不受配置变化影响。 | precedence/snapshot unit |
-| `AC-03` | 动态 lane/role/count 可用，不需预先固定 staffing。 | team unit + review contract |
+| `AC-03` | 动态 lane/role/count 可用；独立且路径不重叠的 implementation lanes 可并行 dispatch，存在依赖或冲突时保持串行，不需预先固定 staffing。 | team unit + implementation contract |
 | `AC-04` | 正常/启动失败边合法；launch operation 可 reconcile，未知时阻断；crash resume 不重复启动。 | registry unit + fake runtime |
 | `AC-05` | 跨 lane 重叠 writer 被拒；quiescence、证据和 permit 齐备后才可 fallback writer。 | lease/takeover unit + fake runtime |
 | `AC-06` | runtime terminal 与 controller admission 分离；lane convergence 和 mixed/none finalize 唯一派生。 | aggregation/finalize unit + artifact lint |
