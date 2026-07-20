@@ -42,6 +42,14 @@ const SAFETY_INVARIANTS = new Set([
   "invariant:data-integrity",
   "invariant:permission-boundary",
 ]);
+const PLACEHOLDER_REASONS = new Set([
+  "-",
+  "placeholder",
+  "tbd",
+  "todo",
+  "待定",
+  "待补充",
+]);
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -264,6 +272,15 @@ function validateAuthority(record, index, verdict, brief, sliceDir, errors) {
     }
     if (!refs.has(diffRef)) {
       errors.push(`${label} safety-data-permission-risk requires the current diff authority ref`);
+    }
+    if (!brief.acceptance_refs.some((ref) => refs.has(`acceptance:${ref}`))) {
+      errors.push(`${label} safety-data-permission-risk requires an authority ref for a current acceptance`);
+    }
+    const normalizedReason = typeof record.reason === "string"
+      ? record.reason.trim().toLowerCase()
+      : "";
+    if (!normalizedReason || PLACEHOLDER_REASONS.has(normalizedReason)) {
+      errors.push(`${label} safety-data-permission-risk requires a substantive causal reason`);
     }
     if (brief.global_constraints_path !== CANONICAL_GLOBAL_CONSTRAINTS_PATH) {
       errors.push(`${label} safety-data-permission-risk requires canonical global_constraints_path ${CANONICAL_GLOBAL_CONSTRAINTS_PATH}`);

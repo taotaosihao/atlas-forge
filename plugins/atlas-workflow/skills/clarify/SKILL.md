@@ -50,27 +50,15 @@ Follow this loop:
 5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, and do not use discovery, review wording, or generic completeness language to broaden it.
 6. Collect brownfield facts after the Goal is frozen. Classify every discovered item as `goal:<requirement-ref>`, controller-resolved `current-required:<finding_id>`, or non-executable `follow-up`. Discovery cannot rewrite the frozen Goal; only a validated controller resolution can admit a non-Goal finding into the current delivery.
 7. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
-8. Run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>`, then
-   write `workflow/artifacts/<task-id>/clarify.md` and update `context.md`.
-   - current state
-   - confirmed facts
-   - source of truth files
-   - known risks
-9. Preserve or update `workflow/artifacts/<task-id>/decision.md` when the chosen approach matters for execution.
-   - selected direction
-   - rejected alternatives
-   - assumptions inherited from brainstorm or office-hours
-10. Write `workflow/artifacts/<task-id>/spec.md`.
-   - Goal
-   - Non-goals
-   - Decision Boundaries
-   - Acceptance Criteria
-   - Verification Plan
-   - Critical Feedback
-   - Tiny Escape Decision
-   - Stop Conditions
-11. Make acceptance criteria command-verifiable or user-visible.
-12. When the next step is non-tiny implementation, include an implementation-contract expectation:
+8. Select one canonical scope source. Reuse a substantive existing issue, PRD, design, or contract when it already contains the locked scope; otherwise run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>` and make `workflow/artifacts/<task-id>/clarify.md` canonical. Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope. Any necessary supporting note must cite the canonical source instead of repeating it.
+9. Keep the canonical scope source compact but execution-ready:
+   - Goal and stable requirement refs
+   - Non-goals and decision boundaries
+   - Accepted assumptions
+   - Acceptance criteria and verification
+   - Critical feedback and stop conditions
+10. Make acceptance criteria command-verifiable or user-visible.
+11. Create an implementation contract only when machine-checkable scope admission, cross-session handoff, audit, or release value justifies it. When a contract is required:
    - whether `workflow/templates/implementation-contract.md` should be filled before coding
    - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
    - which acceptance criteria become required validation rows
@@ -114,35 +102,25 @@ Follow this loop:
    - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final executable contract body
    - when authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose
    - review severity, `required_fix`, affected rows, and remediation prose do not grant scope; for SDD v2, every validated controller finding with `disposition: current-required` remains an executable requirement whether `repair_status` is `open` or `resolved`, while only `open` findings block or create repair feedback
+   - a safety, data-integrity, or permission finding may become `current-required` only when its controller resolution binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence, and a substantive reason explaining why omission blocks or makes that acceptance unsafe; machine validation checks these bindings, not the truth of the prose
    - project those admitted findings only into Goal, Acceptance, Completion, Edge Cases, or Required safe fallback; retain `visible-follow-up` and `informational` findings only in `Finding Provenance` or follow-up records
    - in semantics-v2 contracts, mark required acceptance and edge-case rows with `goal:<requirement-ref>` or `current-required:<finding_id>` so strict lint can validate attribution without interpreting natural language
    Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
-13. Because clarify turns a chosen direction into an execution-ready plan, also write a concise project doc:
-   - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
-   - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
-   - use stable files inside the bundle, such as `README.md`, `clarify.md`, `spec.md`, `contract-index.md`, `implementation-contract.draft.md`, `implementation-contract.final.md`, `reviews/`, `decisions/`, and `evidence/`; do not create scattered sibling markdown files for the same workflow.
-   - classify process docs before mirroring: draft `context.md`, `analysis.md`, `decision.md`, and `spec.md` are workflow working notes until confirmed; durable repo docs should contain the locked boundaries, accepted assumptions, verification plan, and next step, not the full clarification trail.
-   - keep `evidence/` concise: prefer `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`; target 10 git evidence files or fewer and 1 MB or less per phase, with exceptions explained in `phase-review-report.md`.
-   - include the goal, non-goals, selected direction, decision boundaries, acceptance criteria, verification plan, assumptions, and next execution step.
-   - if the clarify output becomes the current implementation authority, update `contract-index.md` to point at that file; when execution is ready, point it at `implementation-contract.final.md`.
-   - keep `contract-index.md` as the bundle entrypoint by adding supporting evidence links when those files exist or are created: `team_decision`, `staffing`, `evidence_index`, `workflow_team_decision`, and `workflow_team_staffing`; if a non-team flow has no staffing owner, create a brief `staffing.md` that says not applicable and names the human/main-agent owner.
-   - keep `workflow/artifacts/<task-id>/` as the working record; the project doc is the durable handoff for the repo.
-14. Self-review artifacts before reporting:
+12. Create a repo docs bundle, `contract-index.md`, staffing file, or durable evidence index only when explicit handoff, audit, release, or existing project-document authority requires it. A non-tiny task, a review finding, or the mere presence of an implementation contract is not sufficient reason. Keep one canonical scope body and use links from supporting artifacts.
+13. Self-review the canonical scope source before reporting:
    - no placeholders such as `TBD` or `TODO`
-   - no contradictions between context, decision, spec, and the project doc
+   - no contradictory or mirrored scope in supporting artifacts
    - assumptions are labelled
    - acceptance criteria match the verification plan
    - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
    - for a newly authored final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --new-authoring --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; new authoring requires semantics v2, while the lint must validate contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
    - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`
-15. Before claiming the artifacts are execution-ready, run:
-    - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec`
-    - add `decision` to `--require` when the selected direction or rejected alternatives matter for execution.
-16. Use `$atlas-workflow:team` when the task should go through Codex native subagent discussion or promotion before execution. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
-17. In the final reply, include the task id, `context.md`, `decision.md` if used, `spec.md`, project doc path, readiness result, locked assumptions, and verification plan.
+14. Run `codex-workflow ready` only when the chosen canonical workflow already uses its requested artifact set; do not create mirrored `context.md` or `spec.md` solely to satisfy readiness. A newly authored implementation contract must pass the strict new-authoring lint above before it is execution-ready.
+15. Use `$atlas-workflow:team` when the task should go through Codex native subagent discussion or promotion before execution. If native subagent tools are unavailable, stop and ask whether to use explicit legacy `$atlas-workflow:team-v1`; do not silently fall back to legacy CLI lanes.
+16. In the final reply, include the task id, canonical scope source, locked assumptions, verification plan, and only the supporting artifacts that materially exist.
 
 Hard rules:
 
 - Do not re-open product strategy or design exploration unless execution safety depends on it.
 - Do not implement code from this skill unless the user explicitly changes the request to implementation after the spec is locked.
-- Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; execution-ready specs must also be mirrored into the workflow docs bundle described above.
+- Keep exploratory or unstable notes outside the canonical scope source; do not mirror an execution-ready scope into a repo bundle unless handoff, audit, release, or existing project authority requires it.

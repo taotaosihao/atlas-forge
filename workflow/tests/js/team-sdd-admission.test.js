@@ -165,6 +165,7 @@ test("controller schema closes disposition, basis, authority, and repair combina
         basis: "safety-data-permission-risk",
         authority_refs: [
           "invariant:data-integrity",
+          "acceptance:AC-1",
           `constraints-sha256:${context.constraintsDigest}`,
           `diff:${"1".repeat(40)}..${"2".repeat(40)}`,
         ],
@@ -176,15 +177,25 @@ test("controller schema closes disposition, basis, authority, and repair combina
   assert.deepEqual(validateControllerResolutionAgainst(safety, context), []);
 
   for (const authorityRefs of [
-    ["invariant:no-data-loss", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
-    ["invariant:safety", "invariant:anything-goes", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
-    ["invariant:safety", `constraints-sha256:${"f".repeat(64)}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
-    ["invariant:permission-boundary", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"3".repeat(40)}`],
+    ["invariant:no-data-loss", "acceptance:AC-1", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
+    ["invariant:safety", "invariant:anything-goes", "acceptance:AC-1", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
+    ["invariant:safety", "acceptance:AC-1", `constraints-sha256:${"f".repeat(64)}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
+    ["invariant:permission-boundary", "acceptance:AC-1", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"3".repeat(40)}`],
+    ["invariant:data-integrity", `constraints-sha256:${context.constraintsDigest}`, `diff:${"1".repeat(40)}..${"2".repeat(40)}`],
   ]) {
     const invalidSafety = structuredClone(safety);
     invalidSafety.records[0].authority_refs = authorityRefs;
     assert.notDeepEqual(validateControllerResolutionAgainst(invalidSafety, context), []);
   }
+  for (const reason of ["-", "TODO", "TBD", "待定", "   "]) {
+    const invalidSafety = structuredClone(safety);
+    invalidSafety.records[0].reason = reason;
+    assert.ok(validateControllerResolutionAgainst(invalidSafety, context)
+      .some((error) => error.includes("substantive causal reason")));
+  }
+  const conciseSafety = structuredClone(safety);
+  conciseSafety.records[0].reason = "blocks AC-1";
+  assert.deepEqual(validateControllerResolutionAgainst(conciseSafety, context), []);
   fs.rmSync(context.constraintsFile);
   assert.ok(validateControllerResolutionAgainst(safety, context)
     .some((error) => error.includes("global constraints")));
