@@ -18,7 +18,7 @@ product_ui_not_applicable_reason: 本合同改变的是 headless Web acceptance 
 
 ### Goal
 
-在不改变 Atlas BAF v2 machine semantics 和唯一 verdict 的前提下，把当前已登记的 Web run evidence 组织成可供业务验收人直接审阅的完整单据流转材料：同一单据从初始状态开始，依次展示真实 UI 操作、请求与后端结果、关联业务对象的状态前后值、外部输入、必须的反向控制、最终 UI/API/DB/audit 一致性、三次 fresh-seed 收敛及每个节点的可定位证据。支持 accepted durable baseline 的原始材料还必须以版本化 manifest 绑定稳定 locator、内容摘要、敏感级别和 retention policy，并能脱离原本机路径恢复后重新验证。
+在不改变 Atlas BAF v2 machine semantics 和唯一 verdict 的前提下，把当前已登记的 Web run evidence 组织成可供业务验收人直接审阅的完整单据流转材料：同一单据从初始状态开始，依次展示真实 UI 操作、请求与后端结果、关联业务对象的状态前后值、外部输入、必须的反向控制、最终 UI/API/DB/audit 一致性、三次 fresh-seed 收敛及每个节点的可定位证据。
 
 ### Non-goals
 
@@ -29,6 +29,7 @@ product_ui_not_applicable_reason: 本合同改变的是 headless Web acceptance 
 - 不在 Core 写入 Sharp Cell 名称、`WorkOrder`、`LineTask`、`DeviceTask`、assignment、状态值、DOM、账号、URL、port、browser 或 viewport。
 - 不提交原始 Trace、视频、HAR、完整日志、API/DB dump、callback raw payload、批量截图或失败中间输出到 Git。
 - 不在 Core 实现 S3/OSS/制品库客户端、上传/删除服务、bucket 生命周期管理、组织访问控制或固定 retention 天数；storage provider、credentials、policy 和真实 mutation 属于项目/组织所有。
+- 外部 export、retention、provider locator/resolver、fresh-root rehydration、灾备、长期防篡改平台及其穷举矩阵均不属于本合同 Required；可作为后续 experimental/pending 工作，但不得阻塞本合同或 Sharp Cell v2 blocked 材料。
 - 不默认重跑 run29/run30/run31；新真实 run、服务启动或浏览器执行必须在证据缺口确认后获得相应实施授权。
 - 不 push、不建 PR、不安装、不刷新 cache/marketplace/workflow runtime、不部署、不发布。
 - 不修改、运行、测试、同步、迁移或删除 Multica。
@@ -40,7 +41,6 @@ Atlas Forge owned paths:
 - `workflow/bin/codex-web-acceptance`
 - `workflow/bin/lib/codex-web-acceptance/review.js`
 - `workflow/bin/lib/codex-web-acceptance/contracts/**` 中 review-card v2/flow contract schema 与类型
-- `workflow/bin/lib/codex-web-acceptance/contracts/**` 中 provider-neutral artifact manifest/restored-root schema 与类型
 - 必要的 domain-neutral Core validator/helper；不得含项目领域常量
 - `workflow/templates/web-scenario-review-card.md`
 - `workflow/tests/contract_web_acceptance.sh`
@@ -59,7 +59,6 @@ Sharp Cell owned paths，仅在 Phase 3 获实施授权后：
 - invalid callback 等反向控制与 valid callback 正向路径并排展示，能够确认被拒绝输入未改变关键单据状态。
 - 最终截图只是最终 UI readback 的一个证据，不再单独代表业务符合。
 - owner 只有在完整 flow material 通过当前引用校验后才能登记判断；材料变化后旧判断自动失效。
-- accepted durable baseline 的 evidence link 不再只指向本机 `.codex` 路径；材料显示稳定 locator、retention class 和 sensitivity，并能在恢复演练后证明内容未丢失或被替换。
 
 ## First Code Slice Guard
 
@@ -117,36 +116,17 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 - 每个 required step、negative control、final-state join 和 convergence row 必须满足项目声明的 categories；缺失、unknown、跨 scenario 或结果非 passed 时失败关闭，除非该项按合同明确允许显示“未登记/当前无法判断”且不参与 accepted 所需 claim。
 - evidence path 必须 canonical、regular、non-symlink 并位于当前 task artifact；现有 run evidence index/digest 继续负责底层文件完整性。
 
-### Evidence lifecycle and storage boundaries
+### Evidence storage boundary（non-blocking）
 
-- 三层存储是 required boundary：Git 保存规则、代码、schema、validators、项目 flow contract、小型脱敏 fixtures/golden、artifact manifest/digests 和 phase conclusion；durable artifact storage 保存 accepted 所需真实原件；ephemeral storage 保存失败重试、调试和 migration 中间产物。
-- Git 禁止新增真实 run 的 Trace、HAR、video、API/DB dump、callback raw payload、全量日志和批量截图；少量截图或 JSON 只有在脱敏、体积受控且作为稳定 test/reference golden 时才能提交。
-- durable storage 必须 immutable 或 versioned、访问受控、支持项目 retention policy，并能按无凭据稳定 locator 取回；Git LFS 不能自动满足 secret、权限、删除和 retention 要求，因此不是默认 raw evidence store。
-- Core 不上传、不删除、不选择 provider、不解析 credentials、不配置 bucket lifecycle。真实 export/restore 是独立外部 mutation，必须由项目/组织 owner 提供 target、访问策略、resolver/export argv 和明确授权。
-- Core 提供 provider-neutral manifest schema 和 restored-root 校验。没有外部权限时，只能以 hermetic local fixture 验证协议，不能声称 Sharp Cell 已形成 durable baseline。
-
-### Durable artifact manifest
-
-- 每个支持 accepted durable baseline 的 raw evidence 必须有 manifest entry：`evidence_id`、`scenario_id`、`run_id`、`attempt`、`sha256`、`size_bytes`、`media_type`、`artifact_locator`、`sensitivity_class`、`retention_class`、`retention_policy_ref`。
-- `artifact_locator` 只定位内容，不产生业务事实；evidence identity/result 仍来自 BAF/evidence，完整性仍由 SHA-256、size、run/attempt 和 strict validators 决定。
-- locator scheme allowlist、resolver argv 和 retention class 到实际期限的映射来自 project config；Core 不硬编码 provider 或期限。
-- locator 禁止 credentials、query token、home/worktree 绝对路径和指向原 `.codex/workflow`/`.codex/visualizations` 的 `file://`；unknown scheme、空 policy ref、无效 media type、负数/不符 size 或 digest mismatch 均失败关闭。
-- `sensitivity_class` 和 `retention_class` 是项目 policy key；Core 只校验它们非空并与当前 project policy/allowlist 对应，不自行决定分类。
-- Manifest 本身可进入 Git 或 accepted bundle，但不能包含 credential、临时 signed URL、客户 secret 或原始敏感内容。
-
-### Rehydration gate
-
-- accepted durable baseline 必须从 manifest locators 取回到一个新建、canonical、非 symlink、非源 artifact 子目录的临时 restored root；禁止通过 bind/symlink 或回退原本机路径伪造恢复。
-- 项目/组织 resolver 负责外部读取；Core 只在 restored root 逐文件核对 evidence ID、run/attempt、relative layout、SHA-256、size 和 media type，并重新运行 review-card v2、项目 required validators 与 strict closure。
-- 恢复测试必须在原 `.codex/workflow` 和 `.codex/visualizations` 路径不可作为输入的条件下通过；只检查 locator 可访问、HTTP 200 或对象存在不能满足门禁。
-- export 成功但 restore/digest/strict review 失败时，durable baseline 为 blocked；不得用仍存在的本地源副本兜底判定通过。
+- Required 只要求当前 bundle 内 evidence 可定位、合法、与当前 task/scenario/run 对应，并保留必要摘要与相对路径校验。
+- 原始 Trace、HAR、video、API/DB dump、callback raw payload、全量日志和批量截图仍不得进入 Git；此安全边界保持不变。
+- 外部 durable storage、manifest/locator、retention、resolver、fresh-root rehydration、DR 和长期防篡改均为 non-goal/experimental pending，不进入 Required AC、完成条件或 Sharp 前置。
 
 ### Deterministic Markdown view
 
 - `review --format json` 输出结构化 validation result；`review --format markdown` 输出中文 human-first material。两者先运行同一 validator。
 - Markdown 固定包含：场景与范围、单据关联树、初始状态、完整流转时间线、逐节点预期/实际/证据、反向控制、最终一致性、三次 convergence、限制、当前 BAF 状态和 owner decision。
 - 每个 evidence link 显示 evidence ID、类别、结果和 bundle 内相对路径；不内嵌 secret 或大体积 raw data。
-- durable evidence link 同时显示稳定 locator、retention class 和 sensitivity；临时 signed URL、credential 或本机绝对路径不得进入 Markdown。
 - 缺失写“未登记”，证据不足写“当前无法判断”；不得用“通过”“符合”掩盖局部缺口。
 - 非 `real` integration mode 必须如实显示具体模式，禁止称真实运行、真实链路或真实系统验收。
 
@@ -176,30 +156,21 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 
 - 完成 fact pointer、canonical path、category completeness、negative controls、final consistency、convergence 和 missing/unknown 语义。
 - 实现规范化 flow digest 与 owner decision current-reference 验证。
-- 完成 tamper、cross-scenario、screenshot-only、mode、secret 和 stale reference 负向矩阵。
+- 完成覆盖 current refs、cross-scenario、screenshot-only、mode 和 stale owner decision 的最小确定性负例；不要求穷举矩阵。
 
-### Phase 3 — Artifact lifecycle thin slice
-
-- 实现 provider-neutral manifest schema、Git/durable/ephemeral 分类校验、locator policy 和 restored-root digest/identity 校验。
-- 使用 hermetic fixture 在新的临时目录完成 restore rehearsal；不连接、不创建也不修改真实外部 storage。
-- staged diff gate 阻止 raw Trace/HAR/video/API/DB/callback/log/bulk screenshot 意外进入 Git。
-
-### Phase 4 — Sharp Cell reference migration
+### Phase 3 — Sharp Cell reference migration
 
 - 项目维护 flow contract 和 granular evidence bridge；Core 零 Sharp Cell 常量。
 - 只读解析 run29/run30/run31，登记同一 WorkOrder → LineTask → DeviceTask → assignment 链、UI 操作、invalid no-mutation、valid callback 和 UI running readback。
-- 生成无 owner decision 的新 blocked bundle、Markdown 和 durable manifest；旧 accepted bundle可恢复归档，不追溯修改。
+- 生成无 owner decision 的新 blocked v2 bundle 与 Markdown；旧 accepted bundle 保持历史只读、可校验且不追溯修改。
 - 任一 required 节点缺失时列出具体 evidence gap 并停止，不补写、不把旧总 run pass 当成节点证据。
-- 若用户尚未选择 storage target 或授权 export，材料保持 `durability_status: pending_external_authority`，不得称 accepted durable baseline。
+### Phase 4 — 独立复核与人工判断
 
-### Phase 5 — Durable export、独立复核与人工判断
-
-- 只有在 storage target、access policy 和外部写权限明确后才执行真实 export；export 完成后从新的临时目录 restore，并在不引用源路径的情况下重跑 digest、v2 review、项目 validators 和 strict closure。
 - 独立只读 reviewer 检查 authority、领域隔离、材料完整性、正反路径和历史保留。
 - 只有在 acceptance owner 实际查看当前完整 Markdown 后，才可登记新的 v2 decision。
 - owner 未判断、判断“不符合/需修改”或任何引用变化均保持 blocked/rejected，不得 accepted。
 
-### Phase 6 — 回归与收口
+### Phase 5 — 回归与收口
 
 - 运行所有 required validation rows、forbidden-path 审计和 Multica fingerprints。
 - Atlas 与 Sharp Cell 分别形成适中、可回退的本地逻辑提交；没有 push、PR、安装、部署或发布授权。
@@ -209,26 +180,21 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 | ID | Criterion | Required | Verification |
 | --- | --- | --- | --- |
 | AC-01 | review-card v2 表达有序 document chain、flow steps、negative controls、final state、convergence 和 limitations | yes | schema/positive fixtures |
-| AC-02 | actual facts 只能引用当前 task/scenario 已登记 evidence；unknown、cross-scenario、stale、path escape、symlink 均失败 | yes | negative matrix |
+| AC-02 | actual facts 只能引用当前 task/scenario 已登记 evidence；unknown、cross-scenario、stale、path escape、symlink 均失败 | yes | 最小确定性 negative fixtures |
 | AC-03 | 项目声明的 required evidence categories 缺失时失败关闭 | yes | completeness fixtures |
 | AC-04 | screenshot-only 不得满足 identity、transition、causality 或 no-mutation | yes | screenshot-only fixture |
 | AC-05 | required negative control 同时证明 rejection 和关键状态 no-mutation | yes | invalid-input fixtures + project validator |
 | AC-06 | domain join/transition/causality 由 adapter 外独立 validator 判定 | yes | validator spoof/tamper tests |
 | AC-07 | JSON 与 Markdown 使用同一 validated model，Markdown包含完整业务流转所需章节 | yes | golden semantic assertions |
 | AC-08 | 缺失/不足严格显示“未登记/当前无法判断”，无 AI 推断或自由 actual conclusion | yes | missing/unknown tests + source scan |
-| AC-09 | 非 real 模式不得称真实运行或真实业务验收 | yes | integration-mode matrix |
-| AC-10 | owner decision 绑定规范化 flow digest；flow 或当前引用变化使旧判断失败 | yes | owner tamper matrix |
+| AC-09 | 非 real 模式不得称真实运行或真实业务验收 | yes | 最小 integration-mode fixtures |
+| AC-10 | owner decision 绑定规范化 flow digest 与实际引用；flow 或当前引用变化使旧判断失败 | yes | 最小 current-reference tamper fixtures |
 | AC-11 | BAF v2 semantics 和唯一 `business-verdict.json` 不变，review 零 verdict 写入 | yes | BAF regression + write audit |
 | AC-12 | Core 无 Sharp Cell 领域、DOM、账号、URL、browser 或 viewport 常量 | yes | forbidden-value source scan |
 | AC-13 | Sharp Cell v2 材料展示同一单据链的 UI 创建/发布/启动、invalid no-mutation、valid callback 和 UI running readback | yes | migration material review |
 | AC-14 | 优先复用 run29/run30/run31；缺 required evidence 时明确 blocked，不补写或降级 gate | yes | migration dry-run |
 | AC-15 | v1 历史只读兼容并标识 legacy summary，不自动继承 owner decision | yes | compatibility fixtures |
 | AC-16 | secret、canonical path、forbidden paths 和 Multica fingerprints 不回归 | yes | security/range audit |
-| AC-17 | Git 只保留规则、manifest/digest、结论和小型脱敏 fixtures/golden；真实 raw Trace/HAR/video/API/DB/callback/log/bulk screenshots 不进入 Git | yes | staged path/type/size/secret audit |
-| AC-18 | durable manifest entry 完整记录 evidence/scenario/run/attempt identity、digest、size、media type、稳定 locator、sensitivity、retention class 和 policy ref | yes | manifest schema/negative fixtures |
-| AC-19 | locator credentials、本机绝对路径、home/worktree `file://`、unknown scheme、无 policy、digest/size mismatch 均失败 | yes | locator/manifest negative matrix |
-| AC-20 | 从 locator 恢复到新临时目录后，不依赖源路径即可通过逐文件完整性、v2 review、项目 validators 和 strict closure | yes | hermetic rehydration + Sharp restore rehearsal |
-| AC-21 | Core 不实现 provider upload/delete/lifecycle，实际 external export 只有获得 target/access/权限后执行 | yes | source scan + authorization audit |
 
 ## Real Validation Plan
 
@@ -241,20 +207,16 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 | V-05 | Markdown semantics | 对 v2 golden 断言固定章节、单据树、逐节点 expected/actual/evidence、negative control、final state、convergence 和 limitations | 全部存在且来自 validated model | 同上 |
 | V-06 | Sharp migration | 使用 run29/run30/run31 的复制 artifacts 运行只读 migration dry-run | 完整则生成 blocked v2 bundle；不完整则精确列 evidence gaps | Git 外 migration artifact + concise index |
 | V-07 | Sharp validators | 运行既有 Core `check-run`、五个独立 validators 和项目 BAF closure tests | 既有 technical authority 不回归 | Sharp phase conclusion |
-| V-08 | Owner current refs | 对 flow、scenario、verdict、map、image、evidence refs 分别做单点 tamper | 所有 stale decision 失败 | focused test output |
+| V-08 | Owner current refs | 以最小确定性 fixtures 覆盖 flow digest 与实际 refs 变化 | stale decision 失败 | focused test output |
 | V-09 | Human review | acceptance owner 从 Markdown 定位同一单据全链、invalid/valid 对照和每个 evidence link | owner 能据此判断；判断仍由 owner 本人登记 | owner decision evidence |
 | V-10 | Docs | implementation-contract strict lint、contract-index lint、relative Markdown links | 全部通过 | clarify/final conclusion |
 | V-11 | Diff | Atlas/Sharp 分别 `git diff --check` 与 owned/forbidden path audit | 无越界或格式问题 | final conclusion |
 | V-12 | Multica | 只读比较 `HEAD:plugins/multica-sdlc` 与 `HEAD:.agents` fingerprints | 与实施前一致且未运行 tests/runtime | final conclusion |
-| V-13 | Git evidence boundary | staged path/type/size/secret audit，并对 raw evidence patterns 做负向 fixture | 真实 raw evidence 未进入 Git | phase/final conclusion |
-| V-14 | Manifest/locator | 对缺字段、credential URL、local/home path、unknown scheme、policy/digest/size mismatch 运行矩阵 | 全部失败关闭 | focused test output |
-| V-15 | Rehydration | 从 hermetic locator 恢复到 `mktemp -d` 后校验；真实 Sharp export 获权后做同类 rehearsal | 不引用源路径仍通过 digest/v2 review/validators/strict closure | restored artifact + concise conclusion |
 
 ## Evidence Budget
 
 - Git 只保留代码、schema、必要 fixtures/golden、项目 flow contract、phase conclusion、evidence index、gate checklist 和一份示例 human-first Markdown。
-- 原始 run JSON、Trace、video、HAR、network、日志、API/DB dump、callback payload 和批量截图放 Git 外 durable artifacts；失败 retry、调试和 migration 中间输出放 ephemeral artifacts。
-- Git 中的 accepted evidence manifest 只包含无 secret 的 metadata、digest、稳定 locator 和 policy keys；不包含临时 signed URL 或访问凭据。
+- 原始 run JSON、Trace、video、HAR、network、日志、API/DB dump、callback payload 和批量截图保持在 Git 外当前授权 artifact；失败 retry、调试和 migration 中间输出不得进入 Git。
 - 每 phase 目标不超过 10 个 Git evidence 文件和 1 MB；例外必须在 phase review 中解释。
 
 ## Edge Cases
@@ -271,10 +233,6 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 | v1 card 历史读取 | 可校验但标识 legacy summary，不升级为 v2 accepted | yes |
 | 现有三次 run 缺少 required evidence | migration blocked；新 run 需另行授权 | yes |
 | raw Trace/HAR/video 被 staged | Git evidence boundary failed | yes |
-| locator 只指向当前本机绝对路径 | durability gate failed | yes |
-| export 完成但新目录 restore digest mismatch | durable baseline blocked；不回退源副本 | yes |
-| retention class 没有 project policy mapping | manifest invalid | yes |
-| 用户未选择 storage target/权限 | 实施可完成 hermetic 协议，但 Sharp durable export 停止等待授权 | yes |
 
 ## Failure And Stop Conditions
 
@@ -282,7 +240,6 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 - 需要在 Core 硬编码项目对象、状态或 DOM 才能表达流程。
 - Phase 1 结束仍没有可执行 v2 review/Markdown 行为。
 - Sharp migration 发现 required evidence 未采集，继续需要启动真实服务、浏览器、新 run 或外部状态变化但没有相应授权。
-- Sharp durable export 需要 storage provider/target、credentials/access policy、retention mapping 或外部写入，但尚未由用户/组织 owner 提供和授权。
 - acceptance owner 对 required 业务节点、预期状态或允许路径存在未解决歧义。
 - 实施需要 push、PR、安装、刷新 runtime/cache/marketplace、部署、发布或 Multica 变更。
 - Required safe fallback: 缺失事实保持 blocked，并输出“未登记/当前无法判断”和精确 evidence gap；不得自动降级为 summary pass。
@@ -295,7 +252,6 @@ actual fact 只能由 `evidence_id` 加可选 JSON Pointer/结构化 selector �
 - [ ] Required validation rows have evidence
 - [ ] Sharp Cell material shows the complete same-document flow or explicitly blocks on gaps
 - [ ] Any v2 accepted verdict uses a fresh owner decision bound to current flow digest
-- [ ] Git contains no prohibited raw evidence and the accepted manifest contains no credential or temporary signed URL
-- [ ] Durable baseline was restored into a new directory and revalidated without source-path fallback
-- [ ] Historical v1/accepted artifacts remain recoverable and unmodified
+- [ ] Git contains no prohibited raw evidence
+- [ ] Historical v1/accepted artifacts remain read-only verifiable and unmodified
 - [ ] Residual risks are recorded
