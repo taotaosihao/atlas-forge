@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Atlas Project Business Flow Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "evidence_bindings", "document_roles", "required_steps", "negative_controls", "final_consistency", "convergence", "limitations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "contract_id": {"type": "string", "minLength": 1},
+    "evidence_bindings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidenceBinding"}},
+    "document_roles": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/documentRole"}},
+    "required_steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/flowStep"}},
+    "negative_controls": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/negativeControl"}},
+    "final_consistency": {"$ref": "#/$defs/finalConsistency"},
+    "convergence": {"$ref": "#/$defs/convergence"},
+    "limitations": {"type": "array", "items": {"$ref": "#/$defs/limitation"}}
+  },
+  "$defs": {
+    "category": {"enum": ["ui_action", "network", "backend_api", "database", "audit_trace", "external_input", "visual"]},
+    "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/category"}},
+    "validator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim", "validator_id", "claim_id"],
+      "properties": {
+        "claim": {"enum": ["identity", "transition", "causality", "no_mutation", "final_consistency"]},
+        "validator_id": {"type": "string", "minLength": 1},
+        "claim_id": {"type": "string", "minLength": 1},
+        "evidence_binding_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "evidenceBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_id", "categories", "allowed_pointers", "sha256", "run_root", "attempt", "run_evidence_id"],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "categories": {"$ref": "#/$defs/categories"},
+        "allowed_pointers": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "run_root": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1},
+        "run_evidence_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "documentRole": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "label", "required_categories", "identity_validator"],
+      "properties": {
+        "role": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "required_categories": {"$ref": "#/$defs/categories"},
+        "identity_validator": {"$ref": "#/$defs/validator"}
+      }
+    },
+    "flowStep": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "actor", "operation", "expected", "required_categories", "required_validators"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "actor": {"type": "string", "minLength": 1},
+        "operation": {"type": "string", "minLength": 1}, "expected": {"type": "string", "minLength": 1},
+        "required_categories": {"$ref": "#/$defs/categories"},
+        "required_validators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/validator"}}
+      }
+    },
+    "negativeControl": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "input", "expected_rejection", "expected_no_mutation", "required_categories", "required_validators"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "input": {"type": "string", "minLength": 1},
+        "expected_rejection": {"type": "string", "minLength": 1}, "expected_no_mutation": {"type": "string", "minLength": 1},
+        "required_categories": {"$ref": "#/$defs/categories"},
+        "required_validators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/validator"}}
+      }
+    },
+    "finalFact": {
+      "type": "object", "additionalProperties": false, "required": ["id", "label", "category"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}, "category": {"$ref": "#/$defs/category"}}
+    },
+    "finalConsistency": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "facts", "required_categories", "required_validators"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "facts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/finalFact"}},
+        "required_categories": {"$ref": "#/$defs/categories"},
+        "required_validators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/validator"}}
+      }
+    },
+    "convergence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimum_runs", "required_categories", "required_validators"],
+      "properties": {
+        "minimum_runs": {"type": "integer", "minimum": 1},
+        "required_categories": {"$ref": "#/$defs/categories"},
+        "required_validators": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/validator"}}
+      }
+    },
+    "limitation": {
+      "type": "object", "additionalProperties": false, "required": ["id", "label", "targets"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1},
+        "targets": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

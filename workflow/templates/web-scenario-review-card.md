@@ -8,11 +8,24 @@
 - 进入角色与初始条件：引用当前 BAF 场景记录；材料不足时写“当前无法判断”。
 - 集成方式：只有 BAF 当前记录为 `integration_mode: real` 才写“真实运行”，其他模式照实登记。
 
-## 场景操作、预期与实际
+## 单据关联树与初始状态
+
+- 按项目 flow contract 的有序 document roles 展示同一业务链的 identity、初始状态和最终状态。
+- actual value 必须由当前 evidence ID 和允许的 JSON Pointer 解析；不能人工补写。
+
+## 完整业务流转时间线（场景操作、预期与实际）
 
 | 场景操作 | 预期结果 | 实际结果 | 已登记证据 |
 | --- | --- | --- | --- |
 | 按当前场景逐步操作 | 引用当前场景预期 | 引用当前 evidence result；缺失写“未登记/当前无法判断” | 引用当前 evidence ID |
+
+每个节点同时显示 actor、operation、expected、before/after、result，以及由项目 contract 绑定的 UI、network、backend/API、database、audit/trace、external input、visual 分类。截图不能单独证明 identity、transition、causality 或 no-mutation。
+
+## 反向控制与最终一致性
+
+- 反向控制必须同时展示拒绝结果和关键状态 no-mutation，并引用独立 validator closure。
+- 最终状态并列展示 UI、API、DB 与 audit/trace；任一不一致都不能写成符合。
+- Fresh-seed convergence 按解析后的 run ID、seed、attempt、identity 和结果展示，不使用自由文本总结。
 
 ## 参考图与实际截图
 
@@ -27,4 +40,4 @@
 
 ## Acceptance owner 人工判断
 
-Acceptance owner 只对当前 contract、参考图、实际截图和 evidence 引用选择“符合”、“不符合”或“需修改”。`acceptance-owner-design-intent` 仅校验当前引用对应关系和判断登记，不产生第二个 verdict。
+Acceptance owner 只对当前 contract、完整 flow digest、参考图、实际截图和 evidence 引用选择“符合”、“不符合”或“需修改”。`acceptance-owner-design-intent` 仅校验当前引用对应关系和判断登记，不产生第二个 verdict。

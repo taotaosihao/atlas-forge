@@ -153,7 +153,11 @@ Web UI acceptance uses the dependency-free `codex-web-acceptance` thin layer:
 workflow/bin/codex-web-acceptance audit --project <root> --playwright-config <file> --format json
 workflow/bin/codex-web-acceptance run --project-config <config.json> --contract <contract> --artifact-root <run-root> --format json
 workflow/bin/codex-web-acceptance check-run --run-root <run-directory> --format json
-workflow/bin/codex-web-acceptance review --baf-root <team/acceptance> --card <review-card.json> [--contract <contract> --check-owner-decision] --format json
+# Validate/materialize only: an embedded owner decision is reported as registered but unverified.
+workflow/bin/codex-web-acceptance review --baf-root <team/acceptance> --card <review-card.json> --format json
+workflow/bin/codex-web-acceptance review --baf-root <team/acceptance> --card <review-card-v2.json> --flow-contract <project-flow.json> --format markdown
+# Explicitly validate a complete material's owner decision against the current contract and refs.
+workflow/bin/codex-web-acceptance review --baf-root <team/acceptance> --card <review-card-v2.json> --flow-contract <project-flow.json> --contract <contract> --check-owner-decision --format json
 ```
 
 Project adapters and independent claim validators exchange one JSON envelope on
@@ -164,7 +168,13 @@ produce only a technical result; BAF v2 remains the machine-fact authority and
 `business-verdict.json` remains the sole final verdict. The concise Chinese
 handoff template is `workflow/templates/web-scenario-review-card.md`; missing
 facts must stay explicit and only BAF `integration_mode: real` may be described
-as a real run.
+as a real run. Review-card v2 resolves actual values only through current,
+content-bound evidence IDs and JSON Pointers; its deterministic Markdown is a
+view of the validated model and never creates a verdict. Contract-declared
+missing facts produce a blocked material with exact gap targets. A blocked
+material cannot validate an owner decision. Without `--check-owner-decision`,
+JSON and Markdown never expose the decision value; they only say whether one is
+registered but unverified.
 
 Refresh Atlas workflow after changing plugin source, workflow helper source, or
 native Codex agent source from the Atlas Forge checkout:

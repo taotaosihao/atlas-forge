@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Atlas Web Acceptance Review Card v2",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "task_id", "scenario_id", "title", "baf_refs", "integration_mode", "flow_contract_digest", "document_chain", "flow_steps", "negative_controls", "final_state", "convergence", "limitations", "reference_images", "actual_screenshots"],
+  "properties": {
+    "schema_version": {"const": 2}, "task_id": {"$ref": "#/$defs/text"}, "scenario_id": {"$ref": "#/$defs/text"},
+    "title": {"$ref": "#/$defs/text"}, "integration_mode": {"$ref": "#/$defs/text"}, "flow_contract_digest": {"$ref": "#/$defs/digest"},
+    "baf_refs": {"$ref": "#/$defs/bafRefs"},
+    "document_chain": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/documentNode"}},
+    "flow_steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/flowStep"}},
+    "negative_controls": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/negativeControl"}},
+    "final_state": {"$ref": "#/$defs/finalState"},
+    "convergence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/convergenceRow"}},
+    "limitations": {"type": "array", "items": {"$ref": "#/$defs/limitation"}},
+    "reference_images": {"type": "array", "items": {"type": "string"}},
+    "actual_screenshots": {"type": "array", "items": {"type": "string"}},
+    "owner_decision": {"$ref": "#/$defs/ownerDecision"}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "factPointer": {"type": "object", "additionalProperties": false, "required": ["evidence_id", "pointer"], "properties": {"evidence_id": {"$ref": "#/$defs/text"}, "pointer": {"type": "string"}}},
+    "missingFact": {"type": "object", "additionalProperties": false, "required": ["status"], "properties": {"status": {"enum": ["未登记", "当前无法判断"]}}},
+    "factRef": {"oneOf": [{"$ref": "#/$defs/factPointer"}, {"$ref": "#/$defs/missingFact"}]},
+    "evidenceRefs": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+    "bafRefs": {"type": "object", "additionalProperties": false, "required": ["verdict", "technical_status", "business_status", "evidence_refs", "verdict_digest", "evidence_map_digest", "scenario_digest"], "properties": {"verdict": {"$ref": "#/$defs/text"}, "technical_status": {"$ref": "#/$defs/text"}, "business_status": {"$ref": "#/$defs/text"}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}, "verdict_digest": {"$ref": "#/$defs/digest"}, "evidence_map_digest": {"$ref": "#/$defs/digest"}, "scenario_digest": {"$ref": "#/$defs/digest"}}},
+    "documentNode": {"type": "object", "additionalProperties": false, "required": ["role", "identity", "initial_state", "final_state"], "properties": {"role": {"$ref": "#/$defs/text"}, "identity": {"$ref": "#/$defs/factRef"}, "initial_state": {"$ref": "#/$defs/factRef"}, "final_state": {"$ref": "#/$defs/factRef"}}},
+    "flowStep": {"type": "object", "additionalProperties": false, "required": ["step_id", "actor", "operation", "expected", "before", "after", "result", "evidence_refs"], "properties": {"step_id": {"$ref": "#/$defs/text"}, "actor": {"$ref": "#/$defs/text"}, "operation": {"$ref": "#/$defs/text"}, "expected": {"$ref": "#/$defs/text"}, "before": {"$ref": "#/$defs/factRef"}, "after": {"$ref": "#/$defs/factRef"}, "result": {"$ref": "#/$defs/factRef"}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}}},
+    "negativeControl": {"type": "object", "additionalProperties": false, "required": ["control_id", "input", "expected_rejection", "expected_no_mutation", "actual_rejection", "actual_no_mutation", "evidence_refs"], "properties": {"control_id": {"$ref": "#/$defs/text"}, "input": {"$ref": "#/$defs/text"}, "expected_rejection": {"$ref": "#/$defs/text"}, "expected_no_mutation": {"$ref": "#/$defs/text"}, "actual_rejection": {"$ref": "#/$defs/factRef"}, "actual_no_mutation": {"$ref": "#/$defs/factRef"}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}}},
+    "finalFact": {"type": "object", "additionalProperties": false, "required": ["fact_id", "actual"], "properties": {"fact_id": {"$ref": "#/$defs/text"}, "actual": {"$ref": "#/$defs/factRef"}}},
+    "finalState": {"type": "object", "additionalProperties": false, "required": ["result", "facts", "evidence_refs"], "properties": {"result": {"$ref": "#/$defs/factRef"}, "facts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/finalFact"}}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}}},
+    "convergenceRow": {"type": "object", "additionalProperties": false, "required": ["run_id", "seed", "attempt", "identity", "result", "evidence_refs"], "properties": {"run_id": {"$ref": "#/$defs/factRef"}, "seed": {"$ref": "#/$defs/factRef"}, "attempt": {"$ref": "#/$defs/factRef"}, "identity": {"$ref": "#/$defs/factRef"}, "result": {"$ref": "#/$defs/factRef"}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}}},
+    "limitation": {"type": "object", "additionalProperties": false, "required": ["limitation_id", "status"], "properties": {"limitation_id": {"$ref": "#/$defs/text"}, "status": {"enum": ["未登记", "当前无法判断"]}}},
+    "ownerDecision": {"type": "object", "additionalProperties": false, "required": ["decision", "owner", "decision_evidence_id", "contract_digest", "verdict_digest", "evidence_map_digest", "scenario_digest", "reference_digests", "actual_digests", "evidence_refs", "flow_digest"], "properties": {"decision": {"enum": ["符合", "不符合", "需修改"]}, "owner": {"$ref": "#/$defs/text"}, "decision_evidence_id": {"$ref": "#/$defs/text"}, "contract_digest": {"$ref": "#/$defs/digest"}, "verdict_digest": {"$ref": "#/$defs/digest"}, "evidence_map_digest": {"$ref": "#/$defs/digest"}, "scenario_digest": {"$ref": "#/$defs/digest"}, "reference_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}}, "actual_digests": {"type": "array", "items": {"$ref": "#/$defs/digest"}}, "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}, "flow_digest": {"$ref": "#/$defs/digest"}}}
+  }
+}

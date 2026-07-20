@@ -20,6 +20,7 @@ expect_exit() {
   set -e
   [[ "$actual" == "$expected" ]] || {
     printf 'expected exit %s, got %s: %s\n' "$expected" "$actual" "$*" >&2
+    sed -n '1,20p' "$TMP_ROOT/command.err" >&2
     return 1
   }
 }
@@ -311,7 +312,7 @@ card.owner_decision={decision:'符合',owner:'acceptance-owner',decision_evidenc
 NODE
 expect_exit 0 "$BIN" review --baf-root "$baf" --card "$baf/card/review-card.json" --contract "$protocol/contract.md" --check-owner-decision --format json
 node - "$TMP_ROOT/command.out" <<'NODE'
-const value=JSON.parse(require('fs').readFileSync(process.argv[2])); if(!value.ok||value.evidence_validation.validator_id!=='acceptance-owner-design-intent'||value.evidence_validation.status!=='passed'||'verdict' in value)process.exit(1);
+const value=JSON.parse(require('fs').readFileSync(process.argv[2])); if(!value.ok||value.schema_version!==1||value.material_completeness!=='legacy_summary_only'||value.evidence_validation.validator_id!=='acceptance-owner-design-intent'||value.evidence_validation.status!=='passed'||'verdict' in value)process.exit(1);
 NODE
 node - "$baf/card/review-card.json" "$baf/card/cross-scenario.json" <<'NODE'
 const fs=require('fs'),v=JSON.parse(fs.readFileSync(process.argv[2]));v.steps[0].evidence_refs=['ev-other'];v.steps[0].actual='其他场景证据（结果：passed）';fs.writeFileSync(process.argv[3],JSON.stringify(v));
@@ -377,6 +378,137 @@ NODE
 expect_exit 1 "$BIN" review --baf-root "$baf" --card "$baf/card/review-card.json.nonreal" --format json
 grep -Fq '不得称为真实运行' "$TMP_ROOT/command.err"
 mv "$baf/business-verdict.before-mode.json" "$baf/business-verdict.json"
+
+# Business-flow review-card v2: structured facts, deterministic Markdown, category/validator closure and no verdict writes.
+v2root="$TMP_ROOT/v2/task"
+v2baf="$v2root/team/acceptance"
+mkdir -p "$v2baf/scenarios" "$v2baf/card" "$v2root/evidence"
+cp "$baf/scenarios/business-scenario-card.flow.json" "$v2baf/scenarios/"
+cp "$baf/business-verdict.json" "$v2baf/business-verdict.json"
+cat > "$v2root/adapter.js" <<'NODE'
+const c=require('crypto'),fs=require('fs');let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{const v=JSON.parse(s),body=JSON.stringify({document:{primary:{id:'D-1',initial:'draft',final:'active'},child:{id:'C-1',initial:'queued',final:'active'}},step:{before:'queued',after:'active',result:'passed'},negative:{rejected:true,unchanged:true},final:{result:'passed',ui:'active',api:'active',db:'active',audit:'active'},run:{id:v.run_id,badId:'wrong-run',seed:`seed-${v.run_id}`,duplicateSeed:'shared-seed',attempt:v.attempt,badAttempt:2,identity:`identity-${v.run_id}`,duplicateIdentity:'shared-identity',result:'passed'}}),claims=['flow-facts','identity','transition','no-mutation','final-consistency','convergence'],refs=claims.map((claim,i)=>{const file=i?'closure-'+claim+'.json':'facts.json';fs.writeFileSync(`${v.artifact_root}/${file}`,body);return{id:claim,claim_id:claim,status:'passed',path:file,sha256:c.createHash('sha256').update(body).digest('hex')}});process.stdout.write(JSON.stringify({protocol_version:'1',phase:v.phase,facts:{captured:true},evidence_refs:refs,failure_facts:[]})+'\n')});
+NODE
+cat > "$v2root/validator.js" <<'NODE'
+let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{const v=JSON.parse(s);process.stdout.write(JSON.stringify({protocol_version:'1',validator_id:v.validator_id,claim_id:v.claim_id,input_digest:v.input_digest,evidence_digest:v.evidence_digest,status:'passed',reason:'independent project validator closure'})+'\n')});
+NODE
+cat > "$v2root/project.json" <<JSON
+{"schema_version":1,"protocol_version":"1","task_id":"legacy-web-fixture","scenario_id":"flow","project_root":"$v2root","adapter":{"argv":["node","$v2root/adapter.js"]},"phases":["execute"],"validators":[{"id":"facts-validator","claim_id":"flow-facts","argv":["node","$v2root/validator.js"]},{"id":"identity-validator","claim_id":"identity","argv":["node","$v2root/validator.js"]},{"id":"transition-validator","claim_id":"transition","argv":["node","$v2root/validator.js"]},{"id":"no-mutation-validator","claim_id":"no-mutation","argv":["node","$v2root/validator.js"]},{"id":"final-validator","claim_id":"final-consistency","argv":["node","$v2root/validator.js"]},{"id":"convergence-validator","claim_id":"convergence","argv":["node","$v2root/validator.js"]}],"required_evidence":[{"id":"flow-facts","claim_id":"flow-facts"},{"id":"identity","claim_id":"identity"},{"id":"transition","claim_id":"transition"},{"id":"no-mutation","claim_id":"no-mutation"},{"id":"final-consistency","claim_id":"final-consistency"},{"id":"convergence","claim_id":"convergence"}]}
+JSON
+expect_exit 0 "$BIN" run --project-config "$v2root/project.json" --contract "$protocol/contract.md" --artifact-root "$v2root/runs" --run-id v2-run-a --format json
+expect_exit 0 "$BIN" run --project-config "$v2root/project.json" --contract "$protocol/contract.md" --artifact-root "$v2root/runs" --run-id v2-run-b --format json
+printf '%s\n' reference > "$v2baf/card/reference.png"
+printf '%s\n' actual > "$v2baf/card/actual.png"
+node - "$v2root" <<'NODE'
+const c=require('crypto'),fs=require('fs'),p=require('path'),root=process.argv[2],baf=p.join(root,'team/acceptance'),sha=f=>c.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+const refs=[['ev-facts-a','runs/v2-run-a/attempt-1/facts.json'],['ev-facts-b','runs/v2-run-b/attempt-1/facts.json'],['ev-owner','team/acceptance/card/review-card-v2.json']].map(([evidence_id,evidence_path])=>({evidence_id,scenario_id:'flow',source_type:'local',description:evidence_id,evidence_path,result:'passed'}));
+fs.writeFileSync(p.join(baf,'business-evidence-map.json'),JSON.stringify({schema_version:1,task_id:'web-fixture',evidence_refs:refs})+'\n');
+const pointers=['/document/primary/id','/document/primary/initial','/document/primary/final','/document/child/id','/document/child/initial','/document/child/final','/step/before','/step/after','/step/result','/negative/rejected','/negative/unchanged','/final/result','/final/ui','/final/api','/final/db','/final/audit','/run/id','/run/badId','/run/seed','/run/duplicateSeed','/run/attempt','/run/badAttempt','/run/identity','/run/duplicateIdentity','/run/result'];
+const binding=(suffix)=>({evidence_id:`ev-facts-${suffix}`,categories:['ui_action','network','backend_api','database','audit_trace','external_input','visual'],allowed_pointers:pointers,sha256:sha(p.join(root,`runs/v2-run-${suffix}/attempt-1/facts.json`)),run_root:`runs/v2-run-${suffix}`,attempt:1,run_evidence_id:'flow-facts'}); const validator=(claim,validator_id,claim_id,evidence_binding_id)=>Object.assign({claim,validator_id,claim_id},evidence_binding_id?{evidence_binding_id}:{});
+const fixed=(claim,id,claimId)=>validator(claim,id,claimId,'ev-facts-a'); const flow={schema_version:1,contract_id:'generic-flow',evidence_bindings:[binding('a'),binding('b')],document_roles:[{role:'primary',label:'主单据',required_categories:['database'],identity_validator:fixed('identity','identity-validator','identity')},{role:'child',label:'子单据',required_categories:['database'],identity_validator:fixed('identity','identity-validator','identity')}],required_steps:[{id:'activate',actor:'业务用户',operation:'执行激活',expected:'子单据进入 active',required_categories:['ui_action','network','backend_api','database','audit_trace'],required_validators:[fixed('transition','transition-validator','transition')]}],negative_controls:[{id:'invalid-input',input:'无效外部输入',expected_rejection:'请求被拒绝',expected_no_mutation:'单据状态不变',required_categories:['external_input','database','audit_trace'],required_validators:[fixed('no_mutation','no-mutation-validator','no-mutation')]}],final_consistency:{id:'final',facts:[{id:'ui',label:'UI 状态',category:'visual'},{id:'api',label:'API 状态',category:'backend_api'},{id:'db',label:'DB 状态',category:'database'},{id:'audit',label:'Audit 状态',category:'audit_trace'}],required_categories:['backend_api','database','audit_trace','visual'],required_validators:[fixed('final_consistency','final-validator','final-consistency')]},convergence:{minimum_runs:2,required_categories:['database'],required_validators:[validator('causality','convergence-validator','convergence')]},limitations:[]}; fs.writeFileSync(p.join(root,'flow.json'),JSON.stringify(flow)+'\n');
+const f=(suffix,pointer)=>({evidence_id:`ev-facts-${suffix}`,pointer}); const convergence=(suffix)=>({run_id:f(suffix,'/run/id'),seed:f(suffix,'/run/seed'),attempt:f(suffix,'/run/attempt'),identity:f(suffix,'/run/identity'),result:f(suffix,'/run/result'),evidence_refs:[`ev-facts-${suffix}`]}); const card={schema_version:2,task_id:'web-fixture',scenario_id:'flow',title:'按场景核对页面结果',baf_refs:{verdict:'accepted',technical_status:'passed',business_status:'passed',evidence_refs:['ev-facts-a','ev-facts-b'],verdict_digest:sha(p.join(baf,'business-verdict.json')),evidence_map_digest:sha(p.join(baf,'business-evidence-map.json')),scenario_digest:sha(p.join(baf,'scenarios/business-scenario-card.flow.json'))},integration_mode:'real',flow_contract_digest:sha(p.join(root,'flow.json')),document_chain:[{role:'primary',identity:f('a','/document/primary/id'),initial_state:f('a','/document/primary/initial'),final_state:f('a','/document/primary/final')},{role:'child',identity:f('a','/document/child/id'),initial_state:f('a','/document/child/initial'),final_state:f('a','/document/child/final')}],flow_steps:[{step_id:'activate',actor:'业务用户',operation:'执行激活',expected:'子单据进入 active',before:f('a','/step/before'),after:f('a','/step/after'),result:f('a','/step/result'),evidence_refs:['ev-facts-a']}],negative_controls:[{control_id:'invalid-input',input:'无效外部输入',expected_rejection:'请求被拒绝',expected_no_mutation:'单据状态不变',actual_rejection:f('a','/negative/rejected'),actual_no_mutation:f('a','/negative/unchanged'),evidence_refs:['ev-facts-a']}],final_state:{result:f('a','/final/result'),facts:[{fact_id:'ui',actual:f('a','/final/ui')},{fact_id:'api',actual:f('a','/final/api')},{fact_id:'db',actual:f('a','/final/db')},{fact_id:'audit',actual:f('a','/final/audit')}],evidence_refs:['ev-facts-a']},convergence:[convergence('a'),convergence('b')],limitations:[],reference_images:['team/acceptance/card/reference.png'],actual_screenshots:['team/acceptance/card/actual.png']}; fs.writeFileSync(p.join(baf,'card/review-card-v2.json'),JSON.stringify(card)+'\n');
+NODE
+before_verdict="$(sha256sum "$v2baf/business-verdict.json" | cut -d' ' -f1)"
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --format json
+node - "$TMP_ROOT/command.out" <<'NODE'
+const v=JSON.parse(require('fs').readFileSync(process.argv[2]));if(!v.ok||v.schema_version!==2||v.material_completeness!=='complete_business_flow'||!/^[a-f0-9]{64}$/.test(v.flow_digest)||'markdown' in v||'verdict' in v)process.exit(1);
+NODE
+cp "$TMP_ROOT/command.out" "$TMP_ROOT/v2-review-result.json"
+for convergence_case in same-run same-seed same-identity attempt-mismatch run-id-mismatch; do
+  node - "$v2baf/card/review-card-v2.json" "$v2baf/card/convergence-$convergence_case.json" "$convergence_case" <<'NODE'
+const fs=require('fs'),src=process.argv[2],out=process.argv[3],mode=process.argv[4],v=JSON.parse(fs.readFileSync(src));
+if(mode==='same-run'){for(const name of ['run_id','seed','attempt','identity','result'])v.convergence[1][name].evidence_id='ev-facts-a';v.convergence[1].evidence_refs=['ev-facts-a'];}
+if(mode==='same-seed'){v.convergence[0].seed.pointer=v.convergence[1].seed.pointer='/run/duplicateSeed';}
+if(mode==='same-identity'){v.convergence[0].identity.pointer=v.convergence[1].identity.pointer='/run/duplicateIdentity';}
+if(mode==='attempt-mismatch')v.convergence[1].attempt.pointer='/run/badAttempt';
+if(mode==='run-id-mismatch')v.convergence[1].run_id.pointer='/run/badId';
+fs.writeFileSync(out,JSON.stringify(v));
+NODE
+  expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/convergence-$convergence_case.json" --flow-contract "$v2root/flow.json" --format json
+done
+# Contradictory UI/API/DB/audit facts are rejected even when the card's raw result still says passed.
+cp "$v2root/runs/v2-run-a/attempt-1/facts.json" "$v2root/runs/v2-run-a/attempt-1/facts.before-conflict.json"
+node - "$v2root/runs/v2-run-a/attempt-1/facts.json" <<'NODE'
+const fs=require('fs'),f=process.argv[2],v=JSON.parse(fs.readFileSync(f));v.final.api='conflicting';v.final.result='passed';fs.writeFileSync(f,JSON.stringify(v));
+NODE
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --format json
+mv "$v2root/runs/v2-run-a/attempt-1/facts.before-conflict.json" "$v2root/runs/v2-run-a/attempt-1/facts.json"
+# A card-level passed value cannot replace the current immutable check-run validator closure.
+cp "$v2root/runs/v2-run-a/evidence-index.json" "$v2root/runs/v2-run-a/evidence-index.before-forge.json"
+cp "$v2root/runs/v2-run-a/run-result.json" "$v2root/runs/v2-run-a/run-result.before-forge.json"
+node - "$v2root/runs/v2-run-a" <<'NODE'
+const c=require('crypto'),fs=require('fs'),p=require('path'),root=process.argv[2],index=p.join(root,'evidence-index.json'),result=p.join(root,'run-result.json'),i=JSON.parse(fs.readFileSync(index)),r=JSON.parse(fs.readFileSync(result));i.validators=i.validators.filter(v=>v.validator_id!=='transition-validator');fs.writeFileSync(index,JSON.stringify(i)+'\n');r.evidence_index_digest=c.createHash('sha256').update(fs.readFileSync(index)).digest('hex');fs.writeFileSync(result,JSON.stringify(r)+'\n');
+NODE
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --format json
+mv "$v2root/runs/v2-run-a/evidence-index.before-forge.json" "$v2root/runs/v2-run-a/evidence-index.json"
+mv "$v2root/runs/v2-run-a/run-result.before-forge.json" "$v2root/runs/v2-run-a/run-result.json"
+node - "$v2baf/card/review-card-v2.json" "$v2baf" "$v2root" "$protocol/contract.md" "$TMP_ROOT/v2-review-result.json" <<'NODE'
+const c=require('crypto'),fs=require('fs'),p=require('path'),file=process.argv[2],baf=process.argv[3],root=process.argv[4],contract=process.argv[5],result=JSON.parse(fs.readFileSync(process.argv[6])),v=JSON.parse(fs.readFileSync(file)),sha=f=>c.createHash('sha256').update(fs.readFileSync(f)).digest('hex');v.owner_decision={decision:'符合',owner:'acceptance-owner',decision_evidence_id:'ev-owner',contract_digest:sha(contract),verdict_digest:v.baf_refs.verdict_digest,evidence_map_digest:v.baf_refs.evidence_map_digest,scenario_digest:v.baf_refs.scenario_digest,reference_digests:[sha(p.join(baf,'card/reference.png'))],actual_digests:[sha(p.join(baf,'card/actual.png'))],evidence_refs:v.baf_refs.evidence_refs,flow_digest:result.flow_digest};fs.writeFileSync(file,JSON.stringify(v)+'\n');
+NODE
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --format json
+node - "$TMP_ROOT/command.out" <<'NODE'
+const v=JSON.parse(require('fs').readFileSync(process.argv[2]));if(v.evidence_validation.checked||v.evidence_validation.status!=='registered_unverified'||JSON.stringify(v).includes('acceptance-owner')||JSON.stringify(v).includes('符合'))process.exit(1);
+NODE
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --contract "$protocol/contract.md" --check-owner-decision --format json
+for owner_tamper in contract_digest verdict_digest evidence_map_digest scenario_digest flow_digest reference_digests actual_digests evidence_refs; do
+  cp "$v2baf/card/review-card-v2.json" "$v2baf/card/review-card-v2.before-tamper.json"
+  node - "$v2baf/card/review-card-v2.json" "$owner_tamper" <<'NODE'
+const fs=require('fs'),file=process.argv[2],field=process.argv[3],v=JSON.parse(fs.readFileSync(file));v.owner_decision[field]=field.endsWith('_digests')?['0'.repeat(64)]:field==='evidence_refs'?[]:'0'.repeat(64);fs.writeFileSync(file,JSON.stringify(v)+'\n');
+NODE
+  expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --contract "$protocol/contract.md" --check-owner-decision --format json
+  mv "$v2baf/card/review-card-v2.before-tamper.json" "$v2baf/card/review-card-v2.json"
+done
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/flow.json" --format markdown
+for heading in '单据关联树与初始状态' '完整业务流转时间线' '反向控制' '最终一致性' 'Fresh-seed convergence' '限制、未登记与当前无法判断'; do grep -Fq "$heading" "$TMP_ROOT/command.out"; done
+grep -Fq 'ev-facts-a / ui_action+network+backend_api+database+audit_trace+external_input+visual / passed / runs/v2-run-a/attempt-1/facts.json' "$TMP_ROOT/command.out"
+grep -Fq '参考图：team/acceptance/card/reference.png' "$TMP_ROOT/command.out"
+grep -Fq '已登记但当前未校验' "$TMP_ROOT/command.out"
+! grep -Fq 'acceptance-owner' "$TMP_ROOT/command.out"
+! grep -Fq ': 符合' "$TMP_ROOT/command.out"
+[[ "$before_verdict" == "$(sha256sum "$v2baf/business-verdict.json" | cut -d' ' -f1)" ]]
+
+# A contract-declared missing fact produces a valid blocked handoff with an exact gap; it can never validate owner pass.
+node - "$v2root/flow.json" "$v2baf/card/review-card-v2.json" "$v2root/blocked-flow.json" "$v2baf/card/blocked-v2.json" <<'NODE'
+const c=require('crypto'),fs=require('fs'),flow=JSON.parse(fs.readFileSync(process.argv[2])),card=JSON.parse(fs.readFileSync(process.argv[3]));flow.limitations=[{id:'missing-step-after',label:'步骤后状态未登记',targets:['flow_steps.activate.after']}];fs.writeFileSync(process.argv[4],JSON.stringify(flow));card.flow_contract_digest=c.createHash('sha256').update(fs.readFileSync(process.argv[4])).digest('hex');card.flow_steps[0].after={status:'未登记'};card.limitations=[{limitation_id:'missing-step-after',status:'未登记'}];fs.writeFileSync(process.argv[5],JSON.stringify(card));
+NODE
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/blocked-v2.json" --flow-contract "$v2root/blocked-flow.json" --format json
+node - "$TMP_ROOT/command.out" <<'NODE'
+const v=JSON.parse(require('fs').readFileSync(process.argv[2]));if(!v.ok||v.material_completeness!=='blocked'||v.gaps.length!==1||v.gaps[0].target!=='flow_steps.activate.after')process.exit(1);
+NODE
+expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/blocked-v2.json" --flow-contract "$v2root/blocked-flow.json" --format markdown
+grep -Fq 'material_completeness: blocked' "$TMP_ROOT/command.out"
+grep -Fq 'gap flow_steps.activate.after：未登记（missing-step-after）' "$TMP_ROOT/command.out"
+grep -Fq '已登记但当前未校验' "$TMP_ROOT/command.out"
+! grep -Fq 'acceptance-owner' "$TMP_ROOT/command.out"
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/blocked-v2.json" --flow-contract "$v2root/blocked-flow.json" --contract "$protocol/contract.md" --check-owner-decision --format json
+for blocked_kind in category validator; do
+  node - "$v2root/flow.json" "$v2baf/card/review-card-v2.json" "$v2root/blocked-$blocked_kind-flow.json" "$v2baf/card/blocked-$blocked_kind-v2.json" "$blocked_kind" <<'NODE'
+const c=require('crypto'),fs=require('fs'),flow=JSON.parse(fs.readFileSync(process.argv[2])),card=JSON.parse(fs.readFileSync(process.argv[3])),kind=process.argv[6],target=kind==='category'?'flow_steps.activate.category.network':'flow_steps.activate.validator.transition';
+if(kind==='category')flow.evidence_bindings[0].categories=flow.evidence_bindings[0].categories.filter(v=>v!=='network');else flow.required_steps[0].required_validators[0].validator_id='missing-transition-validator';
+flow.limitations=[{id:`missing-${kind}`,label:`${kind} 缺口`,targets:[target]}];fs.writeFileSync(process.argv[4],JSON.stringify(flow));card.flow_contract_digest=c.createHash('sha256').update(fs.readFileSync(process.argv[4])).digest('hex');card.limitations=[{limitation_id:`missing-${kind}`,status:'当前无法判断'}];fs.writeFileSync(process.argv[5],JSON.stringify(card));
+NODE
+  expect_exit 0 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/blocked-$blocked_kind-v2.json" --flow-contract "$v2root/blocked-$blocked_kind-flow.json" --format json
+  node - "$TMP_ROOT/command.out" "$blocked_kind" <<'NODE'
+const v=JSON.parse(require('fs').readFileSync(process.argv[2])),kind=process.argv[3];if(v.material_completeness!=='blocked'||v.gaps.length!==1||!v.gaps[0].target.includes(kind==='category'?'.category.':'.validator.'))process.exit(1);
+NODE
+done
+node - "$v2root/flow.json" "$v2root/screenshot-only.json" <<'NODE'
+const fs=require('fs'),v=JSON.parse(fs.readFileSync(process.argv[2]));v.evidence_bindings.forEach(b=>b.categories=['visual']);fs.writeFileSync(process.argv[3],JSON.stringify(v));
+NODE
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/review-card-v2.json" --flow-contract "$v2root/screenshot-only.json" --format json
+node - "$v2baf/card/review-card-v2.json" "$v2baf/card/unknown-v2.json" <<'NODE'
+const fs=require('fs'),v=JSON.parse(fs.readFileSync(process.argv[2]));v.document_chain[0].identity.evidence_id='unknown';fs.writeFileSync(process.argv[3],JSON.stringify(v));
+NODE
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/unknown-v2.json" --flow-contract "$v2root/flow.json" --format json
+node - "$v2baf/card/review-card-v2.json" "$v2baf/card/under-specified-v2.json" <<'NODE'
+const fs=require('fs'),v=JSON.parse(fs.readFileSync(process.argv[2]));delete v.document_chain[0].identity.pointer;fs.writeFileSync(process.argv[3],JSON.stringify(v));
+NODE
+expect_exit 1 "$BIN" review --baf-root "$v2baf" --card "$v2baf/card/under-specified-v2.json" --flow-contract "$v2root/flow.json" --format json
+
+for schema in review-card-v2 project-flow-contract; do
+  node - "$ATLAS_FORGE_ROOT/workflow/bin/lib/codex-web-acceptance/contracts/$schema.schema.json" <<'NODE'
+const s=JSON.parse(require('fs').readFileSync(process.argv[2]));if(s.additionalProperties!==false||!Array.isArray(s.required))process.exit(1);
+NODE
+done
 
 if rg -n 'codex-team-business-report|presentation-strict|finalStatus' "$BIN" "$ATLAS_FORGE_ROOT/workflow/bin/lib/codex-web-acceptance"; then
   printf 'Web Core contains a forbidden renderer/presentation/parallel-verdict dependency\n' >&2
