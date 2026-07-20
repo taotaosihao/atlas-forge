@@ -78,13 +78,13 @@ artifact_category: clarification_conclusion
 - 三次 run 均通过 Core `check-run` 与五个独立 required validators；frozen contract/config/evidence-index digest、全部 evidence digest、attempt-1 authority facts、fresh-seed nonce、runtime identity、WorkOrder、LineTask、DeviceTask、assignment、业务 Trace、Playwright Trace 与截图均完成绑定并互不共享。
 - 独立只读 implementation reviewer 最终 PASS，P0/P1/P2 为 0。独立 browser-verifier 对真实浏览器动作、network mutation、invalid/valid signed callback、material-event chain、非 CNC `plc_report_only` readiness、UI `running` readback、Trace 与截图完成复核，结论 PASS，P0/P1/P2 为 0。
 
-### BAF、handoff 与当前停止状态
+### BAF、handoff 与最终 closure
 
-- Git 外可审阅 BAF bundle：`/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-baf-closure/20260719-005-ai-ui-intake`。
+- Git 外可审阅 BAF bundle：`/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-baf-closure/20260719-005-ai-ui-intake`。该 bundle 从同一 run29、run30、run31 与 `reference-fms-work-orders-expanded-v3.png` 重新生成，没有替换或重跑 technical evidence。
 - 既有 native Team task artifact：`/home/gewu/.codex/workflow/artifacts/20260719-005-ai-ui-intake`。该 task 已补齐与当前执行事实一致的 minimal SDD 记录；`codex-team-artifact-lint --strict --business-acceptance` 与 Sharp closure `validate --workflow-root /home/gewu/.codex/workflow` 均 PASS，未建立第二套 roadmap 或 gate 平台。
-- BAF 当前唯一 `business-verdict.json` 为 `blocked`：`technical_gate_status: passed`，`business_acceptance_status: blocked`，`goal_a.integration_mode: real`，`goal_b.status: blocked`。Acceptance owner 判断仍为“未登记”。
-- 当前两份 bundle 均已正式登记 `reference-fms-work-orders-expanded-v3.png` 和三张 actual screenshot；这些文件只固定 acceptance owner 人工判断所针对的当前 contract/reference/actual/evidence 引用，不等于 design intent 已判断“符合”。
-- 当前唯一残留用户动作是 acceptance owner 对当前 contract/reference/三次 actual screenshot/evidence 引用登记“符合”、“不符合”或“需修改”；在该人工 decision 完成前，`acceptance-owner-design-intent` 不能通过，唯一 verdict 不得改为 `accepted`，本 Goal 当前不能标记 complete。
+- 2026-07-20，acceptance owner `gewu` 对当前 contract、reference、三次 actual screenshot 与 evidence 引用最终登记“符合”。此前登记“需修改”的 bundle 已可恢复归档至 `/home/gewu/.codex/visualizations/2026/07/19/019f7aa8-0774-79c2-b10f-63a6a4b1c443/sharp-cell-phase3/sharp-cell-phase4-baf-closure/owner-needs-modification-20260720/20260719-005-ai-ui-intake`，没有删除或追溯改写该历史判断。
+- 新 bundle strict validate 为 `valid: true`，owner decision 为“符合”；唯一 `business-verdict.json` 为 `accepted`，`technical_gate_status`、`business_acceptance_status`、`goal_a.status` 与 `goal_b.status` 均为 `passed`，`blockers` 与 `required_followups` 均为空。
+- Owner 的最终意图是当前先接受已经跑通的通用测试框架；未来完整测试框架落地后的大幅调整不属于本合同的阻断项，也不改变本次真实 UI、三次 fresh-seed 与 BAF closure 的既有证据结论。
 
 ### 最终范围与禁区核对
 
