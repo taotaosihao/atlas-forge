@@ -41,6 +41,26 @@ logical lane unless the caller explicitly selected `no-fallback`. The fallback
 keeps the original goal, paths, authority, evidence, and provider-perspective
 disclosure.
 
+Exact native role/model routing requires the MultiAgentV2 spawn schema. This is
+a host capability, not a plugin installation side effect. On Codex 0.145 and
+newer, the user-authorized host configuration is:
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+hide_spawn_agent_metadata = false
+expose_spawn_agent_model_overrides = true
+tool_namespace = "agents"
+```
+
+Codex 0.144.x does not expose the
+`expose_spawn_agent_model_overrides` setting; omit that line on those hosts.
+After changing host configuration, restart the app server and start a new task:
+existing tasks do not hot-reload their model-visible tool schema. If the new
+task still lacks `agent_type`, `model`, `reasoning_effort`, or `fork_turns`,
+Team fails closed to main-only instead of spawning an inherited or generic
+child. Host configuration and restart require explicit user authority.
+
 When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.
 Provider mode IDs are not portable and must not be hardcoded or copied across

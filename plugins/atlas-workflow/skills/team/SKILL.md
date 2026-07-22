@@ -27,7 +27,7 @@ When durable Team state has audit or handoff value, use the v2 Team ledger comma
 
 Native collaboration is the normal Team backend. Use the smallest useful set of concrete lanes:
 
-- `collaboration.spawn_agent` for concrete bounded lanes that can run independently.
+- Use the current callable native `spawn_agent` tool for concrete bounded lanes that can run independently. Exact Atlas routing expects `agents.spawn_agent` after activation. A host that exposes only a restricted `collaboration.spawn_agent` remains usable only when its model-visible schema passes the exact-routing preflight below.
 - `collaboration.send_message` for information that does not need a new turn.
 - `collaboration.followup_task` to reuse an idle agent for a new bounded task.
 - `collaboration.wait_agent` only while live work remains.
@@ -69,38 +69,56 @@ Claude-family models are never eligible for automatic routing or model recommend
 - Before a writable fallback, preserve diff/worktree/base/head/untracked evidence, prove the original writer is quiesced, and obtain a takeover permit and non-overlapping lease. If any fact is unknown, stop the lane instead of starting another writer.
 - Atomically record the fallback event and reserve the native attempt in the same logical lane. The native actor continues the same goal, paths, authority, acceptance, and admitted evidence; fallback never widens scope or hides Paseo provenance.
 
-## Native Model Preferences And Calibration
+## Native Exact Model Routing
 
-Before the first native lane that may select an Atlas SDD custom agent, prefer running:
+Before the first native fan-out, inspect the model-visible `spawn_agent` schema and require `agent_type`, `model`, `reasoning_effort`, and `fork_turns`. This is a capability check, not authorization to spawn.
+
+- If any required field is absent, classify the native surface as `schema-restricted`, do not start a generic or inherited child, disclose that exact routing is unavailable, and continue main-only.
+- If the tool returns a reserved-schema mismatch such as `Function '...' is reserved for use by this model and must match the configured schema`, stop new fan-out and return the exact error plus the version-sensitive MultiAgentV2 remediation to the user. Do not mutate user config or restart a runtime unless the current request explicitly authorizes those operations.
+- `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
+- Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
+- A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
+
+Before the first exact Atlas dispatch, run:
 
 ```bash
 workflow/bin/atlas-agent-model-policy check
 ```
 
-- This check validates the checked-in preference projection; it does not prove the runtime model selected for a spawn.
-- The policy resolves the numerically highest stable GPT `major.minor` family from the local Codex model catalog and does not assume that model versions are consecutive.
-- Agent roles use semantic capability and thinking profiles: planner=`frontier/medium`, routine-reviewer=`balanced/high`, phase-reviewer=`frontier/medium`, implementer=`fast/max`, verifier=`balanced/high`, browser-verifier=`fast/high`, and explorer=`fast/medium`.
-- A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency.
-- When an implementation lane is useful, prefer GPT-5.6 Luna max. For routine review or command verification, prefer Terra. Add GPT-5.6 Sol medium planner only for planning whose direction is costly or hard to reverse.
-- Consider GPT-5.6 Sol medium phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the default path.
-- Add GPT-5.6 Luna high browser-verifier only for substantial Playwright or visual interaction work. Route its evidence to the Sol phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with Terra review/verification.
-- Preferred profiles are defaults, not fixed staffing or absolute restrictions. If a preferred agent or projection check is unavailable, use a reasonable available fallback and disclose it; do not claim the runtime model is verified.
+This check validates the checked-in policy/profile projection. It does not prove billing or inference metadata. The resolved profile and the explicit dispatch values must agree on model and reasoning effort; if the profile, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
 
-Runtime metadata is opportunistic calibration, not a daily gate. Record `verified` only when visible evidence supports it; otherwise record `unverified` and continue ordinary work. Calibrate only when the user asks or there are suspicious cost signals such as abnormal token use, unexpected fan-out, or suspected expensive parent-model inheritance. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to the main Codex or fewer subagents. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
+Use the following exact-routing matrix only after staffing has established that the lane is useful:
+
+| Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
+| --- | --- | --- | --- | --- |
+| Planning whose direction is costly or hard to reverse | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
+| Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
+| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
+| Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
+| Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
+| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
+| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
+
+A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
+
+Use the Sol phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the default path. Browser evidence reaches the Sol phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with Terra review/verification.
+
+Visible runtime metadata is optional disclosure, not a daily audit gate. When the tool or UI does not expose trustworthy model evidence, state that billing-level model verification was not performed; do not claim the billing model is verified and do not add persistent runtime-log parsing solely for this workflow. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to main-only. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
 
 ### Routing Scenarios
 
 | Scenario ID | Allowed decision | Disallowed decision |
 | --- | --- | --- |
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
-| `routine-implementation` | `luna-max-implementer-when-useful` | `sol-by-default` |
-| `routine-review-verify` | `terra-reviewer-or-verifier` | `sol-routine-check` |
-| `hard-to-reverse-direction` | `sol-medium-planner-when-useful` | `sol-for-mechanical-or-env-failure` |
-| `completed-phase-extra-judgment` | `sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
-| `browser-heavy` | `luna-high-browser-verifier` | `sol-throughout-browser-run` |
-| `preferred-agent-unavailable` | `disclosed-reasonable-fallback` | `claim-preferred-profile-verified` |
-| `metadata-invisible` | `mark-unverified-and-continue` | `runtime-proof-daily-gate` |
-| `confirmed-cost-anomaly` | `stop-new-fanout; readonly-diagnosis; reduce-agents` | `continue-fanout-or-mutate-runtime` |
+| `routine-implementation` | `explicit-luna-max-implementer` | `generic-or-sol-implementation` |
+| `routine-review-verify` | `explicit-terra-reviewer-or-verifier` | `generic-or-sol-routine-check` |
+| `hard-to-reverse-direction` | `explicit-sol-medium-planner` | `sol-for-mechanical-or-env-failure` |
+| `completed-phase-extra-judgment` | `explicit-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
+| `browser-heavy` | `explicit-luna-high-browser-verifier` | `sol-throughout-browser-run` |
+| `schema-restricted` | `main-only; disclose-routing-unavailable` | `generic-inherited-fanout` |
+| `profile-mismatch` | `block-spawn; reconcile-policy-profile` | `spawn-with-mismatched-model` |
+| `metadata-invisible` | `disclose-unverified; no-billing-proof-required` | `claim-billing-model-verified` |
+| `confirmed-cost-anomaly` | `stop-new-fanout; readonly-diagnosis; main-only` | `continue-fanout-or-mutate-runtime` |
 
 Use this table as a decision contract, not as a fixed sequence of lanes.
 

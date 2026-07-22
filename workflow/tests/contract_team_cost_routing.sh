@@ -40,14 +40,15 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['luna-max-implementer-when-useful', 'sol-by-default'],
-  'routine-review-verify': ['terra-reviewer-or-verifier', 'sol-routine-check'],
-  'hard-to-reverse-direction': ['sol-medium-planner-when-useful', 'sol-for-mechanical-or-env-failure'],
-  'completed-phase-extra-judgment': ['sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
-  'browser-heavy': ['luna-high-browser-verifier', 'sol-throughout-browser-run'],
-  'preferred-agent-unavailable': ['disclosed-reasonable-fallback', 'claim-preferred-profile-verified'],
-  'metadata-invisible': ['mark-unverified-and-continue', 'runtime-proof-daily-gate'],
-  'confirmed-cost-anomaly': ['stop-new-fanout; readonly-diagnosis; reduce-agents', 'continue-fanout-or-mutate-runtime'],
+  'routine-implementation': ['explicit-luna-max-implementer', 'generic-or-sol-implementation'],
+  'routine-review-verify': ['explicit-terra-reviewer-or-verifier', 'generic-or-sol-routine-check'],
+  'hard-to-reverse-direction': ['explicit-sol-medium-planner', 'sol-for-mechanical-or-env-failure'],
+  'completed-phase-extra-judgment': ['explicit-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
+  'browser-heavy': ['explicit-luna-high-browser-verifier', 'sol-throughout-browser-run'],
+  'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
+  'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
+  'metadata-invisible': ['disclose-unverified; no-billing-proof-required', 'claim-billing-model-verified'],
+  'confirmed-cost-anomaly': ['stop-new-fanout; readonly-diagnosis; main-only', 'continue-fanout-or-mutate-runtime'],
 };
 
 if (actual.size !== Object.keys(expected).length) {
@@ -65,26 +66,34 @@ NODE
 # Guard prose and agent prompts against contradictory shortcuts outside the table.
 assert_has "$TEAM" 'small clear task defaults to the main Codex' 'small task defaults to main agent'
 assert_has "$TEAM" 'concrete evidence.*materially lowers risk or latency' 'small task permits evidence-backed delegation'
-assert_lacks "$TEAM" 'mandatory before the first such spawn' 'projection check as a hard spawn gate'
+assert_has "$TEAM" 'Before the first native fan-out' 'native routing preflight is mandatory'
+assert_has "$TEAM" 'agent_type.*model.*reasoning_effort.*fork_turns' 'preflight checks all exact-routing fields'
+assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'
 
-assert_has "$TEAM" 'implementation lane.*GPT-5\.6 Luna max' 'routine implementation prefers Luna max'
-assert_has "$TEAM" 'routine review or command verification, prefer Terra' 'routine review and verification prefer Terra'
-assert_has "$TEAM" 'Sol medium planner only for planning.*costly or hard to reverse' 'planner Sol is reserved for hard-to-reverse direction'
+assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation explicitly routes to Luna max'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'routine review explicitly routes to Terra high'
+assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification explicitly routes to Terra high'
+assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*medium.*none' 'planner explicitly routes to Sol medium'
 
-assert_has "$TEAM" 'phase-reviewer only for a completed phase/final integration result where extra judgment is valuable' 'phase reviewer requires a completed gate and useful judgment'
+assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
 assert_has "$TEAM" 'mechanical or environmental failures stay on the default path' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
-assert_has "$TEAM" 'Luna high browser-verifier only for substantial Playwright or visual interaction work' 'browser-heavy work prefers Luna high'
+assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*high.*none' 'browser-heavy work explicitly routes to Luna high'
+assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*medium.*none' 'exploration explicitly routes to Luna medium'
 assert_has "$AGENTS/atlas-sdd-browser-verifier.toml" 'would benefit from extra judgment, recommend routing' 'final Sol browser review remains conditional'
 assert_lacks "$AGENTS/atlas-sdd-browser-verifier.toml" 'require the controller to route' 'browser evidence cannot force Sol review'
 
-assert_has "$TEAM" 'reasonable available fallback and disclose it' 'unavailable preferred profile permits disclosed fallback'
-assert_has "$TEAM" 'otherwise record `unverified` and continue ordinary work' 'invisible metadata does not block ordinary work'
-assert_lacks "$TEAM" 'stop before spawning rather than silently selecting' 'missing projection cannot hard-stop ordinary work'
+assert_has "$TEAM" 'fork_turns="none"' 'custom role dispatch avoids full-history fork'
+assert_has "$TEAM" 'self-contained dispatch packet' 'fresh child receives a complete task packet'
+assert_has "$TEAM" '`task_name`.*does not select' 'task name is not treated as a custom-agent selector'
+assert_has "$TEAM" 'profile.*model.*reasoning.*mismatch.*do not spawn' 'profile and dispatch mismatch blocks spawn'
+assert_lacks "$TEAM" 'reasonable available fallback and disclose it' 'unavailable exact profile cannot use a generic fallback'
+assert_lacks "$TEAM" 'default_subagent_model' 'team does not require a global default subagent model'
+assert_lacks "$TEAM" 'session JSONL' 'team does not require strict session-log auditing'
 
 assert_has "$TEAM" 'stop new fan-out, perform only minimal read-only diagnosis' 'confirmed cost anomaly stops new fan-out'
-assert_has "$TEAM" 'fall back to the main Codex or fewer subagents' 'confirmed cost anomaly has safe fallback'
+assert_has "$TEAM" 'fall back to main-only' 'confirmed cost anomaly has a deterministic safe fallback'
 
 assert_has "$AGENTS/atlas-sdd-implementer.toml" 'Do not force a dedicated commit for every slice' 'implementer follows moderate commit boundaries'
 assert_lacks "$AGENTS/atlas-sdd-implementer.toml" 'create a dedicated git commit before reporting' 'per-slice commit requirement'
