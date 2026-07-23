@@ -24,13 +24,13 @@ make_agents() {
   local dir="$1"
   local family="$2"
   mkdir -p "$dir"
-  printf 'model = "gpt-%s-terra"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-reviewer.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-reviewer.toml"
   printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-phase-reviewer.toml"
   printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-planner.toml"
-  printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "max"\n' "$family" > "$dir/atlas-sdd-implementer.toml"
-  printf 'model = "gpt-%s-terra"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-verifier.toml"
-  printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-browser-verifier.toml"
-  printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-explorer.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "max"\n' "$family" > "$dir/atlas-sdd-implementer.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-verifier.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-browser-verifier.toml"
+  printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-explorer.toml"
 }
 
 make_catalog "$TMP_ROOT/5.6.json" 5.6

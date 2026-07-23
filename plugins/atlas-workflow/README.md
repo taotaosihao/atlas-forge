@@ -61,6 +61,15 @@ task still lacks `agent_type`, `model`, `reasoning_effort`, or `fork_turns`,
 Team fails closed to main-only instead of spawning an inherited or generic
 child. Host configuration and restart require explicit user authority.
 
+Native Team model routing has two modes. Quality mode is the default and
+explicitly routes every admitted Atlas role to Sol with the role's configured
+reasoning effort. Saving mode is a non-persistent, per-Team or per-lane choice
+that activates only when the user explicitly requests it; it routes
+implementation, browser verification, and exploration to Luna, routine review
+and verification to Terra, and retains Sol for planning and phase judgment.
+Both modes use explicit spawn fields and `fork_turns="none"`; neither relies on
+a global default subagent model.
+
 When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.
 Provider mode IDs are not portable and must not be hardcoded or copied across

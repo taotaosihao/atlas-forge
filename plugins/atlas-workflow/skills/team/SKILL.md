@@ -85,23 +85,43 @@ Before the first exact Atlas dispatch, run:
 workflow/bin/atlas-agent-model-policy check
 ```
 
-This check validates the checked-in policy/profile projection. It does not prove billing or inference metadata. The resolved profile and the explicit dispatch values must agree on model and reasoning effort; if the profile, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
+This check validates the checked-in default-quality policy/profile projection. It does not prove billing or inference metadata. In default quality mode, the resolved profile and the explicit dispatch values must agree on model and reasoning effort.
 
-Use the following exact-routing matrix only after staffing has established that the lane is useful:
+### Default Quality Mode
+
+Default to quality mode. Use the following exact-routing matrix only after staffing has established that the lane is useful:
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
 | Planning whose direction is costly or hard to reverse | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
-| Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
-| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
-| Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
+| Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-sol` | `max` | `none` |
+| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `high` | `none` |
+| Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-sol` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
-| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
-| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
+| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-sol` | `high` | `none` |
+| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-sol` | `medium` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
-Use the Sol phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the default path. Browser evidence reaches the Sol phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with Terra review/verification.
+Use the Sol phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the ordinary reviewer/verifier path. Browser evidence reaches the phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with the reviewer/verifier selected by the current mode.
+
+### Explicit Saving Mode
+
+Enter saving mode only when the user explicitly requests saving mode, cost-saving mode, or an equivalent lower-cost routing choice for the current Team or named lanes. Do not infer it from a routine task, token usage, budget pressure, or a suspected cost anomaly, and never automatically enable saving mode. The explicit choice does not persist into later tasks.
+
+In saving mode, keep the same `agent_type`, reasoning effort, `fork_turns="none"`, staffing rules, and self-contained dispatch packet, but use these explicit per-spawn model overrides:
+
+| Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
+| --- | --- | --- | --- | --- |
+| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
+| Implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
+| Review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
+| Verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
+| Phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
+| Browser or visual verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
+| Exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
+
+The model difference between the Sol default profile and this table is an intentional, user-authorized override. Outside that explicit override, if the profile, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
 
 Visible runtime metadata is optional disclosure, not a daily audit gate. When the tool or UI does not expose trustworthy model evidence, state that billing-level model verification was not performed; do not claim the billing model is verified and do not add persistent runtime-log parsing solely for this workflow. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to main-only. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
 
@@ -110,11 +130,12 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | Scenario ID | Allowed decision | Disallowed decision |
 | --- | --- | --- |
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
-| `routine-implementation` | `explicit-luna-max-implementer` | `generic-or-sol-implementation` |
-| `routine-review-verify` | `explicit-terra-reviewer-or-verifier` | `generic-or-sol-routine-check` |
+| `routine-implementation` | `default-sol-max-implementer` | `implicit-saving-model` |
+| `routine-review-verify` | `default-sol-high-reviewer-or-verifier` | `implicit-saving-model` |
 | `hard-to-reverse-direction` | `explicit-sol-medium-planner` | `sol-for-mechanical-or-env-failure` |
 | `completed-phase-extra-judgment` | `explicit-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
-| `browser-heavy` | `explicit-luna-high-browser-verifier` | `sol-throughout-browser-run` |
+| `browser-heavy` | `default-sol-high-browser-verifier` | `implicit-saving-model` |
+| `saving-mode-explicit` | `luna-implementer-browser-explorer; terra-reviewer-verifier` | `implicit-or-automatic-saving` |
 | `schema-restricted` | `main-only; disclose-routing-unavailable` | `generic-inherited-fanout` |
 | `profile-mismatch` | `block-spawn; reconcile-policy-profile` | `spawn-with-mismatched-model` |
 | `metadata-invisible` | `disclose-unverified; no-billing-proof-required` | `claim-billing-model-verified` |

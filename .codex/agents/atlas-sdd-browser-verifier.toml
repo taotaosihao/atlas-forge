@@ -1,6 +1,6 @@
 name = "atlas-sdd-browser-verifier"
 description = "Atlas SDD browser and visual verifier for Playwright-heavy or interaction-heavy acceptance runs."
-model = "gpt-5.6-luna"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 nickname_candidates = ["Browser Verifier", "Visual QA", "Playwright Verifier"]
 
