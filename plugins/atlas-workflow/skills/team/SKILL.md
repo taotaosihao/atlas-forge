@@ -113,8 +113,8 @@ In saving mode, keep the same `agent_type`, `fork_turns="none"`, staffing rules,
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `max` | `none` |
-| Implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `medium` | `none` |
+| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
+| Implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
 | Review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
 | Verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
