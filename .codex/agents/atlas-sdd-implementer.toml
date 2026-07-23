@@ -1,7 +1,7 @@
 name = "atlas-sdd-implementer"
 description = "Atlas SDD implementer for one owned slice. Use for bounded target-repo edits that must follow brief.json, commit policy, and final IMPLEMENTER_REPORT_JSON."
 model = "gpt-5.6-sol"
-model_reasoning_effort = "max"
+model_reasoning_effort = "medium"
 nickname_candidates = ["SDD Implementer", "Slice Builder", "Atlas Builder"]
 
 developer_instructions = """

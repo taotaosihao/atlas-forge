@@ -10,10 +10,10 @@
     "fast": { "description_pattern": "\\bfast\\b" }
   },
   "roles": {
-    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "high" },
+    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "max" },
     "atlas-sdd-phase-reviewer": { "capability": "frontier", "reasoning_effort": "medium" },
-    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "medium" },
-    "atlas-sdd-implementer": { "capability": "frontier", "reasoning_effort": "max" },
+    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "max" },
+    "atlas-sdd-implementer": { "capability": "frontier", "reasoning_effort": "medium" },
     "atlas-sdd-verifier": { "capability": "frontier", "reasoning_effort": "high" },
     "atlas-sdd-browser-verifier": { "capability": "frontier", "reasoning_effort": "high" },
     "atlas-sdd-explorer": { "capability": "frontier", "reasoning_effort": "medium" }

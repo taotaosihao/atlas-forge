@@ -40,9 +40,9 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['default-sol-max-implementer', 'implicit-saving-model'],
-  'routine-review-verify': ['default-sol-high-reviewer-or-verifier', 'implicit-saving-model'],
-  'hard-to-reverse-direction': ['explicit-sol-medium-planner', 'sol-for-mechanical-or-env-failure'],
+  'routine-implementation': ['default-sol-medium-implementer', 'implicit-saving-model'],
+  'routine-review-verify': ['default-sol-max-reviewer-or-sol-high-verifier', 'implicit-saving-model'],
+  'hard-to-reverse-direction': ['explicit-sol-max-planner', 'sol-for-mechanical-or-env-failure'],
   'completed-phase-extra-judgment': ['explicit-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
   'browser-heavy': ['default-sol-high-browser-verifier', 'implicit-saving-model'],
   'saving-mode-explicit': ['luna-implementer-browser-explorer; terra-reviewer-verifier', 'implicit-or-automatic-saving'],
@@ -72,10 +72,10 @@ assert_has "$TEAM" 'agent_type.*model.*reasoning_effort.*fork_turns' 'preflight 
 assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'
 
 assert_has "$TEAM" 'Default Quality Mode' 'quality mode is visibly the default'
-assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*max.*none' 'routine implementation defaults to Sol max'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*high.*none' 'routine review defaults to Sol high'
+assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'routine implementation defaults to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*max.*none' 'routine review defaults to Sol max'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*high.*none' 'verification defaults to Sol high'
-assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*medium.*none' 'planner explicitly routes to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*max.*none' 'planner explicitly routes to Sol max'
 
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
 assert_has "$TEAM" 'mechanical or environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
@@ -85,7 +85,7 @@ assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-sol.*high.*none' 'brows
 assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-sol.*medium.*none' 'exploration defaults to Sol medium'
 assert_has "$TEAM" 'Explicit Saving Mode' 'saving mode is separately defined'
 assert_has "$TEAM" 'explicitly requests.*saving mode' 'saving mode requires an explicit user request'
-assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'saving implementation routes to Luna max'
+assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*medium.*none' 'saving implementation routes to Luna medium'
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'saving review routes to Terra high'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'saving verification routes to Terra high'
 assert_has "$TEAM" 'never automatically enable saving mode' 'saving mode is never activated automatically'

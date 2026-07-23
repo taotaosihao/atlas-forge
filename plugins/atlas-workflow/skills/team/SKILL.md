@@ -93,9 +93,9 @@ Default to quality mode. Use the following exact-routing matrix only after staff
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning whose direction is costly or hard to reverse | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
-| Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-sol` | `max` | `none` |
-| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `high` | `none` |
+| Planning whose direction is costly or hard to reverse | `atlas-sdd-planner` | `gpt-5.6-sol` | `max` | `none` |
+| Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-sol` | `medium` | `none` |
+| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `max` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-sol` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
 | Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-sol` | `high` | `none` |
@@ -109,12 +109,12 @@ Use the Sol phase-reviewer only for a completed phase/final integration result w
 
 Enter saving mode only when the user explicitly requests saving mode, cost-saving mode, or an equivalent lower-cost routing choice for the current Team or named lanes. Do not infer it from a routine task, token usage, budget pressure, or a suspected cost anomaly, and never automatically enable saving mode. The explicit choice does not persist into later tasks.
 
-In saving mode, keep the same `agent_type`, reasoning effort, `fork_turns="none"`, staffing rules, and self-contained dispatch packet, but use these explicit per-spawn model overrides:
+In saving mode, keep the same `agent_type`, `fork_turns="none"`, staffing rules, and self-contained dispatch packet, but use the following model and supported reasoning values as explicit per-spawn overrides:
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
-| Implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
+| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `max` | `none` |
+| Implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `medium` | `none` |
 | Review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
 | Verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
@@ -130,9 +130,9 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | Scenario ID | Allowed decision | Disallowed decision |
 | --- | --- | --- |
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
-| `routine-implementation` | `default-sol-max-implementer` | `implicit-saving-model` |
-| `routine-review-verify` | `default-sol-high-reviewer-or-verifier` | `implicit-saving-model` |
-| `hard-to-reverse-direction` | `explicit-sol-medium-planner` | `sol-for-mechanical-or-env-failure` |
+| `routine-implementation` | `default-sol-medium-implementer` | `implicit-saving-model` |
+| `routine-review-verify` | `default-sol-max-reviewer-or-sol-high-verifier` | `implicit-saving-model` |
+| `hard-to-reverse-direction` | `explicit-sol-max-planner` | `sol-for-mechanical-or-env-failure` |
 | `completed-phase-extra-judgment` | `explicit-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
 | `browser-heavy` | `default-sol-high-browser-verifier` | `implicit-saving-model` |
 | `saving-mode-explicit` | `luna-implementer-browser-explorer; terra-reviewer-verifier` | `implicit-or-automatic-saving` |
