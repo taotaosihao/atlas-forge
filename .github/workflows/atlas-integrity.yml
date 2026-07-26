@@ -98,6 +98,23 @@ jobs:
       - name: Verify isolated host layouts
         run: bash workflow/tests/contract_host_install.sh
 
+  source-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install lint dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes shellcheck
+
+      - name: Lint tracked shell and JavaScript sources
+        run: bash scripts/lint-sources.sh
+
   docs-links:
     runs-on: ubuntu-latest
     timeout-minutes: 5

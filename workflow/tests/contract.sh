@@ -114,9 +114,9 @@ pass "task list and show JavaScript behavior"
 
 done_id="$($BIN init-task "contract done gate" "done gate")"
 $BIN start "$done_id"
-expect_fail "done without verification" "$BIN" done "$done_id"
+expect_fail "done without verification" "$BIN" 'done' "$done_id"
 $BIN verify "$done_id" -- true >/dev/null
-$BIN done "$done_id"
+$BIN 'done' "$done_id"
 pass "done gate"
 
 lifecycle_id="$($BIN init-task "contract lifecycle" "blocked archive stale")"

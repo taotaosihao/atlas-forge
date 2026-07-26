@@ -199,7 +199,7 @@ git -C "$review_repo" add docs/review-package.md
 git -C "$review_repo" commit -m "second review package change" -q
 review_head="$(git -C "$review_repo" rev-parse HEAD)"
 (
-  cd "$TMP_ROOT"
+  cd "$TMP_ROOT" || exit 1
   node "$review_package_bin" \
     --repo "$review_repo" \
     --base "$review_base" \

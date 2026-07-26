@@ -407,6 +407,9 @@ sync_workflow_helpers() {
     log "would sync native Codex agents with scripts/sync-live-atlas-workflow.sh"
   fi
 
+  # SC2097/SC2098: the prefix assignment only exports the already-identical outer
+  # value, so the CODEX_HOME_ROOT default below intentionally reads the outer one.
+  # shellcheck disable=SC2097,SC2098
   CODEX_HOME_ROOT="$CODEX_HOME_ROOT" \
   CODEX_WORKFLOW_ROOT="${CODEX_WORKFLOW_ROOT:-$CODEX_HOME_ROOT/workflow}" \
   LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-$HOME/.local/bin}" \

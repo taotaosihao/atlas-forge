@@ -2098,6 +2098,7 @@ validate_task_for_update() {
   title="$(get_field "$file" title)"
   status="$(get_field "$file" status)"
   created="$(get_field "$file" created)"
+  # shellcheck disable=SC2034  # read for header symmetry; validation uses updated_count only
   updated="$(get_field "$file" updated)"
 
   if [[ "$task_id" != "$expected_id" ]]; then
@@ -4612,7 +4613,7 @@ main() {
       ;;
     done)
       shift
-      cmd_task_mutation done "$@"
+      cmd_task_mutation 'done' "$@"
       ;;
     archive)
       shift

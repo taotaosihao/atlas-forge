@@ -413,7 +413,7 @@ printf '%s\n' collision >> "$RELEASE_ROOT/$EXPECTED_VERSION/fixture-release.txt"
 run_strict_failure 'same-version different-tree cache reports collision' version_collision
 
 setup_case missing-exact
-rm -rf "$RELEASE_ROOT/$EXPECTED_VERSION"
+rm -rf "${RELEASE_ROOT:?}/${EXPECTED_VERSION:?}"
 cp -a "$SOURCE" "$RELEASE_ROOT/latest"
 run_strict_failure 'missing exact cache never falls back to latest' exact_release_cache
 
