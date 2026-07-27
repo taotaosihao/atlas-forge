@@ -3,6 +3,7 @@
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 const { resolvePaths, workflowRoot } = require("../core/paths");
+const { reconcileTaskRuntime } = require("../core/reconcile");
 const {
   TaskLifecycleError,
   archiveTask,
@@ -30,6 +31,8 @@ const BLOCK_USAGE = 'usage: codex-workflow block <task-id> --reason "<reason>"';
 const RESUME_USAGE = "usage: codex-workflow resume <task-id>";
 const ARCHIVE_USAGE = 'usage: codex-workflow archive <task-id> --reason "<reason>"';
 const STALE_USAGE = "usage: codex-workflow stale [--days <n>|--days=<n>]";
+const RECONCILE_USAGE =
+  "usage: codex-workflow reconcile <task-id> [--apply --authority-ref <ref>]";
 
 class CliError extends Error {
   constructor(message, exitCode = 1) {
@@ -202,6 +205,25 @@ function parseStaleArgs(argv) {
   return Number(value);
 }
 
+function parseReconcileArgs(argv) {
+  if (argv.length < 1) throw new CliError(RECONCILE_USAGE);
+  const result = { apply: false, authorityRef: "", taskId: argv[0] };
+  for (let index = 1; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--apply" && !result.apply) {
+      result.apply = true;
+    } else if (argument === "--authority-ref" && !result.authorityRef && index + 1 < argv.length) {
+      result.authorityRef = argv[++index];
+    } else if (argument.startsWith("--authority-ref=") && !result.authorityRef) {
+      result.authorityRef = argument.slice("--authority-ref=".length);
+    } else {
+      throw new CliError(RECONCILE_USAGE);
+    }
+  }
+  if (!result.apply && result.authorityRef) throw new CliError(RECONCILE_USAGE);
+  return result;
+}
+
 function runInitTask(argv, environment = process.env) {
   if (argv.length !== 2) {
     throw new CliError(INIT_USAGE);
@@ -248,6 +270,17 @@ function runStale(argv, environment = process.env) {
   process.stdout.write(versionSort(lines));
 }
 
+function runReconcile(argv, environment = process.env) {
+  const { taskId, ...options } = parseReconcileArgs(argv);
+  const result = reconcileTaskRuntime(taskId, { ...options, environment });
+  process.stdout.write([
+    `task_id: ${taskId}`,
+    `status: ${result.status}`,
+    `revision: ${result.revision}`,
+    `applied: ${result.applied}`,
+  ].join("\n") + "\n");
+}
+
 function main(argv) {
   const command = argv[0];
   try {
@@ -269,9 +302,11 @@ function main(argv) {
       runArchive(argv.slice(1));
     } else if (command === "stale") {
       runStale(argv.slice(1));
+    } else if (command === "reconcile") {
+      runReconcile(argv.slice(1));
     } else {
       throw new CliError(
-        "usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show}",
+        "usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|reconcile}",
       );
     }
     return 0;
@@ -300,6 +335,7 @@ module.exports = {
   INIT_USAGE,
   LIST_USAGE,
   RESUME_USAGE,
+  RECONCILE_USAGE,
   SHOW_USAGE,
   STALE_USAGE,
   START_USAGE,
@@ -308,6 +344,7 @@ module.exports = {
   parseDoneArgs,
   parseListArgs,
   parseReasonArgs,
+  parseReconcileArgs,
   parseStaleArgs,
   versionSort,
   workflowRoot,

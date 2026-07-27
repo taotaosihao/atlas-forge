@@ -2,29 +2,27 @@
 
 const fs = require("fs");
 const path = require("path");
-const { atomicWriteFile } = require("../core/atomic-file");
-const { sleepMilliseconds, taskLockFile, withLock } = require("../core/lock");
+const { sleepMilliseconds, withLock } = require("../core/lock");
 const { resolvePaths, taskArtifactDirRelative } = require("../core/paths");
+const { mutateTaskRuntime } = require("../core/task-mutation");
 const { taskIdTitleToken } = require("./id");
 const {
   listTaskRecords,
   requireTaskFile,
+  renderTaskFields,
   taskFile,
-  updateTaskFields,
   validateTaskFile,
 } = require("./repository");
 const {
-  appendTaskLifecycleEvent,
   clearCurrentTaskPointer,
+  ensureTaskRuntimeScaffold,
   lifecycleEvents,
+  projectTaskState,
   readJsonObject,
-  setTaskStateFields,
   successfulVerificationAdmission,
-  syncTaskRuntime,
   taskStateFile,
   timestampSeconds,
   writeCurrentTaskPointer,
-  writeTaskCompletion,
 } = require("./runtime");
 const { teamClosureIssues } = require("../team/lane-registry");
 
@@ -102,8 +100,35 @@ function renderTaskTemplate(template, values) {
   );
 }
 
-function eventOptions(options) {
-  return { clock: options.clock, eventId: options.eventId };
+function mutationOptions(options, clock, environment) {
+  return {
+    clock,
+    environment,
+    eventId: options.eventId,
+    expectedRevision: options.expectedRevision,
+    failAfterEventAppend: options.failAfterEventAppend,
+    failBeforeEventAppend: options.failBeforeEventAppend,
+    operationId: options.operationId,
+  };
+}
+
+function lifecycleLegacy(kind, data) {
+  return { schema_version: 1, kind, data };
+}
+
+function currentTaskProjection(paths, taskId, updates, clock, mutateState = (state) => state) {
+  const file = requireTaskFile(paths.tasksDir, taskId);
+  const { task } = validateTaskFile(file);
+  const taskContent = renderTaskFields(fs.readFileSync(file, "utf8"), updates);
+  const state = projectTaskState(
+    paths,
+    taskId,
+    taskContent,
+    readJsonObject(taskStateFile(paths, taskId)),
+    clock,
+  );
+  mutateState(state);
+  return { projection: { task_content: taskContent, state }, task };
 }
 
 function createTask(title, criteria, options = {}) {
@@ -135,30 +160,25 @@ function createTask(title, criteria, options = {}) {
       SUCCESS_CRITERIA: criteria,
     };
     const template = fs.readFileSync(paths.taskTemplate, "utf8");
-    atomicWriteFile(
-      taskFile(paths.tasksDir, taskId),
-      renderTaskTemplate(template, values),
-      { encoding: "utf8" },
-    );
-    syncTaskRuntime(paths, taskId, clock);
-    appendTaskLifecycleEvent(
+    const taskContent = renderTaskTemplate(template, values);
+    const state = projectTaskState(paths, taskId, taskContent, {}, clock);
+    mutateTaskRuntime(
       paths,
       taskId,
-      "task.created",
-      { from: null, to: "todo" },
-      eventOptions({ ...options, clock }),
+      {
+        kind: "task.created",
+        operationId: options.operationId,
+        data: { from: null, to: "todo" },
+      },
+      () => ({
+        projection: { task_content: taskContent, state },
+        result: { task_id: taskId },
+        legacy: [lifecycleLegacy("task.created", { from: null, to: "todo" })],
+      }),
+      mutationOptions(options, clock, environment),
     );
+    ensureTaskRuntimeScaffold(paths, taskId, title);
     return taskId;
-  });
-}
-
-function lockedTask(paths, taskId, callback) {
-  const file = taskFile(paths.tasksDir, taskId);
-  return withLock(taskLockFile(paths, file), () => {
-    requireTaskFile(paths.tasksDir, taskId);
-    const record = validateTaskFile(file);
-    readJsonObject(taskStateFile(paths, taskId));
-    return callback(file, record);
   });
 }
 
@@ -166,28 +186,31 @@ function startTask(taskId, options = {}) {
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const clock = options.clock || (() => new Date());
-  return lockedTask(paths, taskId, (file, { task }) => {
-    if (task.status === "done") {
-      throw new TaskLifecycleError(`task already done: ${taskId}`);
-    }
-    if (task.status === "doing") {
-      throw new TaskLifecycleError(`task already doing: ${taskId}`);
-    }
-    if (task.status !== "todo") {
-      throw new TaskLifecycleError(`task must be todo before start: ${taskId}`);
-    }
-    pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    updateTaskFields(file, { status: "doing", updated: localDay(clock) });
-    syncTaskRuntime(paths, taskId, clock);
+  const result = mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "task.started", operationId: options.operationId, data: { from: "todo", to: "doing" } },
+    () => {
+      const { projection, task } = currentTaskProjection(
+        paths, taskId, { status: "doing", updated: localDay(clock) }, clock,
+      );
+      if (task.status === "done") throw new TaskLifecycleError(`task already done: ${taskId}`);
+      if (task.status === "doing") throw new TaskLifecycleError(`task already doing: ${taskId}`);
+      if (task.status !== "todo") {
+        throw new TaskLifecycleError(`task must be todo before start: ${taskId}`);
+      }
+      pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
+      return {
+        projection,
+        legacy: [lifecycleLegacy("task.started", { from: "todo", to: "doing" })],
+      };
+    },
+    mutationOptions(options, clock, environment),
+  );
+  if (!result.replay || result.event.kind === "task.started") {
     writeCurrentTaskPointer(paths, taskId, clock);
-    appendTaskLifecycleEvent(
-      paths,
-      taskId,
-      "task.started",
-      { from: "todo", to: "doing" },
-      eventOptions({ ...options, clock }),
-    );
-  });
+  }
+  return result;
 }
 
 function blockTask(taskId, reason, options = {}) {
@@ -195,54 +218,60 @@ function blockTask(taskId, reason, options = {}) {
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const clock = options.clock || (() => new Date());
-  return lockedTask(paths, taskId, (file, { task }) => {
-    if (task.status !== "doing") {
-      throw new TaskLifecycleError(`task must be doing before block: ${taskId}`);
-    }
-    pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    const blockedAt = timestampSeconds(clock);
-    updateTaskFields(file, {
-      status: "blocked",
-      updated: localDay(clock),
-      blocked_reason: reason,
-      blocked_at: blockedAt,
-    });
-    syncTaskRuntime(paths, taskId, clock);
+  const blockedAt = timestampSeconds(clock);
+  const result = mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "task.blocked", operationId: options.operationId, data: { from: "doing", to: "blocked", reason } },
+    () => {
+      const { projection, task } = currentTaskProjection(paths, taskId, {
+        status: "blocked", updated: localDay(clock), blocked_reason: reason, blocked_at: blockedAt,
+      }, clock);
+      if (task.status !== "doing") {
+        throw new TaskLifecycleError(`task must be doing before block: ${taskId}`);
+      }
+      pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
+      return {
+        projection,
+        legacy: [lifecycleLegacy("task.blocked", { from: "doing", to: "blocked", reason })],
+      };
+    },
+    mutationOptions(options, clock, environment),
+  );
+  if (!result.replay || result.event.kind === "task.blocked") {
     clearCurrentTaskPointer(paths, taskId);
-    appendTaskLifecycleEvent(
-      paths,
-      taskId,
-      "task.blocked",
-      { from: "doing", to: "blocked", reason },
-      eventOptions({ ...options, clock }),
-    );
-  });
+  }
+  return result;
 }
 
 function resumeTask(taskId, options = {}) {
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const clock = options.clock || (() => new Date());
-  return lockedTask(paths, taskId, (file, { task }) => {
-    if (task.status !== "blocked") {
-      throw new TaskLifecycleError(`task must be blocked before resume: ${taskId}`);
-    }
-    pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    updateTaskFields(file, {
-      status: "doing",
-      updated: localDay(clock),
-      resumed_at: timestampSeconds(clock),
-    });
-    syncTaskRuntime(paths, taskId, clock);
+  const resumedAt = timestampSeconds(clock);
+  const result = mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "task.resumed", operationId: options.operationId, data: { from: "blocked", to: "doing" } },
+    () => {
+      const { projection, task } = currentTaskProjection(paths, taskId, {
+        status: "doing", updated: localDay(clock), resumed_at: resumedAt,
+      }, clock);
+      if (task.status !== "blocked") {
+        throw new TaskLifecycleError(`task must be blocked before resume: ${taskId}`);
+      }
+      pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
+      return {
+        projection,
+        legacy: [lifecycleLegacy("task.resumed", { from: "blocked", to: "doing" })],
+      };
+    },
+    mutationOptions(options, clock, environment),
+  );
+  if (!result.replay || result.event.kind === "task.resumed") {
     writeCurrentTaskPointer(paths, taskId, clock);
-    appendTaskLifecycleEvent(
-      paths,
-      taskId,
-      "task.resumed",
-      { from: "blocked", to: "doing" },
-      eventOptions({ ...options, clock }),
-    );
-  });
+  }
+  return result;
 }
 
 function completeTask(
@@ -284,64 +313,64 @@ function completeTask(
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const clock = options.clock || (() => new Date());
-  return lockedTask(paths, taskId, (file, { task }) => {
-    if (task.status === "done") {
-      throw new TaskLifecycleError(`task already done: ${taskId}`);
-    }
-    if (task.status !== "doing") {
-      throw new TaskLifecycleError(`task must be doing before done: ${taskId}`);
-    }
-
-    const state = readJsonObject(taskStateFile(paths, taskId));
-    const teamIssues = teamClosureIssues(state.active_team, outcome);
-    if (teamIssues.length > 0) {
-      throw new TaskLifecycleError(teamIssues.join("\n"));
-    }
-    let verification = {
-      identityDigest: "",
-      passed: outcome !== "succeeded",
-      reasons: [],
-      recordId: "",
-    };
-    if (outcome === "succeeded") {
-      verification = successfulVerificationAdmission(paths, taskId, {
-        captureIdentity: options.captureIdentity,
-        environment,
-      });
-      if (!verification.passed) {
-        throw new TaskLifecycleError(
-          `task lacks successful workflow verification: ${taskId}\n` +
-            `${verification.reasons.join("\n")}\n` +
-            `run: codex-workflow verify ${taskId} -- <command...>`,
-        );
+  const closedAt = timestampSeconds(clock);
+  const data = {
+    from: "doing",
+    to: "done",
+    outcome,
+    authority_ref: authorityRef,
+    evidence_refs: [...evidenceRefs],
+    no_verify_reason: noVerifyRequested ? noVerifyReason : "",
+  };
+  const result = mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "task.completion.closed", operationId: options.operationId, data },
+    () => {
+      const currentFile = requireTaskFile(paths.tasksDir, taskId);
+      const { task } = validateTaskFile(currentFile);
+      if (task.status === "done") throw new TaskLifecycleError(`task already done: ${taskId}`);
+      if (task.status !== "doing") {
+        throw new TaskLifecycleError(`task must be doing before done: ${taskId}`);
       }
-    }
-
-    pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    const closedAt = timestampSeconds(clock);
-    const updates = {
-      status: "done",
-      updated: localDay(clock),
-      completion_outcome: outcome,
-      completion_authority_ref: authorityRef || "-",
-      completion_evidence_refs: evidenceRefs.length > 0 ? evidenceRefs.join(" ") : "-",
-      completion_closed_at: closedAt,
-    };
-    let noVerifyAt = "";
-    if (noVerifyRequested) {
-      noVerifyAt = timestampSeconds(clock);
-      updates.no_verify_reason = noVerifyReason;
-      updates.no_verify_at = noVerifyAt;
-    }
-    updateTaskFields(file, updates);
-    syncTaskRuntime(paths, taskId, clock);
-    const activeTeam = state.active_team && typeof state.active_team === "object"
-      ? state.active_team
-      : {};
-    writeTaskCompletion(
-      paths,
-      taskId,
-      {
+      const currentState = readJsonObject(taskStateFile(paths, taskId));
+      const teamIssues = teamClosureIssues(currentState.active_team, outcome);
+      if (teamIssues.length > 0) throw new TaskLifecycleError(teamIssues.join("\n"));
+      let verification = {
+        identityDigest: "", passed: outcome !== "succeeded", reasons: [], recordId: "",
+      };
+      if (outcome === "succeeded") {
+        verification = successfulVerificationAdmission(paths, taskId, {
+          captureIdentity: options.captureIdentity,
+          environment,
+        });
+        if (!verification.passed) {
+          throw new TaskLifecycleError(
+            `task lacks successful workflow verification: ${taskId}\n` +
+              `${verification.reasons.join("\n")}\n` +
+              `run: codex-workflow verify ${taskId} -- <command...>`,
+          );
+        }
+      }
+      pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
+      const updates = {
+        status: "done",
+        updated: localDay(clock),
+        completion_outcome: outcome,
+        completion_authority_ref: authorityRef || "-",
+        completion_evidence_refs: evidenceRefs.length > 0 ? evidenceRefs.join(" ") : "-",
+        completion_closed_at: closedAt,
+      };
+      if (noVerifyRequested) {
+        updates.no_verify_reason = noVerifyReason;
+        updates.no_verify_at = closedAt;
+      }
+      const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), updates);
+      const state = projectTaskState(paths, taskId, taskContent, currentState, clock);
+      const activeTeam = state.active_team && typeof state.active_team === "object"
+        ? state.active_team
+        : {};
+      state.completion = {
         schema_version: 1,
         outcome,
         authority_ref: authorityRef,
@@ -351,43 +380,23 @@ function completeTask(
         team_run_id: activeTeam.team_run_id || "",
         team_generation: activeTeam.generation || 0,
         closed_at: closedAt,
-      },
-      clock,
-    );
-    if (noVerifyRequested) {
-      setTaskStateFields(
-        paths,
-        taskId,
-        {
-          "verification.skipped": "__TRUE__",
-          "verification.skip_reason": noVerifyReason,
-          "verification.skipped_at": noVerifyAt,
-        },
-        clock,
-      );
-      appendTaskLifecycleEvent(
-        paths,
-        taskId,
-        "verification.skipped",
-        { reason: noVerifyReason },
-        eventOptions({ ...options, clock }),
-      );
-    }
-    clearCurrentTaskPointer(paths, taskId);
-    appendTaskLifecycleEvent(
-      paths,
-      taskId,
-      "task.done",
-      {
-        from: "doing",
-        to: "done",
-        outcome,
-        authority_ref: authorityRef,
+      };
+      const legacy = [];
+      if (noVerifyRequested) {
+        state.verification = { ...(state.verification || {}),
+          skipped: true, skip_reason: noVerifyReason, skipped_at: closedAt };
+        legacy.push(lifecycleLegacy("verification.skipped", { reason: noVerifyReason }));
+      }
+      legacy.push(lifecycleLegacy("task.done", {
+        from: "doing", to: "done", outcome, authority_ref: authorityRef,
         evidence_refs: [...evidenceRefs],
-      },
-      eventOptions({ ...options, clock }),
-    );
-  });
+      }));
+      return { projection: { task_content: taskContent, state }, legacy };
+    },
+    mutationOptions(options, clock, environment),
+  );
+  clearCurrentTaskPointer(paths, taskId);
+  return result;
 }
 
 function archiveTask(taskId, reason, options = {}) {
@@ -395,32 +404,39 @@ function archiveTask(taskId, reason, options = {}) {
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const clock = options.clock || (() => new Date());
-  return lockedTask(paths, taskId, (file, { task }) => {
-    if (task.status === "archived") {
-      throw new TaskLifecycleError(`task already archived: ${taskId}`);
-    }
-    const allowed = new Set(["todo", "doing", "blocked", "done"]);
-    if (!allowed.has(task.status)) {
-      throw new TaskLifecycleError(`task cannot be archived from ${task.status}: ${taskId}`);
-    }
-    pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    const archivedAt = timestampSeconds(clock);
-    updateTaskFields(file, {
-      status: "archived",
-      updated: localDay(clock),
-      archived_reason: reason,
-      archived_at: archivedAt,
-    });
-    syncTaskRuntime(paths, taskId, clock);
+  const archivedAt = timestampSeconds(clock);
+  const result = mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "task.archived", operationId: options.operationId, data: { reason } },
+    () => {
+      const file = requireTaskFile(paths.tasksDir, taskId);
+      const { task } = validateTaskFile(file);
+      if (task.status === "archived") {
+        throw new TaskLifecycleError(`task already archived: ${taskId}`);
+      }
+      const allowed = new Set(["todo", "doing", "blocked", "done"]);
+      if (!allowed.has(task.status)) {
+        throw new TaskLifecycleError(`task cannot be archived from ${task.status}: ${taskId}`);
+      }
+      pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
+      const taskContent = renderTaskFields(fs.readFileSync(file, "utf8"), {
+        status: "archived", updated: localDay(clock), archived_reason: reason, archived_at: archivedAt,
+      });
+      const state = projectTaskState(
+        paths, taskId, taskContent, readJsonObject(taskStateFile(paths, taskId)), clock,
+      );
+      return {
+        projection: { task_content: taskContent, state },
+        legacy: [lifecycleLegacy("task.archived", { from: task.status, to: "archived", reason })],
+      };
+    },
+    mutationOptions(options, clock, environment),
+  );
+  if (!result.replay || result.event.kind === "task.archived") {
     clearCurrentTaskPointer(paths, taskId);
-    appendTaskLifecycleEvent(
-      paths,
-      taskId,
-      "task.archived",
-      { from: task.status, to: "archived", reason },
-      eventOptions({ ...options, clock }),
-    );
-  });
+  }
+  return result;
 }
 
 function staleTasks(days = 7, options = {}) {

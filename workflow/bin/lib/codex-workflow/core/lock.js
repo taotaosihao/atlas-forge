@@ -103,6 +103,10 @@ function taskLockFile(paths, taskFile) {
   return path.join(paths.taskLockDir, `${posixChecksum(taskFile)}.lock`);
 }
 
+function taskMutationLockFile(paths, taskId) {
+  return taskLockFile(paths, path.join(paths.tasksDir, `${taskId}.md`));
+}
+
 module.exports = {
   acquireLock,
   posixChecksum,
@@ -110,5 +114,6 @@ module.exports = {
   releaseLock,
   sleepMilliseconds,
   taskLockFile,
+  taskMutationLockFile,
   withLock,
 };

@@ -23,6 +23,7 @@ const EXPECTED_ROUTES = {
     "done",
     "init-task",
     "list",
+    "reconcile",
     "resume",
     "show",
     "stale",
@@ -100,8 +101,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 39 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 39);
+test("routes exactly 40 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 40);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)

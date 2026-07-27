@@ -6,17 +6,23 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const {
   CommandError,
-  appendLegacyRuntimeEvent,
   commandOptions,
-  prepareTaskCommand,
-  updateTaskCommand,
 } = require("../core/command-runtime");
+const { readAuthoritativeEvents } = require("../core/event-store");
+const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
-const { timestampSeconds } = require("../task/runtime");
+const { renderTaskFields, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  ensureTaskRuntimeScaffold,
+  projectTaskState,
+  readJsonObject,
+  taskStateFile,
+  timestampSeconds,
+} = require("../task/runtime");
 const { captureVerificationIdentity, sha256 } = require("./identity");
 const {
-  writeVerificationIdentityRecord,
-  writeVerificationRecord,
+  buildVerificationIdentityRecord,
+  renderVerificationRecord,
 } = require("./record");
 
 const VERIFY_USAGE =
@@ -199,7 +205,12 @@ function commandExitCode(result, stderrFile) {
 
 function runVerification(parsed, options = {}) {
   const { clock, cwd, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  const { task } = validateTaskFile(taskFile);
+  readJsonObject(taskStateFile(paths, parsed.taskId));
+  ensureTaskRuntimeScaffold(paths, parsed.taskId, task.title);
+  const observedEvents = readAuthoritativeEvents(taskEventFile(paths, parsed.taskId), parsed.taskId);
+  const observedRevision = observedEvents.at(-1)?.revision || 0;
   const captureIdentity = options.captureIdentity || captureVerificationIdentity;
   const before = captureIdentity({
     argv: parsed.command,
@@ -254,7 +265,7 @@ function runVerification(parsed, options = {}) {
       inputPaths: parsed.inputPaths || [],
     });
     const snapshotStable = before.identityDigest === after.identityDigest;
-    const identityRecord = writeVerificationIdentityRecord(identityFile, {
+    const identityRecord = buildVerificationIdentityRecord({
       schema_version: 2,
       task_id: parsed.taskId,
       created_at: createdAt,
@@ -274,7 +285,7 @@ function runVerification(parsed, options = {}) {
       },
     });
     const identityReference = relativeToCodeHome(paths, identityFile);
-    writeVerificationRecord({
+    const recordContent = renderVerificationRecord({
       recordFile,
       recordType: "verification",
       taskId: parsed.taskId,
@@ -297,34 +308,75 @@ function runVerification(parsed, options = {}) {
     });
 
     const verifiedAt = timestampSeconds(clock);
-    updateTaskCommand(
+    const stateFields = {
+      last_record: relativeToCodeHome(paths, recordFile),
+      last_identity_record: identityReference,
+      last_exit_code: exitCode,
+      outcome,
+      trajectory: parsed.trajectory,
+      evaluator,
+      failure_attribution: parsed.failureAttribution,
+      identity_schema_version: 2,
+      record_id: identityRecord.record_id,
+      identity_digest: identityRecord.identity_digest,
+      identity_stable: snapshotStable,
+      evidence_refs: parsed.evidenceRefs.length > 0 ? parsed.evidenceRefs.join(" ") : "-",
+    };
+    mutateTaskRuntime(
       paths,
       parsed.taskId,
-      { last_verified_at: verifiedAt },
       {
-        last_verified_at: verifiedAt,
-        "verification.last_record": relativeToCodeHome(paths, recordFile),
-        "verification.last_identity_record": identityReference,
-        "verification.last_exit_code": exitCode,
-        "verification.outcome": outcome,
-        "verification.trajectory": parsed.trajectory,
-        "verification.evaluator": evaluator,
-        "verification.failure_attribution": parsed.failureAttribution,
-        "verification.identity_schema_version": 2,
-        "verification.record_id": identityRecord.record_id,
-        "verification.identity_digest": identityRecord.identity_digest,
-        "verification.identity_stable": snapshotStable ? "__TRUE__" : "__FALSE__",
-        "verification.evidence_refs":
-          parsed.evidenceRefs.length > 0 ? parsed.evidenceRefs.join(" ") : "-",
+        kind: "verification.recorded",
+        operationId: options.operationId,
+        data: {
+          record_id: identityRecord.record_id,
+          identity_digest: identityRecord.identity_digest,
+          observed_revision: observedRevision,
+          verdict,
+          outcome,
+        },
       },
-      clock,
-    );
-    appendLegacyRuntimeEvent(
-      paths,
-      parsed.taskId,
-      "verify",
-      `${commandText} => ${verdict}`,
-      clock,
+      () => {
+        const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+        validateTaskFile(currentFile);
+        const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
+          last_verified_at: verifiedAt,
+        });
+        const state = projectTaskState(
+          paths,
+          parsed.taskId,
+          taskContent,
+          readJsonObject(taskStateFile(paths, parsed.taskId)),
+          clock,
+        );
+        state.last_verified_at = verifiedAt;
+        state.verification = stateFields;
+        return {
+          projection: {
+            task_content: taskContent,
+            state,
+            files: [
+              {
+                path: `verification/${token}.md`,
+                content_base64: Buffer.from(recordContent).toString("base64"),
+              },
+              {
+                path: `verification/${token}.json`,
+                content_base64: Buffer.from(`${JSON.stringify(identityRecord, null, 2)}\n`)
+                  .toString("base64"),
+              },
+            ],
+          },
+          legacy: [{ kind: "verify", detail: `${commandText} => ${verdict}` }],
+        };
+      },
+      {
+        clock,
+        environment,
+        expectedRevision: observedRevision,
+        failAfterEventAppend: options.failAfterEventAppend,
+        failBeforeEventAppend: options.failBeforeEventAppend,
+      },
     );
     return {
       exitCode,

@@ -4,13 +4,17 @@ const fs = require("fs");
 const path = require("path");
 const {
   CommandError,
-  appendLegacyRuntimeEvent,
   commandOptions,
-  prepareTaskCommand,
-  updateTaskCommand,
 } = require("../core/command-runtime");
+const { mutateTaskRuntime } = require("../core/task-mutation");
 const { taskArtifactDir } = require("../core/paths");
-const { timestampSeconds } = require("../task/runtime");
+const { renderTaskFields, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  projectTaskState,
+  readJsonObject,
+  taskStateFile,
+  timestampSeconds,
+} = require("../task/runtime");
 
 const READY_USAGE =
   'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]';
@@ -117,35 +121,24 @@ function evaluateReadiness(paths, taskId, requirementsText) {
 }
 
 function runReady(parsed, options = {}) {
-  const { clock, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const { clock, environment, paths } = commandOptions(options);
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  validateTaskFile(taskFile);
+  readJsonObject(taskStateFile(paths, parsed.taskId));
   const checkedAt = timestampSeconds(clock);
   if (parsed.skipRequested) {
-    updateTaskCommand(
+    recordReadiness(
       paths,
-      parsed.taskId,
+      parsed,
       {
-        readiness_status: "skipped",
-        readiness_checked_at: checkedAt,
-        readiness_requirements: parsed.requirements,
-        readiness_issues: "-",
-        readiness_skip_reason: parsed.skipReason,
+        status: "skipped",
+        checked_at: checkedAt,
+        requirements: parsed.requirements,
+        issues: "-",
+        skip_reason: parsed.skipReason,
       },
-      {
-        "readiness.status": "skipped",
-        "readiness.checked_at": checkedAt,
-        "readiness.requirements": parsed.requirements,
-        "readiness.issues": "-",
-        "readiness.skip_reason": parsed.skipReason,
-      },
-      clock,
-    );
-    appendLegacyRuntimeEvent(
-      paths,
-      parsed.taskId,
-      "readiness-skip",
       `${parsed.requirements}: ${parsed.skipReason}`,
-      clock,
+      { ...options, clock, environment },
     );
     return {
       exitCode: 0,
@@ -159,33 +152,19 @@ function runReady(parsed, options = {}) {
   }
 
   const result = evaluateReadiness(paths, parsed.taskId, parsed.requirements);
-  updateTaskCommand(
+  recordReadiness(
     paths,
-    parsed.taskId,
+    parsed,
     {
-      readiness_status: result.status,
-      readiness_checked_at: checkedAt,
-      readiness_requirements: parsed.requirements,
-      readiness_issues: result.issues,
-      readiness_paths: result.paths,
-      readiness_skip_reason: "-",
+      status: result.status,
+      checked_at: checkedAt,
+      requirements: parsed.requirements,
+      issues: result.issues,
+      paths: result.paths,
+      skip_reason: "-",
     },
-    {
-      "readiness.status": result.status,
-      "readiness.checked_at": checkedAt,
-      "readiness.requirements": parsed.requirements,
-      "readiness.issues": result.issues,
-      "readiness.paths": result.paths,
-      "readiness.skip_reason": "-",
-    },
-    clock,
-  );
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "readiness",
     `${result.status} ${parsed.requirements} ${result.issues}`,
-    clock,
+    { ...options, clock, environment },
   );
   return {
     exitCode: result.status === "ready" ? 0 : 1,
@@ -197,6 +176,47 @@ function runReady(parsed, options = {}) {
       `paths: ${result.paths}`,
     ],
   };
+}
+
+function recordReadiness(paths, parsed, readiness, detail, options) {
+  const headerUpdates = {
+    readiness_status: readiness.status,
+    readiness_checked_at: readiness.checked_at,
+    readiness_requirements: readiness.requirements,
+    readiness_issues: readiness.issues,
+    readiness_skip_reason: readiness.skip_reason,
+  };
+  if (readiness.paths !== undefined) headerUpdates.readiness_paths = readiness.paths;
+  mutateTaskRuntime(
+    paths,
+    parsed.taskId,
+    {
+      kind: readiness.status === "skipped" ? "readiness.skipped" : "readiness.evaluated",
+      operationId: options.operationId,
+      data: readiness,
+    },
+    () => {
+      const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      validateTaskFile(taskFile);
+      const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), headerUpdates);
+      const state = projectTaskState(
+        paths,
+        parsed.taskId,
+        taskContent,
+        readJsonObject(taskStateFile(paths, parsed.taskId)),
+        options.clock,
+      );
+      state.readiness = { ...readiness };
+      return {
+        projection: { task_content: taskContent, state },
+        legacy: [{
+          kind: readiness.status === "skipped" ? "readiness-skip" : "readiness",
+          detail,
+        }],
+      };
+    },
+    options,
+  );
 }
 
 module.exports = {

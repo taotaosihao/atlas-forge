@@ -1,10 +1,8 @@
 "use strict";
 
-const { appendStructuredEvent } = require("../core/event-store");
-const { taskLockFile, withLock } = require("../core/lock");
 const { resolvePaths } = require("../core/paths");
+const { derivedLegacyRows, recordTaskRuntimeEvent } = require("../core/task-mutation");
 const { requireTaskFile, taskFile, validateTaskFile } = require("../task/repository");
-const { taskRuntimeFile } = require("../task/runtime");
 const { OUTCOME_KIND_SET, outcomeEventKind } = require("./schema");
 
 class OutcomeMarkerError extends Error {
@@ -37,23 +35,35 @@ function markOutcome(
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
   const file = taskFile(paths.tasksDir, taskId);
-  return withLock(taskLockFile(paths, file), () => {
-    requireTaskFile(paths.tasksDir, taskId);
-    validateTaskFile(file);
-    return appendStructuredEvent(taskRuntimeFile(paths, taskId), {
-      taskId,
+  requireTaskFile(paths.tasksDir, taskId);
+  validateTaskFile(file);
+  const data = {
+    evidence,
+    applicable: !notApplicableRequested,
+    ...(notApplicableRequested ? { not_applicable_reason: notApplicableReason } : {}),
+  };
+  const eventId = options.eventId ? options.eventId() : "";
+  const committed = recordTaskRuntimeEvent(
+    paths,
+    taskId,
+    {
       kind: outcomeEventKind(kind),
-      data: {
-        evidence,
-        applicable: !notApplicableRequested,
-        ...(notApplicableRequested
-          ? { not_applicable_reason: notApplicableReason }
-          : {}),
-      },
-      clock: options.clock,
-      eventId: options.eventId,
-    });
-  });
+      operationId: options.operationId,
+      data,
+    },
+    {
+      schema_version: 1,
+      event_id: eventId,
+      kind: outcomeEventKind(kind),
+      data,
+    },
+    {
+      ...options,
+      environment,
+      ...(eventId ? { eventId: () => eventId } : {}),
+    },
+  );
+  return derivedLegacyRows(committed.event)[0];
 }
 
 module.exports = {

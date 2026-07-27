@@ -195,6 +195,14 @@ function readEvents(paths, taskId) {
     .map((line) => JSON.parse(line));
 }
 
+function legacyShape(event) {
+  return {
+    kind: event.kind,
+    detail: event.detail,
+    created_at: event.created_at,
+  };
+}
+
 function readTeam(paths, taskId) {
   return readJsonObject(taskStateFile(paths, taskId)).active_team;
 }
@@ -330,7 +338,7 @@ test("record-start validates and records native running state", (t) => {
   assert.equal(state.active_team.providers, "");
   assert.equal(state.active_team.temp_dir, "");
   assert.equal(fs.existsSync(`${teamLockFile(taskId, environment)}.dir`), false);
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readEvents(paths, taskId).at(-1)), {
     kind: "team-record-start",
     detail: "native/discuss roles=executor,reviewer,verifier",
     created_at: "2026-07-10T12:01:00Z",
@@ -394,7 +402,7 @@ test("record-start requires explicit Paseo selection authority and validates pro
     "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
   );
   assert.equal(state.active_team.temp_dir, "");
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readEvents(paths, taskId).at(-1)), {
     kind: "team-record-start",
     detail: "paseo/discuss roles=planner,implementer,reviewer,verifier",
     created_at: "2026-07-10T12:01:00Z",
@@ -544,7 +552,7 @@ test("finalize records complete native artifacts", (t) => {
   assert.match(state.active_team.round_file, /team\/round-native\.md$/);
   assert.match(state.active_team.staffing, /team\/staffing\.md$/);
   assert.equal(state.active_team.temp_dir, "");
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readEvents(paths, taskId).at(-1)), {
     kind: "team-record-finalize",
     detail: `none/complete round=${state.active_team.round_file}`,
     created_at: "2026-07-10T12:02:00Z",
@@ -597,7 +605,7 @@ test("finalize records complete paseo artifacts with matching backend markers", 
     state.active_team.providers,
     "codex=gpt-5.6,claude=sonnet-4,deepseek=deepseek-coder,glm=glm-4.5,kimi=kimi-k3",
   );
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readEvents(paths, taskId).at(-1)), {
     kind: "team-record-finalize",
     detail: `none/complete round=${state.active_team.round_file}`,
     created_at: "2026-07-10T12:02:00Z",
@@ -836,7 +844,7 @@ test("promote updates state and accepts equals form through the public dispatche
   assert.equal(readEvents(paths, taskId).at(-1).detail, "finish");
 });
 
-test("promote rolls back task, state, and decision when runtime append fails", (t) => {
+test("promote leaves task, state, decision, runtime, and events unchanged before commit", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Rollback failed promotion");
   startNativeRecord(environment, taskId);
@@ -845,19 +853,16 @@ test("promote rolls back task, state, and decision when runtime append fails", (
     taskStateFile(paths, taskId),
     teamDecisionFile(paths, taskId),
     taskRuntimeFile(paths, taskId),
+    path.join(taskArtifactDir(paths, taskId), "events-v2.jsonl"),
   ];
   const before = files.map((file) => fs.readFileSync(file));
-  const originalAppendFileSync = fs.appendFileSync;
-  t.mock.method(fs, "appendFileSync", (file, ...args) => {
-    if (file === taskRuntimeFile(paths, taskId)) {
-      throw new Error("injected runtime append failure");
-    }
-    return originalAppendFileSync(file, ...args);
-  });
 
   assert.throws(
-    () => runPromote({ taskId, target: "finish", authorizationRef: "" }, { environment }),
-    /injected runtime append failure/,
+    () => runPromote(
+      { taskId, target: "finish", authorizationRef: "" },
+      { environment, failBeforeEventAppend: true, operationId: "promote-before-commit" },
+    ),
+    /injected failure before authoritative event append/,
   );
   files.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), before[index]));
 });

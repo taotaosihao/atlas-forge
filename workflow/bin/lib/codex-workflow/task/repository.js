@@ -58,8 +58,7 @@ function splitTaskDocument(text) {
   };
 }
 
-function updateTaskFields(file, updates) {
-  const text = fs.readFileSync(file, "utf8");
+function renderTaskFields(text, updates) {
   const { body, header } = splitTaskDocument(text);
   const entries = Array.isArray(updates) ? updates : Object.entries(updates);
   const written = new Set();
@@ -86,7 +85,12 @@ function updateTaskFields(file, updates) {
     }
     output += body.replace(/^\n+/, "");
   }
-  atomicWriteFile(file, output, { encoding: "utf8" });
+  return output;
+}
+
+function updateTaskFields(file, updates) {
+  const text = fs.readFileSync(file, "utf8");
+  atomicWriteFile(file, renderTaskFields(text, updates), { encoding: "utf8" });
 }
 
 function getTaskField(file, field) {
@@ -201,6 +205,7 @@ module.exports = {
   listTaskIds,
   listTaskRecords,
   parseTaskHeader,
+  renderTaskFields,
   requireTaskFile,
   shouldListTask,
   splitTaskDocument,

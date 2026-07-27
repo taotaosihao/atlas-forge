@@ -71,13 +71,13 @@ function readEvents(paths, taskId) {
     .map((line) => JSON.parse(line));
 }
 
-test("appends a normalized metric without projecting it into task or state", (t) => {
+test("appends a normalized metric without changing task or business state", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment);
   const file = taskFile(paths.tasksDir, taskId);
   const stateFile = taskStateFile(paths, taskId);
   const taskBefore = fs.readFileSync(file);
-  const stateBefore = fs.readFileSync(stateFile);
+  const stateBefore = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   const result = runGateMetric(
     parseGateMetricArgs([
       taskId,
@@ -108,12 +108,19 @@ test("appends a normalized metric without projecting it into task or state", (t)
     duration_ms: 12,
   });
   assert.deepEqual(fs.readFileSync(file), taskBefore);
-  assert.deepEqual(fs.readFileSync(stateFile), stateBefore);
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  const stateAfter = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  for (const key of ["runtime_revision", "last_event_id", "consistency"]) {
+    delete stateBefore[key];
+    delete stateAfter[key];
+  }
+  assert.deepEqual(stateAfter, stateBefore);
+  const event = readEvents(paths, taskId).at(-1);
+  assert.deepEqual({ kind: event.kind, detail: event.detail, created_at: event.created_at }, {
     kind: "gate-metric",
     detail: "ready used",
     created_at: "2026-07-10T10:00:00Z",
   });
+  assert.equal(event.derived_from_schema, 2);
 });
 
 test("keeps optional duration and core metric diagnostics stable", (t) => {

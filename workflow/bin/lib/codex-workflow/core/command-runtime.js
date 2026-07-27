@@ -1,9 +1,9 @@
 "use strict";
 
-const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { resolvePaths, taskArtifactDir } = require("./paths");
+const { recordTaskRuntimeEvent } = require("./task-mutation");
 const {
   requireTaskFile,
   updateTaskFields,
@@ -11,11 +11,9 @@ const {
 } = require("../task/repository");
 const {
   readJsonObject,
+  ensureTaskRuntimeScaffold,
   setTaskStateFields,
-  syncTaskRuntime,
-  taskRuntimeFile,
   taskStateFile,
-  timestampSeconds,
   writeTaskState,
 } = require("../task/runtime");
 
@@ -64,8 +62,9 @@ function artifactFile(paths, taskId, name) {
 
 function prepareTaskCommand(paths, taskId, clock) {
   const file = requireTaskFile(paths.tasksDir, taskId);
-  validateTaskFile(file);
-  syncTaskRuntime(paths, taskId, clock);
+  const { task } = validateTaskFile(file);
+  readJsonObject(taskStateFile(paths, taskId));
+  ensureTaskRuntimeScaffold(paths, taskId, task.title);
   return file;
 }
 
@@ -82,12 +81,16 @@ function updateTaskCommand(paths, taskId, headerUpdates, stateUpdates, clock) {
 }
 
 function appendLegacyRuntimeEvent(paths, taskId, kind, detail, clock) {
-  const row =
-    `{"kind": ${JSON.stringify(kind)}, "detail": ${JSON.stringify(detail)}, ` +
-    `"created_at": ${JSON.stringify(timestampSeconds(clock))}}\n`;
-  const file = taskRuntimeFile(paths, taskId);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, row, "utf8");
+  return recordTaskRuntimeEvent(
+    paths,
+    taskId,
+    {
+      kind: `compatibility.${kind}`,
+      data: { legacy_kind: kind, detail },
+    },
+    { kind, detail },
+    { clock },
+  );
 }
 
 module.exports = {

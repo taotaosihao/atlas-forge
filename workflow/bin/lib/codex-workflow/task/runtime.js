@@ -3,10 +3,17 @@
 const fs = require("fs");
 const path = require("path");
 const { atomicWriteJson } = require("../core/atomic-file");
-const { appendLifecycleEvent, readEventRows } = require("../core/event-store");
+const {
+  appendLifecycleEvent,
+  readAuthoritativeEvents,
+  readEventRows,
+} = require("../core/event-store");
+const { taskEventFile } = require("../core/task-mutation");
 const { withLock } = require("../core/lock");
 const { taskArtifactDir, taskArtifactDirRelative } = require("../core/paths");
 const {
+  REQUIRED_FIELDS,
+  parseTaskHeader,
   requireTaskFile,
   updateTaskFields,
   validateTaskFile,
@@ -78,14 +85,19 @@ function headerValue(fields, key) {
   return fields[key] ? fields[key][0] : "";
 }
 
-function writeTaskState(paths, taskId, clock = () => new Date()) {
-  const file = requireTaskFile(paths.tasksDir, taskId);
-  const { fields, task } = validateTaskFile(file);
-  const stateFile = taskStateFile(paths, taskId);
-  const state = readJsonObject(stateFile);
+function projectTaskState(paths, taskId, taskContent, currentState = {}, clock = () => new Date()) {
+  const fields = parseTaskHeader(taskContent);
+  const missing = REQUIRED_FIELDS.filter((field) => !fields[field] || fields[field].length !== 1);
+  if (missing.length > 0) {
+    throw new Error(`cannot project malformed task content: missing or duplicate ${missing.join(" ")}`);
+  }
+  const task = Object.fromEntries(REQUIRED_FIELDS.map((field) => [field, fields[field][0]]));
+  if (task.id !== taskId) {
+    throw new Error(`cannot project task id mismatch: ${task.id} != ${taskId}`);
+  }
+  const state = JSON.parse(JSON.stringify(currentState || {}));
   const activeTeam =
     state.active_team && typeof state.active_team === "object" ? state.active_team : {};
-
   if (activeTeam.schema_version !== 2) {
     activeTeam.backend = headerValue(fields, "active_team_backend") || activeTeam.backend || "";
     activeTeam.mode = headerValue(fields, "active_team_mode") || activeTeam.mode || "";
@@ -93,7 +105,6 @@ function writeTaskState(paths, taskId, clock = () => new Date()) {
     activeTeam.decision =
       headerValue(fields, "active_team_decision") || activeTeam.decision || "";
   }
-
   Object.assign(state, {
     task_id: task.id,
     title: task.title,
@@ -103,7 +114,6 @@ function writeTaskState(paths, taskId, clock = () => new Date()) {
     updated_at: timestampSeconds(clock),
     active_team: activeTeam,
   });
-
   for (const key of [
     "blocked_reason",
     "blocked_at",
@@ -114,11 +124,22 @@ function writeTaskState(paths, taskId, clock = () => new Date()) {
     "no_verify_at",
   ]) {
     const value = headerValue(fields, key);
-    if (value) {
-      state[key] = value;
-    }
+    if (value) state[key] = value;
   }
+  return state;
+}
 
+function writeTaskState(paths, taskId, clock = () => new Date()) {
+  const file = requireTaskFile(paths.tasksDir, taskId);
+  validateTaskFile(file);
+  const stateFile = taskStateFile(paths, taskId);
+  const state = projectTaskState(
+    paths,
+    taskId,
+    fs.readFileSync(file, "utf8"),
+    readJsonObject(stateFile),
+    clock,
+  );
   atomicWriteJson(stateFile, state);
   return state;
 }
@@ -330,6 +351,15 @@ function hasSuccessfulVerification(paths, taskId, options = {}) {
 }
 
 function lifecycleEvents(paths, taskId) {
+  const authoritative = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  if (authoritative.length > 0) {
+    return authoritative
+      .filter((event) => event.kind.startsWith("task."))
+      .map((event) => ({
+        ...event,
+        kind: event.kind === "task.completion.closed" ? "task.done" : event.kind,
+      }));
+  }
   return readEventRows(taskRuntimeFile(paths, taskId)).filter(
     (row) =>
       row &&
@@ -349,6 +379,7 @@ module.exports = {
   hasSuccessfulVerification,
   lifecycleEvents,
   readJsonObject,
+  projectTaskState,
   replaceActiveTeam,
   setTaskStateFields,
   successfulVerificationAdmission,

@@ -73,6 +73,10 @@ function readRuntimeEvents(paths, taskId) {
     .map((line) => JSON.parse(line));
 }
 
+function legacyShape(event) {
+  return { kind: event.kind, detail: event.detail, created_at: event.created_at };
+}
+
 test("records fresh template artifacts as not ready", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment);
@@ -101,7 +105,7 @@ test("records fresh template artifacts as not ready", (t) => {
     paths: "context:context.md,spec:spec.md,analysis:analysis.md",
     skip_reason: "-",
   });
-  assert.deepEqual(readRuntimeEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readRuntimeEvents(paths, taskId).at(-1)), {
     kind: "readiness",
     detail:
       "not-ready context,spec,analysis context:template,spec:template,analysis:template",

@@ -64,14 +64,27 @@ test("records an evidence-bound first-code event", (t) => {
     eventId: () => "outcome-event",
   });
 
-  assert.deepEqual(event, {
-    schema_version: 1,
-    event_id: "outcome-event",
-    task_id: taskId,
-    kind: "outcome.first-code",
-    occurred_at: "2026-07-10T03:00:00.000Z",
-    data: { evidence: "commit:abc123", applicable: true },
-  });
+  assert.deepEqual(
+    {
+      schema_version: event.schema_version,
+      event_id: event.event_id,
+      task_id: event.task_id,
+      kind: event.kind,
+      occurred_at: event.occurred_at,
+      data: event.data,
+    },
+    {
+      schema_version: 1,
+      event_id: "outcome-event",
+      task_id: taskId,
+      kind: "outcome.first-code",
+      occurred_at: "2026-07-10T03:00:00.000Z",
+      data: { evidence: "commit:abc123", applicable: true },
+    },
+  );
+  assert.equal(event.derived_from_schema, 2);
+  assert.equal(event.authoritative_event_id, "outcome-event");
+  assert.equal(event.revision, 3);
   assert.deepEqual(rows(paths, taskId).at(-1), event);
 });
 
