@@ -2,6 +2,8 @@
 
 const fs = require("fs");
 const path = require("path");
+const { atomicWriteJson } = require("../core/atomic-file");
+const { digestCanonical } = require("./identity");
 
 function outputPreview(file) {
   if (!fs.existsSync(file)) {
@@ -40,6 +42,18 @@ function renderVerificationRecord(record) {
   }
   if (record.failureAttribution) {
     metadata.push(`- failure_attribution: ${record.failureAttribution}`);
+  }
+  if (record.identityRecord) {
+    metadata.push(`- identity_record: \`${record.identityRecord}\``);
+  }
+  if (record.recordId) {
+    metadata.push(`- record_id: ${record.recordId}`);
+  }
+  if (record.identityDigest) {
+    metadata.push(`- identity_digest: ${record.identityDigest}`);
+  }
+  if (record.snapshotStable !== undefined) {
+    metadata.push(`- snapshot_stable: ${record.snapshotStable}`);
   }
   if (record.evidenceRefs.length > 0) {
     metadata.push("", "## Evidence Refs", "");
@@ -91,8 +105,17 @@ function writeVerificationRecord(record) {
   return record.recordFile;
 }
 
+function writeVerificationIdentityRecord(recordFile, record) {
+  const withoutId = { ...record };
+  delete withoutId.record_id;
+  const value = { ...withoutId, record_id: digestCanonical(withoutId) };
+  atomicWriteJson(recordFile, value);
+  return value;
+}
+
 module.exports = {
   outputPreview,
   renderVerificationRecord,
+  writeVerificationIdentityRecord,
   writeVerificationRecord,
 };

@@ -28,6 +28,7 @@ const CONVERGENCE_STATES = new Set([
   "HUMAN_DECISION_REQUIRED",
 ]);
 const ACTIVE_TEAM_STATUSES = new Set(["running", "promoted:execute", "promoted:worktree"]);
+const SUCCESS_TEAM_STATUSES = new Set(["complete", "loop-done", "promoted:finish"]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 class RegistryError extends Error {
@@ -117,6 +118,53 @@ function isTerminalTeamStatus(status) {
     "complete", "failed", "interrupted", "stopped", "loop-done", "loop-incomplete",
     "loop-failed", "loop-timeout", "promoted:finish",
   ]).has(status);
+}
+
+function teamClosureIssues(team, outcome = "succeeded") {
+  if (!team || typeof team !== "object" || Array.isArray(team) || !team.status) return [];
+  const issues = [];
+  if (outcome === "succeeded") {
+    if (!SUCCESS_TEAM_STATUSES.has(team.status)) {
+      issues.push(`Team is not terminal for succeeded completion: ${team.status}`);
+    }
+  } else if (!isTerminalTeamStatus(team.status)) {
+    issues.push(`Team is not terminal for ${outcome} completion: ${team.status}`);
+  }
+  if (team.schema_version !== 2) return issues;
+
+  for (const field of ["lanes", "dispatches", "attempts", "writer_leases"]) {
+    if (!Array.isArray(team[field])) {
+      issues.push(`Team v2 ${field} must be an array`);
+    }
+  }
+  if (issues.some((issue) => issue.includes("must be an array"))) return issues;
+  for (const lane of team.lanes) {
+    if (lane.status !== "closed") {
+      issues.push(`Team lane is not closed: ${lane.lane_id || "unknown"}=${lane.status || "missing"}`);
+    }
+  }
+  for (const dispatch of team.dispatches) {
+    if (dispatch.status !== "closed") {
+      issues.push(
+        `Team dispatch is not closed: ${dispatch.dispatch_id || "unknown"}=${dispatch.status || "missing"}`,
+      );
+    }
+  }
+  for (const attempt of team.attempts) {
+    if (attempt.status !== "quiesced") {
+      issues.push(
+        `Team attempt is not quiesced: ${attempt.attempt_id || "unknown"}=${attempt.status || "missing"}`,
+      );
+    }
+  }
+  for (const lease of team.writer_leases) {
+    if (lease.state !== "released") {
+      issues.push(
+        `Team writer lease is not released: ${lease.lease_id || "unknown"}=${lease.state || "missing"}`,
+      );
+    }
+  }
+  return issues;
 }
 
 function createTeamRun({ previous, mode, objective, configuredBackend, fallbackPolicy, authorizationRef,
@@ -937,4 +985,5 @@ module.exports = {
   recordSelectionEvent,
   reserveAttempt,
   terminalAttempt,
+  teamClosureIssues,
 };

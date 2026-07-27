@@ -16,15 +16,17 @@ const {
 const {
   appendTaskLifecycleEvent,
   clearCurrentTaskPointer,
-  hasSuccessfulVerification,
   lifecycleEvents,
   readJsonObject,
   setTaskStateFields,
+  successfulVerificationAdmission,
   syncTaskRuntime,
   taskStateFile,
   timestampSeconds,
   writeCurrentTaskPointer,
+  writeTaskCompletion,
 } = require("./runtime");
+const { teamClosureIssues } = require("../team/lane-registry");
 
 class TaskLifecycleError extends Error {
   constructor(message) {
@@ -245,10 +247,39 @@ function resumeTask(taskId, options = {}) {
 
 function completeTask(
   taskId,
-  { noVerifyReason = "", noVerifyRequested = false, ...options } = {},
+  {
+    authorityRef = "",
+    evidenceRefs = [],
+    noVerifyReason = "",
+    noVerifyRequested = false,
+    outcome = "succeeded",
+    ...options
+  } = {},
 ) {
+  if (!new Set(["succeeded", "failed", "cancelled"]).has(outcome)) {
+    throw new TaskLifecycleError(`invalid completion outcome: ${outcome}`);
+  }
+  if (!Array.isArray(evidenceRefs)) {
+    throw new TaskLifecycleError("completion evidence_refs must be an array");
+  }
+  if (authorityRef) {
+    validateReason("completion authority ref", authorityRef);
+  }
+  for (const evidenceRef of evidenceRefs) {
+    validateReason("completion evidence ref", evidenceRef);
+  }
   if (noVerifyRequested) {
     validateReason("no-verify reason", noVerifyReason);
+  }
+  if (outcome === "succeeded" && noVerifyRequested) {
+    throw new TaskLifecycleError("no-verify cannot complete a succeeded task");
+  }
+  if (outcome !== "succeeded") {
+    if (!authorityRef || evidenceRefs.length === 0) {
+      throw new TaskLifecycleError(
+        `${outcome} completion requires authority_ref and at least one evidence_ref`,
+      );
+    }
   }
   const environment = options.environment || process.env;
   const paths = options.paths || resolvePaths(environment);
@@ -261,17 +292,41 @@ function completeTask(
       throw new TaskLifecycleError(`task must be doing before done: ${taskId}`);
     }
 
-    syncTaskRuntime(paths, taskId, clock);
-    if (!noVerifyRequested && !hasSuccessfulVerification(paths, taskId)) {
-      throw new TaskLifecycleError(
-        `task lacks successful workflow verification: ${taskId}\n` +
-          `run: codex-workflow verify ${taskId} -- <command...>\n` +
-          'or explicitly skip with: codex-workflow done <task-id> --no-verify "<reason>"',
-      );
+    const state = readJsonObject(taskStateFile(paths, taskId));
+    const teamIssues = teamClosureIssues(state.active_team, outcome);
+    if (teamIssues.length > 0) {
+      throw new TaskLifecycleError(teamIssues.join("\n"));
+    }
+    let verification = {
+      identityDigest: "",
+      passed: outcome !== "succeeded",
+      reasons: [],
+      recordId: "",
+    };
+    if (outcome === "succeeded") {
+      verification = successfulVerificationAdmission(paths, taskId, {
+        captureIdentity: options.captureIdentity,
+        environment,
+      });
+      if (!verification.passed) {
+        throw new TaskLifecycleError(
+          `task lacks successful workflow verification: ${taskId}\n` +
+            `${verification.reasons.join("\n")}\n` +
+            `run: codex-workflow verify ${taskId} -- <command...>`,
+        );
+      }
     }
 
     pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");
-    const updates = { status: "done", updated: localDay(clock) };
+    const closedAt = timestampSeconds(clock);
+    const updates = {
+      status: "done",
+      updated: localDay(clock),
+      completion_outcome: outcome,
+      completion_authority_ref: authorityRef || "-",
+      completion_evidence_refs: evidenceRefs.length > 0 ? evidenceRefs.join(" ") : "-",
+      completion_closed_at: closedAt,
+    };
     let noVerifyAt = "";
     if (noVerifyRequested) {
       noVerifyAt = timestampSeconds(clock);
@@ -280,6 +335,25 @@ function completeTask(
     }
     updateTaskFields(file, updates);
     syncTaskRuntime(paths, taskId, clock);
+    const activeTeam = state.active_team && typeof state.active_team === "object"
+      ? state.active_team
+      : {};
+    writeTaskCompletion(
+      paths,
+      taskId,
+      {
+        schema_version: 1,
+        outcome,
+        authority_ref: authorityRef,
+        evidence_refs: [...evidenceRefs],
+        verification_record_id: verification.recordId || "",
+        verification_identity_digest: verification.identityDigest || "",
+        team_run_id: activeTeam.team_run_id || "",
+        team_generation: activeTeam.generation || 0,
+        closed_at: closedAt,
+      },
+      clock,
+    );
     if (noVerifyRequested) {
       setTaskStateFields(
         paths,
@@ -304,7 +378,13 @@ function completeTask(
       paths,
       taskId,
       "task.done",
-      { from: "doing", to: "done" },
+      {
+        from: "doing",
+        to: "done",
+        outcome,
+        authority_ref: authorityRef,
+        evidence_refs: [...evidenceRefs],
+      },
       eventOptions({ ...options, clock }),
     );
   });

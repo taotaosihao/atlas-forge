@@ -214,13 +214,19 @@ function runRecordStart(parsed, options = {}) {
   }
   validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
   const { clock, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const staffingFile = teamStaffingFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
   const staffing = relativeToCodeHome(paths, staffingFile);
   let team;
   withLock(teamLockFile(parsed.taskId, environment), () => {
+    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+    const { task } = validateTaskFile(taskFile);
+    readJsonObject(taskStateFile(paths, parsed.taskId));
+    if (task.status !== "doing") {
+      throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
+    }
+    prepareTaskCommand(paths, parsed.taskId, clock);
     const state = readJsonObject(taskStateFile(paths, parsed.taskId));
     const previous = state.active_team && typeof state.active_team === "object"
       ? state.active_team : {};

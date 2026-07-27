@@ -11,6 +11,11 @@ const {
   updateTaskFields,
   validateTaskFile,
 } = require("./repository");
+const {
+  captureVerificationIdentity,
+  digestCanonical,
+  identityInputPaths,
+} = require("../verification/identity");
 
 function timestampSeconds(clock = () => new Date()) {
   const value = clock();
@@ -165,6 +170,18 @@ function replaceActiveTeam(paths, taskId, activeTeam, clock = () => new Date()) 
   return state;
 }
 
+function writeTaskCompletion(paths, taskId, completion, clock = () => new Date()) {
+  if (!completion || typeof completion !== "object" || Array.isArray(completion)) {
+    throw new TypeError("completion must be an object");
+  }
+  const stateFile = taskStateFile(paths, taskId);
+  const state = readJsonObject(stateFile);
+  state.completion = completion;
+  state.updated_at = timestampSeconds(clock);
+  atomicWriteJson(stateFile, state);
+  return state;
+}
+
 function syncTaskRuntime(paths, taskId, clock = () => new Date()) {
   const file = requireTaskFile(paths.tasksDir, taskId);
   const { fields, task } = validateTaskFile(file);
@@ -230,12 +247,86 @@ function appendTaskLifecycleEvent(paths, taskId, kind, data, options = {}) {
   });
 }
 
-function hasSuccessfulVerification(paths, taskId) {
+function resolveCodeHomeReference(paths, reference) {
+  return path.isAbsolute(reference) ? reference : path.resolve(paths.codeHome, reference);
+}
+
+function successfulVerificationAdmission(paths, taskId, options = {}) {
   const state = readJsonObject(taskStateFile(paths, taskId));
   const verification =
     state.verification && typeof state.verification === "object" ? state.verification : {};
-  return Boolean(String(state.last_verified_at || "").trim()) &&
-    (verification.last_exit_code === 0 || verification.last_exit_code === "0");
+  const reasons = [];
+  if (!String(state.last_verified_at || "").trim()) {
+    reasons.push("missing last_verified_at");
+  }
+  if (!(verification.last_exit_code === 0 || verification.last_exit_code === "0")) {
+    reasons.push("last verification exit code is not zero");
+  }
+  if (verification.outcome !== "passed") {
+    reasons.push(`last verification outcome is not passed: ${verification.outcome || "missing"}`);
+  }
+  if (verification.skipped === true) {
+    reasons.push("last verification is marked skipped");
+  }
+  if (verification.identity_schema_version !== 2) {
+    reasons.push("missing verification identity schema version 2");
+  }
+  if (verification.identity_stable !== true) {
+    reasons.push("verification snapshot changed while the command ran");
+  }
+  if (!verification.last_identity_record) {
+    reasons.push("missing verification identity record");
+  }
+  if (reasons.length > 0) return { passed: false, reasons };
+
+  let record;
+  try {
+    const recordFile = resolveCodeHomeReference(paths, verification.last_identity_record);
+    record = readJsonObject(recordFile);
+    if (record.schema_version !== 2 || record.task_id !== taskId) {
+      reasons.push("verification identity record task or schema mismatch");
+    }
+    const withoutId = { ...record };
+    delete withoutId.record_id;
+    if (record.record_id !== digestCanonical(withoutId)) {
+      reasons.push("verification identity record digest mismatch");
+    }
+    if (record.identity_digest !== digestCanonical(record.identity || {})) {
+      reasons.push("verification identity payload digest mismatch");
+    }
+    if (record.record_id !== verification.record_id
+      || record.identity_digest !== verification.identity_digest) {
+      reasons.push("verification state pointer does not match the identity record");
+    }
+    if (record.verdict !== "passed" || record.outcome !== "passed"
+      || record.provenance !== "executed" || record.snapshot_stable !== true) {
+      reasons.push("verification identity record is not a stable executed pass");
+    }
+    if (reasons.length === 0) {
+      const captureIdentity = options.captureIdentity || captureVerificationIdentity;
+      const current = captureIdentity({
+        argv: record.identity.argv,
+        cwd: record.identity.cwd_realpath,
+        environment: options.environment || process.env,
+        inputPaths: identityInputPaths(record.identity),
+      });
+      if (current.identityDigest !== record.identity_digest) {
+        reasons.push("verification identity no longer matches the current snapshot");
+      }
+    }
+  } catch (error) {
+    reasons.push(`unable to validate verification identity: ${error.message}`);
+  }
+  return {
+    passed: reasons.length === 0,
+    reasons,
+    recordId: record && record.record_id ? record.record_id : "",
+    identityDigest: record && record.identity_digest ? record.identity_digest : "",
+  };
+}
+
+function hasSuccessfulVerification(paths, taskId, options = {}) {
+  return successfulVerificationAdmission(paths, taskId, options).passed;
 }
 
 function lifecycleEvents(paths, taskId) {
@@ -260,10 +351,12 @@ module.exports = {
   readJsonObject,
   replaceActiveTeam,
   setTaskStateFields,
+  successfulVerificationAdmission,
   syncTaskRuntime,
   taskRuntimeFile,
   taskStateFile,
   timestampSeconds,
   writeCurrentTaskPointer,
+  writeTaskCompletion,
   writeTaskState,
 };

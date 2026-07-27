@@ -24,7 +24,8 @@ const LIST_USAGE = "usage: codex-workflow list [--all|--days <n>|--days=<n>]";
 const SHOW_USAGE = "usage: codex-workflow show <task-id>";
 const INIT_USAGE = 'usage: codex-workflow init-task "<title>" "<success criteria>"';
 const START_USAGE = "usage: codex-workflow start <task-id>";
-const DONE_USAGE = 'usage: codex-workflow done <task-id> [--no-verify "<reason>"]';
+const DONE_USAGE =
+  'usage: codex-workflow done <task-id> [--outcome succeeded|failed|cancelled] [--authority-ref <ref>] [--evidence-ref <ref>]... [--no-verify "<reason>"]';
 const BLOCK_USAGE = 'usage: codex-workflow block <task-id> --reason "<reason>"';
 const RESUME_USAGE = "usage: codex-workflow resume <task-id>";
 const ARCHIVE_USAGE = 'usage: codex-workflow archive <task-id> --reason "<reason>"';
@@ -146,22 +147,41 @@ function parseDoneArgs(argv) {
   if (argv.length < 1) {
     throw new CliError(DONE_USAGE);
   }
-  const taskId = argv[0];
-  const rest = argv.slice(1);
-  if (rest.length === 0) {
-    return { noVerifyReason: "", noVerifyRequested: false, taskId };
+  const result = {
+    authorityRef: "",
+    evidenceRefs: [],
+    noVerifyReason: "",
+    noVerifyRequested: false,
+    outcome: "succeeded",
+    taskId: argv[0],
+  };
+  const seen = new Set();
+  const scalarFlags = {
+    "--authority-ref": "authorityRef",
+    "--no-verify": "noVerifyReason",
+    "--outcome": "outcome",
+  };
+  for (let index = 1; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (Object.hasOwn(scalarFlags, argument)) {
+      if (seen.has(argument) || index + 1 >= argv.length) throw new CliError(DONE_USAGE);
+      seen.add(argument);
+      result[scalarFlags[argument]] = argv[++index];
+      if (argument === "--no-verify") result.noVerifyRequested = true;
+    } else if (argument === "--evidence-ref") {
+      if (index + 1 >= argv.length) throw new CliError(DONE_USAGE);
+      result.evidenceRefs.push(argv[++index]);
+    } else if (argument.startsWith("--evidence-ref=")) {
+      result.evidenceRefs.push(argument.slice("--evidence-ref=".length));
+    } else {
+      const match = /^(--authority-ref|--no-verify|--outcome)=(.*)$/.exec(argument);
+      if (!match || seen.has(match[1])) throw new CliError(DONE_USAGE);
+      seen.add(match[1]);
+      result[scalarFlags[match[1]]] = match[2];
+      if (match[1] === "--no-verify") result.noVerifyRequested = true;
+    }
   }
-  if (rest[0] === "--no-verify" && rest.length === 2) {
-    return { noVerifyReason: rest[1], noVerifyRequested: true, taskId };
-  }
-  if (rest[0].startsWith("--no-verify=") && rest.length === 1) {
-    return {
-      noVerifyReason: rest[0].slice("--no-verify=".length),
-      noVerifyRequested: true,
-      taskId,
-    };
-  }
-  throw new CliError(DONE_USAGE);
+  return result;
 }
 
 function parseStaleArgs(argv) {

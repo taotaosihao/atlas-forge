@@ -13,10 +13,14 @@ const {
 } = require("../core/command-runtime");
 const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
 const { timestampSeconds } = require("../task/runtime");
-const { writeVerificationRecord } = require("./record");
+const { captureVerificationIdentity, sha256 } = require("./identity");
+const {
+  writeVerificationIdentityRecord,
+  writeVerificationRecord,
+} = require("./record");
 
 const VERIFY_USAGE =
-  "usage: codex-workflow verify <task-id> [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... -- <command...>";
+  "usage: codex-workflow verify <task-id> [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... -- <command...>";
 const VALID_OUTCOMES = new Set(["", "passed", "failed", "blocked", "skipped"]);
 const VALID_TRAJECTORIES = new Set([
   "",
@@ -54,6 +58,8 @@ function parseVerifyArgs(argv) {
     evaluator: "",
     evidenceRefs: [],
     failureAttribution: "",
+    gateClass: "general",
+    inputPaths: [],
     outcome: "",
     taskId: argv[0],
     trajectory: "",
@@ -66,6 +72,7 @@ function parseVerifyArgs(argv) {
       break;
     }
     const namedFlags = {
+      "--gate-class": "gateClass",
       "--outcome": "outcome",
       "--trajectory": "trajectory",
       "--evaluator": "evaluator",
@@ -81,6 +88,13 @@ function parseVerifyArgs(argv) {
         throw new CommandError(VERIFY_USAGE);
       }
       result.evidenceRefs.push(argv[++index]);
+    } else if (argument === "--input") {
+      if (index + 1 >= argv.length) {
+        throw new CommandError(VERIFY_USAGE);
+      }
+      result.inputPaths.push(argv[++index]);
+    } else if (argument.startsWith("--gate-class=")) {
+      result.gateClass = argument.slice("--gate-class=".length);
     } else if (argument.startsWith("--outcome=")) {
       result.outcome = argument.slice("--outcome=".length);
     } else if (argument.startsWith("--trajectory=")) {
@@ -91,6 +105,8 @@ function parseVerifyArgs(argv) {
       result.failureAttribution = argument.slice("--failure-attribution=".length);
     } else if (argument.startsWith("--evidence=")) {
       result.evidenceRefs.push(argument.slice("--evidence=".length));
+    } else if (argument.startsWith("--input=")) {
+      result.inputPaths.push(argument.slice("--input=".length));
     } else {
       throw new CommandError(VERIFY_USAGE);
     }
@@ -100,6 +116,9 @@ function parseVerifyArgs(argv) {
   }
   result.command = argv.slice(commandStart);
 
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(result.gateClass)) {
+    throw new CommandError(`invalid gate class: ${result.gateClass}`);
+  }
   if (!VALID_OUTCOMES.has(result.outcome)) {
     throw new CommandError(`invalid outcome: ${result.outcome}`);
   }
@@ -181,6 +200,13 @@ function commandExitCode(result, stderrFile) {
 function runVerification(parsed, options = {}) {
   const { clock, cwd, environment, paths } = commandOptions(options);
   prepareTaskCommand(paths, parsed.taskId, clock);
+  const captureIdentity = options.captureIdentity || captureVerificationIdentity;
+  const before = captureIdentity({
+    argv: parsed.command,
+    cwd,
+    environment,
+    inputPaths: parsed.inputPaths || [],
+  });
   const temporaryParent = options.temporaryParent || environment.TMPDIR || os.tmpdir();
   fs.mkdirSync(temporaryParent, { recursive: true });
   const temporaryDir = fs.mkdtempSync(path.join(temporaryParent, "codex-workflow-verify."));
@@ -210,11 +236,44 @@ function runVerification(parsed, options = {}) {
     const evaluator = parsed.evaluator || "local-command";
     const commandText = formatCommand(parsed.command);
     const token = options.recordToken || timestampToken(clock);
+    const createdAt = timestampSeconds(clock);
     const recordFile = path.join(
       taskArtifactDir(paths, parsed.taskId),
       "verification",
       `${token}.md`,
     );
+    const identityFile = path.join(
+      taskArtifactDir(paths, parsed.taskId),
+      "verification",
+      `${token}.json`,
+    );
+    const after = captureIdentity({
+      argv: parsed.command,
+      cwd,
+      environment,
+      inputPaths: parsed.inputPaths || [],
+    });
+    const snapshotStable = before.identityDigest === after.identityDigest;
+    const identityRecord = writeVerificationIdentityRecord(identityFile, {
+      schema_version: 2,
+      task_id: parsed.taskId,
+      created_at: createdAt,
+      gate_class: parsed.gateClass || "general",
+      verdict,
+      outcome,
+      provenance: "executed",
+      identity: after.identity,
+      identity_digest: after.identityDigest,
+      pre_identity_digest: before.identityDigest,
+      snapshot_stable: snapshotStable,
+      result: {
+        exit_code: exitCode,
+        stdout_sha256: sha256(fs.readFileSync(stdoutFile)),
+        stderr_sha256: sha256(fs.readFileSync(stderrFile)),
+        evidence_refs: [...parsed.evidenceRefs],
+      },
+    });
+    const identityReference = relativeToCodeHome(paths, identityFile);
     writeVerificationRecord({
       recordFile,
       recordType: "verification",
@@ -225,12 +284,16 @@ function runVerification(parsed, options = {}) {
       verdict,
       stdoutFile,
       stderrFile,
-      createdAt: timestampSeconds(clock),
+      createdAt,
       outcome,
       trajectory: parsed.trajectory,
       evaluator,
       failureAttribution: parsed.failureAttribution,
       evidenceRefs: parsed.evidenceRefs,
+      identityRecord: identityReference,
+      recordId: identityRecord.record_id,
+      identityDigest: identityRecord.identity_digest,
+      snapshotStable,
     });
 
     const verifiedAt = timestampSeconds(clock);
@@ -241,11 +304,16 @@ function runVerification(parsed, options = {}) {
       {
         last_verified_at: verifiedAt,
         "verification.last_record": relativeToCodeHome(paths, recordFile),
+        "verification.last_identity_record": identityReference,
         "verification.last_exit_code": exitCode,
         "verification.outcome": outcome,
         "verification.trajectory": parsed.trajectory,
         "verification.evaluator": evaluator,
         "verification.failure_attribution": parsed.failureAttribution,
+        "verification.identity_schema_version": 2,
+        "verification.record_id": identityRecord.record_id,
+        "verification.identity_digest": identityRecord.identity_digest,
+        "verification.identity_stable": snapshotStable ? "__TRUE__" : "__FALSE__",
         "verification.evidence_refs":
           parsed.evidenceRefs.length > 0 ? parsed.evidenceRefs.join(" ") : "-",
       },
@@ -265,6 +333,7 @@ function runVerification(parsed, options = {}) {
         `record: ${recordFile}`,
         `verdict: ${verdict}`,
       ],
+      identityFile,
       recordFile,
     };
   } finally {

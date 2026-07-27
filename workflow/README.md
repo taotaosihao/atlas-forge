@@ -48,7 +48,13 @@ Finish a task:
 
 ```bash
 ~/.codex/workflow/bin/codex-workflow done <task-id>
+~/.codex/workflow/bin/codex-workflow done <task-id> --outcome failed|cancelled --authority-ref <stable-ref> --evidence-ref <path-or-url>
 ```
+
+Succeeded completion requires a current, stable verification identity and a
+fully closed Team ledger. Failed or cancelled completion is explicit and must
+retain both authority and evidence; it never projects a succeeded outcome.
+`--no-verify` cannot admit succeeded completion.
 
 Show a task:
 
@@ -77,8 +83,12 @@ Run a real Codex smoke in the active task workspace:
 Record a verification command inside the task artifact directory:
 
 ```bash
-~/.codex/workflow/bin/codex-workflow verify <task-id> -- <command...>
+~/.codex/workflow/bin/codex-workflow verify <task-id> [--gate-class <id>] [--input <file>]... -- <command...>
 ```
+
+Verification records bind the result to the current Git/worktree, cwd, argv,
+non-secret environment policy, toolchain, lockfiles, submodules, and explicit
+inputs. Any snapshot change after verification requires a new verification.
 
 Install Codex Bash hooks for workflow evidence capture:
 

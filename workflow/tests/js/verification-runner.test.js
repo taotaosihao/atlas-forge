@@ -34,6 +34,10 @@ const { outputPreview } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/record.js",
 ));
+const { captureVerificationIdentity } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/verification/identity.js",
+));
 const {
   VERIFY_USAGE,
   formatCommand,
@@ -77,10 +81,15 @@ function readEvents(paths, taskId) {
 }
 
 test("runs a passing argv command and records independent verification metadata", (t) => {
-  const { environment, paths } = temporaryWorkflow(t);
+  const { environment, home, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment);
+  const inputFile = path.join(home, "verification-input.txt");
+  fs.writeFileSync(inputFile, "explicit verification input\n");
   const parsed = parseVerifyArgs([
     taskId,
+    "--gate-class=unit",
+    "--input",
+    inputFile,
     "--outcome",
     "blocked",
     "--trajectory=fixed",
@@ -114,20 +123,46 @@ test("runs a passing argv command and records independent verification metadata"
   assert.match(record, /- `https:\/\/example\.invalid\/run\/1`/);
   assert.match(record, /```text\nchild stdout\n```/);
   assert.match(record, /```text\nchild stderr\n```/);
+  assert.match(record, /- identity_record: `/);
+  assert.match(record, /- snapshot_stable: true/);
+  assert.equal(fs.existsSync(result.identityFile), true);
+  const identity = JSON.parse(fs.readFileSync(result.identityFile, "utf8"));
+  assert.equal(identity.schema_version, 2);
+  assert.equal(identity.task_id, taskId);
+  assert.equal(identity.gate_class, "unit");
+  assert.equal(identity.provenance, "executed");
+  assert.equal(identity.snapshot_stable, true);
+  assert.equal(identity.identity.argv[0], process.execPath);
+  assert.match(identity.record_id, /^sha256:[a-f0-9]{64}$/);
+  assert.match(identity.identity_digest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(identity.identity.environment.secrets_persisted, false);
+  assert.deepEqual(identity.identity.inputs.map((entry) => entry.requested), [inputFile]);
 
   const file = taskFile(paths.tasksDir, taskId);
   assert.equal(getTaskField(file, "last_verified_at"), "2026-07-10T09:15:00Z");
   const state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.last_verified_at, "2026-07-10T09:15:00Z");
-  assert.deepEqual(state.verification, {
-    last_record: `workflow/artifacts/${taskId}/verification/20260710T091500000000000.md`,
-    last_exit_code: 0,
-    outcome: "blocked",
-    trajectory: "fixed",
-    evaluator: "human",
-    failure_attribution: "",
-    evidence_refs: "verification/manual.md https://example.invalid/run/1",
-  });
+  assert.equal(
+    state.verification.last_record,
+    `workflow/artifacts/${taskId}/verification/20260710T091500000000000.md`,
+  );
+  assert.equal(
+    state.verification.last_identity_record,
+    `workflow/artifacts/${taskId}/verification/20260710T091500000000000.json`,
+  );
+  assert.equal(state.verification.last_exit_code, 0);
+  assert.equal(state.verification.outcome, "blocked");
+  assert.equal(state.verification.identity_schema_version, 2);
+  assert.equal(state.verification.identity_stable, true);
+  assert.equal(state.verification.record_id, identity.record_id);
+  assert.equal(state.verification.identity_digest, identity.identity_digest);
+  assert.equal(state.verification.trajectory, "fixed");
+  assert.equal(state.verification.evaluator, "human");
+  assert.equal(state.verification.failure_attribution, "");
+  assert.equal(
+    state.verification.evidence_refs,
+    "verification/manual.md https://example.invalid/run/1",
+  );
   assert.deepEqual(readEvents(paths, taskId).at(-1), {
     kind: "verify",
     detail: `${formatCommand(parsed.command)} => passed`,
@@ -172,6 +207,80 @@ test("returns a failed command exit code after writing every projection", (t) =>
   assert.equal(readEvents(paths, taskId).at(-1).kind, "verify");
 });
 
+test("captures repository-wide untracked and nested lockfile identity from a subdirectory", (t) => {
+  const { home } = temporaryWorkflow(t);
+  const repo = path.join(home, "identity-repo");
+  const nested = path.join(repo, "packages", "app");
+  fs.mkdirSync(nested, { recursive: true });
+  const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("config", "user.name", "Atlas Test").status, 0);
+  assert.equal(git("config", "user.email", "atlas@example.invalid").status, 0);
+  fs.writeFileSync(path.join(repo, "root-tracked.txt"), "root tracked\n");
+  fs.writeFileSync(path.join(nested, "package-lock.json"), "{\"lockfileVersion\":3}\n");
+  fs.writeFileSync(path.join(nested, "tracked.txt"), "tracked\n");
+  assert.equal(git("add", ".").status, 0);
+  assert.equal(git("commit", "-qm", "fixture").status, 0);
+  fs.writeFileSync(path.join(nested, "untracked.txt"), "untracked\n");
+
+  const captured = captureVerificationIdentity({
+    argv: [process.execPath, "--version"],
+    cwd: nested,
+    environment: process.env,
+  });
+  assert.equal(captured.identity.cwd_realpath, fs.realpathSync(nested));
+  assert.deepEqual(captured.identity.lockfiles.map((entry) => entry.path), [
+    "packages/app/package-lock.json",
+  ]);
+  assert.match(captured.identity.worktree.untracked_manifest_sha256, /^sha256:[a-f0-9]{64}$/);
+  fs.writeFileSync(path.join(repo, "root-tracked.txt"), "changed outside cwd\n");
+  const changed = captureVerificationIdentity({
+    argv: [process.execPath, "--version"],
+    cwd: nested,
+    environment: process.env,
+  });
+  assert.notEqual(
+    changed.identity.worktree.tracked_diff_sha256,
+    captured.identity.worktree.tracked_diff_sha256,
+  );
+});
+
+test("marks an exit-zero verification unstable when the command changes its snapshot", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const repo = path.join(home, "unstable-repo");
+  fs.mkdirSync(repo);
+  const git = (...args) => spawnSync("git", ["-C", repo, ...args], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  assert.equal(git("config", "user.name", "Atlas Test").status, 0);
+  assert.equal(git("config", "user.email", "atlas@example.invalid").status, 0);
+  const tracked = path.join(repo, "tracked.txt");
+  fs.writeFileSync(tracked, "before\n");
+  assert.equal(git("add", ".").status, 0);
+  assert.equal(git("commit", "-qm", "fixture").status, 0);
+  const taskId = createFixtureTask(environment, "Unstable verification");
+  const result = runVerification(
+    parseVerifyArgs([
+      taskId,
+      "--",
+      process.execPath,
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(tracked)}, "after\\n")`,
+    ]),
+    {
+      clock: fixedClock,
+      cwd: repo,
+      environment,
+      recordToken: "20260710T091500000000009",
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  const identity = JSON.parse(fs.readFileSync(result.identityFile, "utf8"));
+  assert.equal(identity.snapshot_stable, false);
+  assert.notEqual(identity.pre_identity_digest, identity.identity_digest);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).verification.identity_stable, false);
+});
+
 test("keeps parser diagnostics and public child exit-code delegation stable", (t) => {
   assert.equal(formatCommand(["bash", "-lc", "exit 3"]), "bash -lc exit\\ 3 ");
   assert.equal(formatCommand(["echo", "中文", "a,b"]), "echo 中文 a\\,b ");
@@ -188,6 +297,10 @@ test("keeps parser diagnostics and public child exit-code delegation stable", (t
   assert.throws(
     () => parseVerifyArgs(["task", "--failure-attribution=outside", "--", "true"]),
     /invalid failure attribution: outside/,
+  );
+  assert.throws(
+    () => parseVerifyArgs(["task", "--gate-class=Unsafe Class", "--", "true"]),
+    /invalid gate class: Unsafe Class/,
   );
 
   const { environment, paths } = temporaryWorkflow(t);

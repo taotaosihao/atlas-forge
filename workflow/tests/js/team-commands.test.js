@@ -18,7 +18,7 @@ const { updateTaskCommand } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/command-runtime.js",
 ));
-const { createTask } = require(path.join(
+const { archiveTask, createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
 ));
@@ -79,10 +79,13 @@ function temporaryWorkflow(t) {
 }
 
 function createFixtureTask(environment, title = "Native team") {
-  return createTask(title, "native team contract", {
+  const options = {
     clock: clockAt("2026-07-10T12:00:00.000Z"),
     environment,
-  });
+  };
+  const taskId = createTask(title, "native team contract", options);
+  startTask(taskId, options);
+  return taskId;
 }
 
 function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
@@ -431,6 +434,35 @@ test("record-start requires an explicit authorization ref before execute writes"
     readJsonObject(stateFile).active_team.authorization_ref,
     "user-message:implement-roadmap",
   );
+});
+
+test("record-start rejects done and archived tasks before changing Team state", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  for (const status of ["done", "archived"]) {
+    const taskId = createFixtureTask(environment, `Reject ${status} Team start`);
+    if (status === "archived") {
+      archiveTask(taskId, "fixture closure", {
+        clock: clockAt("2026-07-10T12:00:30.000Z"),
+        environment,
+      });
+    } else {
+      updateTaskFields(taskFile(paths.tasksDir, taskId), { status: "done" });
+      updateTaskCommand(paths, taskId, {}, {}, clockAt("2026-07-10T12:00:30.000Z"));
+    }
+    const stateFile = taskStateFile(paths, taskId);
+    const runtimeFile = taskRuntimeFile(paths, taskId);
+    const before = {
+      state: fs.readFileSync(stateFile),
+      runtime: fs.readFileSync(runtimeFile),
+    };
+
+    assert.throws(
+      () => startNativeRecord(environment, taskId),
+      new RegExp(`task must be doing before team start: ${taskId}`),
+    );
+    assert.deepEqual(fs.readFileSync(stateFile), before.state);
+    assert.deepEqual(fs.readFileSync(runtimeFile), before.runtime);
+  }
 });
 
 test("finalize rejects invalid artifacts without changing running state", (t) => {
