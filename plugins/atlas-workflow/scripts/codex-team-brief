@@ -7,6 +7,11 @@ const path = require("path");
 const crypto = require("crypto");
 const childProcess = require("child_process");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
+const {
+  POLICY_ID,
+  extractExecutionPlan,
+  sha256Value,
+} = require("../contracts/team-sdd/validators/execution-plan");
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -14,9 +19,14 @@ function usage() {
   console.log(`usage:
   codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
     --objective <text> --acceptance <ref> --owned <path> --check <command> [options]
+  codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
+    --contract <semantics-v3-contract>
+  codex-team-brief --task <task-id> --all-slices --repo <absolute-path> --base <rev> \\
+    --contract <semantics-v3-contract>
 
 options:
   --contract <file>           Sprint Contract markdown to compile into evidence-manifest.json
+  --all-slices                Compile every slice in a semantics-v3 execution plan
   --forbidden <path>           repeatable, comma-separated allowed
   --commit-policy <policy>     logical_outcome|changes_allowed_no_commit|no_change_allowed`);
 }
@@ -25,6 +35,7 @@ function parseArgs(argv) {
   const options = {
     task: null,
     slice: null,
+    allSlices: false,
     repo: null,
     base: null,
     objective: null,
@@ -48,6 +59,8 @@ function parseArgs(argv) {
       options.slice = argv[++i];
     } else if (arg.startsWith("--slice=")) {
       options.slice = arg.slice("--slice=".length);
+    } else if (arg === "--all-slices") {
+      options.allSlices = true;
     } else if (arg === "--repo") {
       options.repo = argv[++i];
     } else if (arg.startsWith("--repo=")) {
@@ -141,6 +154,31 @@ function sha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
+function contractSemanticsVersion(text) {
+  const match = /^contract_semantics_version:\s*([^\s]+)\s*$/m.exec(text);
+  if (!match) return 1;
+  const version = Number(match[1]);
+  if (![1, 2, 3].includes(version)) {
+    throw new Error(`unsupported contract_semantics_version: ${match[1]}`);
+  }
+  return version;
+}
+
+function readContract(options) {
+  if (!options.contract) return null;
+  const contractPath = path.resolve(options.contract);
+  if (!fs.existsSync(contractPath) || !fs.statSync(contractPath).isFile()) {
+    throw new Error("--contract must exist and be a file");
+  }
+  const text = fs.readFileSync(contractPath, "utf8");
+  return {
+    path: contractPath,
+    sha256: sha256(contractPath),
+    semanticsVersion: contractSemanticsVersion(text),
+    text,
+  };
+}
+
 function parseMarkdownTableRows(text) {
   const rows = [];
   const lines = text.split(/\n/);
@@ -205,11 +243,9 @@ function compileContract(options) {
   };
 }
 
-function requireOptions(options) {
-  for (const key of ["task", "slice", "repo", "base", "objective"]) {
-    if (!options[key]) {
-      throw new Error(`--${key === "commitPolicy" ? "commit-policy" : key} is required`);
-    }
+function requireRepositoryOptions(options) {
+  for (const key of ["task", "repo", "base"]) {
+    if (!options[key]) throw new Error(`--${key} is required`);
   }
   if (!path.isAbsolute(options.repo)) {
     throw new Error("--repo must be an absolute path");
@@ -217,6 +253,14 @@ function requireOptions(options) {
   if (!fs.existsSync(options.repo) || !fs.statSync(options.repo).isDirectory()) {
     throw new Error("--repo must exist and be a directory");
   }
+}
+
+function requireLegacyOptions(options) {
+  requireRepositoryOptions(options);
+  for (const key of ["slice", "objective"]) {
+    if (!options[key]) throw new Error(`--${key} is required`);
+  }
+  if (options.allSlices) throw new Error("--all-slices requires a semantics-v3 contract");
   if (options.acceptance.length === 0) {
     throw new Error("--acceptance is required");
   }
@@ -228,11 +272,8 @@ function requireOptions(options) {
   }
 }
 
-function writeBrief(options) {
-  requireOptions(options);
-  const baseSha = resolveCommit(options.repo, options.base);
-  const dir = sliceDir(options.task, options.slice);
-  const evidenceManifest = compileContract(options);
+function writeBriefFiles(brief, evidenceManifest = null) {
+  const dir = sliceDir(brief.task_id, brief.slice_id);
   const sddDir = path.resolve(dir, "..", "..");
   const globalConstraints = path.join(sddDir, "global-constraints.md");
   if (!fs.existsSync(globalConstraints)) {
@@ -242,31 +283,45 @@ function writeBrief(options) {
   const briefMarkdown = [
     "# Brief",
     "",
-    `task_id: ${options.task}`,
-    `slice_id: ${options.slice}`,
-    `repo: ${options.repo}`,
-    `base_sha: ${baseSha}`,
+    `task_id: ${brief.task_id}`,
+    `slice_id: ${brief.slice_id}`,
+    `repo: ${brief.repo}`,
+    `base_sha: ${brief.base_sha}`,
     "",
     "## Objective",
     "",
-    options.objective,
+    brief.objective,
     "",
     "## Acceptance",
     "",
-    ...options.acceptance.map((item) => `- ${item}`),
+    ...brief.acceptance_refs.map((item) => `- ${item}`),
     "",
     "## Owned Paths",
     "",
-    ...options.owned.map((item) => `- ${item}`),
+    ...brief.owned_paths.map((item) => `- ${item}`),
     "",
     "## Required Checks",
     "",
-    ...options.checks.map((item) => `- ${item}`),
+    ...(brief.schema_version === 3
+      ? brief.checks.map((item) => `- ${item.check_id}: ${item.command}`)
+      : brief.required_checks.map((item) => `- ${item}`)),
     "",
   ].join("\n");
   fs.writeFileSync(path.join(dir, "brief.md"), briefMarkdown, "utf8");
 
-  const brief = {
+  const errors = validateBrief(brief);
+  if (errors.length > 0) throw new Error(errors.join("; "));
+  fs.writeFileSync(path.join(dir, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`, "utf8");
+  if (evidenceManifest) {
+    fs.writeFileSync(path.join(dir, "evidence-manifest.json"), `${JSON.stringify(evidenceManifest, null, 2)}\n`, "utf8");
+    console.log(`evidence_manifest: ${path.join(dir, "evidence-manifest.json")}`);
+  }
+  console.log(`brief_json: ${path.join(dir, "brief.json")}`);
+  console.log(`brief_md: ${path.join(dir, "brief.md")}`);
+}
+
+function legacyBrief(options, baseSha) {
+  return {
     schema_version: 2,
     task_id: options.task,
     slice_id: options.slice,
@@ -282,17 +337,133 @@ function writeBrief(options) {
     commit_policy: options.commitPolicy,
     output_contract: "final_message_json_only",
   };
-  const errors = validateBrief(brief);
-  if (errors.length > 0) {
-    throw new Error(errors.join("; "));
+}
+
+function measuredSize(slice) {
+  return {
+    changed_files: slice.owned_paths.length,
+    loc: 0,
+    wall_clock_minutes: 0,
+    required_checks: slice.checks.length,
+  };
+}
+
+function sizeGate(slice) {
+  const measured = measuredSize(slice);
+  const overBudget = measured.changed_files > slice.budget.max_changed_files
+    || measured.required_checks > slice.budget.max_required_checks;
+  if (!overBudget) return { decision: "pass", policy_id: POLICY_ID, measured, exception: null };
+  if (!slice.size_exception) {
+    throw new Error(`slice ${slice.slice_id} exceeds ${POLICY_ID} and requires a complete size_exception`);
   }
-  fs.writeFileSync(path.join(dir, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`, "utf8");
-  if (evidenceManifest) {
-    fs.writeFileSync(path.join(dir, "evidence-manifest.json"), `${JSON.stringify(evidenceManifest, null, 2)}\n`, "utf8");
-    console.log(`evidence_manifest: ${path.join(dir, "evidence-manifest.json")}`);
+  return { decision: "exception", policy_id: POLICY_ID, measured, exception: slice.size_exception };
+}
+
+function v3Brief(options, baseSha, contract, plan, slice) {
+  const slices = new Map(plan.slices.map((item) => [item.slice_id, item]));
+  return {
+    schema_version: 3,
+    task_id: options.task,
+    slice_id: slice.slice_id,
+    repo: fs.realpathSync(options.repo),
+    base_sha: baseSha,
+    objective: slice.objective,
+    requirements_path: "brief.md",
+    global_constraints_path: "../../global-constraints.md",
+    contract: {
+      path: contract.path,
+      sha256: `sha256:${contract.sha256}`,
+      semantics_version: contract.semanticsVersion,
+      execution_plan_sha256: `sha256:${sha256Value(plan)}`,
+    },
+    dependencies: slice.depends_on.map((sliceId) => ({
+      slice_id: sliceId,
+      required_outcome: "succeeded",
+      keeper_outputs: slices.get(sliceId).keeper_outputs,
+    })),
+    keeper_outputs: slice.keeper_outputs,
+    owned_paths: slice.owned_paths,
+    forbidden_paths: slice.forbidden_paths || [],
+    acceptance_refs: slice.acceptance_refs,
+    risk_class: slice.risk_class,
+    failure_domain: slice.failure_domain,
+    rollback_boundary: slice.rollback_boundary,
+    budget: slice.budget,
+    checks: slice.checks,
+    size_gate: sizeGate(slice),
+    commit_policy: options.commitPolicy,
+    output_contract: "final_message_json_only",
+  };
+}
+
+function compatibilityPlan(options) {
+  return {
+    schema_version: 1,
+    size_policy: { policy_id: POLICY_ID },
+    slices: [{
+      slice_id: options.slice,
+      objective: options.objective,
+      depends_on: [],
+      keeper_outputs: [`event:${options.slice}:complete`],
+      owned_paths: options.owned,
+      forbidden_paths: options.forbidden,
+      acceptance_refs: options.acceptance,
+      risk_class: "medium",
+      failure_domain: "legacy-single-slice",
+      rollback_boundary: "one logical commit",
+      budget: {
+        max_changed_files: Math.max(1, options.owned.length),
+        max_loc: 1200,
+        max_wall_clock_minutes: 120,
+        max_required_checks: Math.max(1, options.checks.length),
+      },
+      checks: options.checks.map((command, index) => ({
+        check_id: `legacy-check-${String(index + 1).padStart(3, "0")}`,
+        gate_class: "contract",
+        command,
+        final_only: false,
+        cache_policy: "identity-bound",
+      })),
+    }],
+  };
+}
+
+function writeBrief(options) {
+  const contract = readContract(options);
+  if (!contract) {
+    requireLegacyOptions(options);
+    writeBriefFiles(
+      legacyBrief(options, resolveCommit(options.repo, options.base)),
+      null,
+    );
+    return;
   }
-  console.log(`brief_json: ${path.join(dir, "brief.json")}`);
-  console.log(`brief_md: ${path.join(dir, "brief.md")}`);
+  if (contract.semanticsVersion !== 3) {
+    requireLegacyOptions(options);
+    const plan = compatibilityPlan(options);
+    writeBriefFiles(
+      v3Brief(options, resolveCommit(options.repo, options.base), contract, plan, plan.slices[0]),
+      compileContract(options),
+    );
+    return;
+  }
+  requireRepositoryOptions(options);
+  if (options.allSlices && options.slice) throw new Error("--all-slices and --slice are mutually exclusive");
+  if (!options.allSlices && !options.slice) throw new Error("--slice or --all-slices is required");
+  if (options.objective || options.acceptance.length || options.owned.length
+    || options.forbidden.length || options.checks.length) {
+    throw new Error("semantics-v3 contracts derive objective, acceptance, owned paths, and checks from the execution plan");
+  }
+  const plan = extractExecutionPlan(contract.text);
+  const selected = options.allSlices
+    ? plan.slices
+    : plan.slices.filter((slice) => slice.slice_id === options.slice);
+  if (selected.length !== (options.allSlices ? plan.slices.length : 1)) {
+    throw new Error(`slice not found in execution plan: ${options.slice}`);
+  }
+  const baseSha = resolveCommit(options.repo, options.base);
+  const briefs = selected.map((slice) => v3Brief(options, baseSha, contract, plan, slice));
+  for (const brief of briefs) writeBriefFiles(brief);
 }
 
 function main() {

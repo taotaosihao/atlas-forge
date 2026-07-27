@@ -7,7 +7,7 @@ contract_status: final
 current_authoritative_contract: ./implementation-contract.final.md
 created: {{CREATED}}
 finalized: {{FINALIZED}}
-contract_semantics_version: 2
+contract_semantics_version: 3
 finding_scope_admission: controller_current_required_only
 safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>
 work_type: implementation | planning | review | audit | docs-only
@@ -15,6 +15,46 @@ first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
 product_ui_gate: required | not_applicable
 product_ui_not_applicable_reason:
+
+## Execution Plan
+
+```atlas-execution-plan+json
+{
+  "schema_version": 1,
+  "size_policy": {
+    "policy_id": "atlas-slice-size-v1"
+  },
+  "slices": [
+    {
+      "slice_id": "slice-001",
+      "objective": "Replace with the bounded slice objective.",
+      "depends_on": [],
+      "keeper_outputs": ["event:slice-001:complete"],
+      "owned_paths": ["path/to/owned/**"],
+      "forbidden_paths": [],
+      "acceptance_refs": ["AC-1"],
+      "risk_class": "medium",
+      "failure_domain": "bounded-slice",
+      "rollback_boundary": "one logical commit",
+      "budget": {
+        "max_changed_files": 12,
+        "max_loc": 1200,
+        "max_wall_clock_minutes": 120,
+        "max_required_checks": 5
+      },
+      "checks": [
+        {
+          "check_id": "slice-contract",
+          "gate_class": "contract",
+          "command": "replace-with-a-reproducible-command",
+          "final_only": false,
+          "cache_policy": "identity-bound"
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Scope
 

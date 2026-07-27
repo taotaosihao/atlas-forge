@@ -110,11 +110,38 @@ node "$brief_bin" \
   --check "pytest tests/auth/test_login.py" > "$TMP_ROOT/sdd-contract-brief.out"
 contract_slice="$sdd_root/artifacts/fixture-contract/team/sdd/slices/slice-001"
 node "$validate_json_bin" --type brief --file "$contract_slice/brief.json" >/dev/null
+node - "$contract_slice/brief.json" <<'NODE'
+const brief = require(process.argv[2]);
+if (brief.schema_version !== 3 || brief.contract.semantics_version !== 1) process.exit(1);
+if (brief.slice_id !== "slice-001" || brief.dependencies.length !== 0) process.exit(1);
+NODE
 python3 -m json.tool "$contract_slice/evidence-manifest.json" >/dev/null
 grep -q "SC-A1" "$contract_slice/evidence-manifest.json"
 ! grep -q "SC-A2" "$contract_slice/evidence-manifest.json"
 grep -q "evidence_manifest:" "$TMP_ROOT/sdd-contract-brief.out"
 expect_fail "contract brief rejects unknown acceptance" node "$brief_bin" --task fixture-contract --slice slice-002 --repo "$sdd_repo" --base "$sdd_base" --objective bad --contract "$sprint_contract" --acceptance "SC-MISSING" --owned "plugins/atlas-workflow/contracts/team-sdd" --check true
+
+v3_contract="$fixture_dir/valid/execution-contract-v3.md"
+node "$brief_bin" \
+  --task fixture-v3 \
+  --all-slices \
+  --repo "$sdd_repo" \
+  --base "$sdd_base" \
+  --contract "$v3_contract" > "$TMP_ROOT/sdd-v3-all-slices.out"
+v3_slices="$sdd_root/artifacts/fixture-v3/team/sdd/slices"
+test "$(find "$v3_slices" -mindepth 2 -maxdepth 2 -name brief.json | wc -l)" -eq 3
+for v3_slice in slice-one slice-two slice-three; do
+  node "$validate_json_bin" --type brief --file "$v3_slices/$v3_slice/brief.json" >/dev/null
+done
+node - "$v3_slices/slice-two/brief.json" <<'NODE'
+const brief = require(process.argv[2]);
+if (brief.schema_version !== 3 || brief.slice_id !== "slice-two") process.exit(1);
+if (brief.dependencies.length !== 1 || brief.dependencies[0].slice_id !== "slice-one") process.exit(1);
+if (brief.dependencies[0].required_outcome !== "succeeded") process.exit(1);
+if (brief.contract.semantics_version !== 3 || !brief.contract.execution_plan_sha256.startsWith("sha256:")) process.exit(1);
+NODE
+expect_fail "v3 compiler rejects caller-owned execution fields" node "$brief_bin" --task fixture-v3 --slice slice-one --repo "$sdd_repo" --base "$sdd_base" --contract "$v3_contract" --objective duplicate
+expect_fail "v3 compiler rejects over-budget slice without named exception" node "$brief_bin" --task fixture-v3-over-budget --all-slices --repo "$sdd_repo" --base "$sdd_base" --contract "$fixture_dir/invalid/execution-contract-over-budget-v3.md"
 
 node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/implementer-report.json" >/dev/null
 node "$validate_json_bin" --type implementer-report --file "$fixture_dir/valid/uncommitted-implementer-report.json" >/dev/null

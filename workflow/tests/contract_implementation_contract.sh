@@ -57,7 +57,7 @@ run_v2_valid() {
   pass "$label"
 }
 
-run_v2_new_authoring_valid() {
+run_v3_new_authoring_valid() {
   local label="$1" file="$2" authority_slice="$3"
   case_paths
   if ! "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
@@ -65,12 +65,12 @@ run_v2_new_authoring_valid() {
   fi
   grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
   grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
-  grep -q '^semantics_version: 2$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^semantics_version: 3$' "$CASE_STDOUT" || show_failure "$label"
   [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
   pass "$label"
 }
 
-run_v1_new_authoring_invalid() {
+run_old_new_authoring_invalid() {
   local label="$1" file="$2" status
   case_paths
   set +e
@@ -78,7 +78,7 @@ run_v1_new_authoring_invalid() {
   status=$?
   set -e
   [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
-  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V2 ' "$CASE_STDERR" || show_failure "$label"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V3 ' "$CASE_STDERR" || show_failure "$label"
   pass "$label"
 }
 
@@ -90,10 +90,10 @@ run_unversioned_new_authoring_invalid() {
   status=$?
   set -e
   [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
-  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V2 ' "$CASE_STDERR" || show_failure "$label"
-  grep -q 'contract_semantics_version: 2' "$CASE_STDERR" || show_failure "$label"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V3 ' "$CASE_STDERR" || show_failure "$label"
+  grep -q 'contract_semantics_version: 3' "$CASE_STDERR" || show_failure "$label"
   grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
-  ! grep -q 'contract_semantics_version: 1 or 2' "$CASE_STDERR" || show_failure "$label"
+  ! grep -q 'contract_semantics_version: 1, 2, or 3' "$CASE_STDERR" || show_failure "$label"
   pass "$label"
 }
 
@@ -322,10 +322,13 @@ fs.writeFileSync(path.join(target, "brief.json"), `${JSON.stringify(brief, null,
 NODE
 goal_only_contract="$TMP_ROOT/scope-admission-v2-goal-only.md"
 sed 's/current-required:finding-resolved/goal:REQ-1/g' "$scope_v2" > "$goal_only_contract"
-run_v2_new_authoring_valid \
-  'new authoring accepts a v2 goal-only authority slice' \
-  "$goal_only_contract" \
+run_v3_new_authoring_valid \
+  'new authoring accepts a v3 goal-only authority slice' \
+  "$FIXTURE_ROOT/valid/scope-admission-v3.md" \
   "$GOAL_ONLY_SLICE"
+run_old_new_authoring_invalid \
+  'new authoring rejects semantics v2 compatibility contracts' \
+  "$goal_only_contract"
 run_v2_authority_invalid \
   'goal-only authority cannot admit current-required findings' \
   "$scope_v2" \
@@ -388,10 +391,10 @@ NODE
 run_v2_authority_invalid 'v2 rejects stale verdict authority' "$scope_v2" AUTHORITY_SLICE_INVALID
 mv "$TMP_ROOT/review-verdict.backup.json" "$AUTHORITY_SLICE/review-verdict.json"
 run_v1_valid 'current authoritative implementation contract passes strict lint' "$CURRENT_AUTHORITY"
-run_v1_new_authoring_invalid 'new authoring rejects semantics v1' "$CURRENT_AUTHORITY"
+run_old_new_authoring_invalid 'new authoring rejects semantics v1' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
-run_unversioned_new_authoring_invalid 'new authoring gives a v2-only diagnostic for unversioned contracts' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
+run_unversioned_new_authoring_invalid 'new authoring gives a v3-only diagnostic for unversioned contracts' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 
 run_semantic_invalid 'template enum placeholders are rejected' "$FIXTURE_ROOT/invalid/template-enums.md" WORK_TYPE_INVALID FIRST_CODE_GUARD_INVALID PRODUCT_UI_GATE_INVALID
 run_semantic_invalid 'missing first-code owner verification stop and gate plan are rejected' "$FIXTURE_ROOT/invalid/missing-first-code-fields.md" \
@@ -689,7 +692,8 @@ run_usage_invalid 'duplicate new authoring is a usage error' CLI_USAGE --strict 
 
 for template in implementation-contract.md implementation-contract.final.md; do
   file="$ATLAS_FORGE_ROOT/workflow/templates/$template"
-  grep -q '^contract_semantics_version: 2$' "$file"
+  grep -q '^contract_semantics_version: 3$' "$file"
+  grep -q '^```atlas-execution-plan+json$' "$file"
   grep -q '^finding_scope_admission: controller_current_required_only$' "$file"
   grep -q '^safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>$' "$file"
   grep -q '^work_type: implementation | planning | review | audit | docs-only$' "$file"
@@ -711,6 +715,7 @@ grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROO
 grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q -- '--strict --new-authoring' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'new authoring requires semantics v3' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Freeze the smallest user-visible Goal before brownfield discovery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Discovery cannot rewrite the frozen Goal' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"

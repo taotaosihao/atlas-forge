@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert/strict");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -86,6 +87,129 @@ function createFixtureTask(environment, title = "Native team") {
   const taskId = createTask(title, "native team contract", options);
   startTask(taskId, options);
   return taskId;
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function sha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function executionBrief(paths, taskId, options = {}) {
+  const repo = path.join(paths.root, "execution-repo");
+  fs.mkdirSync(repo, { recursive: true });
+  spawnSync("git", ["init", "-q", repo], { encoding: "utf8" });
+  spawnSync("git", ["-C", repo, "config", "user.email", "atlas@example.test"]);
+  spawnSync("git", ["-C", repo, "config", "user.name", "Atlas Test"]);
+  const slice = {
+    slice_id: options.sliceId || "execution-slice",
+    objective: "execute the admitted test slice",
+    depends_on: options.dependsOn || [],
+    keeper_outputs: ["event:execution-slice-complete"],
+    owned_paths: options.ownedPaths || ["workflow/**"],
+    forbidden_paths: [],
+    acceptance_refs: ["AC-EXECUTE"],
+    risk_class: "high",
+    failure_domain: "team-execution",
+    rollback_boundary: "one logical commit",
+    budget: options.budget || {
+      max_changed_files: 4,
+      max_loc: 400,
+      max_wall_clock_minutes: 60,
+      max_required_checks: 2,
+    },
+    checks: [{
+      check_id: "execution-contract",
+      gate_class: options.gateClass || "contract",
+      command: "bash workflow/tests/contract_team_native.sh",
+      final_only: false,
+      cache_policy: options.cachePolicy || "identity-bound",
+    }],
+  };
+  if (options.sizeException) slice.size_exception = options.sizeException;
+  const dependencySlices = (options.dependsOn || []).map((sliceId) => ({
+    ...slice,
+    slice_id: sliceId,
+    objective: `produce ${sliceId}`,
+    depends_on: [],
+    keeper_outputs: [`event:${sliceId}:ready`],
+    owned_paths: [`dependencies/${sliceId}/**`],
+    acceptance_refs: [`AC-${sliceId}`],
+    checks: [{ ...slice.checks[0], check_id: `check-${sliceId}` }],
+  }));
+  const plan = {
+    schema_version: 1,
+    size_policy: { policy_id: "atlas-slice-size-v1" },
+    slices: [...dependencySlices, slice],
+  };
+  const contract = path.join(repo, "implementation-contract.final.md");
+  fs.writeFileSync(contract, [
+    "# Test Contract",
+    "",
+    `task_id: ${taskId}`,
+    "contract_semantics_version: 3",
+    "",
+    "```atlas-execution-plan+json",
+    JSON.stringify(plan, null, 2),
+    "```",
+    "",
+  ].join("\n"));
+  spawnSync("git", ["-C", repo, "add", "implementation-contract.final.md"]);
+  spawnSync("git", ["-C", repo, "commit", "-qm", "test: execution contract"]);
+  const baseSha = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const briefDir = path.join(paths.artifactsDir, taskId, "team", "sdd", "slices", slice.slice_id);
+  fs.mkdirSync(briefDir, { recursive: true });
+  const dependencies = dependencySlices.map((dependency) => ({
+    slice_id: dependency.slice_id,
+    required_outcome: "succeeded",
+    keeper_outputs: dependency.keeper_outputs,
+  }));
+  const brief = {
+    schema_version: 3,
+    task_id: taskId,
+    slice_id: slice.slice_id,
+    repo,
+    base_sha: baseSha,
+    objective: slice.objective,
+    requirements_path: "brief.md",
+    global_constraints_path: "../../global-constraints.md",
+    contract: {
+      path: contract,
+      sha256: `sha256:${sha256(fs.readFileSync(contract))}`,
+      semantics_version: 3,
+      execution_plan_sha256: `sha256:${sha256(JSON.stringify(stableValue(plan)))}`,
+    },
+    dependencies,
+    keeper_outputs: slice.keeper_outputs,
+    owned_paths: slice.owned_paths,
+    forbidden_paths: slice.forbidden_paths,
+    acceptance_refs: slice.acceptance_refs,
+    risk_class: slice.risk_class,
+    failure_domain: slice.failure_domain,
+    rollback_boundary: slice.rollback_boundary,
+    budget: slice.budget,
+    checks: slice.checks,
+    size_gate: {
+      decision: options.sizeDecision || "pass",
+      policy_id: "atlas-slice-size-v1",
+      measured: {
+        changed_files: slice.owned_paths.length,
+        loc: 0,
+        wall_clock_minutes: 0,
+        required_checks: slice.checks.length,
+      },
+      exception: options.sizeException || null,
+    },
+    commit_policy: "logical_outcome",
+    output_contract: "final_message_json_only",
+  };
+  const briefPath = path.join(briefDir, "brief.json");
+  fs.writeFileSync(briefPath, `${JSON.stringify(brief, null, 2)}\n`);
+  return { brief, briefPath, repo };
 }
 
 function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
@@ -433,15 +557,171 @@ test("record-start requires an explicit authorization ref before execute writes"
   assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
 
+  const admission = executionBrief(paths, taskId);
   const result = runRecordStart(
-    { ...parsed, authorizationRef: "user-message:implement-roadmap" },
-    { environment },
+    {
+      ...parsed,
+      authorizationRef: "user-message:implement-roadmap",
+      briefPath: admission.briefPath,
+      operationId: "start-execution",
+    },
+    { cwd: admission.repo, environment },
   );
   assert.ok(result.lines.includes("authorization_ref: user-message:implement-roadmap"));
   assert.equal(
     readJsonObject(stateFile).active_team.authorization_ref,
     "user-message:implement-roadmap",
   );
+  const runtimeAfterStart = fs.readFileSync(runtimeFile, "utf8");
+  runRecordStart(
+    {
+      ...parsed,
+      authorizationRef: "user-message:implement-roadmap",
+      briefPath: admission.briefPath,
+      operationId: "start-execution",
+    },
+    { cwd: admission.repo, environment },
+  );
+  assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeAfterStart);
+  assert.throws(() => runRecordStart(
+    {
+      ...parsed,
+      objective: "conflicting replay objective",
+      authorizationRef: "user-message:implement-roadmap",
+      briefPath: admission.briefPath,
+      operationId: "start-execution",
+    },
+    { cwd: admission.repo, environment },
+  ), /team start operation_id replay conflict/);
+});
+
+test("execute admission requires keeper-ready succeeded dependencies", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Dependency admission");
+  const admission = executionBrief(paths, taskId, { dependsOn: ["foundation"] });
+  const parsed = parseRecordStartArgs([
+    taskId, "execute dependent slice", "--mode=execute",
+    "--authorization-ref=user-message:dependency-execute",
+    `--brief=${admission.briefPath}`, "--operation-id=start-dependent-slice",
+  ]);
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency is not keeper-ready succeeded: foundation/,
+  );
+  const progress = path.join(paths.artifactsDir, taskId, "team", "sdd", "progress.jsonl");
+  fs.mkdirSync(path.dirname(progress), { recursive: true });
+  fs.writeFileSync(progress, `${JSON.stringify({
+    schema_version: 1,
+    event: "slice_complete",
+    task_id: taskId,
+    slice_id: "foundation",
+    timestamp: "2026-07-10T12:00:00Z",
+    outcome: "succeeded",
+    keeper_outputs: ["event:foundation:ready"],
+  })}\n`);
+  runRecordStart(parsed, { cwd: admission.repo, environment });
+  assert.equal(readTeam(paths, taskId).slice_id, "execution-slice");
+});
+
+test("execute admission rejects global writer overlap until the lease is released", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(environment, "First writer");
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/**"] });
+  runRecordStart(parseRecordStartArgs([
+    firstTask, "hold workflow writer lease", "--mode=execute",
+    "--authorization-ref=user-message:first-writer",
+    `--brief=${firstAdmission.briefPath}`, "--operation-id=start-first-writer",
+  ]), { cwd: firstAdmission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=first-writer-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    firstTask, "--operation-id=first-writer-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=first-writer-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=first-writer-attempt",
+    "--launch-operation-id=launch-first-writer",
+    "--writable", "--paths=workflow/**",
+  ]);
+
+  const secondTask = createFixtureTask(environment, "Second writer");
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/bin/**"] });
+  const secondStart = parseRecordStartArgs([
+    secondTask, "request overlapping writer scope", "--mode=execute",
+    "--authorization-ref=user-message:second-writer",
+    `--brief=${secondAdmission.briefPath}`, "--operation-id=start-second-writer",
+  ]);
+  assert.throws(
+    () => runRecordStart(secondStart, { cwd: secondAdmission.repo, environment }),
+    /global writer lease conflict/,
+  );
+  const firstStateFile = taskStateFile(paths, firstTask);
+  const firstState = readJsonObject(firstStateFile);
+  firstState.active_team.writer_leases[0].state = "released";
+  fs.writeFileSync(firstStateFile, `${JSON.stringify(firstState, null, 2)}\n`);
+  runRecordStart(secondStart, { cwd: secondAdmission.repo, environment });
+  assert.equal(readTeam(paths, secondTask).admission.mode, "execution-v3");
+});
+
+test("size exceptions are explicit and cannot downgrade permanent gates", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Size exception");
+  const sizeException = {
+    authority_ref: "user-message:size-exception",
+    expires_at: "2099-01-01T00:00:00Z",
+    reason: "bounded integration slice cannot be divided safely",
+    compensating_controls: ["independent final contract verification"],
+  };
+  const admitted = executionBrief(paths, taskId, {
+    budget: { max_changed_files: 1, max_loc: 1, max_wall_clock_minutes: 1, max_required_checks: 1 },
+    ownedPaths: ["workflow/**", "plugins/**"],
+    sizeDecision: "exception",
+    sizeException,
+  });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute exception-authorized slice", "--mode=execute",
+    "--authorization-ref=user-message:size-execute",
+    `--brief=${admitted.briefPath}`, "--operation-id=start-size-exception",
+  ]), { cwd: admitted.repo, environment });
+
+  const { environment: unsafeEnvironment, paths: unsafePaths } = temporaryWorkflow(t);
+  const unsafeTask = createFixtureTask(unsafeEnvironment, "Unsafe permanent gate");
+  const unsafe = executionBrief(unsafePaths, unsafeTask, {
+    cachePolicy: "cached",
+    gateClass: "security",
+    budget: { max_changed_files: 1, max_loc: 1, max_wall_clock_minutes: 1, max_required_checks: 1 },
+    ownedPaths: ["workflow/**", "plugins/**"],
+    sizeDecision: "exception",
+    sizeException,
+  });
+  assert.throws(() => runRecordStart(parseRecordStartArgs([
+    unsafeTask, "reject downgraded security gate", "--mode=execute",
+    "--authorization-ref=user-message:unsafe-execute",
+    `--brief=${unsafe.briefPath}`, "--operation-id=start-unsafe-exception",
+  ]), { cwd: unsafe.repo, environment: unsafeEnvironment }), /permanent gate security must be fresh-executed/);
+});
+
+test("discuss compatibility never grants a writable lease", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Discuss read only");
+  startNativeRecord(environment, taskId);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=discuss-writer-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=discuss-writer-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=discuss-writer-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=discuss-writer-attempt",
+    "--launch-operation-id=launch-discuss-writer", "--writable", "--paths=workflow/**",
+  ]), /writable attempt requires execute mode/);
+  assert.equal(readTeam(paths, taskId).writer_leases.length, 0);
 });
 
 test("record-start rejects done and archived tasks before changing Team state", (t) => {
@@ -808,12 +1088,16 @@ test("promote updates state and accepts equals form through the public dispatche
   assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
 
+  const admission = executionBrief(paths, taskId);
   const execute = runPromote(parsePromoteArgs([
     taskId,
     "--to=execute",
     "--authorization-ref=user-message:implement-roadmap",
+    `--brief=${admission.briefPath}`,
+    "--operation-id=promote-execution",
   ]), {
     clock: clockAt("2026-07-10T12:05:00.000Z"),
+    cwd: admission.repo,
     environment,
   });
   assert.deepEqual(execute.lines, [
@@ -821,11 +1105,24 @@ test("promote updates state and accepts equals form through the public dispatche
     "target: execute",
     `decision: ${teamDecisionFile(paths, taskId)}`,
     "authorization_ref: user-message:implement-roadmap",
+    `brief: ${admission.briefPath}`,
+    "operation_id: promote-execution",
   ]);
   let state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.active_team.mode, "execute");
   assert.equal(state.active_team.promoted_to, "execute");
   assert.equal(state.active_team.authorization_ref, "user-message:implement-roadmap");
+  assert.equal(state.active_team.admission.mode, "execution-v3");
+  const runtimeAfterPromotion = fs.readFileSync(runtimeFile, "utf8");
+  const replay = runPromote(parsePromoteArgs([
+    taskId,
+    "--to=execute",
+    "--authorization-ref=user-message:implement-roadmap",
+    `--brief=${admission.briefPath}`,
+    "--operation-id=promote-execution",
+  ]), { clock: clockAt("2026-07-10T12:05:00.000Z"), cwd: admission.repo, environment });
+  assert.equal(replay.lines.at(-1), "replayed: true");
+  assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeAfterPromotion);
 
   const dispatched = spawnSync(PUBLIC_BIN, ["team-promote", taskId, "--to=finish"], {
     encoding: "utf8",
@@ -1410,12 +1707,14 @@ test("required perspective admission requires an independently bound actor", (t)
 test("writer lease, trusted retry, and atomic writable fallback preserve ownership", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Writable Paseo fallback");
+  const admission = executionBrief(paths, taskId);
   runRecordStart(parseRecordStartArgs([
     taskId, "execute a bounded Paseo lane", "--backend=paseo", "--mode=execute",
     "--fallback-policy=codex", "--selection-authority-kind=user-message",
     "--selection-authority-ref=user-message:paseo-writer",
     "--authorization-ref=user-message:execute-writer",
-  ]), { environment });
+    `--brief=${admission.briefPath}`, "--operation-id=start-paseo-writer",
+  ]), { cwd: admission.repo, environment });
   invokeControl(runLaneRecord, parseLaneArgs, environment, [
     taskId, "--operation-id=writer-lane-open", "--action=open", "--lane=writer",
     "--writable", "--paths=workflow/**",

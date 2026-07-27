@@ -149,7 +149,7 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 
 - Use discuss for read-only options, architecture, diagnosis, risk review, or a second opinion.
 - Discuss does not authorize implementation, commits, deployment, release, or other mutation.
-- Keep discuss lanes read-only unless the user explicitly assigns a writable deliverable.
+- Discuss lanes never acquire writable attempts or writer leases; an explicitly authorized writable deliverable must enter through execute admission.
 
 ### Execute
 
@@ -157,12 +157,13 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 - Record execute start or promotion with the explicit message reference. Native is the default; an explicitly selected Paseo Team also records its controller-attested selection authority:
 
 ```bash
-codex-workflow team-record-start <task-id> "<objective>" --mode execute --authorization-ref <user-message-ref>
-codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode execute --selection-authority-kind user-message --selection-authority-ref <user-message-ref> --authorization-ref <user-message-ref>
-codex-workflow team-promote <task-id> --to execute --authorization-ref <user-message-ref>
+codex-workflow team-record-start <task-id> "<objective>" --mode execute --authorization-ref <user-message-ref> --brief <canonical-brief.json> --operation-id <id>
+codex-workflow team-record-start <task-id> "<objective>" --backend paseo --mode execute --selection-authority-kind user-message --selection-authority-ref <user-message-ref> --authorization-ref <user-message-ref> --brief <canonical-brief.json> --operation-id <id>
+codex-workflow team-promote <task-id> --to execute --authorization-ref <user-message-ref> --brief <canonical-brief.json> --operation-id <id>
 ```
 
 - `authorization_ref` is an audit guard against accidental promotion, not a host capability. Never fabricate it from workflow artifacts.
+- Execute start and promotion require the canonical semantics-v3 `brief.json`; Team revalidates its contract/plan digests, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock.
 - Discuss starts and non-execute promotions do not require the reference.
 
 ## Minimal Agent Planning

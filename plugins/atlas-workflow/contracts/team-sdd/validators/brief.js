@@ -1,5 +1,8 @@
 "use strict";
 
+const fs = require("fs");
+const path = require("path");
+
 const {
   requireObject,
   requireKeys,
@@ -13,6 +16,12 @@ const {
   expectAbsoluteExistingDir,
   expectGitRevision,
 } = require("./common");
+const {
+  POLICY_ID,
+  pathsOverlap,
+  validateCheck,
+  validateException,
+} = require("./execution-plan");
 
 const BASE_KEYS = [
   "schema_version",
@@ -33,6 +42,156 @@ const BASE_KEYS = [
 
 const V1_KEYS = [...BASE_KEYS, "max_question_rounds", "fix_loop_policy"];
 const V2_KEYS = BASE_KEYS;
+const V3_KEYS = [
+  "schema_version",
+  "task_id",
+  "slice_id",
+  "repo",
+  "base_sha",
+  "objective",
+  "requirements_path",
+  "global_constraints_path",
+  "contract",
+  "dependencies",
+  "keeper_outputs",
+  "owned_paths",
+  "forbidden_paths",
+  "acceptance_refs",
+  "risk_class",
+  "failure_domain",
+  "rollback_boundary",
+  "budget",
+  "checks",
+  "size_gate",
+  "commit_policy",
+  "output_contract",
+];
+const CONTRACT_KEYS = ["path", "sha256", "semantics_version", "execution_plan_sha256"];
+const DEPENDENCY_KEYS = ["slice_id", "required_outcome", "keeper_outputs"];
+const BUDGET_KEYS = ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"];
+const SIZE_GATE_KEYS = ["decision", "policy_id", "measured", "exception"];
+const MEASURED_KEYS = ["changed_files", "loc", "wall_clock_minutes", "required_checks"];
+
+function validateExactObject(value, label, keys, errors) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${label} must be an object`);
+    return false;
+  }
+  for (const key of keys) {
+    if (!Object.hasOwn(value, key)) errors.push(`${label} missing required key: ${key}`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) errors.push(`${label} unknown key: ${key}`);
+  }
+  return true;
+}
+
+function validateUniqueStrings(value, label, errors, nonEmpty = false) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+    errors.push(`${label} must be an array of non-empty strings`);
+    return;
+  }
+  if (nonEmpty && value.length === 0) errors.push(`${label} must not be empty`);
+  if (new Set(value).size !== value.length) errors.push(`${label} must not contain duplicates`);
+}
+
+function validateV3(value, errors) {
+  requireKeys(value, V3_KEYS, errors);
+  rejectUnknownKeys(value, V3_KEYS, errors);
+  expectSafeId(value, "task_id", errors);
+  expectSafeId(value, "slice_id", errors);
+  expectAbsoluteExistingDir(value, "repo", errors);
+  expectString(value, "base_sha", errors);
+  expectString(value, "objective", errors);
+  expectString(value, "requirements_path", errors);
+  expectString(value, "global_constraints_path", errors);
+  if (path.isAbsolute(value.requirements_path || "")) errors.push("requirements_path must be relative");
+  if (path.isAbsolute(value.global_constraints_path || "")) errors.push("global_constraints_path must be relative");
+
+  if (validateExactObject(value.contract, "contract", CONTRACT_KEYS, errors)) {
+    if (typeof value.contract.path !== "string" || !path.isAbsolute(value.contract.path)) {
+      errors.push("contract.path must be an absolute path");
+    } else if (!fs.existsSync(value.contract.path) || !fs.statSync(value.contract.path).isFile()) {
+      errors.push("contract.path must exist and be a regular file");
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.sha256 || "")) {
+      errors.push("contract.sha256 must use sha256:<hex>");
+    }
+    if (![1, 2, 3].includes(value.contract.semantics_version)) {
+      errors.push("contract.semantics_version must be one of: 1, 2, 3");
+    }
+    if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.execution_plan_sha256 || "")) {
+      errors.push("contract.execution_plan_sha256 must use sha256:<hex>");
+    }
+  }
+
+  if (!Array.isArray(value.dependencies)) {
+    errors.push("dependencies must be an array");
+  } else {
+    const ids = new Set();
+    value.dependencies.forEach((dependency, index) => {
+      const label = `dependencies[${index}]`;
+      if (!validateExactObject(dependency, label, DEPENDENCY_KEYS, errors)) return;
+      expectSafeId(dependency, "slice_id", errors);
+      if (ids.has(dependency.slice_id)) errors.push(`${label}.slice_id must be unique`);
+      ids.add(dependency.slice_id);
+      if (dependency.slice_id === value.slice_id) errors.push(`${label}.slice_id cannot reference the current slice`);
+      if (dependency.required_outcome !== "succeeded") errors.push(`${label}.required_outcome must equal succeeded`);
+      validateUniqueStrings(dependency.keeper_outputs, `${label}.keeper_outputs`, errors, true);
+    });
+  }
+
+  validateUniqueStrings(value.keeper_outputs, "keeper_outputs", errors, true);
+  validateUniqueStrings(value.owned_paths, "owned_paths", errors, true);
+  validateUniqueStrings(value.forbidden_paths, "forbidden_paths", errors);
+  validateUniqueStrings(value.acceptance_refs, "acceptance_refs", errors, true);
+  for (const owned of value.owned_paths || []) {
+    for (const forbidden of value.forbidden_paths || []) {
+      if (pathsOverlap(owned, forbidden)) errors.push(`owned path overlaps forbidden path: ${owned} <> ${forbidden}`);
+    }
+  }
+  expectEnum(value, "risk_class", ["low", "medium", "high", "critical"], errors);
+  expectString(value, "failure_domain", errors);
+  expectString(value, "rollback_boundary", errors);
+
+  if (validateExactObject(value.budget, "budget", BUDGET_KEYS, errors)) {
+    for (const key of BUDGET_KEYS) {
+      if (!Number.isInteger(value.budget[key]) || value.budget[key] < 1) errors.push(`budget.${key} must be a positive integer`);
+    }
+  }
+  if (!Array.isArray(value.checks) || value.checks.length === 0) {
+    errors.push("checks must be a non-empty array");
+  } else {
+    const ids = new Set();
+    value.checks.forEach((check, index) => {
+      validateCheck(check, `checks[${index}]`, errors);
+      if (check && ids.has(check.check_id)) errors.push(`checks[${index}].check_id must be unique`);
+      if (check) ids.add(check.check_id);
+    });
+  }
+
+  if (validateExactObject(value.size_gate, "size_gate", SIZE_GATE_KEYS, errors)) {
+    if (!new Set(["pass", "split_required", "exception"]).has(value.size_gate.decision)) {
+      errors.push("size_gate.decision must be one of: pass, split_required, exception");
+    }
+    if (value.size_gate.policy_id !== POLICY_ID) errors.push(`size_gate.policy_id must equal ${POLICY_ID}`);
+    if (validateExactObject(value.size_gate.measured, "size_gate.measured", MEASURED_KEYS, errors)) {
+      for (const key of MEASURED_KEYS) {
+        if (!Number.isInteger(value.size_gate.measured[key]) || value.size_gate.measured[key] < 0) {
+          errors.push(`size_gate.measured.${key} must be a non-negative integer`);
+        }
+      }
+    }
+    if (value.size_gate.decision === "exception") {
+      validateException(value.size_gate.exception, "size_gate.exception", errors);
+    } else if (value.size_gate.exception !== null) {
+      errors.push("size_gate.exception must be null unless decision is exception");
+    }
+  }
+  expectEnum(value, "commit_policy", ["logical_outcome", "changes_allowed_no_commit", "no_change_allowed"], errors);
+  expectEnum(value, "output_contract", ["final_message_json_only"], errors);
+  expectGitRevision(value.repo, value.base_sha, "base_sha", errors);
+}
 
 function validateBrief(value) {
   const errors = [];
@@ -40,8 +199,12 @@ function validateBrief(value) {
     return errors;
   }
   expectInteger(value, "schema_version", errors);
-  if (![1, 2].includes(value.schema_version)) {
-    errors.push("schema_version must be one of: 1, 2");
+  if (![1, 2, 3].includes(value.schema_version)) {
+    errors.push("schema_version must be one of: 1, 2, 3");
+    return errors;
+  }
+  if (value.schema_version === 3) {
+    validateV3(value, errors);
     return errors;
   }
   const keys = value.schema_version === 1 ? V1_KEYS : V2_KEYS;

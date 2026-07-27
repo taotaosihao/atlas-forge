@@ -6,7 +6,7 @@ const {
   CommandError,
   commandOptions,
 } = require("../core/command-runtime");
-const { taskMutationLockFile } = require("../core/lock");
+const { taskMutationLockFile, withLock } = require("../core/lock");
 const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require("../core/paths");
 const { mutateTaskRuntime } = require("../core/task-mutation");
 const {
@@ -43,6 +43,11 @@ const {
 } = require("./lane-registry");
 const { classifyPaseoObservation } = require("./backend-failures");
 const { launchLabel, observePaseoCommand, reconcileLaunch } = require("./paseo-observer");
+const {
+  admitTeamStart,
+  globalAdmissionLockFile,
+  validateTeamWriterAdmission,
+} = require("./admission");
 const {
   ATTEMPT_USAGE,
   DISPATCH_USAGE,
@@ -129,36 +134,40 @@ function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
 function mutateV2Team(taskId, operationFn, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
   let output;
-  const committed = mutateTaskRuntime(
-    paths,
-    taskId,
-    {
-      kind: options.eventKind || "team.control.mutated",
-      operationId: options.operationId,
-      data: options.operationData || {},
-    },
-    () => {
-      const team = requireV2Team(paths, taskId);
-      try {
-        output = operationFn(team, timestampSeconds(clock));
-      } catch (error) {
-        if (error instanceof RegistryError) throw new CommandError(error.message);
-        throw error;
-      }
-      return {
-        projection: {
-          ...buildTeamProjection(paths, taskId, output.team, clock),
-          files: output.files || [],
-        },
-        result: output.result || {},
-        legacy: output.legacy || [{
-          kind: options.legacyKind || "team-control",
-          detail: options.legacyDetail || options.eventKind || "team.control.mutated",
-        }],
-      };
-    },
-    { ...options, clock, environment, expectedRevision: options.expectedRevision },
-  );
+  let committed;
+  withLock(globalAdmissionLockFile(paths), () => {
+    committed = mutateTaskRuntime(
+      paths,
+      taskId,
+      {
+        kind: options.eventKind || "team.control.mutated",
+        operationId: options.operationId,
+        data: options.operationData || {},
+      },
+      () => {
+        const team = requireV2Team(paths, taskId);
+        try {
+          output = operationFn(team, timestampSeconds(clock));
+        } catch (error) {
+          if (error instanceof RegistryError) throw new CommandError(error.message);
+          throw error;
+        }
+        validateTeamWriterAdmission(paths, taskId, output.team);
+        return {
+          projection: {
+            ...buildTeamProjection(paths, taskId, output.team, clock),
+            files: output.files || [],
+          },
+          result: output.result || {},
+          legacy: output.legacy || [{
+            kind: options.legacyKind || "team-control",
+            detail: options.legacyDetail || options.eventKind || "team.control.mutated",
+          }],
+        };
+      },
+      { ...options, clock, environment, expectedRevision: options.expectedRevision },
+    );
+  });
   if (committed.replay) output = { replay: true, result: committed.result };
   return { ...output, paths };
 }
@@ -189,88 +198,123 @@ function runRecordStart(parsed, options = {}) {
     validateReason(parsed.selectionAuthorityRef, "selection authority ref");
   }
   validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
-  const { clock, environment, paths } = commandOptions(options);
+  const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const staffingFile = teamStaffingFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
   const staffing = relativeToCodeHome(paths, staffingFile);
   let team;
-  const committed = mutateTaskRuntime(
-    paths,
-    parsed.taskId,
-    {
-      kind: "team.started",
-      operationId: parsed.operationId || options.operationId,
-      data: {
-        mode: parsed.mode,
-        objective: parsed.objective,
-        backend: parsed.backend || "",
-        fallback_policy: fallbackPolicy,
-        authorization_ref: parsed.authorizationRef || "",
-      },
-    },
-    () => {
-      const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-      const { task } = validateTaskFile(taskFile);
-      const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-      if (task.status !== "doing") {
-        throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
+  let committed;
+  withLock(globalAdmissionLockFile(paths), () => {
+    const admission = admitTeamStart({
+      briefPath: parsed.briefPath,
+      clock,
+      cwd,
+      mode: parsed.mode,
+      paths,
+      taskId: parsed.taskId,
+    });
+    try {
+      committed = mutateTaskRuntime(
+        paths,
+        parsed.taskId,
+        {
+          kind: "team.started",
+          operationId: parsed.operationId || options.operationId,
+          data: {
+            mode: parsed.mode,
+            objective: parsed.objective,
+            backend: parsed.backend || "",
+            fallback_policy: fallbackPolicy,
+            authorization_ref: parsed.authorizationRef || "",
+            agents: parsed.agents || "",
+            roles: parsed.roles || "",
+            providers: parsed.providers || "",
+            selection_authority_kind: parsed.selectionAuthorityKind || "",
+            selection_authority_ref: parsed.selectionAuthorityRef || "",
+            brief_path: admission.brief?.path || "",
+            brief_sha256: admission.brief?.sha256 || "",
+            execution_plan_sha256: admission.brief?.execution_plan_sha256 || "",
+          },
+        },
+        () => {
+          const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+          const { task } = validateTaskFile(taskFile);
+          const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+          if (task.status !== "doing") {
+            throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
+          }
+          const previous = state.active_team && typeof state.active_team === "object"
+            ? state.active_team
+            : {};
+          const generation = previous.schema_version === 2
+            ? Number(previous.generation || 0) + 1
+            : 1;
+          try {
+            team = createTeamRun({
+              previous,
+              mode: parsed.mode,
+              objective: parsed.objective,
+              configuredBackend: parsed.backend || null,
+              fallbackPolicy,
+              authorizationRef: parsed.authorizationRef,
+              agents: parsed.agents,
+              roles: parsed.roles,
+              providers: parsed.providers,
+              decision,
+              staffing,
+              now: timestampSeconds(clock),
+              teamSelection: parsed.backend ? {
+                eventId: `selection-team-${String(generation).padStart(4, "0")}`,
+                kind: "backend",
+                scope: "team",
+                authorityKind: parsed.selectionAuthorityKind,
+                authorityRef: parsed.selectionAuthorityRef,
+                backend,
+              } : null,
+            });
+          } catch (error) {
+            if (error instanceof RegistryError) throw new CommandError(error.message);
+            throw error;
+          }
+          team.admission = admission;
+          team.admitted_owned_paths = admission.admitted_owned_paths;
+          team.slice_id = admission.brief?.slice_id || "";
+          team.start_operation_id = parsed.operationId || options.operationId || "";
+          validateTeamWriterAdmission(paths, parsed.taskId, team);
+          return {
+            projection: buildTeamProjection(paths, parsed.taskId, team, clock, state),
+            result: { team },
+            legacy: [{
+              kind: "team-record-start",
+              detail: `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
+            }],
+          };
+        },
+        { ...options, clock, environment },
+      );
+    } catch (error) {
+      if (parsed.operationId
+        && error.message === `operation_id replay payload conflict: ${parsed.operationId}`) {
+        throw new CommandError(`team start operation_id replay conflict: ${parsed.operationId}`);
       }
-      const previous = state.active_team && typeof state.active_team === "object"
-        ? state.active_team
-        : {};
-      const generation = previous.schema_version === 2
-        ? Number(previous.generation || 0) + 1
-        : 1;
-      try {
-        team = createTeamRun({
-          previous,
-          mode: parsed.mode,
-          objective: parsed.objective,
-          configuredBackend: parsed.backend || null,
-          fallbackPolicy,
-          authorizationRef: parsed.authorizationRef,
-          agents: parsed.agents,
-          roles: parsed.roles,
-          providers: parsed.providers,
-          decision,
-          staffing,
-          now: timestampSeconds(clock),
-          teamSelection: parsed.backend ? {
-            eventId: `selection-team-${String(generation).padStart(4, "0")}`,
-            kind: "backend",
-            scope: "team",
-            authorityKind: parsed.selectionAuthorityKind,
-            authorityRef: parsed.selectionAuthorityRef,
-            backend,
-          } : null,
-        });
-      } catch (error) {
-        if (error instanceof RegistryError) throw new CommandError(error.message);
-        throw error;
-      }
-      return {
-        projection: buildTeamProjection(paths, parsed.taskId, team, clock, state),
-        result: { team },
-        legacy: [{
-          kind: "team-record-start",
-          detail: `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
-        }],
-      };
-    },
-    { ...options, clock, environment },
-  );
+      throw error;
+    }
+  });
   if (committed.replay) team = committed.result.team;
   const lines = [
     `task_id: ${parsed.taskId}`,
     `backend: ${backend}`,
     `mode: ${parsed.mode}`,
-    "status: running",
+    `status: ${team.status}`,
     `decision: ${decisionFile}`,
     `staffing: ${staffingFile}`,
   ];
   if (parsed.mode === "execute") {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+    lines.push(`brief: ${team.admission.brief.path}`);
+    lines.push(`slice_id: ${team.slice_id}`);
+    lines.push(`operation_id: ${team.start_operation_id}`);
   }
   if (parsed.providers) {
     lines.push(`providers: ${parsed.providers}`);
@@ -1358,102 +1402,120 @@ function runStop(argv, options = {}) {
 
 function runPromote(parsed, options = {}) {
   validateExecutionAuthorization(parsed.target, parsed.authorizationRef);
-  const { clock, environment, paths } = commandOptions(options);
+  const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
-  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-  validateTaskFile(taskFile);
-  const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-  const authorizationLine = parsed.target === "execute"
-    ? `- authorization_ref: ${parsed.authorizationRef}\n`
-    : "";
-  const promotionBlock =
-    `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}` +
-    `- created_at: ${timestampSeconds(clock)}\n`;
-  const projectionFile = (team) => ({
-    path: "team/decision.md",
-    content_base64: Buffer.from(`${fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, "utf8") : ""}${promotionBlock}`)
-      .toString("base64"),
-  });
-  if (state.active_team && state.active_team.schema_version === 2) {
-    mutateV2Team(parsed.taskId, (team) => {
-      if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
-        throw new CommandError(`team run is not mutable: ${team.status}`);
-      }
-      const mode = parsed.target === "execute" ? "execute" : team.mode;
-      team.mode = mode;
-      team.status = `promoted:${parsed.target}`;
-      team.promoted_to = parsed.target;
-      team.decision = decision;
-      if (parsed.target === "execute") team.authorization_ref = parsed.authorizationRef;
-      return { team, files: [projectionFile(team)] };
-    }, {
-      ...options,
+  let replayed = false;
+  let committed;
+  const operationId = parsed.operationId || options.operationId;
+  withLock(globalAdmissionLockFile(paths), () => {
+    const admission = parsed.target === "execute" ? admitTeamStart({
+      briefPath: parsed.briefPath,
       clock,
-      environment,
+      cwd,
+      mode: "execute",
       paths,
-      operationId: options.operationId,
-      operationData: {
-        target: parsed.target,
-        authorization_ref: parsed.authorizationRef || "",
-      },
-      eventKind: "team.promoted",
-      legacyKind: "team-promote",
-      legacyDetail: parsed.target,
-    });
-  } else {
-    mutateTaskRuntime(
-      paths,
-      parsed.taskId,
-      {
-        kind: "team.promoted",
-        operationId: options.operationId,
-        data: {
-          target: parsed.target,
-          authorization_ref: parsed.authorizationRef || "",
-        },
-      },
-      () => {
-        const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        validateTaskFile(currentFile);
-        const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
-        const activeTeam = currentState.active_team && typeof currentState.active_team === "object"
-          ? currentState.active_team
-          : {};
-        const mode = parsed.target === "execute"
-          ? "execute"
-          : getTaskField(currentFile, "active_team_mode");
-        const status = `promoted:${parsed.target}`;
-        const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
-          active_team_mode: mode,
-          active_team_status: status,
-          active_team_decision: decision,
-        });
-        const nextState = projectTaskState(
-          paths, parsed.taskId, taskContent, currentState, clock,
-        );
-        nextState.active_team = {
-          ...activeTeam,
-          mode,
-          status,
-          promoted_to: parsed.target,
-          decision,
-        };
-        if (parsed.target === "execute") {
-          nextState.active_team.authorization_ref = parsed.authorizationRef;
-        }
-        return {
-          projection: {
-            task_content: taskContent,
-            state: nextState,
-            files: [projectionFile(activeTeam)],
+      taskId: parsed.taskId,
+    }) : null;
+    try {
+      committed = mutateTaskRuntime(
+        paths,
+        parsed.taskId,
+        {
+          kind: "team.promoted",
+          operationId,
+          data: {
+            target: parsed.target,
+            authorization_ref: parsed.authorizationRef || "",
+            brief_path: admission?.brief?.path || "",
+            brief_sha256: admission?.brief?.sha256 || "",
+            execution_plan_sha256: admission?.brief?.execution_plan_sha256 || "",
           },
-          legacy: [{ kind: "team-promote", detail: parsed.target }],
-        };
-      },
-      { clock, environment },
-    );
-  }
+        },
+        () => {
+          const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+          validateTaskFile(taskFile);
+          const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+          const activeTeam = state.active_team && typeof state.active_team === "object"
+            ? state.active_team
+            : {};
+          if (activeTeam.schema_version === 2
+            && !new Set(["running", "promoted:execute", "promoted:worktree"])
+              .has(activeTeam.status)) {
+            throw new CommandError(`team run is not mutable: ${activeTeam.status}`);
+          }
+          const mode = parsed.target === "execute"
+            ? "execute"
+            : activeTeam.schema_version === 2
+              ? activeTeam.mode
+              : getTaskField(taskFile, "active_team_mode");
+          const status = `promoted:${parsed.target}`;
+          const promotedTeam = {
+            ...activeTeam,
+            mode,
+            status,
+            promoted_to: parsed.target,
+            decision,
+          };
+          if (parsed.target === "execute") {
+            promotedTeam.authorization_ref = parsed.authorizationRef;
+            promotedTeam.admission = admission;
+            promotedTeam.admitted_owned_paths = admission.admitted_owned_paths;
+            promotedTeam.slice_id = admission.brief.slice_id;
+            promotedTeam.execution_operation_id = operationId || "";
+          }
+          validateTeamWriterAdmission(paths, parsed.taskId, promotedTeam);
+          const authorizationLines = parsed.target === "execute"
+            ? `- authorization_ref: ${parsed.authorizationRef}\n` +
+              `- brief: ${admission.brief.path}\n` +
+              `- operation_id: ${operationId}\n`
+            : "";
+          const promotionBlock =
+            `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLines}` +
+            `- created_at: ${timestampSeconds(clock)}\n`;
+          const projectionFile = {
+            path: "team/decision.md",
+            content_base64: Buffer.from(
+              `${fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, "utf8") : ""}${promotionBlock}`,
+            ).toString("base64"),
+          };
+          let projection;
+          if (activeTeam.schema_version === 2) {
+            projection = {
+              ...buildTeamProjection(paths, parsed.taskId, promotedTeam, clock, state),
+              files: [projectionFile],
+            };
+          } else {
+            const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {
+              active_team_mode: mode,
+              active_team_status: status,
+              active_team_decision: decision,
+            });
+            const nextState = projectTaskState(paths, parsed.taskId, taskContent, state, clock);
+            nextState.active_team = promotedTeam;
+            projection = {
+              task_content: taskContent,
+              state: nextState,
+              files: [projectionFile],
+            };
+          }
+          return {
+            projection,
+            result: { team: promotedTeam },
+            legacy: [{ kind: "team-promote", detail: parsed.target }],
+          };
+        },
+        { ...options, clock, environment },
+      );
+    } catch (error) {
+      if (parsed.operationId
+        && error.message === `operation_id replay payload conflict: ${parsed.operationId}`) {
+        throw new CommandError(`team promotion operation_id replay conflict: ${parsed.operationId}`);
+      }
+      throw error;
+    }
+  });
+  replayed = committed.replay;
   const lines = [
     `task_id: ${parsed.taskId}`,
     `target: ${parsed.target}`,
@@ -1461,7 +1523,10 @@ function runPromote(parsed, options = {}) {
   ];
   if (parsed.target === "execute") {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+    lines.push(`brief: ${parsed.briefPath}`);
+    lines.push(`operation_id: ${parsed.operationId}`);
   }
+  if (replayed) lines.push("replayed: true");
   return {
     exitCode: 0,
     lines,
