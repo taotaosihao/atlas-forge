@@ -79,7 +79,7 @@ authority. Apply mode first saves the current projection under the task's
 `reconcile-backups/` directory:
 
 ```bash
-~/.codex/workflow/bin/codex-workflow reconcile <task-id> --apply --authority-ref <stable-ref>
+~/.codex/workflow/bin/codex-workflow reconcile <task-id> --apply --authority-ref <stable-ref> --reason "<repair reason>"
 ```
 
 Legacy Atlas recall:
@@ -106,9 +106,21 @@ Record a verification command inside the task artifact directory:
 ~/.codex/workflow/bin/codex-workflow verify <task-id> [--gate-class <id>] [--input <file>]... -- <command...>
 ```
 
+For an admitted execution-v3 slice, bind every required check to the canonical brief and its exact declared command:
+
+```bash
+~/.codex/workflow/bin/codex-workflow verify <task-id> \
+  --brief <brief.json> --slice-id <slice-id> --check-id <check-id> -- <declared-command...>
+~/.codex/workflow/bin/codex-workflow team-slice-accept <task-id> \
+  --brief <brief.json> --operation-id <id> --keeper-output '<declared-ref>=<repo-file>'
+~/.codex/workflow/bin/codex-workflow team-slice-supersede <task-id> \
+  --slice-id <slice-id> --operation-id <id> --authority-ref <ref> --reason "<reason>"
+```
+
 Verification records bind the result to the current Git/worktree, cwd, argv,
 non-secret environment policy, toolchain, lockfiles, submodules, and explicit
-inputs. Any snapshot change after verification requires a new verification.
+inputs. General verification remains supplemental and cannot satisfy a declared
+required gate. Any snapshot change after verification requires a new verification.
 
 Install Codex Bash hooks for workflow evidence capture:
 

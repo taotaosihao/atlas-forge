@@ -5,11 +5,14 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const test = require("node:test");
 
 const WORKFLOW_ROOT = path.resolve(__dirname, "../..");
 const PUBLIC_BIN = path.join(WORKFLOW_ROOT, "bin", "codex-workflow");
+const TEAM_LEDGER_BIN = path.resolve(
+  WORKFLOW_ROOT, "../plugins/atlas-workflow/scripts/codex-team-ledger",
+);
 const TEMPLATE_DIR = path.join(WORKFLOW_ROOT, "templates");
 const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
@@ -19,7 +22,15 @@ const { updateTaskCommand } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/command-runtime.js",
 ));
-const { archiveTask, createTask, startTask } = require(path.join(
+const { authoritativeEventDigest } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/event-store.js",
+));
+const { taskEventFile } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/task-mutation.js",
+));
+const { archiveTask, completeTask, createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
 ));
@@ -61,6 +72,23 @@ const { buildObservation, launchLabel } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/team/paseo-observer.js",
 ));
+const {
+  formatCommand,
+  parseVerifyArgs,
+  runVerification,
+} = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/runner.js"));
+const { executionCompletionAdmission, requiredGateAdmission } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/required-gates.js",
+));
+const { globalAdmissionLockFile } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/team/admission.js",
+));
+const {
+  parseSliceAcceptArgs,
+  parseSliceSupersedeArgs,
+  runSliceAccept,
+  runSliceSupersede,
+} = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/team/slice-acceptance.js"));
 
 function clockAt(value) {
   return () => new Date(value);
@@ -89,6 +117,29 @@ function createFixtureTask(environment, title = "Native team") {
   return taskId;
 }
 
+function spawnWorkflow(environment, args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(PUBLIC_BIN, args, { cwd, env: environment });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stderr, stdout }));
+  });
+}
+
+async function waitForFile(file, timeoutMilliseconds = 3000) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(file)) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for file: ${file}`);
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (!value || typeof value !== "object") return value;
@@ -110,22 +161,29 @@ function executionBrief(paths, taskId, options = {}) {
     objective: "execute the admitted test slice",
     depends_on: options.dependsOn || [],
     keeper_outputs: ["event:execution-slice-complete"],
-    owned_paths: options.ownedPaths || ["workflow/**"],
+    owned_paths: options.ownedPaths || ["workflow/test-owned/**"],
     forbidden_paths: [],
     acceptance_refs: ["AC-EXECUTE"],
     risk_class: "high",
     failure_domain: "team-execution",
     rollback_boundary: "one logical commit",
+    estimate: options.estimate || {
+      estimated_changed_files: 2,
+      estimated_net_loc: 200,
+      target_p90_minutes: 30,
+      serial_dependency_depth: (options.dependsOn || []).length > 0 ? 1 : 0,
+      independent_vertical_count: 1,
+    },
     budget: options.budget || {
       max_changed_files: 4,
       max_loc: 400,
       max_wall_clock_minutes: 60,
       max_required_checks: 2,
     },
-    checks: [{
+    checks: options.checks || [{
       check_id: "execution-contract",
       gate_class: options.gateClass || "contract",
-      command: "bash workflow/tests/contract_team_native.sh",
+      command: options.command || "bash workflow/tests/contract_team_native.sh",
       final_only: false,
       cache_policy: options.cachePolicy || "identity-bound",
     }],
@@ -140,10 +198,11 @@ function executionBrief(paths, taskId, options = {}) {
     owned_paths: [`dependencies/${sliceId}/**`],
     acceptance_refs: [`AC-${sliceId}`],
     checks: [{ ...slice.checks[0], check_id: `check-${sliceId}` }],
+    estimate: { ...slice.estimate, serial_dependency_depth: 0 },
   }));
   const plan = {
     schema_version: 1,
-    size_policy: { policy_id: "atlas-slice-size-v1" },
+    size_policy: { policy_id: "atlas-slice-size-v2" },
     slices: [...dependencySlices, slice],
   };
   const contract = path.join(repo, "implementation-contract.final.md");
@@ -161,55 +220,68 @@ function executionBrief(paths, taskId, options = {}) {
   spawnSync("git", ["-C", repo, "add", "implementation-contract.final.md"]);
   spawnSync("git", ["-C", repo, "commit", "-qm", "test: execution contract"]);
   const baseSha = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
-  const briefDir = path.join(paths.artifactsDir, taskId, "team", "sdd", "slices", slice.slice_id);
-  fs.mkdirSync(briefDir, { recursive: true });
-  const dependencies = dependencySlices.map((dependency) => ({
-    slice_id: dependency.slice_id,
-    required_outcome: "succeeded",
-    keeper_outputs: dependency.keeper_outputs,
-  }));
-  const brief = {
-    schema_version: 3,
-    task_id: taskId,
-    slice_id: slice.slice_id,
-    repo,
-    base_sha: baseSha,
-    objective: slice.objective,
-    requirements_path: "brief.md",
-    global_constraints_path: "../../global-constraints.md",
-    contract: {
-      path: contract,
-      sha256: `sha256:${sha256(fs.readFileSync(contract))}`,
-      semantics_version: 3,
-      execution_plan_sha256: `sha256:${sha256(JSON.stringify(stableValue(plan)))}`,
-    },
-    dependencies,
-    keeper_outputs: slice.keeper_outputs,
-    owned_paths: slice.owned_paths,
-    forbidden_paths: slice.forbidden_paths,
-    acceptance_refs: slice.acceptance_refs,
-    risk_class: slice.risk_class,
-    failure_domain: slice.failure_domain,
-    rollback_boundary: slice.rollback_boundary,
-    budget: slice.budget,
-    checks: slice.checks,
-    size_gate: {
-      decision: options.sizeDecision || "pass",
-      policy_id: "atlas-slice-size-v1",
-      measured: {
-        changed_files: slice.owned_paths.length,
-        loc: 0,
-        wall_clock_minutes: 0,
-        required_checks: slice.checks.length,
-      },
-      exception: options.sizeException || null,
-    },
-    commit_policy: "logical_outcome",
-    output_contract: "final_message_json_only",
+  const slices = new Map(plan.slices.map((item) => [item.slice_id, item]));
+  const contractIdentity = {
+    path: contract,
+    sha256: `sha256:${sha256(fs.readFileSync(contract))}`,
+    semantics_version: 3,
+    execution_plan_sha256: `sha256:${sha256(JSON.stringify(stableValue(plan)))}`,
   };
-  const briefPath = path.join(briefDir, "brief.json");
-  fs.writeFileSync(briefPath, `${JSON.stringify(brief, null, 2)}\n`);
-  return { brief, briefPath, repo };
+  const briefs = {};
+  const briefPaths = {};
+  for (const selected of plan.slices) {
+    const brief = {
+      schema_version: 3,
+      task_id: taskId,
+      slice_id: selected.slice_id,
+      repo,
+      base_sha: baseSha,
+      objective: selected.objective,
+      requirements_path: "brief.md",
+      global_constraints_path: "../../global-constraints.md",
+      contract: contractIdentity,
+      dependencies: selected.depends_on.map((sliceId) => ({
+        slice_id: sliceId,
+        required_outcome: "succeeded",
+        keeper_outputs: slices.get(sliceId).keeper_outputs,
+      })),
+      keeper_outputs: selected.keeper_outputs,
+      owned_paths: selected.owned_paths,
+      forbidden_paths: selected.forbidden_paths,
+      acceptance_refs: selected.acceptance_refs,
+      risk_class: selected.risk_class,
+      failure_domain: selected.failure_domain,
+      rollback_boundary: selected.rollback_boundary,
+      budget: selected.budget,
+      checks: selected.checks,
+      size_gate: {
+        decision: selected.size_exception ? "exception" : options.sizeDecision || "pass",
+        policy_id: "atlas-slice-size-v2",
+        estimate: selected.estimate,
+        exception: selected.size_exception || null,
+      },
+      commit_policy: "logical_outcome",
+      output_contract: "final_message_json_only",
+    };
+    const briefDir = path.join(
+      paths.artifactsDir, taskId, "team", "sdd", "slices", selected.slice_id,
+    );
+    fs.mkdirSync(briefDir, { recursive: true });
+    const briefPath = path.join(briefDir, "brief.json");
+    fs.writeFileSync(briefPath, `${JSON.stringify(brief, null, 2)}\n`);
+    briefs[selected.slice_id] = brief;
+    briefPaths[selected.slice_id] = briefPath;
+  }
+  const selectedId = options.briefSliceId || slice.slice_id;
+  return {
+    brief: briefs[selectedId],
+    briefPath: briefPaths[selectedId],
+    briefPaths,
+    briefs,
+    contract,
+    plan,
+    repo,
+  };
 }
 
 function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
@@ -583,6 +655,18 @@ test("record-start requires an explicit authorization ref before execute writes"
     { cwd: admission.repo, environment },
   );
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeAfterStart);
+  const briefBeforeReplayConflict = fs.readFileSync(admission.briefPath);
+  fs.appendFileSync(admission.briefPath, "\n");
+  assert.throws(() => runRecordStart(
+    {
+      ...parsed,
+      authorizationRef: "user-message:implement-roadmap",
+      briefPath: admission.briefPath,
+      operationId: "start-execution",
+    },
+    { cwd: admission.repo, environment },
+  ), /team start operation_id replay conflict/);
+  fs.writeFileSync(admission.briefPath, briefBeforeReplayConflict);
   assert.throws(() => runRecordStart(
     {
       ...parsed,
@@ -595,10 +679,14 @@ test("record-start requires an explicit authorization ref before execute writes"
   ), /team start operation_id replay conflict/);
 });
 
-test("execute admission requires keeper-ready succeeded dependencies", (t) => {
+test("execute admission requires keeper-ready succeeded dependencies", async (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Dependency admission");
-  const admission = executionBrief(paths, taskId, { dependsOn: ["foundation"] });
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+    dependsOn: ["foundation"],
+  });
   const parsed = parseRecordStartArgs([
     taskId, "execute dependent slice", "--mode=execute",
     "--authorization-ref=user-message:dependency-execute",
@@ -609,24 +697,403 @@ test("execute admission requires keeper-ready succeeded dependencies", (t) => {
     /dependency is not keeper-ready succeeded: foundation/,
   );
   const progress = path.join(paths.artifactsDir, taskId, "team", "sdd", "progress.jsonl");
-  fs.mkdirSync(path.dirname(progress), { recursive: true });
-  fs.writeFileSync(progress, `${JSON.stringify({
-    schema_version: 1,
-    event: "slice_complete",
+  const forged = spawnSync(process.execPath, [
+    TEAM_LEDGER_BIN, "--task", taskId, "append", "--event", "slice_complete", "--json",
+    JSON.stringify({
     task_id: taskId,
     slice_id: "foundation",
-    timestamp: "2026-07-10T12:00:00Z",
     outcome: "succeeded",
     keeper_outputs: ["event:foundation:ready"],
-  })}\n`);
+    }),
+  ], { encoding: "utf8", env: environment });
+  assert.equal(forged.status, 0, forged.stderr);
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency is not keeper-ready succeeded: foundation/,
+  );
+
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute foundation slice", "--mode=execute",
+    "--authorization-ref=user-message:foundation-execute",
+    `--brief=${admission.briefPaths.foundation}`, "--operation-id=start-foundation",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-foundation",
+  });
+  const keeper = path.join(admission.repo, "dependencies", "foundation", "keeper.txt");
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "foundation keeper\n");
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPaths.foundation}`, "--slice-id=foundation",
+    "--check-id=check-foundation", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-foundation",
+    recordToken: "20260710T120600000000001",
+  });
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPaths.foundation}`,
+    "--operation-id=accept-foundation-with-unowned-keeper",
+    "--keeper-output=event:foundation:ready=implementation-contract.final.md",
+  ]), { environment }), /keeper output is outside admitted ownership/);
+  runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPaths.foundation}`,
+    "--operation-id=accept-foundation",
+    "--keeper-output=event:foundation:ready=dependencies/foundation/keeper.txt",
+  ]), { environment });
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-foundation-only" }),
+    /missing authoritative accepted slice: execution-slice/,
+  );
+
+  const eventFile = taskEventFile(paths, taskId);
+  const acceptedStream = fs.readFileSync(eventFile, "utf8");
+  const rewriteAccepted = (change) => {
+    const events = acceptedStream.trim().split("\n").map((line) => JSON.parse(line));
+    change(events.at(-1).result.accepted);
+    events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
+    fs.writeFileSync(eventFile, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  };
+  rewriteAccepted((accepted) => {
+    accepted.brief_sha256 = `sha256:${"1".repeat(64)}`;
+  });
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency Team generation is not authoritative: foundation/,
+  );
+  fs.writeFileSync(eventFile, acceptedStream);
+  rewriteAccepted((accepted) => { accepted.generation += 1; });
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency Team generation is not authoritative: foundation/,
+  );
+  fs.writeFileSync(eventFile, acceptedStream);
+  rewriteAccepted((accepted) => {
+    accepted.verification_records = [{ check_id: "check-foundation" }];
+  });
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency authoritative acceptance is invalid: foundation/,
+  );
+  fs.writeFileSync(eventFile, acceptedStream);
+  rewriteAccepted((accepted) => {
+    accepted.execution_plan_sha256 = `sha256:${"0".repeat(64)}`;
+  });
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency authoritative acceptance is invalid: foundation/,
+  );
+  fs.writeFileSync(eventFile, acceptedStream);
+  rewriteAccepted((accepted) => {
+    accepted.verification_records[0].provenance = "imported";
+  });
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency authoritative acceptance is invalid: foundation/,
+  );
+  fs.writeFileSync(eventFile, acceptedStream);
+
+  fs.writeFileSync(keeper, "tampered keeper\n");
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency verification identity is invalid.*no longer matches the current snapshot|dependency keeper output digest mismatch/,
+  );
+  fs.writeFileSync(keeper, "foundation keeper\n");
+
+  const changedAfterDependencyVerification = path.join(admission.repo, "changed-after-foundation.txt");
+  fs.writeFileSync(changedAfterDependencyVerification, "dependency identity drift\n");
+  assert.throws(
+    () => runRecordStart(parsed, { cwd: admission.repo, environment }),
+    /dependency verification identity is invalid.*no longer matches the current snapshot/,
+  );
+  fs.unlinkSync(changedAfterDependencyVerification);
+
   runRecordStart(parsed, { cwd: admission.repo, environment });
   assert.equal(readTeam(paths, taskId).slice_id, "execution-slice");
+  assert.match(
+    fs.readFileSync(progress, "utf8"),
+    /"authority":"derived-from-authoritative-slice-accepted"/,
+  );
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-dependent",
+  });
+  const dependentKeeper = path.join(admission.repo, "workflow", "test-owned", "dependent.txt");
+  fs.mkdirSync(path.dirname(dependentKeeper), { recursive: true });
+  fs.writeFileSync(dependentKeeper, "dependent keeper\n");
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-dependent",
+    recordToken: "20260710T120600000000002",
+  });
+  const acceptEnvironment = {
+    ...environment,
+    CODEX_WORKFLOW_TEST_SLICE_ACCEPT_PAUSE_AFTER_DEPENDENCIES: "0.25",
+  };
+  const accepting = spawnWorkflow(acceptEnvironment, [
+    "team-slice-accept", taskId, `--brief=${admission.briefPath}`,
+    "--operation-id=accept-dependent-concurrent",
+    "--keeper-output=event:execution-slice-complete=workflow/test-owned/dependent.txt",
+  ], admission.repo);
+  await waitForFile(`${globalAdmissionLockFile(paths)}.dir`);
+  const superseding = spawnWorkflow(environment, [
+    "team-slice-supersede", taskId, "--slice-id=foundation",
+    "--operation-id=supersede-foundation-concurrent",
+    "--authority-ref=user-message:dependency-invalidated-concurrent",
+    "--reason=prove acceptance and supersede share one admission lock",
+  ], admission.repo);
+  const [acceptedConcurrently, supersededConcurrently] = await Promise.all([accepting, superseding]);
+  assert.equal(acceptedConcurrently.status, 0, acceptedConcurrently.stderr);
+  assert.equal(supersededConcurrently.status, 1, supersededConcurrently.stdout);
+  assert.match(
+    supersededConcurrently.stderr,
+    /cannot supersede foundation while accepted dependent slices remain: execution-slice/,
+  );
+  assert.deepEqual(
+    readJsonObject(taskStateFile(paths, taskId)).slice_acceptances["execution-slice"].actual_size.changed_paths,
+    ["workflow/test-owned/dependent.txt"],
+  );
+  runSliceSupersede(parseSliceSupersedeArgs([
+    taskId, "--slice-id=execution-slice", "--operation-id=supersede-dependent",
+    "--authority-ref=user-message:dependent-invalidated",
+    "--reason=release the dependent before invalidating its foundation",
+  ]), { environment });
+  runSliceSupersede(parseSliceSupersedeArgs([
+    taskId, "--slice-id=foundation", "--operation-id=supersede-foundation",
+    "--authority-ref=user-message:dependency-invalidated",
+    "--reason=foundation keeper is no longer valid",
+  ]), { environment });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      taskId, "retry dependent slice", "--mode=execute",
+      "--authorization-ref=user-message:dependency-retry",
+      `--brief=${admission.briefPath}`, "--operation-id=retry-dependent-slice",
+    ]), { cwd: admission.repo, environment }),
+    /dependency is not keeper-ready succeeded: foundation/,
+  );
+});
+
+test("task completion requires every command-bound admitted gate", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Required completion gates");
+  const firstCommand = [process.execPath, "-e", "process.exit(0)"];
+  const secondCommand = [process.execPath, "--version"];
+  const admission = executionBrief(paths, taskId, { checks: [
+    {
+      check_id: "contracts",
+      gate_class: "contract",
+      command: formatCommand(firstCommand).trimEnd(),
+      final_only: false,
+      cache_policy: "identity-bound",
+    },
+    {
+      check_id: "security",
+      gate_class: "security",
+      command: formatCommand(secondCommand).trimEnd(),
+      final_only: true,
+      cache_policy: "fresh-executed",
+    },
+  ] });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute checks bound to the admitted plan", "--mode=execute",
+    "--authorization-ref=user-message:required-gates",
+    `--brief=${admission.briefPath}`, "--operation-id=start-required-gates",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-required-gates",
+  });
+  const keeper = path.join(admission.repo, "workflow", "test-owned", "keeper.txt");
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "accepted keeper\n");
+
+  const admittedHead = spawnSync(
+    "git", ["-C", admission.repo, "rev-parse", "HEAD"], { encoding: "utf8" },
+  ).stdout.trim();
+  const headDrift = path.join(admission.repo, "head-drift.txt");
+  fs.writeFileSync(headDrift, "external commit after slice admission\n");
+  spawnSync("git", ["-C", admission.repo, "add", "head-drift.txt"]);
+  const headCommit = spawnSync(
+    "git", ["-C", admission.repo, "commit", "-qm", "test: advance admitted head"],
+    { encoding: "utf8" },
+  );
+  assert.equal(headCommit.status, 0, headCommit.stderr);
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=contracts", "--", ...firstCommand,
+  ]), { cwd: admission.repo, environment }), /verification HEAD does not match the admitted slice-start HEAD/);
+  assert.equal(
+    spawnSync("git", ["-C", admission.repo, "update-ref", "HEAD", admittedHead]).status,
+    0,
+  );
+  assert.equal(spawnSync("git", ["-C", admission.repo, "read-tree", "HEAD"]).status, 0);
+  fs.rmSync(headDrift);
+
+  runVerification(parseVerifyArgs([taskId, "--", "true"]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "general-true",
+    recordToken: "20260710T120700000000001",
+  });
+  assert.match(
+    requiredGateAdmission(paths, taskId, readJsonObject(taskStateFile(paths, taskId)), { environment })
+      .reasons.join("\n"),
+    /missing required verification gate: contracts/,
+  );
+
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=contracts", "--", process.execPath, "--version",
+  ]), { cwd: admission.repo, environment }),
+  /verification command does not match check contracts/);
+
+  const otherRepo = path.join(paths.root, "other-verification-repo");
+  fs.mkdirSync(otherRepo, { recursive: true });
+  spawnSync("git", ["init", "-q", otherRepo]);
+  spawnSync("git", ["-C", otherRepo, "config", "user.email", "atlas@example.test"]);
+  spawnSync("git", ["-C", otherRepo, "config", "user.name", "Atlas Test"]);
+  fs.writeFileSync(path.join(otherRepo, "README.md"), "other repo\n");
+  spawnSync("git", ["-C", otherRepo, "add", "README.md"]);
+  spawnSync("git", ["-C", otherRepo, "commit", "-qm", "test: other repository"]);
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=contracts", "--", ...firstCommand,
+  ]), { cwd: otherRepo, environment }),
+  /verification repository does not match admitted brief/);
+
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=contracts", "--", ...firstCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-contracts",
+    recordToken: "20260710T120700000000002",
+  });
+  assert.match(
+    requiredGateAdmission(paths, taskId, readJsonObject(taskStateFile(paths, taskId)), { environment })
+      .reasons.join("\n"),
+    /missing required verification gate: security/,
+  );
+
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=security", "--", ...secondCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-security",
+    recordToken: "20260710T120700000000003",
+  });
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.verification.schema_version, 3);
+  assert.deepEqual(Object.keys(state.verification.required_gates).sort(), ["contracts", "security"]);
+  assert.equal(state.verification.required_gates.security.provenance, "fresh-executed");
+  const imported = JSON.parse(JSON.stringify(state));
+  imported.verification.required_gates.security.provenance = "imported";
+  assert.equal(requiredGateAdmission(paths, taskId, imported, { environment }).passed, false);
+
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-without-acceptance" }),
+    /missing authoritative accepted slice: execution-slice/,
+  );
+
+  const changedSource = path.join(admission.repo, "workflow", "test-owned", "changed-after-gates.txt");
+  fs.writeFileSync(changedSource, "changed after required gates\n");
+  assert.match(
+    requiredGateAdmission(paths, taskId, readJsonObject(taskStateFile(paths, taskId)), { environment })
+      .reasons.join("\n"),
+    /no longer matches the current snapshot/,
+  );
+  fs.unlinkSync(changedSource);
+
+  const briefBytes = fs.readFileSync(admission.briefPath);
+  fs.appendFileSync(admission.briefPath, "\n");
+  assert.throws(
+    () => requiredGateAdmission(
+      paths, taskId, readJsonObject(taskStateFile(paths, taskId)), { environment },
+    ),
+    /admitted Team brief sha256 no longer matches/,
+  );
+  fs.writeFileSync(admission.briefPath, briefBytes);
+
+  runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-required-gates",
+    "--keeper-output=event:execution-slice-complete=workflow/test-owned/keeper.txt",
+  ]), { environment });
+  completeTask(taskId, { environment, operationId: "done-all-required-gates" });
+  const completedState = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(completedState.status, "done");
+  assert.equal(completedState.execution_authority.status, "active");
+  assert.equal(completedState.execution_authority.completion.completed_revision, completedState.runtime_revision);
+  assert.equal(executionCompletionAdmission(paths, taskId, completedState).passed, true);
+  archiveTask(taskId, "completed execution retained for audit", {
+    environment,
+    operationId: "archive-completed-execution",
+  });
+  const archivedState = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(archivedState.execution_authority.status, "active");
+  assert.deepEqual(
+    archivedState.execution_authority.completion,
+    completedState.execution_authority.completion,
+  );
+});
+
+test("execution authority survives later Team generations and rejects implicit replan", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Persistent execution authority");
+  const admission = executionBrief(paths, taskId);
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute authoritative plan", "--mode=execute",
+    "--authorization-ref=user-message:authority-plan-a",
+    `--brief=${admission.briefPath}`, "--operation-id=start-authority-plan-a",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-authority-plan-a",
+  });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "discuss follow-up without replacing execution authority", "--mode=discuss",
+    "--operation-id=start-discuss-after-execution",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-discuss-after-execution",
+  });
+  runVerification(parseVerifyArgs([taskId, "--", "true"]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "general-after-execution",
+    recordToken: "20260710T120700000000004",
+  });
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-authority-downgrade" }),
+    /missing authoritative accepted slice: execution-slice/,
+  );
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).execution_authority.execution_plan_sha256,
+    admission.brief.contract.execution_plan_sha256,
+  );
+
+  const replacement = executionBrief(paths, taskId, { ownedPaths: ["replacement/code/**"] });
+  assert.throws(() => runRecordStart(parseRecordStartArgs([
+    taskId, "implicitly replace authoritative plan", "--mode=execute",
+    "--authorization-ref=user-message:authority-plan-b",
+    `--brief=${replacement.briefPath}`, "--operation-id=start-authority-plan-b",
+  ]), { cwd: replacement.repo, environment }),
+  /task execution authority is already bound to another contract/);
 });
 
 test("execute admission rejects global writer overlap until the lease is released", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const firstTask = createFixtureTask(environment, "First writer");
-  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/**"] });
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/test-owned/**"] });
   runRecordStart(parseRecordStartArgs([
     firstTask, "hold workflow writer lease", "--mode=execute",
     "--authorization-ref=user-message:first-writer",
@@ -634,21 +1101,26 @@ test("execute admission rejects global writer overlap until the lease is release
   ]), { cwd: firstAdmission.repo, environment });
   invokeControl(runLaneRecord, parseLaneArgs, environment, [
     firstTask, "--operation-id=first-writer-lane", "--action=open", "--lane=writer",
-    "--writable", "--paths=workflow/**",
+    "--writable", "--paths=workflow/test-owned/**",
   ]);
   invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
     firstTask, "--operation-id=first-writer-dispatch", "--action=open", "--lane=writer",
     "--dispatch=writer-dispatch",
   ]);
-  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+  assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
     firstTask, "--operation-id=first-writer-reserve", "--action=reserve",
     "--dispatch=writer-dispatch", "--attempt=first-writer-attempt",
     "--launch-operation-id=launch-first-writer",
-    "--writable", "--paths=workflow/**",
-  ]);
+    "--writable", "--paths=workflow/test-owned/**",
+  ], "2026-07-10T12:06:00.000Z", { failAfterEventAppend: true }),
+  /authoritative event committed but projection is inconsistent/);
+  assert.equal(
+    (readTeam(paths, firstTask).writer_leases || []).some((lease) => lease.state === "active"),
+    false,
+  );
 
   const secondTask = createFixtureTask(environment, "Second writer");
-  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/bin/**"] });
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/test-owned/bin/**"] });
   const secondStart = parseRecordStartArgs([
     secondTask, "request overlapping writer scope", "--mode=execute",
     "--authorization-ref=user-message:second-writer",
@@ -658,12 +1130,44 @@ test("execute admission rejects global writer overlap until the lease is release
     () => runRecordStart(secondStart, { cwd: secondAdmission.repo, environment }),
     /global writer lease conflict/,
   );
-  const firstStateFile = taskStateFile(paths, firstTask);
-  const firstState = readJsonObject(firstStateFile);
-  firstState.active_team.writer_leases[0].state = "released";
-  fs.writeFileSync(firstStateFile, `${JSON.stringify(firstState, null, 2)}\n`);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=first-writer-terminal", "--action=terminal",
+    "--attempt=first-writer-attempt", "--outcome=succeeded",
+  ]);
+  writeEvidence(paths, firstTask, "team/first-writer-quiesced.json");
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=first-writer-quiesced", "--action=quiesced",
+    "--attempt=first-writer-attempt",
+    "--evidence-refs=team/first-writer-quiesced.json",
+  ]);
   runRecordStart(secondStart, { cwd: secondAdmission.repo, environment });
   assert.equal(readTeam(paths, secondTask).admission.mode, "execution-v3");
+});
+
+test("Team start restores a committed task completion before admission", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Restore done before Team start");
+  startNativeRecord(environment, taskId);
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-before-done-failure",
+  });
+  runVerification(parseVerifyArgs([taskId, "--", process.execPath, "-e", "process.exit(0)"]), {
+    environment,
+    operationId: "verify-before-done-failure",
+    recordToken: "20260710T120650000000001",
+  });
+  assert.throws(() => completeTask(taskId, {
+    environment,
+    failAfterEventAppend: true,
+    operationId: "done-projection-failure",
+  }), /authoritative event committed but projection is inconsistent/);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+  assert.throws(
+    () => startNativeRecord(environment, taskId, "2026-07-10T12:07:00.000Z"),
+    new RegExp(`task must be doing before team start: ${taskId}`),
+  );
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "done");
 });
 
 test("size exceptions are explicit and cannot downgrade permanent gates", (t) => {
@@ -704,6 +1208,48 @@ test("size exceptions are explicit and cannot downgrade permanent gates", (t) =>
   ]), { cwd: unsafe.repo, environment: unsafeEnvironment }), /permanent gate security must be fresh-executed/);
 });
 
+test("slice acceptance rejects actual diff drift beyond 150 percent", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Actual size drift");
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+    estimate: {
+      estimated_changed_files: 1,
+      estimated_net_loc: 1,
+      target_p90_minutes: 10,
+      serial_dependency_depth: 0,
+      independent_vertical_count: 1,
+    },
+    ownedPaths: ["src/bounded/**"],
+  });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute drifted slice", "--mode=execute",
+    "--authorization-ref=user-message:size-drift",
+    `--brief=${admission.briefPath}`, "--operation-id=start-size-drift",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-size-drift",
+  });
+  const keeper = path.join(admission.repo, "src", "bounded", "keeper.txt");
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "one\ntwo\nthree\n");
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-size-drift",
+    recordToken: "20260710T120800000000001",
+  });
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-size-drift",
+    "--keeper-output=event:execution-slice-complete=src/bounded/keeper.txt",
+  ]), { environment }), /slice requires pause\/replan: actual size/);
+});
+
 test("discuss compatibility never grants a writable lease", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Discuss read only");
@@ -734,8 +1280,8 @@ test("record-start rejects done and archived tasks before changing Team state", 
         environment,
       });
     } else {
-      updateTaskFields(taskFile(paths.tasksDir, taskId), { status: "done" });
-      updateTaskCommand(paths, taskId, {}, {}, clockAt("2026-07-10T12:00:30.000Z"));
+      updateTaskCommand(paths, taskId, { status: "done" }, { status: "done" },
+        clockAt("2026-07-10T12:00:30.000Z"));
     }
     const stateFile = taskStateFile(paths, taskId);
     const runtimeFile = taskRuntimeFile(paths, taskId);
@@ -975,6 +1521,11 @@ test("loop-record validates paseo backend markers and preserves providers", (t) 
     loop,
     "# Paseo Loop\n\n- backend: paseo\n\n## Evidence\nThe paseo loop completed with sufficient verification evidence.\n",
   );
+  const staleLoopState = readJsonObject(taskStateFile(paths, taskId));
+  staleLoopState.active_team = {
+    backend: "paseo", mode: "discuss", status: "running", decision: "legacy",
+  };
+  fs.writeFileSync(taskStateFile(paths, taskId), `${JSON.stringify(staleLoopState, null, 2)}\n`);
   const result = runLoopRecord(
     parseLoopRecordArgs([
       taskId,
@@ -1124,6 +1675,24 @@ test("promote updates state and accepts equals form through the public dispatche
   assert.equal(replay.lines.at(-1), "replayed: true");
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeAfterPromotion);
 
+  const briefBeforeConflict = fs.readFileSync(admission.briefPath, "utf8");
+  try {
+    fs.appendFileSync(admission.briefPath, "\n");
+    assert.throws(() => runPromote(parsePromoteArgs([
+      taskId,
+      "--to=execute",
+      "--authorization-ref=user-message:implement-roadmap",
+      `--brief=${admission.briefPath}`,
+      "--operation-id=promote-execution",
+    ]), {
+      clock: clockAt("2026-07-10T12:05:00.000Z"),
+      cwd: admission.repo,
+      environment,
+    }), /operation_id replay conflict/);
+  } finally {
+    fs.writeFileSync(admission.briefPath, briefBeforeConflict);
+  }
+
   const dispatched = spawnSync(PUBLIC_BIN, ["team-promote", taskId, "--to=finish"], {
     encoding: "utf8",
     env: environment,
@@ -1264,6 +1833,11 @@ test("v2 public commands enforce idempotent attempt lifecycle and derive admitte
   assert.equal(team.lanes[0].convergence, "CONSENSUS");
 
   const { decision, round, staffing } = writeNativeArtifacts(paths, taskId);
+  const staleFinalizeState = readJsonObject(taskStateFile(paths, taskId));
+  staleFinalizeState.active_team = {
+    backend: "native", mode: "discuss", status: "running", decision: "legacy",
+  };
+  fs.writeFileSync(taskStateFile(paths, taskId), `${JSON.stringify(staleFinalizeState, null, 2)}\n`);
   runRecordFinalize(parseRecordFinalizeArgs([
     taskId, "--backend=native", "--status=complete",
     `--round=${round}`, `--decision=${decision}`, `--staffing=${staffing}`,
@@ -1717,7 +2291,7 @@ test("writer lease, trusted retry, and atomic writable fallback preserve ownersh
   ]), { cwd: admission.repo, environment });
   invokeControl(runLaneRecord, parseLaneArgs, environment, [
     taskId, "--operation-id=writer-lane-open", "--action=open", "--lane=writer",
-    "--writable", "--paths=workflow/**",
+    "--writable", "--paths=workflow/test-owned/**",
   ]);
   invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
     taskId, "--operation-id=writer-dispatch-open", "--action=open", "--lane=writer",
@@ -1731,7 +2305,7 @@ test("writer lease, trusted retry, and atomic writable fallback preserve ownersh
     taskId, `--operation-id=${operationId}`, "--action=reserve", "--dispatch=writer-dispatch",
     `--attempt=${attemptId}`, "--provider=openai", "--model=gpt-5.6",
     "--capability-snapshot=writer-capability",
-    "--runtime-mode-id=structured-write-v1", "--writable", "--paths=workflow/**",
+    "--runtime-mode-id=structured-write-v1", "--writable", "--paths=workflow/test-owned/**",
     `--launch-operation-id=launch-${attemptId}`, ...extra,
   ];
   invokeControl(runAttemptRecord, parseAttemptArgs, environment,
@@ -1739,7 +2313,7 @@ test("writer lease, trusted retry, and atomic writable fallback preserve ownersh
 
   invokeControl(runLaneRecord, parseLaneArgs, environment, [
     taskId, "--operation-id=conflict-lane-open", "--action=open", "--lane=conflict",
-    "--writable", "--paths=workflow/bin/**",
+    "--writable", "--paths=workflow/test-owned/bin/**",
   ]);
   invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
     taskId, "--operation-id=conflict-dispatch-open", "--action=open", "--lane=conflict",
@@ -1750,7 +2324,7 @@ test("writer lease, trusted retry, and atomic writable fallback preserve ownersh
       taskId, "--operation-id=conflict-attempt-reserve", "--action=reserve",
       "--dispatch=conflict-dispatch", "--attempt=conflict-attempt", "--provider=openai",
       "--model=gpt-5.6", "--capability-snapshot=writer-capability",
-      "--runtime-mode-id=structured-write-v1", "--writable", "--paths=workflow/bin/**",
+      "--runtime-mode-id=structured-write-v1", "--writable", "--paths=workflow/test-owned/bin/**",
       "--launch-operation-id=launch-conflict",
     ]),
     /writer lease conflict/,
@@ -1846,7 +2420,8 @@ test("writer lease, trusted retry, and atomic writable fallback preserve ownersh
   assert.equal(team.fallback_events.length, 1);
   assert.equal(team.takeover_permits.length, 1);
   assert.equal(team.takeover_permits[0].authorization_ref, "user-message:execute-writer");
-  assert.deepEqual(team.attempts.find((item) => item.attempt_id === "native-writer").owned_paths, ["workflow/**"]);
+  assert.deepEqual(team.attempts.find((item) => item.attempt_id === "native-writer").owned_paths,
+    ["workflow/test-owned/**"]);
   assert.equal(team.writer_leases.find((item) => item.owner_attempt_id === "native-writer").state, "active");
 
   invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
@@ -1963,15 +2538,22 @@ test("v2 state resists stale Markdown headers and generations do not import runn
     active_team_status: "failed",
     active_team_decision: "stale/decision.md",
   });
-  runStatus([taskId], { environment });
+  const staleState = readJsonObject(taskStateFile(paths, taskId));
+  staleState.active_team = {
+    backend: "paseo", mode: "execute", status: "failed", decision: "stale/decision.md",
+  };
+  fs.writeFileSync(taskStateFile(paths, taskId), `${JSON.stringify(staleState, null, 2)}\n`);
+  const authoritativeStatus = runStatus([taskId], { environment });
+  assert.ok(authoritativeStatus.lines.includes("team_schema_version: 2"));
+  assert.ok(authoritativeStatus.lines.includes("team_status: running"));
+  runStop([taskId], { environment });
   let team = readTeam(paths, taskId);
   assert.equal(team.schema_version, 2);
   assert.equal(team.backend, "native");
   assert.equal(team.mode, "discuss");
-  assert.equal(team.status, "running");
+  assert.equal(team.status, "stopped");
   assert.notEqual(team.decision, "stale/decision.md");
 
-  runStop([taskId], { environment });
   const second = startNativeRecord(environment, taskId, "2026-07-10T12:07:00.000Z");
   assert.ok(second.lines.includes("team_run_id: run-0002"));
   assert.ok(second.lines.includes("generation: 2"));

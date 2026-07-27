@@ -4756,7 +4756,7 @@ main() {
       shift
       cmd_team_start "$@"
       ;;
-    team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote)
+    team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-slice-accept|team-slice-supersede)
       command="$1"
       shift
       node "$SCRIPT_DIR/lib/codex-workflow/team/cli.js" "$command" "$@"
@@ -4767,7 +4767,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede|team-loop}' >&2
       exit 1
       ;;
   esac

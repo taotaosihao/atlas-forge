@@ -23,6 +23,10 @@ const {
   digestCanonical,
   identityInputPaths,
 } = require("../verification/identity");
+const {
+  executionCompletionAdmission,
+  requiredGateAdmission,
+} = require("../verification/required-gates");
 
 function timestampSeconds(clock = () => new Date()) {
   const value = clock();
@@ -274,6 +278,14 @@ function resolveCodeHomeReference(paths, reference) {
 
 function successfulVerificationAdmission(paths, taskId, options = {}) {
   const state = readJsonObject(taskStateFile(paths, taskId));
+  try {
+    const execution = executionCompletionAdmission(paths, taskId, state);
+    if (execution) return execution;
+    const required = requiredGateAdmission(paths, taskId, state, options);
+    if (required) return required;
+  } catch (error) {
+    return { passed: false, reasons: [`unable to load required verification gates: ${error.message}`] };
+  }
   const verification =
     state.verification && typeof state.verification === "object" ? state.verification : {};
   const reasons = [];

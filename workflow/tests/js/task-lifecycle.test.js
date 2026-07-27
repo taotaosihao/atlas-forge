@@ -14,6 +14,10 @@ const { resolvePaths } = require(path.resolve(
   __dirname,
   "../../bin/lib/codex-workflow/core/paths.js",
 ));
+const { mutateTaskRuntime } = require(path.resolve(
+  __dirname,
+  "../../bin/lib/codex-workflow/core/task-mutation.js",
+));
 const {
   archiveTask,
   blockTask,
@@ -136,10 +140,23 @@ function v2Team(overrides = {}) {
 }
 
 function replaceTeam(paths, taskId, team) {
-  const file = taskStateFile(paths, taskId);
-  const state = JSON.parse(fs.readFileSync(file, "utf8"));
-  state.active_team = team;
-  fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+  replaceStateFields(paths, taskId, { active_team: team });
+}
+
+function replaceStateFields(paths, taskId, updates) {
+  mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "test.projection-fixture", data: updates },
+    ({ currentProjection }) => ({
+      projection: {
+        task_content: currentProjection.task_content,
+        state: { ...currentProjection.state, ...updates },
+      },
+      result: {},
+      legacy: [],
+    }),
+  );
 }
 
 test("creates a task, state projection, scaffold, and schema-v1 event in JavaScript", (t) => {
@@ -326,10 +343,10 @@ test("resume and done do not interpret admission-shaped task state", (t) => {
   blockTask(taskId, "pause before lifecycle characterization", options);
 
   const stateFile = taskStateFile(paths, taskId);
-  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-  state.severity = "Critical";
-  state.admission = { disposition: "visible-follow-up", repair_status: "open" };
-  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  replaceStateFields(paths, taskId, {
+    severity: "Critical",
+    admission: { disposition: "visible-follow-up", repair_status: "open" },
+  });
 
   resumeTask(taskId, options);
   recordPassingVerification(environment, taskId, clock, {
@@ -626,7 +643,7 @@ test("reports stale open tasks without mutating task or artifact files", (t) => 
   }
 });
 
-test("rejects corrupt task state before lifecycle or command preparation writes", (t) => {
+test("lifecycle restores a corrupt projection from the latest authoritative event", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const options = { clock: fixedClock("2026-07-10T13:00:00.000Z"), environment };
   const corruptValues = ['{"active_team":', "[]", "null"];
@@ -637,25 +654,10 @@ test("rejects corrupt task state before lifecycle or command preparation writes"
     const statePath = taskStateFile(paths, taskId);
     const runtimePath = taskRuntimeFile(paths, taskId);
     fs.writeFileSync(statePath, corrupt);
-    const before = {
-      task: fs.readFileSync(taskPath),
-      state: fs.readFileSync(statePath),
-      runtime: fs.readFileSync(runtimePath),
-    };
-
-    assert.throws(
-      () => startTask(taskId, options),
-      new RegExp(`corrupt task state: .*${taskId}.*state\\.json`),
-    );
-    assert.deepEqual(fs.readFileSync(taskPath), before.task);
-    assert.deepEqual(fs.readFileSync(statePath), before.state);
-    assert.deepEqual(fs.readFileSync(runtimePath), before.runtime);
-    assert.throws(
-      () => prepareTaskCommand(paths, taskId, options.clock),
-      new RegExp(`corrupt task state: .*${taskId}.*state\\.json`),
-    );
-    assert.deepEqual(fs.readFileSync(taskPath), before.task);
-    assert.deepEqual(fs.readFileSync(statePath), before.state);
-    assert.deepEqual(fs.readFileSync(runtimePath), before.runtime);
+    startTask(taskId, options);
+    assert.equal(JSON.parse(fs.readFileSync(statePath, "utf8")).status, "doing");
+    assert.equal(validateTaskFile(taskPath).task.status, "doing");
+    assert.doesNotThrow(() => prepareTaskCommand(paths, taskId, options.clock));
+    assert.match(fs.readFileSync(runtimePath, "utf8"), /"kind":"task\.started"/);
   }
 });

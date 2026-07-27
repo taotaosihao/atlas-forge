@@ -11,7 +11,12 @@ const {
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
-const { renderTaskFields, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  parseTaskHeader,
+  renderTaskFields,
+  requireTaskFile,
+  validateTaskFile,
+} = require("../task/repository");
 const {
   ensureTaskRuntimeScaffold,
   projectTaskState,
@@ -24,9 +29,10 @@ const {
   buildVerificationIdentityRecord,
   renderVerificationRecord,
 } = require("./record");
+const { bindRequiredCheck } = require("./required-gates");
 
 const VERIFY_USAGE =
-  "usage: codex-workflow verify <task-id> [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... -- <command...>";
+  "usage: codex-workflow verify <task-id> [--brief <brief.json> --slice-id <id> --check-id <id>] [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... -- <command...>";
 const VALID_OUTCOMES = new Set(["", "passed", "failed", "blocked", "skipped"]);
 const VALID_TRAJECTORIES = new Set([
   "",
@@ -60,13 +66,17 @@ function parseVerifyArgs(argv) {
     throw new CommandError(VERIFY_USAGE);
   }
   const result = {
+    briefPath: "",
+    checkId: "",
     command: [],
     evaluator: "",
     evidenceRefs: [],
     failureAttribution: "",
     gateClass: "general",
+    gateClassProvided: false,
     inputPaths: [],
     outcome: "",
+    sliceId: "",
     taskId: argv[0],
     trajectory: "",
   };
@@ -78,17 +88,21 @@ function parseVerifyArgs(argv) {
       break;
     }
     const namedFlags = {
+      "--brief": "briefPath",
+      "--check-id": "checkId",
       "--gate-class": "gateClass",
       "--outcome": "outcome",
       "--trajectory": "trajectory",
       "--evaluator": "evaluator",
       "--failure-attribution": "failureAttribution",
+      "--slice-id": "sliceId",
     };
     if (Object.hasOwn(namedFlags, argument)) {
       if (index + 1 >= argv.length) {
         throw new CommandError(VERIFY_USAGE);
       }
       result[namedFlags[argument]] = argv[++index];
+      if (argument === "--gate-class") result.gateClassProvided = true;
     } else if (argument === "--evidence") {
       if (index + 1 >= argv.length) {
         throw new CommandError(VERIFY_USAGE);
@@ -99,8 +113,13 @@ function parseVerifyArgs(argv) {
         throw new CommandError(VERIFY_USAGE);
       }
       result.inputPaths.push(argv[++index]);
+    } else if (argument.startsWith("--brief=")) {
+      result.briefPath = argument.slice("--brief=".length);
+    } else if (argument.startsWith("--check-id=")) {
+      result.checkId = argument.slice("--check-id=".length);
     } else if (argument.startsWith("--gate-class=")) {
       result.gateClass = argument.slice("--gate-class=".length);
+      result.gateClassProvided = true;
     } else if (argument.startsWith("--outcome=")) {
       result.outcome = argument.slice("--outcome=".length);
     } else if (argument.startsWith("--trajectory=")) {
@@ -113,6 +132,8 @@ function parseVerifyArgs(argv) {
       result.evidenceRefs.push(argument.slice("--evidence=".length));
     } else if (argument.startsWith("--input=")) {
       result.inputPaths.push(argument.slice("--input=".length));
+    } else if (argument.startsWith("--slice-id=")) {
+      result.sliceId = argument.slice("--slice-id=".length);
     } else {
       throw new CommandError(VERIFY_USAGE);
     }
@@ -124,6 +145,11 @@ function parseVerifyArgs(argv) {
 
   if (!/^[a-z0-9][a-z0-9-]*$/.test(result.gateClass)) {
     throw new CommandError(`invalid gate class: ${result.gateClass}`);
+  }
+  for (const [label, value] of [["check id", result.checkId], ["slice id", result.sliceId]]) {
+    if (value && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+      throw new CommandError(`invalid ${label}: ${value}`);
+    }
   }
   if (!VALID_OUTCOMES.has(result.outcome)) {
     throw new CommandError(`invalid outcome: ${result.outcome}`);
@@ -205,12 +231,31 @@ function commandExitCode(result, stderrFile) {
 
 function runVerification(parsed, options = {}) {
   const { clock, cwd, environment, paths } = commandOptions(options);
-  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-  const { task } = validateTaskFile(taskFile);
-  readJsonObject(taskStateFile(paths, parsed.taskId));
-  ensureTaskRuntimeScaffold(paths, parsed.taskId, task.title);
   const observedEvents = readAuthoritativeEvents(taskEventFile(paths, parsed.taskId), parsed.taskId);
+  const latest = observedEvents.at(-1);
   const observedRevision = observedEvents.at(-1)?.revision || 0;
+  let latestState;
+  let taskTitle;
+  if (latest) {
+    latestState = latest.projection.state;
+    const fields = parseTaskHeader(latest.projection.task_content);
+    taskTitle = fields.title?.[0] || parsed.taskId;
+  } else {
+    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+    const { task } = validateTaskFile(taskFile);
+    latestState = readJsonObject(taskStateFile(paths, parsed.taskId));
+    taskTitle = task.title;
+  }
+  ensureTaskRuntimeScaffold(paths, parsed.taskId, taskTitle);
+  const commandText = formatCommand(parsed.command).trimEnd();
+  const requiredGate = bindRequiredCheck({
+    commandText,
+    cwd,
+    parsed,
+    paths,
+    state: latestState,
+  });
+  const gateClass = requiredGate?.gate_class || parsed.gateClass || "general";
   const captureIdentity = options.captureIdentity || captureVerificationIdentity;
   const before = captureIdentity({
     argv: parsed.command,
@@ -245,7 +290,7 @@ function runVerification(parsed, options = {}) {
     const verdict = exitCode === 0 ? "passed" : "failed";
     const outcome = parsed.outcome || verdict;
     const evaluator = parsed.evaluator || "local-command";
-    const commandText = formatCommand(parsed.command);
+    const renderedCommandText = `${commandText} `;
     const token = options.recordToken || timestampToken(clock);
     const createdAt = timestampSeconds(clock);
     const recordFile = path.join(
@@ -266,13 +311,14 @@ function runVerification(parsed, options = {}) {
     });
     const snapshotStable = before.identityDigest === after.identityDigest;
     const identityRecord = buildVerificationIdentityRecord({
-      schema_version: 2,
+      schema_version: requiredGate ? 3 : 2,
       task_id: parsed.taskId,
       created_at: createdAt,
-      gate_class: parsed.gateClass || "general",
+      gate_class: gateClass,
       verdict,
       outcome,
-      provenance: "executed",
+      provenance: requiredGate ? "fresh-executed" : "executed",
+      ...(requiredGate ? { required_gate: requiredGate } : {}),
       identity: after.identity,
       identity_digest: after.identityDigest,
       pre_identity_digest: before.identityDigest,
@@ -289,7 +335,7 @@ function runVerification(parsed, options = {}) {
       recordFile,
       recordType: "verification",
       taskId: parsed.taskId,
-      commandText,
+      commandText: renderedCommandText,
       cwd,
       exitCode,
       verdict,
@@ -316,7 +362,7 @@ function runVerification(parsed, options = {}) {
       trajectory: parsed.trajectory,
       evaluator,
       failure_attribution: parsed.failureAttribution,
-      identity_schema_version: 2,
+      identity_schema_version: requiredGate ? 3 : 2,
       record_id: identityRecord.record_id,
       identity_digest: identityRecord.identity_digest,
       identity_stable: snapshotStable,
@@ -332,11 +378,12 @@ function runVerification(parsed, options = {}) {
           record_id: identityRecord.record_id,
           identity_digest: identityRecord.identity_digest,
           observed_revision: observedRevision,
+          required_gate: requiredGate,
           verdict,
           outcome,
         },
       },
-      () => {
+      ({ revision }) => {
         const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
         validateTaskFile(currentFile);
         const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
@@ -350,7 +397,27 @@ function runVerification(parsed, options = {}) {
           clock,
         );
         state.last_verified_at = verifiedAt;
-        state.verification = stateFields;
+        state.verification = {
+          ...(state.verification || {}),
+          ...stateFields,
+        };
+        if (requiredGate) {
+          state.verification.schema_version = 3;
+          state.verification.required_gates = {
+            ...(state.verification.required_gates || {}),
+            [requiredGate.check_id]: {
+              ...requiredGate,
+              completed_at: verifiedAt,
+              event_revision: revision + 1,
+              identity_digest: identityRecord.identity_digest,
+              identity_record: identityReference,
+              outcome,
+              provenance: "fresh-executed",
+              record_digest: identityRecord.record_id,
+              record_id: identityRecord.record_id,
+            },
+          };
+        }
         return {
           projection: {
             task_content: taskContent,
@@ -367,7 +434,7 @@ function runVerification(parsed, options = {}) {
               },
             ],
           },
-          legacy: [{ kind: "verify", detail: `${commandText} => ${verdict}` }],
+          legacy: [{ kind: "verify", detail: `${renderedCommandText} => ${verdict}` }],
         };
       },
       {

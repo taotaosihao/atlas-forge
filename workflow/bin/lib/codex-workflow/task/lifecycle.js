@@ -207,7 +207,7 @@ function startTask(taskId, options = {}) {
     },
     mutationOptions(options, clock, environment),
   );
-  if (!result.replay || result.event.kind === "task.started") {
+  if (!result.replay || result.latest) {
     writeCurrentTaskPointer(paths, taskId, clock);
   }
   return result;
@@ -238,7 +238,7 @@ function blockTask(taskId, reason, options = {}) {
     },
     mutationOptions(options, clock, environment),
   );
-  if (!result.replay || result.event.kind === "task.blocked") {
+  if (!result.replay || result.latest) {
     clearCurrentTaskPointer(paths, taskId);
   }
   return result;
@@ -268,7 +268,7 @@ function resumeTask(taskId, options = {}) {
     },
     mutationOptions(options, clock, environment),
   );
-  if (!result.replay || result.event.kind === "task.resumed") {
+  if (!result.replay || result.latest) {
     writeCurrentTaskPointer(paths, taskId, clock);
   }
   return result;
@@ -326,7 +326,7 @@ function completeTask(
     paths,
     taskId,
     { kind: "task.completion.closed", operationId: options.operationId, data },
-    () => {
+    ({ revision }) => {
       const currentFile = requireTaskFile(paths.tasksDir, taskId);
       const { task } = validateTaskFile(currentFile);
       if (task.status === "done") throw new TaskLifecycleError(`task already done: ${taskId}`);
@@ -377,10 +377,22 @@ function completeTask(
         evidence_refs: [...evidenceRefs],
         verification_record_id: verification.recordId || "",
         verification_identity_digest: verification.identityDigest || "",
+        verification_record_ids: verification.recordIds || (
+          verification.recordId ? [verification.recordId] : []
+        ),
         team_run_id: activeTeam.team_run_id || "",
         team_generation: activeTeam.generation || 0,
         closed_at: closedAt,
       };
+      if (outcome === "succeeded" && state.execution_authority?.status === "active") {
+        state.execution_authority = {
+          ...state.execution_authority,
+          completion: {
+            completed_at: closedAt,
+            completed_revision: revision + 1,
+          },
+        };
+      }
       const legacy = [];
       if (noVerifyRequested) {
         state.verification = { ...(state.verification || {}),
@@ -395,7 +407,7 @@ function completeTask(
     },
     mutationOptions(options, clock, environment),
   );
-  clearCurrentTaskPointer(paths, taskId);
+  if (!result.replay || result.latest) clearCurrentTaskPointer(paths, taskId);
   return result;
 }
 
@@ -433,7 +445,7 @@ function archiveTask(taskId, reason, options = {}) {
     },
     mutationOptions(options, clock, environment),
   );
-  if (!result.replay || result.event.kind === "task.archived") {
+  if (!result.replay || result.latest) {
     clearCurrentTaskPointer(paths, taskId);
   }
   return result;

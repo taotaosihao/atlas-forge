@@ -8,7 +8,8 @@ const {
 } = require("../core/command-runtime");
 const { taskMutationLockFile, withLock } = require("../core/lock");
 const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require("../core/paths");
-const { mutateTaskRuntime } = require("../core/task-mutation");
+const { readAuthoritativeEvents } = require("../core/event-store");
+const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const {
   getTaskField,
   renderTaskFields,
@@ -45,6 +46,8 @@ const { classifyPaseoObservation } = require("./backend-failures");
 const { launchLabel, observePaseoCommand, reconcileLaunch } = require("./paseo-observer");
 const {
   admitTeamStart,
+  bindExecutionAuthority,
+  briefRequestIdentity,
   globalAdmissionLockFile,
   validateTeamWriterAdmission,
 } = require("./admission");
@@ -103,6 +106,13 @@ function requireV2Team(paths, taskId) {
   const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
   if (team.schema_version !== 2) throw new CommandError("team v2 run is required");
   return team;
+}
+
+function authoritativeTaskState(paths, taskId) {
+  const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  const latest = events.at(-1);
+  if (latest) return JSON.parse(JSON.stringify(latest.projection.state));
+  return readJsonObject(taskStateFile(paths, taskId));
 }
 
 function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
@@ -172,6 +182,18 @@ function mutateV2Team(taskId, operationFn, options = {}) {
   return { ...output, paths };
 }
 
+function assertAdmissionRequestIdentity(admission, requested) {
+  const actual = {
+    brief_path: admission?.brief?.path || "",
+    brief_sha256: admission?.brief?.sha256 || "",
+    contract_sha256: admission?.brief?.contract_sha256 || "",
+    execution_plan_sha256: admission?.brief?.execution_plan_sha256 || "",
+  };
+  if (JSON.stringify(actual) !== JSON.stringify(requested)) {
+    throw new CommandError("Team brief identity changed while admission was being evaluated");
+  }
+}
+
 function runRecordStart(parsed, options = {}) {
   const backend = parsed.backend || "native";
   validateBackend(backend);
@@ -206,14 +228,7 @@ function runRecordStart(parsed, options = {}) {
   let team;
   let committed;
   withLock(globalAdmissionLockFile(paths), () => {
-    const admission = admitTeamStart({
-      briefPath: parsed.briefPath,
-      clock,
-      cwd,
-      mode: parsed.mode,
-      paths,
-      taskId: parsed.taskId,
-    });
+    const requestIdentity = briefRequestIdentity(parsed.briefPath);
     try {
       committed = mutateTaskRuntime(
         paths,
@@ -232,12 +247,24 @@ function runRecordStart(parsed, options = {}) {
             providers: parsed.providers || "",
             selection_authority_kind: parsed.selectionAuthorityKind || "",
             selection_authority_ref: parsed.selectionAuthorityRef || "",
-            brief_path: admission.brief?.path || "",
-            brief_sha256: admission.brief?.sha256 || "",
-            execution_plan_sha256: admission.brief?.execution_plan_sha256 || "",
+            ...requestIdentity,
           },
         },
-        () => {
+        ({ revision }) => {
+          const admission = admitTeamStart({
+            briefPath: parsed.briefPath,
+            captureIdentity: options.captureIdentity,
+            clock,
+            cwd,
+            environment,
+            mode: parsed.mode,
+            paths,
+            taskId: parsed.taskId,
+          });
+          assertAdmissionRequestIdentity(admission, requestIdentity);
+          if (admission.slice_start_snapshot) {
+            admission.slice_start_snapshot.captured_at_revision = revision + 1;
+          }
           const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
           const { task } = validateTaskFile(taskFile);
           const state = readJsonObject(taskStateFile(paths, parsed.taskId));
@@ -247,6 +274,7 @@ function runRecordStart(parsed, options = {}) {
           const previous = state.active_team && typeof state.active_team === "object"
             ? state.active_team
             : {};
+          bindExecutionAuthority(state, admission, revision + 1);
           const generation = previous.schema_version === 2
             ? Number(previous.generation || 0) + 1
             : 1;
@@ -880,60 +908,61 @@ function validateTeamArtifact(paths, taskId, label, file, backend) {
 function runRecordFinalize(parsed, options = {}) {
   validateFinalStatus(parsed.status);
   const { clock, environment, paths } = commandOptions(options);
-  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-  validateTaskFile(taskFile);
-  const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
-  if (currentState.active_team && currentState.active_team.schema_version === 2) {
-    return runRecordFinalizeV2(parsed, { ...options, clock, environment, paths });
-  }
-  validateBackend(parsed.backend);
-  const currentBackend = getTaskField(taskFile, "active_team_backend");
-  const currentStatus = getTaskField(taskFile, "active_team_status");
-  if (currentBackend !== parsed.backend || currentStatus !== "running") {
-    throw new CommandError(
-      `team-record-finalize requires an active ${parsed.backend} team record in running status`,
-    );
-  }
-  const roundAbsolute = validateTeamArtifact(
-    paths,
-    parsed.taskId,
-    "team round",
-    parsed.roundFile,
-    parsed.backend,
-  );
-  const decisionAbsolute = validateTeamArtifact(
-    paths,
-    parsed.taskId,
-    "team decision",
-    parsed.decisionFile,
-    parsed.backend,
-  );
-  const staffingAbsolute = validateTeamArtifact(
-    paths,
-    parsed.taskId,
-    "team staffing",
-    parsed.staffingFile,
-    parsed.backend,
-  );
-  const round = relativeToCodeHome(paths, roundAbsolute);
-  const decision = relativeToCodeHome(paths, decisionAbsolute);
-  const staffing = relativeToCodeHome(paths, staffingAbsolute);
-  const mode = getTaskField(taskFile, "active_team_mode");
-  mutateTaskRuntime(
-    paths,
-    parsed.taskId,
-    {
-      kind: "team.finalized",
-      operationId: options.operationId,
-      data: {
-        backend: parsed.backend,
-        status: parsed.status,
-        round,
-        decision,
-        staffing,
+  let committed;
+  withLock(globalAdmissionLockFile(paths), () => {
+    committed = mutateTaskRuntime(
+      paths,
+      parsed.taskId,
+      {
+        kind: "team.finalized",
+        operationId: options.operationId,
+        data: {
+          backend: parsed.backend,
+          status: parsed.status,
+          round_file: path.resolve(parsed.roundFile),
+          decision_file: path.resolve(parsed.decisionFile),
+          staffing_file: path.resolve(parsed.staffingFile),
+        },
       },
-    },
-    () => {
+      ({ currentProjection }) => {
+        const currentState = currentProjection.state;
+        const currentTeam = currentState.active_team && typeof currentState.active_team === "object"
+          ? JSON.parse(JSON.stringify(currentState.active_team))
+          : {};
+        if (currentTeam.schema_version === 2) {
+          const output = finalizeV2Transition(parsed, { clock, paths }, currentTeam);
+          validateTeamWriterAdmission(paths, parsed.taskId, output.team);
+          return {
+            projection: {
+              ...buildTeamProjection(paths, parsed.taskId, output.team, clock, currentState),
+              files: output.files,
+            },
+            result: output.result,
+            legacy: output.legacy,
+          };
+        }
+        validateBackend(parsed.backend);
+        const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+        validateTaskFile(taskFile);
+        if (getTaskField(taskFile, "active_team_backend") !== parsed.backend
+          || getTaskField(taskFile, "active_team_status") !== "running") {
+          throw new CommandError(
+            `team-record-finalize requires an active ${parsed.backend} team record in running status`,
+          );
+        }
+        const roundAbsolute = validateTeamArtifact(
+          paths, parsed.taskId, "team round", parsed.roundFile, parsed.backend,
+        );
+        const decisionAbsolute = validateTeamArtifact(
+          paths, parsed.taskId, "team decision", parsed.decisionFile, parsed.backend,
+        );
+        const staffingAbsolute = validateTeamArtifact(
+          paths, parsed.taskId, "team staffing", parsed.staffingFile, parsed.backend,
+        );
+        const round = relativeToCodeHome(paths, roundAbsolute);
+        const decision = relativeToCodeHome(paths, decisionAbsolute);
+        const staffing = relativeToCodeHome(paths, staffingAbsolute);
+        const mode = getTaskField(taskFile, "active_team_mode");
       const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
       validateTaskFile(currentFile);
       const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
@@ -945,7 +974,7 @@ function runRecordFinalize(parsed, options = {}) {
         paths,
         parsed.taskId,
         taskContent,
-        readJsonObject(taskStateFile(paths, parsed.taskId)),
+        currentState,
         clock,
       );
       state.active_team = {
@@ -960,24 +989,31 @@ function runRecordFinalize(parsed, options = {}) {
       };
       return {
         projection: { task_content: taskContent, state },
+        result: { effective_backend: parsed.backend, sidecar: false },
         legacy: [{
           kind: "team-record-finalize",
           detail: `${parsed.backend}/${parsed.status} round=${round}`,
         }],
       };
-    },
-    { clock, environment },
-  );
+      },
+      { ...options, clock, environment },
+    );
+  });
+  const effectiveBackend = committed.result.effective_backend || parsed.backend;
+  const lines = [
+    `task_id: ${parsed.taskId}`,
+    `backend: ${effectiveBackend}`,
+    `status: ${parsed.status}`,
+    `decision: ${parsed.decisionFile}`,
+    `staffing: ${parsed.staffingFile}`,
+    `round: ${parsed.roundFile}`,
+  ];
+  if (committed.result.sidecar) {
+    lines.push(`sidecar: ${path.join(teamDir(paths, parsed.taskId), "backend-v2.json")}`);
+  }
   return {
     exitCode: 0,
-    lines: [
-      `task_id: ${parsed.taskId}`,
-      `backend: ${parsed.backend}`,
-      `status: ${parsed.status}`,
-      `decision: ${parsed.decisionFile}`,
-      `staffing: ${parsed.staffingFile}`,
-      `round: ${parsed.roundFile}`,
-    ],
+    lines,
   };
 }
 
@@ -991,13 +1027,12 @@ function backendAssertionMatches(asserted, effective, hasDispatches, resolvedReq
   return effective === "none" && !hasDispatches && asserted === resolvedRequestedBackend;
 }
 
-function runRecordFinalizeV2(parsed, context) {
+function finalizeV2Transition(parsed, context, team) {
   const { clock, paths } = context;
   const sidecarFile = path.join(teamDir(paths, parsed.taskId), "backend-v2.json");
-  const output = mutateV2Team(parsed.taskId, (team) => {
-    if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
+  if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
       throw new CommandError("team-record-finalize requires an active v2 team record in running status");
-    }
+  }
     const roundAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team round", parsed.roundFile);
     const decisionAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team decision", parsed.decisionFile);
     const staffingAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team staffing", parsed.staffingFile);
@@ -1046,39 +1081,13 @@ function runRecordFinalizeV2(parsed, context) {
       result: {
         effective_backend: effectiveBackend,
         round_file: team.round_file,
+        sidecar: true,
       },
       legacy: [{
         kind: "team-record-finalize",
         detail: `${effectiveBackend}/${parsed.status} round=${team.round_file}`,
       }],
     };
-  }, {
-    ...context,
-    operationId: context.operationId,
-    operationData: {
-      backend: parsed.backend,
-      status: parsed.status,
-      roundFile: parsed.roundFile,
-      decisionFile: parsed.decisionFile,
-      staffingFile: parsed.staffingFile,
-    },
-    eventKind: "team.finalized",
-    legacyKind: "team-record-finalize",
-    legacyDetail: `${parsed.backend}/${parsed.status} round=${parsed.roundFile}`,
-  });
-  const effectiveBackend = output.result.effective_backend;
-  return {
-    exitCode: 0,
-    lines: [
-      `task_id: ${parsed.taskId}`,
-      `backend: ${effectiveBackend}`,
-      `status: ${parsed.status}`,
-      `decision: ${parsed.decisionFile}`,
-      `staffing: ${parsed.staffingFile}`,
-      `round: ${parsed.roundFile}`,
-      `sidecar: ${sidecarFile}`,
-    ],
-  };
 }
 
 function validateExistingTeamArtifactPath(paths, taskId, label, file) {
@@ -1102,45 +1111,50 @@ function runLoopRecord(parsed, options = {}) {
     validateReason(parsed.maxTime, "loop max time");
   }
   const { clock, environment, paths } = commandOptions(options);
-  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-  validateTaskFile(taskFile);
-  const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-  if (state.active_team && state.active_team.schema_version === 2) {
-    return runLoopRecordV2(parsed, { ...options, clock, environment, paths });
-  }
-  validateBackend(parsed.backend);
-  if (getTaskField(taskFile, "active_team_backend") !== parsed.backend) {
-    throw new CommandError(`team-loop-record requires a ${parsed.backend} team record`);
-  }
-  const loopAbsolute = validateTeamArtifact(
-    paths,
-    parsed.taskId,
-    "team loop",
-    parsed.loopFile,
-    parsed.backend,
-  );
-  const decisionFile = teamDecisionFile(paths, parsed.taskId);
-  const staffingFile = teamStaffingFile(paths, parsed.taskId);
-  const decision = relativeToCodeHome(paths, decisionFile);
-  const staffing = relativeToCodeHome(paths, staffingFile);
-  const loop = relativeToCodeHome(paths, loopAbsolute);
-  const mode = getTaskField(taskFile, "active_team_mode") || "execute";
-  mutateTaskRuntime(
-    paths,
-    parsed.taskId,
-    {
-      kind: "team.loop.recorded",
-      operationId: options.operationId,
-      data: {
-        backend: parsed.backend,
-        status: parsed.status,
-        loop,
-        iterations: Number(parsed.iterations),
-        max_iterations: parsed.maxIterations ? Number(parsed.maxIterations) : null,
-        max_time: parsed.maxTime || "",
+  let committed;
+  withLock(globalAdmissionLockFile(paths), () => {
+    committed = mutateTaskRuntime(
+      paths,
+      parsed.taskId,
+      {
+        kind: "team.loop.recorded",
+        operationId: options.operationId,
+        data: {
+          backend: parsed.backend,
+          status: parsed.status,
+          loop_file: path.resolve(parsed.loopFile),
+          iterations: Number(parsed.iterations),
+          max_iterations: parsed.maxIterations ? Number(parsed.maxIterations) : null,
+          max_time: parsed.maxTime || "",
+        },
       },
-    },
-    () => {
+      ({ currentProjection }) => {
+        const currentState = currentProjection.state;
+        const currentTeam = currentState.active_team && typeof currentState.active_team === "object"
+          ? JSON.parse(JSON.stringify(currentState.active_team))
+          : {};
+        if (currentTeam.schema_version === 2) {
+          const output = loopV2Transition(parsed, { clock, paths }, currentTeam);
+          validateTeamWriterAdmission(paths, parsed.taskId, output.team);
+          return {
+            projection: buildTeamProjection(paths, parsed.taskId, output.team, clock, currentState),
+            result: output.result,
+            legacy: output.legacy,
+          };
+        }
+        validateBackend(parsed.backend);
+        const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+        validateTaskFile(taskFile);
+        if (getTaskField(taskFile, "active_team_backend") !== parsed.backend) {
+          throw new CommandError(`team-loop-record requires a ${parsed.backend} team record`);
+        }
+        const loopAbsolute = validateTeamArtifact(
+          paths, parsed.taskId, "team loop", parsed.loopFile, parsed.backend,
+        );
+        const decision = relativeToCodeHome(paths, teamDecisionFile(paths, parsed.taskId));
+        const staffing = relativeToCodeHome(paths, teamStaffingFile(paths, parsed.taskId));
+        const loop = relativeToCodeHome(paths, loopAbsolute);
+        const mode = getTaskField(taskFile, "active_team_mode") || "execute";
       const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
       validateTaskFile(currentFile);
       const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
@@ -1153,7 +1167,7 @@ function runLoopRecord(parsed, options = {}) {
         paths,
         parsed.taskId,
         taskContent,
-        readJsonObject(taskStateFile(paths, parsed.taskId)),
+        currentState,
         clock,
       );
       const nextLoop = {
@@ -1175,19 +1189,21 @@ function runLoopRecord(parsed, options = {}) {
       };
       return {
         projection: { task_content: taskContent, state: nextState },
+        result: { effective_backend: parsed.backend },
         legacy: [{
           kind: "team-loop-record",
           detail: `${parsed.backend}/${parsed.status} loop=${loop} iterations=${parsed.iterations}`,
         }],
       };
-    },
-    { clock, environment },
-  );
+      },
+      { ...options, clock, environment },
+    );
+  });
   return {
     exitCode: 0,
     lines: [
       `task_id: ${parsed.taskId}`,
-      `backend: ${parsed.backend}`,
+      `backend: ${committed.result.effective_backend || parsed.backend}`,
       `status: ${parsed.status}`,
       `loop: ${parsed.loopFile}`,
       `iterations: ${parsed.iterations}`,
@@ -1195,12 +1211,11 @@ function runLoopRecord(parsed, options = {}) {
   };
 }
 
-function runLoopRecordV2(parsed, context) {
+function loopV2Transition(parsed, context, team) {
   const { clock, paths } = context;
-  const output = mutateV2Team(parsed.taskId, (team) => {
-    if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
+  if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
       throw new CommandError("team-loop-record requires an active v2 team record in running status");
-    }
+  }
     deriveTeam(team);
     const effective = team.effective_backend;
     if (parsed.backend && !backendAssertionMatches(
@@ -1241,32 +1256,6 @@ function runLoopRecordV2(parsed, context) {
         detail: `${effective}/${parsed.status} loop=${team.loop.file} iterations=${parsed.iterations}`,
       }],
     };
-  }, {
-    ...context,
-    operationId: context.operationId,
-    operationData: {
-      backend: parsed.backend,
-      status: parsed.status,
-      loopFile: parsed.loopFile,
-      iterations: Number(parsed.iterations),
-      maxIterations: parsed.maxIterations ? Number(parsed.maxIterations) : null,
-      maxTime: parsed.maxTime || "",
-    },
-    eventKind: "team.loop.recorded",
-    legacyKind: "team-loop-record",
-    legacyDetail: `${parsed.backend}/${parsed.status} loop=${parsed.loopFile} iterations=${parsed.iterations}`,
-  });
-  const effective = output.result.effective_backend;
-  return {
-    exitCode: 0,
-    lines: [
-      `task_id: ${parsed.taskId}`,
-      `backend: ${effective}`,
-      `status: ${parsed.status}`,
-      `loop: ${parsed.loopFile}`,
-      `iterations: ${parsed.iterations}`,
-    ],
-  };
 }
 
 function displayValue(value) {
@@ -1280,7 +1269,7 @@ function runStatus(argv, options = {}) {
   const { paths } = commandOptions(options);
   const taskFile = requireTaskFile(paths.tasksDir, argv[0]);
   validateTaskFile(taskFile);
-  const state = readJsonObject(taskStateFile(paths, argv[0]));
+  const state = authoritativeTaskState(paths, argv[0]);
   const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
   const loop = team.loop && typeof team.loop === "object" ? team.loop : {};
   const fields = [
@@ -1337,9 +1326,20 @@ function runStop(argv, options = {}) {
   const taskFile = requireTaskFile(paths.tasksDir, argv[0]);
   validateTaskFile(taskFile);
   const decision = relativeToCodeHome(paths, teamDecisionFile(paths, argv[0]));
-  const state = readJsonObject(taskStateFile(paths, argv[0]));
-  if (state.active_team && state.active_team.schema_version === 2) {
-    mutateV2Team(argv[0], (team) => {
+  withLock(globalAdmissionLockFile(paths), () => mutateTaskRuntime(
+    paths,
+    argv[0],
+    {
+      kind: "team.stopped",
+      operationId: options.operationId,
+      data: { status: "stopped" },
+    },
+    ({ currentProjection }) => {
+      const currentState = currentProjection.state;
+      const team = currentState.active_team && typeof currentState.active_team === "object"
+        ? JSON.parse(JSON.stringify(currentState.active_team))
+        : {};
+      if (team.schema_version === 2) {
       if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
         throw new CommandError(`team run is not mutable: ${team.status}`);
       }
@@ -1349,29 +1349,12 @@ function runStop(argv, options = {}) {
       }
       team.status = "stopped";
       team.decision = decision;
-      return { team };
-    }, {
-      ...options,
-      clock,
-      environment,
-      paths,
-      operationId: options.operationId,
-      operationData: { status: "stopped" },
-      eventKind: "team.stopped",
-      legacyKind: "team-stop",
-      legacyDetail: "stopped",
-    });
-    return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
-  }
-  mutateTaskRuntime(
-    paths,
-    argv[0],
-    {
-      kind: "team.stopped",
-      operationId: options.operationId,
-      data: { status: "stopped" },
-    },
-    () => {
+        validateTeamWriterAdmission(paths, argv[0], team);
+        return {
+          projection: buildTeamProjection(paths, argv[0], team, clock, currentState),
+          legacy: [{ kind: "team-stop", detail: "stopped" }],
+        };
+      }
       const currentFile = requireTaskFile(paths.tasksDir, argv[0]);
       validateTaskFile(currentFile);
       const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
@@ -1382,7 +1365,7 @@ function runStop(argv, options = {}) {
         paths,
         argv[0],
         taskContent,
-        readJsonObject(taskStateFile(paths, argv[0])),
+        currentState,
         clock,
       );
       nextState.active_team = {
@@ -1395,8 +1378,8 @@ function runStop(argv, options = {}) {
         legacy: [{ kind: "team-stop", detail: "stopped" }],
       };
     },
-    { clock, environment },
-  );
+    { ...options, clock, environment },
+  ));
   return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
 }
 
@@ -1409,14 +1392,9 @@ function runPromote(parsed, options = {}) {
   let committed;
   const operationId = parsed.operationId || options.operationId;
   withLock(globalAdmissionLockFile(paths), () => {
-    const admission = parsed.target === "execute" ? admitTeamStart({
-      briefPath: parsed.briefPath,
-      clock,
-      cwd,
-      mode: "execute",
-      paths,
-      taskId: parsed.taskId,
-    }) : null;
+    const requestIdentity = parsed.target === "execute"
+      ? briefRequestIdentity(parsed.briefPath)
+      : briefRequestIdentity("");
     try {
       committed = mutateTaskRuntime(
         paths,
@@ -1427,18 +1405,31 @@ function runPromote(parsed, options = {}) {
           data: {
             target: parsed.target,
             authorization_ref: parsed.authorizationRef || "",
-            brief_path: admission?.brief?.path || "",
-            brief_sha256: admission?.brief?.sha256 || "",
-            execution_plan_sha256: admission?.brief?.execution_plan_sha256 || "",
+            ...requestIdentity,
           },
         },
-        () => {
+        ({ revision }) => {
+          const admission = parsed.target === "execute" ? admitTeamStart({
+            briefPath: parsed.briefPath,
+            captureIdentity: options.captureIdentity,
+            clock,
+            cwd,
+            environment,
+            mode: "execute",
+            paths,
+            taskId: parsed.taskId,
+          }) : null;
+          if (admission) {
+            assertAdmissionRequestIdentity(admission, requestIdentity);
+            admission.slice_start_snapshot.captured_at_revision = revision + 1;
+          }
           const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
           validateTaskFile(taskFile);
           const state = readJsonObject(taskStateFile(paths, parsed.taskId));
           const activeTeam = state.active_team && typeof state.active_team === "object"
             ? state.active_team
             : {};
+          if (admission) bindExecutionAuthority(state, admission, revision + 1);
           if (activeTeam.schema_version === 2
             && !new Set(["running", "promoted:execute", "promoted:worktree"])
               .has(activeTeam.status)) {

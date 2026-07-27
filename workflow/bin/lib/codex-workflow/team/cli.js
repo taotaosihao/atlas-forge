@@ -25,6 +25,12 @@ const {
   runStatus,
   runStop,
 } = require("./commands");
+const {
+  parseSliceAcceptArgs,
+  parseSliceSupersedeArgs,
+  runSliceAccept,
+  runSliceSupersede,
+} = require("./slice-acceptance");
 
 function main(argv) {
   try {
@@ -52,9 +58,13 @@ function main(argv) {
       result = runAttemptRecord(parseAttemptArgs(argv.slice(1)));
     } else if (command === "team-fallback-record") {
       result = runFallbackRecord(parseFallbackArgs(argv.slice(1)));
+    } else if (command === "team-slice-accept") {
+      result = runSliceAccept(parseSliceAcceptArgs(argv.slice(1)));
+    } else if (command === "team-slice-supersede") {
+      result = runSliceSupersede(parseSliceSupersedeArgs(argv.slice(1)));
     } else {
       throw new CommandError(
-        "usage: codex-workflow {team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record}",
+        "usage: codex-workflow {team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede}",
       );
     }
     process.stdout.write(`${result.lines.join("\n")}\n`);

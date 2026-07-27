@@ -3,10 +3,15 @@
 const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { CommandError } = require("../core/command-runtime");
 const { taskArtifactDir } = require("../core/paths");
+const { readAuthoritativeEvents } = require("../core/event-store");
+const { taskEventFile } = require("../core/task-mutation");
 const { pathsOverlap } = require("./lane-registry");
+const { sha256 } = require("../verification/identity");
+const { validateGateRecord } = require("../verification/required-gates");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SHA256 = /^sha256:([a-f0-9]{64})$/;
@@ -15,9 +20,36 @@ const PERMANENT_GATES = new Set([
   "restore", "served-ui", "browser-flow", "install", "postflight",
   "release-identity", "collision", "downgrade", "symlink", "exact-layout",
 ]);
-const TERMINAL_SLICE_EVENTS = new Set([
-  "slice_complete", "slice_blocked", "slice_superseded", "slice_abandoned",
-]);
+const SIZE_POLICY_ID = "atlas-slice-size-v2";
+
+function pathPrefix(raw) {
+  if (typeof raw !== "string" || !raw.trim() || raw.startsWith("/") || raw.includes("\\")) return "";
+  const normalized = raw.replace(/^\.\//, "").replace(/\/+/g, "/");
+  if (normalized.split("/").includes("..")) return "";
+  const segments = [];
+  for (const segment of normalized.split("/")) {
+    if (segment === "**" || /[*?\[\]{}]/.test(segment)) break;
+    segments.push(segment);
+  }
+  return segments.join("/");
+}
+
+function repositoryBroadPath(raw) {
+  const prefix = pathPrefix(raw);
+  if (!prefix) return true;
+  const normalized = String(raw).replace(/^\.\//, "").replace(/\/+$/g, "");
+  if (normalized === "." || normalized === "**" || normalized === "**/*") return true;
+  return /[*?\[\]{}]/.test(normalized) && prefix.split("/").length <= 1;
+}
+
+function estimateOverBudget(estimate, budget, checks) {
+  return estimate.estimated_changed_files > budget.max_changed_files
+    || estimate.estimated_net_loc > budget.max_loc
+    || estimate.target_p90_minutes > budget.max_wall_clock_minutes
+    || estimate.serial_dependency_depth > 2
+    || estimate.independent_vertical_count > 1
+    || checks.length > budget.max_required_checks;
+}
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -72,7 +104,7 @@ function executionPlan(markdown) {
   } catch (error) {
     throw new CommandError(`contract execution plan is invalid JSON: ${error.message}`);
   }
-  if (plan.schema_version !== 1 || plan.size_policy?.policy_id !== "atlas-slice-size-v1"
+  if (plan.schema_version !== 1 || plan.size_policy?.policy_id !== SIZE_POLICY_ID
     || !Array.isArray(plan.slices) || plan.slices.length === 0) {
     throw new CommandError("contract execution plan has an invalid v1 envelope");
   }
@@ -88,7 +120,7 @@ function executionPlan(markdown) {
       || !Array.isArray(slice.owned_paths) || slice.owned_paths.length === 0
       || !Array.isArray(slice.acceptance_refs) || slice.acceptance_refs.length === 0
       || !Array.isArray(slice.checks) || slice.checks.length === 0
-      || !slice.budget) {
+      || !slice.estimate || !slice.budget) {
       throw new CommandError(`contract execution plan has an incomplete slice: ${slice.slice_id || "unknown"}`);
     }
     for (const ref of slice.acceptance_refs) {
@@ -137,6 +169,23 @@ function executionPlan(markdown) {
     visited.add(sliceId);
   }
   for (const sliceId of ids) visit(sliceId);
+  const depths = new Map();
+  function dependencyDepth(sliceId) {
+    if (depths.has(sliceId)) return depths.get(sliceId);
+    const dependencies = slices.get(sliceId).depends_on;
+    const depth = dependencies.length === 0
+      ? 0
+      : 1 + Math.max(...dependencies.map(dependencyDepth));
+    depths.set(sliceId, depth);
+    return depth;
+  }
+  for (const slice of plan.slices) {
+    if (slice.estimate.serial_dependency_depth !== dependencyDepth(slice.slice_id)) {
+      throw new CommandError(
+        `contract execution plan has an incorrect serial dependency depth for ${slice.slice_id}`,
+      );
+    }
+  }
   return plan;
 }
 
@@ -170,6 +219,37 @@ function gitOutput(repo, args, label) {
     throw new CommandError(`${label}: ${(result.stderr || result.error?.message || "git failed").trim()}`);
   }
   return result.stdout.trim();
+}
+
+function captureWorktreeSnapshot(repo) {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-slice-snapshot."));
+  const indexFile = path.join(temporary, "index");
+  const environment = { ...process.env, GIT_INDEX_FILE: indexFile };
+  const run = (args, label) => {
+    const result = childProcess.spawnSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      env: environment,
+    });
+    if (result.error || result.status !== 0) {
+      throw new CommandError(
+        `${label}: ${(result.stderr || result.error?.message || "git failed").trim()}`,
+      );
+    }
+    return result.stdout.trim();
+  };
+  try {
+    run(["read-tree", "HEAD"], "unable to initialize slice snapshot");
+    run(["add", "-A", "--", "."], "unable to capture slice worktree");
+    const treeOid = run(["write-tree"], "unable to write slice snapshot tree");
+    const headSha = gitOutput(repo, ["rev-parse", "--verify", "HEAD^{commit}"], "unable to capture slice HEAD");
+    return {
+      tree_oid: treeOid,
+      head_sha: headSha,
+      worktree_manifest_digest: `sha256:${digestValue({ head_sha: headSha, tree_oid: treeOid })}`,
+    };
+  } finally {
+    fs.rmSync(temporary, { force: true, recursive: true });
+  }
 }
 
 function validateRepository(brief, cwd) {
@@ -222,29 +302,41 @@ function validateContractBinding(brief, repo) {
     ["risk_class", brief.risk_class, slice.risk_class],
     ["failure_domain", brief.failure_domain, slice.failure_domain],
     ["rollback_boundary", brief.rollback_boundary, slice.rollback_boundary],
+    ["size gate estimate", brief.size_gate?.estimate, slice.estimate],
     ["budget", brief.budget, slice.budget],
     ["checks", brief.checks, slice.checks],
   ];
   for (const [label, actual, expected] of bindings) {
     if (!same(actual, expected)) throw new CommandError(`brief ${label} does not match the contract plan`);
   }
-  return { contractDigest, contractFile, planDigest };
+  return { contractDigest, contractFile, plan, planDigest };
 }
 
 function validateSizeGate(brief, clock) {
   const gate = brief.size_gate;
-  if (!gate || gate.policy_id !== "atlas-slice-size-v1") throw new CommandError("brief size_gate is invalid");
-  const measured = {
-    changed_files: brief.owned_paths.length,
-    loc: 0,
-    wall_clock_minutes: 0,
-    required_checks: (brief.checks || []).length,
-  };
-  if (!same(gate.measured, measured)) {
-    throw new CommandError("brief size gate measurements do not match the admitted slice");
+  if (!gate || gate.policy_id !== SIZE_POLICY_ID) throw new CommandError("brief size_gate is invalid");
+  const budgetKeys = [
+    "max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks",
+  ];
+  if (!brief.budget || Object.keys(brief.budget).sort().join(",")
+      !== [...budgetKeys].sort().join(",")
+    || budgetKeys.some((key) => !Number.isInteger(brief.budget[key]) || brief.budget[key] < 1)) {
+    throw new CommandError("brief size budget is invalid");
   }
-  const overBudget = measured.changed_files > brief.budget.max_changed_files
-    || measured.required_checks > brief.budget.max_required_checks;
+  const estimateKeys = [
+    "estimated_changed_files", "estimated_net_loc", "target_p90_minutes",
+    "serial_dependency_depth", "independent_vertical_count",
+  ];
+  if (!gate.estimate || Object.keys(gate.estimate).sort().join(",") !== [...estimateKeys].sort().join(",")
+    || estimateKeys.some((key) => !Number.isInteger(gate.estimate[key])
+      || gate.estimate[key] < (key === "serial_dependency_depth" ? 0 : 1))) {
+    throw new CommandError("brief size gate estimate is invalid");
+  }
+  if ((brief.dependencies || []).length > 0 && gate.estimate.serial_dependency_depth < 1) {
+    throw new CommandError("brief serial dependency depth cannot be zero when dependencies exist");
+  }
+  const overBudget = estimateOverBudget(gate.estimate, brief.budget, brief.checks || [])
+    || brief.owned_paths.some(repositoryBroadPath);
   if (gate.decision === "split_required") throw new CommandError("brief size gate requires the slice to be split");
   if (gate.decision === "pass") {
     if (overBudget) throw new CommandError("over-budget brief requires a named size exception");
@@ -270,33 +362,194 @@ function validateSizeGate(brief, clock) {
   }
 }
 
-function readLedger(paths, taskId) {
-  const file = path.join(taskArtifactDir(paths, taskId), "team", "sdd", "progress.jsonl");
-  if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map((line, index) => {
-    try {
-      return JSON.parse(line);
-    } catch (error) {
-      throw new CommandError(`invalid Team SDD ledger row ${index + 1}: ${error.message}`);
-    }
-  });
-}
-
-function validateDependencies(paths, brief) {
-  const events = readLedger(paths, brief.task_id);
+function validateDependencies(paths, brief, options = {}) {
+  const events = readAuthoritativeEvents(taskEventFile(paths, brief.task_id), brief.task_id);
   for (const dependency of brief.dependencies || []) {
-    const terminal = events.filter((event) => event.slice_id === dependency.slice_id
-      && TERMINAL_SLICE_EVENTS.has(event.event)).at(-1);
-    if (!terminal || terminal.event !== "slice_complete" || terminal.outcome !== "succeeded") {
+    const terminal = events.filter((event) => (
+      new Set(["slice.accepted", "slice.superseded"]).has(event.kind)
+      && (event.result?.accepted?.slice_id || event.data?.slice_id) === dependency.slice_id
+    )).at(-1);
+    if (!terminal || terminal.kind !== "slice.accepted") {
       throw new CommandError(`dependency is not keeper-ready succeeded: ${dependency.slice_id}`);
     }
-    const outputs = new Set(terminal.keeper_outputs || []);
+    const accepted = terminal.result?.accepted;
+    if (!accepted || accepted.task_id !== brief.task_id
+      || accepted.contract_sha256 !== brief.contract.sha256
+      || accepted.execution_plan_sha256 !== brief.contract.execution_plan_sha256
+      || accepted.status !== "accepted"
+      || !SAFE_ID.test(accepted.team_run_id || "")
+      || !Number.isInteger(accepted.generation) || accepted.generation < 1
+      || accepted.authority_ref !== `team-run:${accepted.team_run_id}`
+      || accepted.revision !== terminal.revision
+      || !/^sha256:[a-f0-9]{64}$/.test(accepted.brief_sha256 || "")
+      || !Array.isArray(accepted.keeper_outputs) || accepted.keeper_outputs.length === 0
+      || accepted.keeper_outputs.some((keeper) => (
+        !keeper || typeof keeper.reference !== "string" || !keeper.reference
+        || typeof keeper.path !== "string" || !keeper.path
+        || !/^sha256:[a-f0-9]{64}$/.test(keeper.content_digest || "")
+      ))
+      || !Array.isArray(accepted.verification_records)
+      || accepted.verification_records.length === 0
+      || new Set(accepted.verification_records.map((record) => record?.check_id)).size
+        !== accepted.verification_records.length
+      || accepted.verification_records.some((record) => (
+        !record || !SAFE_ID.test(record.check_id || "")
+        || !/^sha256:[a-f0-9]{64}$/.test(record.record_id || "")
+        || record.record_digest !== record.record_id
+        || !/^sha256:[a-f0-9]{64}$/.test(record.identity_digest || "")
+        || record.outcome !== "passed" || record.provenance !== "fresh-executed"
+      ))) {
+      throw new CommandError(`dependency authoritative acceptance is invalid: ${dependency.slice_id}`);
+    }
+    const matchingRunEvent = events.slice(0, events.indexOf(terminal) + 1).findLast((event) => {
+      const team = event.kind === "team.started" ? event.result?.team : null;
+      return team?.team_run_id === accepted.team_run_id
+        && team?.generation === accepted.generation
+        && team?.slice_id === dependency.slice_id
+        && team?.admission?.brief?.sha256 === accepted.brief_sha256
+        && team?.admission?.brief?.slice_id === dependency.slice_id
+        && team?.admission?.brief?.contract_sha256 === accepted.contract_sha256
+        && team?.admission?.brief?.execution_plan_sha256 === accepted.execution_plan_sha256;
+    });
+    if (!matchingRunEvent) {
+      throw new CommandError(`dependency Team generation is not authoritative: ${dependency.slice_id}`);
+    }
+    const dependencyAdmission = matchingRunEvent.result.team.admission;
+    if (!dependencyAdmission?.slice_start_snapshot?.head_sha
+      || !dependencyAdmission.slice_start_snapshot.tree_oid) {
+      throw new CommandError(`dependency Team admission snapshot is invalid: ${dependency.slice_id}`);
+    }
+    const dependencyBriefPath = path.join(
+      taskArtifactDir(paths, brief.task_id), "team", "sdd", "slices", dependency.slice_id, "brief.json",
+    );
+    const dependencyBriefFile = canonicalFile(dependencyBriefPath, "dependency Team brief");
+    const dependencyBrief = readJson(dependencyBriefFile, "dependency Team brief");
+    if (`sha256:${digestFile(dependencyBriefFile)}` !== accepted.brief_sha256
+      || dependencyBrief.task_id !== brief.task_id
+      || dependencyBrief.slice_id !== dependency.slice_id
+      || dependencyBrief.contract?.sha256 !== accepted.contract_sha256
+      || dependencyBrief.contract?.execution_plan_sha256 !== accepted.execution_plan_sha256) {
+      throw new CommandError(`dependency brief identity is invalid: ${dependency.slice_id}`);
+    }
+    const recordByCheck = new Map(accepted.verification_records.map((record) => [record.check_id, record]));
+    if (recordByCheck.size !== dependencyBrief.checks.length
+      || accepted.verification_records.length !== recordByCheck.size) {
+      throw new CommandError(`dependency verification coverage is invalid: ${dependency.slice_id}`);
+    }
+    for (const expected of dependencyBrief.checks) {
+      const record = recordByCheck.get(expected.check_id);
+      const verificationEvent = events.find((event) => (
+        event.event_id === record?.verification_event_id
+        && event.revision === record?.verification_revision
+      ));
+      const projectedGate = terminal.projection?.state?.verification?.required_gates?.[expected.check_id];
+      const expectedGate = {
+        admission_head_sha: dependencyAdmission.slice_start_snapshot.head_sha,
+        admission_tree_oid: dependencyAdmission.slice_start_snapshot.tree_oid,
+        base_sha: dependencyBrief.base_sha,
+        brief_sha256: accepted.brief_sha256,
+        cache_policy: expected.cache_policy,
+        check_id: expected.check_id,
+        command_digest: sha256(expected.command),
+        contract_sha256: accepted.contract_sha256,
+        execution_plan_sha256: accepted.execution_plan_sha256,
+        final_only: expected.final_only,
+        gate_class: expected.gate_class,
+        repo_realpath: brief.repo,
+        slice_id: dependency.slice_id,
+      };
+      if (!record || record.slice_id !== dependency.slice_id
+        || record.contract_sha256 !== accepted.contract_sha256
+        || record.execution_plan_sha256 !== accepted.execution_plan_sha256
+        || record.brief_sha256 !== accepted.brief_sha256
+        || record.gate_class !== expected.gate_class
+        || record.command_digest !== expectedGate.command_digest
+        || record.cache_policy !== expected.cache_policy
+        || record.final_only !== expected.final_only
+        || record.repo_realpath !== brief.repo
+        || record.outcome !== "passed" || record.provenance !== "fresh-executed"
+        || !verificationEvent || verificationEvent.kind !== "verification.recorded"
+        || verificationEvent.revision >= terminal.revision
+        || verificationEvent.data?.record_id !== record.record_id
+        || verificationEvent.data?.identity_digest !== record.identity_digest
+        || verificationEvent.data?.required_gate?.check_id !== expected.check_id
+        || projectedGate?.record_id !== record.record_id
+        || projectedGate?.identity_digest !== record.identity_digest) {
+        throw new CommandError(
+          `dependency verification evidence is invalid: ${dependency.slice_id}/${expected.check_id}`,
+        );
+      }
+      const gateReasons = [];
+      const identity = validateGateRecord(
+        paths,
+        brief.task_id,
+        expectedGate,
+        projectedGate,
+        {
+          captureIdentity: options.captureIdentity,
+          environment: options.environment || process.env,
+          validateCurrentIdentity: options.validateCurrentIdentity !== false,
+        },
+        gateReasons,
+      );
+      if (!identity || identity.record_id !== record.record_id || gateReasons.length > 0) {
+        throw new CommandError(
+          `dependency verification identity is invalid: ${dependency.slice_id}/${expected.check_id}: ` +
+            gateReasons.join("; "),
+        );
+      }
+    }
+    const outputs = new Map((accepted.keeper_outputs || []).map((item) => [item.reference, item]));
     for (const required of dependency.keeper_outputs || []) {
-      if (!outputs.has(required)) {
+      const keeper = outputs.get(required);
+      if (!keeper) {
         throw new CommandError(`dependency keeper output is missing for ${dependency.slice_id}: ${required}`);
+      }
+      const file = path.resolve(brief.repo, keeper.path || "");
+      const relative = path.relative(brief.repo, file);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new CommandError(`dependency keeper output escapes repository: ${required}`);
+      }
+      let stat;
+      try {
+        stat = fs.lstatSync(file);
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          throw new CommandError(`dependency keeper output is missing on disk: ${required}`);
+        }
+        throw error;
+      }
+      if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(file) !== file
+        || `sha256:${digestFile(file)}` !== keeper.content_digest) {
+        throw new CommandError(`dependency keeper output digest mismatch: ${required}`);
+      }
+      if (!pathMatchesOwned(keeper.path, dependencyBrief.owned_paths)
+        || !(accepted.actual_size?.changed_paths || []).includes(keeper.path)) {
+        throw new CommandError(`dependency keeper output is not owned slice output: ${required}`);
       }
     }
   }
+}
+
+function pathMatchesOwned(candidate, patterns) {
+  return (patterns || []).some((raw) => {
+    const normalized = String(raw || "").replace(/^\.\//, "").replace(/\\/g, "/");
+    let expression = "";
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character === "*" && normalized[index + 1] === "*") {
+        expression += ".*";
+        index += 1;
+      } else if (character === "*") {
+        expression += "[^/]*";
+      } else if (character === "?") {
+        expression += "[^/]";
+      } else {
+        expression += character.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+      }
+    }
+    return new RegExp(`^${expression}$`).test(candidate);
+  });
 }
 
 function activeWriterLeases(paths, excludedTaskId = "") {
@@ -305,8 +558,19 @@ function activeWriterLeases(paths, excludedTaskId = "") {
   for (const entry of fs.readdirSync(paths.artifactsDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || entry.name === excludedTaskId) continue;
     const stateFile = path.join(paths.artifactsDir, entry.name, "state.json");
-    if (!fs.existsSync(stateFile)) continue;
-    const state = readJson(stateFile, `task state ${entry.name}`);
+    const eventFile = taskEventFile(paths, entry.name);
+    if (!fs.existsSync(eventFile) && !fs.existsSync(stateFile)) continue;
+    let state;
+    if (fs.existsSync(eventFile)) {
+      const events = readAuthoritativeEvents(eventFile, entry.name);
+      const latest = events.at(-1);
+      if (!latest) {
+        throw new CommandError(`authoritative task event stream is empty: ${entry.name}`);
+      }
+      state = latest.projection.state;
+    } else {
+      state = readJson(stateFile, `legacy task state ${entry.name}`);
+    }
     const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
     for (const lease of team.writer_leases || []) {
       if (lease.state === "active") leases.push({ ...lease, task_id: entry.name });
@@ -350,7 +614,7 @@ function globalAdmissionLockFile(paths) {
   return path.join(paths.stateDir, ".team-execution-admission.lock");
 }
 
-function admitTeamStart({ briefPath, clock, cwd, mode, paths, taskId }) {
+function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, mode, paths, taskId }) {
   if (mode === "discuss") {
     if (!briefPath) return { mode: "discuss-compat", brief: null, admitted_owned_paths: [] };
   } else if (!briefPath) {
@@ -365,7 +629,11 @@ function admitTeamStart({ briefPath, clock, cwd, mode, paths, taskId }) {
   const repo = validateRepository(brief, cwd);
   const binding = validateContractBinding(brief, repo);
   validateSizeGate(brief, clock);
-  validateDependencies(paths, brief);
+  validateDependencies(paths, brief, {
+    captureIdentity,
+    environment,
+    validateCurrentIdentity: true,
+  });
   assertNoGlobalWriterOverlap(paths, taskId, brief.owned_paths);
   return {
     mode: mode === "execute" ? "execution-v3" : "discuss-v3",
@@ -377,14 +645,93 @@ function admitTeamStart({ briefPath, clock, cwd, mode, paths, taskId }) {
       contract_sha256: `sha256:${binding.contractDigest}`,
       execution_plan_sha256: `sha256:${binding.planDigest}`,
       base_sha: brief.base_sha,
+      repo,
     },
     admitted_owned_paths: [...brief.owned_paths],
+    required_slices: binding.plan.slices.map((slice) => slice.slice_id),
+    slice_start_snapshot: captureWorktreeSnapshot(repo),
   };
+}
+
+function briefRequestIdentity(briefPath) {
+  if (!briefPath) {
+    return {
+      brief_path: "",
+      brief_sha256: "",
+      contract_sha256: "",
+      execution_plan_sha256: "",
+    };
+  }
+  const file = canonicalFile(briefPath, "Team brief");
+  const brief = readJson(file, "Team brief");
+  return {
+    brief_path: file,
+    brief_sha256: `sha256:${digestFile(file)}`,
+    contract_sha256: String(brief.contract?.sha256 || ""),
+    execution_plan_sha256: String(brief.contract?.execution_plan_sha256 || ""),
+  };
+}
+
+function bindExecutionAuthority(state, admission, revision) {
+  if (admission?.mode !== "execution-v3") return state.execution_authority || null;
+  const requested = {
+    schema_version: 1,
+    status: "active",
+    contract_path: admission.brief.contract_path,
+    contract_sha256: admission.brief.contract_sha256,
+    execution_plan_sha256: admission.brief.execution_plan_sha256,
+    repo_realpath: admission.brief.repo,
+    required_slices: [...admission.required_slices],
+  };
+  const existing = state.execution_authority;
+  if (existing) {
+    if (existing.schema_version !== 1
+      || !new Set(["active", "completed"]).has(existing.status)) {
+      throw new CommandError("task execution authority has an invalid persistent state");
+    }
+    for (const field of [
+      "contract_path", "contract_sha256", "execution_plan_sha256", "repo_realpath",
+    ]) {
+      if (existing[field] !== requested[field]) {
+        throw new CommandError(
+          "task execution authority is already bound to another contract; explicit replan is required",
+        );
+      }
+    }
+    if (!same(existing.required_slices, requested.required_slices)) {
+      throw new CommandError(
+        "task execution authority slice set changed; explicit replan is required",
+      );
+    }
+    if (existing.status === "completed") {
+      const { completed_at: completedAt = "", ...rest } = existing;
+      state.execution_authority = {
+        ...rest,
+        status: "active",
+        ...(completedAt ? {
+          completion: {
+            completed_at: completedAt,
+            completed_revision: Number(existing.completed_revision || existing.established_revision || 0),
+          },
+        } : {}),
+      };
+    }
+    return state.execution_authority;
+  }
+  state.execution_authority = {
+    ...requested,
+    established_revision: revision,
+  };
+  return state.execution_authority;
 }
 
 module.exports = {
   admitTeamStart,
   assertNoGlobalWriterOverlap,
+  bindExecutionAuthority,
+  briefRequestIdentity,
+  captureWorktreeSnapshot,
   globalAdmissionLockFile,
+  validateDependencies,
   validateTeamWriterAdmission,
 };

@@ -58,6 +58,8 @@ const EXPECTED_ROUTES = {
     "team-record-finalize",
     "team-record-start",
     "team-selection-record",
+    "team-slice-accept",
+    "team-slice-supersede",
     "team-status",
     "team-stop",
   ],
@@ -101,8 +103,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 40 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 40);
+test("routes exactly 42 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 42);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)
