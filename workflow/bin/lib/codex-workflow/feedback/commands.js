@@ -4,16 +4,21 @@ const fs = require("fs");
 const path = require("path");
 const {
   CommandError,
-  appendLegacyRuntimeEvent,
   artifactFile,
   commandOptions,
   expandUserPath,
   oneLine,
-  prepareTaskCommand,
-  updateTaskCommand,
 } = require("../core/command-runtime");
-const { relativeToCodeHome } = require("../core/paths");
-const { timestampSeconds } = require("../task/runtime");
+const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
+const { readAuthoritativeEvents } = require("../core/event-store");
+const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
+const { renderTaskFields, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  projectTaskState,
+  readJsonObject,
+  taskStateFile,
+  timestampSeconds,
+} = require("../task/runtime");
 const { evaluateSddAdmission } = require("./sdd-admission");
 
 const TRACE_USAGE =
@@ -96,6 +101,78 @@ function stringifyLikePython(value) {
 function appendLedger(file, event) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, `${stringifyLikePython(event)}\n`, "utf8");
+}
+
+function readOptionalText(file, fallback = "") {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return fallback;
+    throw error;
+  }
+}
+
+function projectionFile(paths, taskId, file, content) {
+  const root = path.resolve(taskArtifactDir(paths, taskId));
+  const absolute = path.resolve(file);
+  const relative = path.relative(root, absolute);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new CommandError(`feedback projection escapes task artifacts: ${file}`);
+  }
+  return {
+    path: relative.split(path.sep).join("/"),
+    content_base64: Buffer.from(content).toString("base64"),
+  };
+}
+
+function commitFeedbackRuntime({
+  paths,
+  taskId,
+  kind,
+  data,
+  headerUpdates,
+  updateState,
+  files,
+  legacyKind,
+  legacyDetail,
+  options,
+}) {
+  mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind, operationId: options.operationId, data },
+    () => {
+      const taskFile = requireTaskFile(paths.tasksDir, taskId);
+      validateTaskFile(taskFile);
+      const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), headerUpdates);
+      const state = projectTaskState(
+        paths,
+        taskId,
+        taskContent,
+        readJsonObject(taskStateFile(paths, taskId)),
+        options.clock,
+      );
+      updateState(state);
+      return {
+        projection: {
+          task_content: taskContent,
+          state,
+          files: files.map((entry) => projectionFile(
+            paths, taskId, entry.file, entry.content,
+          )),
+        },
+        legacy: [{ kind: legacyKind, detail: legacyDetail }],
+      };
+    },
+    options,
+  );
+}
+
+function validateFeedbackTask(paths, taskId) {
+  const taskFile = requireTaskFile(paths.tasksDir, taskId);
+  validateTaskFile(taskFile);
+  readJsonObject(taskStateFile(paths, taskId));
+  return readAuthoritativeEvents(taskEventFile(paths, taskId), taskId).at(-1)?.revision || 0;
 }
 
 function timestampCandidate(prefix, recordedAt) {
@@ -182,7 +259,7 @@ function tracePreview(text) {
 
 function runTracePromotion(parsed, options = {}) {
   const { clock, cwd, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const expectedRevision = validateFeedbackTask(paths, parsed.taskId);
   const traceType = oneLine(parsed.traceType, "type", { allowEmpty: false });
   const reason = oneLine(parsed.reason, "reason", { allowEmpty: false });
   const owner = oneLine(parsed.owner || "atlas", "owner", { allowEmpty: false });
@@ -196,12 +273,7 @@ function runTracePromotion(parsed, options = {}) {
   const recordedAt = timestampSeconds(clock);
   const candidateId = timestampCandidate("T", recordedAt);
   const traceFile = artifactFile(paths, parsed.taskId, "trace-candidates.md");
-  if (!fs.existsSync(traceFile)) {
-    fs.writeFileSync(traceFile, "# Trace Candidates\n\n", "utf8");
-  }
-  fs.appendFileSync(
-    traceFile,
-    [
+  const traceContent = `${readOptionalText(traceFile, "# Trace Candidates\n\n")}${[
       `## ${candidateId}`,
       "",
       `- Recorded: ${recordedAt}`,
@@ -216,18 +288,16 @@ function runTracePromotion(parsed, options = {}) {
       tracePreview(fs.readFileSync(source, "utf8")),
       "```",
       "",
-    ].join("\n"),
-    "utf8",
-  );
+    ].join("\n")}`;
 
   let regression = "-";
+  const projectedFiles = [{ file: traceFile, content: traceContent }];
   if (traceType === "regression") {
     const regressionDir = artifactFile(paths, parsed.taskId, "regressions");
-    fs.mkdirSync(regressionDir, { recursive: true });
     regression = path.join(regressionDir, `${candidateId}.md`);
-    fs.writeFileSync(
-      regression,
-      [
+    projectedFiles.push({
+      file: regression,
+      content: [
         `# Regression Candidate ${candidateId}`,
         "",
         `Source: \`${source}\``,
@@ -238,10 +308,10 @@ function runTracePromotion(parsed, options = {}) {
         "Use the source trace above to build a project-specific regression test or checklist.",
         "",
       ].join("\n"),
-      "utf8",
-    );
+    });
   }
-  appendLedger(artifactFile(paths, parsed.taskId, "ledger.jsonl"), {
+  const ledgerFile = artifactFile(paths, parsed.taskId, "ledger.jsonl");
+  const ledgerEvent = {
     kind: "trace-promote",
     created_at: recordedAt,
     candidate_id: candidateId,
@@ -250,29 +320,35 @@ function runTracePromotion(parsed, options = {}) {
     source,
     reason,
     regression,
+  };
+  projectedFiles.push({
+    file: ledgerFile,
+    content: `${readOptionalText(ledgerFile)}${stringifyLikePython(ledgerEvent)}\n`,
   });
-  updateTaskCommand(
+  const traceReference = relativeToCodeHome(paths, traceFile);
+  commitFeedbackRuntime({
     paths,
-    parsed.taskId,
-    {
+    taskId: parsed.taskId,
+    kind: "trace.promoted",
+    data: ledgerEvent,
+    headerUpdates: {
       trace_candidates: relativeToCodeHome(paths, traceFile),
       latest_trace_candidate: candidateId,
     },
-    {
-      "trace.candidates": relativeToCodeHome(paths, traceFile),
-      "trace.latest_candidate": candidateId,
-      "trace.latest_source": source,
-      "trace.latest_type": traceType,
+    updateState(state) {
+      state.trace = {
+        ...(state.trace || {}),
+        candidates: traceReference,
+        latest_candidate: candidateId,
+        latest_source: source,
+        latest_type: traceType,
+      };
     },
-    clock,
-  );
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "trace-promote",
-    `${candidateId} ${traceType}`,
-    clock,
-  );
+    files: projectedFiles,
+    legacyKind: "trace-promote",
+    legacyDetail: `${candidateId} ${traceType}`,
+    options: { ...options, clock, environment, expectedRevision },
+  });
   return {
     exitCode: 0,
     lines: [
@@ -411,7 +487,7 @@ function hasLegacyMulticaRepairMarker(paths, taskId) {
 
 function runFeedbackCycle(parsed, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const expectedRevision = validateFeedbackTask(paths, parsed.taskId);
   const values = feedbackValues(parsed);
   values.taskId = parsed.taskId;
   const admission = evaluateSddAdmission(values, { environment, paths });
@@ -425,13 +501,13 @@ function runFeedbackCycle(parsed, options = {}) {
   const cycle = createsCycle ? previousCycle + 1 : previousCycle;
   const cycleStatus = createsCycle ? "new-cycle" : "current-cycle-note";
   let cycleFile = "-";
+  const projectedFiles = [];
   if (createsCycle) {
     const cycleDir = artifactFile(paths, parsed.taskId, "plan-cycles");
-    fs.mkdirSync(cycleDir, { recursive: true });
     cycleFile = path.join(cycleDir, `cycle-${cycle}.md`);
-    fs.writeFileSync(
-      cycleFile,
-      [
+    projectedFiles.push({
+      file: cycleFile,
+      content: [
         `# Plan Cycle ${cycle}`,
         "",
         `Created: ${recordedAt}`,
@@ -456,10 +532,9 @@ function runFeedbackCycle(parsed, options = {}) {
           : ["- None recorded."]),
         "",
       ].join("\n"),
-      "utf8",
-    );
+    });
   }
-  appendLedger(ledgerFile, {
+  const ledgerEvent = {
     kind: "feedback-cycle",
     created_at: recordedAt,
     plan_cycle: cycle,
@@ -474,12 +549,16 @@ function runFeedbackCycle(parsed, options = {}) {
     admission_status: admission.status,
     admission_reason: admission.reason,
     admission_locator: values.admissionLocator,
+  };
+  projectedFiles.push({
+    file: ledgerFile,
+    content: `${readOptionalText(ledgerFile)}${stringifyLikePython(ledgerEvent)}\n`,
   });
 
   const returnFile = artifactFile(paths, parsed.taskId, "return-to-plan.md");
-  fs.writeFileSync(
-    returnFile,
-    [
+  projectedFiles.push({
+    file: returnFile,
+    content: [
       "# Return-To-Plan Feedback",
       "",
       `Updated: ${recordedAt}`,
@@ -514,36 +593,36 @@ function runFeedbackCycle(parsed, options = {}) {
       "Feedback remains visible by default. Canonically validated current-required open SDD admission creates a repair cycle; legacy Multica severity/affected-row decisions require a valid durable repair-needed marker for this task.",
       "",
     ].join("\n"),
-    "utf8",
-  );
+  });
   const rowsJoined = values.rows.length > 0 ? values.rows.join(";") : "-";
-  const stateUpdates = {
-    "return_to_plan.artifact": relativeToCodeHome(paths, returnFile),
-    active_plan_cycle: cycle,
-    latest_feedback_route: values.route,
-  };
-  if (createsCycle) {
-    stateUpdates.previous_approval_status = "stale-if-affected";
-    stateUpdates.stale_acceptance_rows = rowsJoined;
-  }
-  updateTaskCommand(
+  const returnReference = relativeToCodeHome(paths, returnFile);
+  commitFeedbackRuntime({
     paths,
-    parsed.taskId,
-    {
+    taskId: parsed.taskId,
+    kind: "feedback.recorded",
+    data: ledgerEvent,
+    headerUpdates: {
       return_to_plan: relativeToCodeHome(paths, returnFile),
       active_plan_cycle: cycle,
       latest_feedback_route: values.route,
     },
-    stateUpdates,
-    clock,
-  );
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "feedback-cycle",
-    `${cycleStatus} cycle ${cycle} route ${values.route}`,
-    clock,
-  );
+    updateState(state) {
+      state.return_to_plan = {
+        ...(state.return_to_plan || {}),
+        artifact: returnReference,
+      };
+      state.active_plan_cycle = cycle;
+      state.latest_feedback_route = values.route;
+      if (createsCycle) {
+        state.previous_approval_status = "stale-if-affected";
+        state.stale_acceptance_rows = rowsJoined;
+      }
+    },
+    files: projectedFiles,
+    legacyKind: "feedback-cycle",
+    legacyDetail: `${cycleStatus} cycle ${cycle} route ${values.route}`,
+    options: { ...options, clock, environment, expectedRevision },
+  });
   return {
     exitCode: 0,
     lines: [
@@ -573,8 +652,8 @@ function parseLessonArgs(argv) {
 }
 
 function runLessonCandidate(parsed, options = {}) {
-  const { clock, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const { clock, environment, paths } = commandOptions(options);
+  const expectedRevision = validateFeedbackTask(paths, parsed.taskId);
   const trigger = oneLine(parsed.trigger, "trigger", { allowEmpty: false });
   const lesson = oneLine(parsed.lesson, "lesson", { allowEmpty: false });
   const evidence = parsed.evidence.map((item) =>
@@ -595,12 +674,7 @@ function runLessonCandidate(parsed, options = {}) {
   const recordedAt = timestampSeconds(clock);
   const candidateId = timestampCandidate("L", recordedAt);
   const lessonFile = artifactFile(paths, parsed.taskId, "lesson-candidates.md");
-  if (!fs.existsSync(lessonFile)) {
-    fs.writeFileSync(lessonFile, "# Lesson Candidates\n\n", "utf8");
-  }
-  fs.appendFileSync(
-    lessonFile,
-    [
+  const lessonContent = `${readOptionalText(lessonFile, "# Lesson Candidates\n\n")}${[
       `## ${candidateId}`,
       "",
       `- Recorded: ${recordedAt}`,
@@ -613,38 +687,45 @@ function runLessonCandidate(parsed, options = {}) {
         ? evidence.map((item) => `- \`${item}\``)
         : ["- None recorded."]),
       "",
-    ].join("\n"),
-    "utf8",
-  );
-  appendLedger(artifactFile(paths, parsed.taskId, "ledger.jsonl"), {
+    ].join("\n")}`;
+  const ledgerFile = artifactFile(paths, parsed.taskId, "ledger.jsonl");
+  const ledgerEvent = {
     kind: "lesson-candidate",
     candidate_id: candidateId,
     created_at: recordedAt,
     trigger,
     lesson,
     evidence,
-  });
-  updateTaskCommand(
+  };
+  const lessonReference = relativeToCodeHome(paths, lessonFile);
+  commitFeedbackRuntime({
     paths,
-    parsed.taskId,
-    {
+    taskId: parsed.taskId,
+    kind: "lesson.candidate.recorded",
+    data: ledgerEvent,
+    headerUpdates: {
       lesson_candidates: relativeToCodeHome(paths, lessonFile),
       latest_lesson_candidate: candidateId,
     },
-    {
-      "learning.candidates": relativeToCodeHome(paths, lessonFile),
-      "learning.latest_candidate": candidateId,
-      "learning.trigger": trigger,
+    updateState(state) {
+      state.learning = {
+        ...(state.learning || {}),
+        candidates: lessonReference,
+        latest_candidate: candidateId,
+        trigger,
+      };
     },
-    clock,
-  );
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "lesson-candidate",
-    `${candidateId} ${trigger}`,
-    clock,
-  );
+    files: [
+      { file: lessonFile, content: lessonContent },
+      {
+        file: ledgerFile,
+        content: `${readOptionalText(ledgerFile)}${stringifyLikePython(ledgerEvent)}\n`,
+      },
+    ],
+    legacyKind: "lesson-candidate",
+    legacyDetail: `${candidateId} ${trigger}`,
+    options: { ...options, clock, environment, expectedRevision },
+  });
   return {
     exitCode: 0,
     lines: [
@@ -671,8 +752,8 @@ function parseLearningDecisionArgs(argv) {
 }
 
 function runLearningDecision(parsed, options = {}) {
-  const { clock, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const { clock, environment, paths } = commandOptions(options);
+  const expectedRevision = validateFeedbackTask(paths, parsed.taskId);
   const decision = oneLine(parsed.decision, "decision", { allowEmpty: false });
   const reason = oneLine(parsed.reason, "reason", { allowEmpty: false });
   const candidates = parsed.candidates.map((item) =>
@@ -683,9 +764,7 @@ function runLearningDecision(parsed, options = {}) {
   }
   const recordedAt = timestampSeconds(clock);
   const decisionFile = artifactFile(paths, parsed.taskId, "learning-decision.md");
-  fs.writeFileSync(
-    decisionFile,
-    [
+  const decisionContent = [
       "# Learning Decision",
       "",
       `Recorded: ${recordedAt}`,
@@ -704,31 +783,44 @@ function runLearningDecision(parsed, options = {}) {
       "",
       "This records whether lesson candidates should be promoted later. It does not automatically write permanent memory.",
       "",
-    ].join("\n"),
-    "utf8",
-  );
-  appendLedger(artifactFile(paths, parsed.taskId, "ledger.jsonl"), {
+    ].join("\n");
+  const ledgerFile = artifactFile(paths, parsed.taskId, "ledger.jsonl");
+  const ledgerEvent = {
     kind: "learning-decision",
     created_at: recordedAt,
     decision,
     reason,
     candidates,
-  });
-  updateTaskCommand(
+  };
+  const decisionReference = relativeToCodeHome(paths, decisionFile);
+  commitFeedbackRuntime({
     paths,
-    parsed.taskId,
-    {
+    taskId: parsed.taskId,
+    kind: "learning.decision.recorded",
+    data: ledgerEvent,
+    headerUpdates: {
       learning_decision: relativeToCodeHome(paths, decisionFile),
       learning_decision_value: decision,
     },
-    {
-      "learning.decision_file": relativeToCodeHome(paths, decisionFile),
-      "learning.decision": decision,
-      "learning.decision_candidates": candidates.length,
+    updateState(state) {
+      state.learning = {
+        ...(state.learning || {}),
+        decision_file: decisionReference,
+        decision,
+        decision_candidates: candidates.length,
+      };
     },
-    clock,
-  );
-  appendLegacyRuntimeEvent(paths, parsed.taskId, "learning-decision", decision, clock);
+    files: [
+      { file: decisionFile, content: decisionContent },
+      {
+        file: ledgerFile,
+        content: `${readOptionalText(ledgerFile)}${stringifyLikePython(ledgerEvent)}\n`,
+      },
+    ],
+    legacyKind: "learning-decision",
+    legacyDetail: decision,
+    options: { ...options, clock, environment, expectedRevision },
+  });
   return {
     exitCode: 0,
     lines: [

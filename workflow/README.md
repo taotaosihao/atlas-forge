@@ -62,6 +62,26 @@ Show a task:
 ~/.codex/workflow/bin/codex-workflow show <task-id>
 ```
 
+Task mutations commit to `events-v2.jsonl` before updating Markdown, `state.json`,
+or the derived compatibility `runtime.jsonl`. Each event carries a monotonic
+revision, operation identity, previous-event link, payload digest, whole-record
+digest, and a replayable projection. Retrying the same operation and payload is
+idempotent; reusing an operation identity with different input is rejected.
+
+Inspect projection consistency without changing files:
+
+```bash
+~/.codex/workflow/bin/codex-workflow reconcile <task-id>
+```
+
+Rebuild a missing, stale, or divergent projection only with explicit repair
+authority. Apply mode first saves the current projection under the task's
+`reconcile-backups/` directory:
+
+```bash
+~/.codex/workflow/bin/codex-workflow reconcile <task-id> --apply --authority-ref <stable-ref>
+```
+
 Legacy Atlas recall:
 
 ```bash

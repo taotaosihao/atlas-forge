@@ -1,24 +1,23 @@
 "use strict";
 
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
-const { atomicWriteJson } = require("../core/atomic-file");
 const {
   CommandError,
-  appendLegacyRuntimeEvent,
   commandOptions,
-  prepareTaskCommand,
-  updateTaskCommand,
 } = require("../core/command-runtime");
-const { posixChecksum, withLock } = require("../core/lock");
-const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
-const { getTaskField, requireTaskFile, validateTaskFile } = require("../task/repository");
-const { updateTaskFields } = require("../task/repository");
+const { taskMutationLockFile } = require("../core/lock");
+const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require("../core/paths");
+const { mutateTaskRuntime } = require("../core/task-mutation");
 const {
+  getTaskField,
+  renderTaskFields,
+  requireTaskFile,
+  validateTaskFile,
+} = require("../task/repository");
+const {
+  projectTaskState,
   readJsonObject,
-  replaceActiveTeam,
-  taskRuntimeFile,
   taskStateFile,
   timestampSeconds,
 } = require("../task/runtime");
@@ -91,52 +90,7 @@ function teamStaffingFile(paths, taskId) {
 }
 
 function teamLockFile(taskId, environment = process.env) {
-  return path.join(
-    environment.TMPDIR || os.tmpdir(),
-    "codex-workflow-team-locks",
-    `${posixChecksum(taskId)}.lock`,
-  );
-}
-
-function snapshotPromotionFile(file, label, required = false) {
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch (error) {
-    if (error.code === "ENOENT" && !required) {
-      return { content: null, file, mode: null };
-    }
-    throw error;
-  }
-  if (!stat.isFile()) {
-    throw new CommandError(`${label} is not a regular file: ${file}`);
-  }
-  return { content: fs.readFileSync(file), file, mode: stat.mode & 0o777 };
-}
-
-function restorePromotionFile(snapshot) {
-  if (snapshot.content === null) {
-    try {
-      fs.unlinkSync(snapshot.file);
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-    return;
-  }
-  let current = null;
-  try {
-    current = fs.readFileSync(snapshot.file);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-  if (!current || !current.equals(snapshot.content)) {
-    fs.writeFileSync(snapshot.file, snapshot.content);
-  }
-  fs.chmodSync(snapshot.file, snapshot.mode);
+  return taskMutationLockFile(resolvePaths(environment), taskId);
 }
 
 function requireV2Team(paths, taskId) {
@@ -146,44 +100,66 @@ function requireV2Team(paths, taskId) {
   return team;
 }
 
-function writeV2Projection(paths, taskId, team, clock) {
+function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
   deriveTeam(team);
   if (team.backend_sidecar && new Set(["mixed", "none"]).has(team.effective_backend)) {
     team.backend = "native";
   }
   const taskFile = requireTaskFile(paths.tasksDir, taskId);
-  const snapshots = [
-    snapshotPromotionFile(taskFile, "task file", true),
-    snapshotPromotionFile(taskStateFile(paths, taskId), "task state", true),
-  ];
-  try {
-    updateTaskFields(taskFile, {
-      active_team_backend: team.backend,
-      active_team_mode: team.mode,
-      active_team_status: team.status,
-      active_team_decision: team.decision || relativeToCodeHome(paths, teamDecisionFile(paths, taskId)),
-    });
-    replaceActiveTeam(paths, taskId, team, clock);
-  } catch (error) {
-    for (const snapshot of snapshots.reverse()) restorePromotionFile(snapshot);
-    throw error;
-  }
+  validateTaskFile(taskFile);
+  const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {
+    active_team_backend: team.backend,
+    active_team_mode: team.mode,
+    active_team_status: team.status,
+    active_team_decision:
+      team.decision || relativeToCodeHome(paths, teamDecisionFile(paths, taskId)),
+  });
+  const state = projectTaskState(
+    paths,
+    taskId,
+    taskContent,
+    currentState || readJsonObject(taskStateFile(paths, taskId)),
+    clock,
+  );
+  state.active_team = team;
+  state.updated_at = timestampSeconds(clock);
+  return { task_content: taskContent, state };
 }
 
 function mutateV2Team(taskId, operationFn, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, taskId, clock);
   let output;
-  withLock(teamLockFile(taskId, environment), () => {
-    const team = requireV2Team(paths, taskId);
-    try {
-      output = operationFn(team, timestampSeconds(clock));
-    } catch (error) {
-      if (error instanceof RegistryError) throw new CommandError(error.message);
-      throw error;
-    }
-    writeV2Projection(paths, taskId, output.team, clock);
-  });
+  const committed = mutateTaskRuntime(
+    paths,
+    taskId,
+    {
+      kind: options.eventKind || "team.control.mutated",
+      operationId: options.operationId,
+      data: options.operationData || {},
+    },
+    () => {
+      const team = requireV2Team(paths, taskId);
+      try {
+        output = operationFn(team, timestampSeconds(clock));
+      } catch (error) {
+        if (error instanceof RegistryError) throw new CommandError(error.message);
+        throw error;
+      }
+      return {
+        projection: {
+          ...buildTeamProjection(paths, taskId, output.team, clock),
+          files: output.files || [],
+        },
+        result: output.result || {},
+        legacy: output.legacy || [{
+          kind: options.legacyKind || "team-control",
+          detail: options.legacyDetail || options.eventKind || "team.control.mutated",
+        }],
+      };
+    },
+    { ...options, clock, environment, expectedRevision: options.expectedRevision },
+  );
+  if (committed.replay) output = { replay: true, result: committed.result };
   return { ...output, paths };
 }
 
@@ -219,55 +195,72 @@ function runRecordStart(parsed, options = {}) {
   const decision = relativeToCodeHome(paths, decisionFile);
   const staffing = relativeToCodeHome(paths, staffingFile);
   let team;
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-    const { task } = validateTaskFile(taskFile);
-    readJsonObject(taskStateFile(paths, parsed.taskId));
-    if (task.status !== "doing") {
-      throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
-    }
-    prepareTaskCommand(paths, parsed.taskId, clock);
-    const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-    const previous = state.active_team && typeof state.active_team === "object"
-      ? state.active_team : {};
-    const generation = previous.schema_version === 2 ? Number(previous.generation || 0) + 1 : 1;
-    const now = timestampSeconds(clock);
-    try {
-      team = createTeamRun({
-        previous,
-        mode: parsed.mode,
-        objective: parsed.objective,
-        configuredBackend: parsed.backend || null,
-        fallbackPolicy,
-        authorizationRef: parsed.authorizationRef,
-        agents: parsed.agents,
-        roles: parsed.roles,
-        providers: parsed.providers,
-        decision,
-        staffing,
-        now,
-        teamSelection: parsed.backend ? {
-          eventId: `selection-team-${String(generation).padStart(4, "0")}`,
-          kind: "backend",
-          scope: "team",
-          authorityKind: parsed.selectionAuthorityKind,
-          authorityRef: parsed.selectionAuthorityRef,
-          backend,
-        } : null,
-      });
-    } catch (error) {
-      if (error instanceof RegistryError) throw new CommandError(error.message);
-      throw error;
-    }
-    writeV2Projection(paths, parsed.taskId, team, clock);
-  });
-  appendLegacyRuntimeEvent(
+  const committed = mutateTaskRuntime(
     paths,
     parsed.taskId,
-    "team-record-start",
-    `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
-    clock,
+    {
+      kind: "team.started",
+      operationId: parsed.operationId || options.operationId,
+      data: {
+        mode: parsed.mode,
+        objective: parsed.objective,
+        backend: parsed.backend || "",
+        fallback_policy: fallbackPolicy,
+        authorization_ref: parsed.authorizationRef || "",
+      },
+    },
+    () => {
+      const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      const { task } = validateTaskFile(taskFile);
+      const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+      if (task.status !== "doing") {
+        throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
+      }
+      const previous = state.active_team && typeof state.active_team === "object"
+        ? state.active_team
+        : {};
+      const generation = previous.schema_version === 2
+        ? Number(previous.generation || 0) + 1
+        : 1;
+      try {
+        team = createTeamRun({
+          previous,
+          mode: parsed.mode,
+          objective: parsed.objective,
+          configuredBackend: parsed.backend || null,
+          fallbackPolicy,
+          authorizationRef: parsed.authorizationRef,
+          agents: parsed.agents,
+          roles: parsed.roles,
+          providers: parsed.providers,
+          decision,
+          staffing,
+          now: timestampSeconds(clock),
+          teamSelection: parsed.backend ? {
+            eventId: `selection-team-${String(generation).padStart(4, "0")}`,
+            kind: "backend",
+            scope: "team",
+            authorityKind: parsed.selectionAuthorityKind,
+            authorityRef: parsed.selectionAuthorityRef,
+            backend,
+          } : null,
+        });
+      } catch (error) {
+        if (error instanceof RegistryError) throw new CommandError(error.message);
+        throw error;
+      }
+      return {
+        projection: buildTeamProjection(paths, parsed.taskId, team, clock, state),
+        result: { team },
+        legacy: [{
+          kind: "team-record-start",
+          detail: `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
+        }],
+      };
+    },
+    { ...options, clock, environment },
   );
+  if (committed.replay) team = committed.result.team;
   const lines = [
     `task_id: ${parsed.taskId}`,
     `backend: ${backend}`,
@@ -384,7 +377,9 @@ function capabilityFromObserverResult(result, providerResult, provider, model) {
 function runSelectionRecord(parsed, options = {}) {
   if (parsed.kind === "capability") {
     const { clock, environment, paths } = commandOptions(options);
-    prepareTaskCommand(paths, parsed.taskId, clock);
+    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+    validateTaskFile(taskFile);
+    readJsonObject(taskStateFile(paths, parsed.taskId));
     const existingTeam = requireV2Team(paths, parsed.taskId);
     const existingOperation = (existingTeam.operation_log || [])
       .find((entry) => entry.operation_id === parsed.operationId);
@@ -431,13 +426,26 @@ function runSelectionRecord(parsed, options = {}) {
       observedAt: observed.observation.observed_at,
       authorityRef: parsed.authorityRef,
       now,
-    }), { ...options, clock, environment, paths });
+    }), {
+      ...options,
+      clock,
+      environment,
+      paths,
+      operationId: parsed.operationId,
+      operationData: { ...parsed },
+      eventKind: "team.capability.recorded",
+    });
     return { exitCode: 0, lines: controlResultLines(parsed.taskId, "selection-record", output.result) };
   }
   const output = mutateV2Team(parsed.taskId, (team, now) => recordSelectionEvent(team, {
     ...parsed,
     now,
-  }), options);
+  }), {
+    ...options,
+    operationId: parsed.operationId,
+    operationData: { ...parsed },
+    eventKind: "team.selection.recorded",
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, "selection-record", output.result) };
 }
 
@@ -459,7 +467,12 @@ function runLaneRecord(parsed, options = {}) {
   } else {
     throw new CommandError(LANE_USAGE);
   }
-  const output = mutateV2Team(parsed.taskId, action, options);
+  const output = mutateV2Team(parsed.taskId, action, {
+    ...options,
+    operationId: parsed.operationId,
+    operationData: { ...parsed },
+    eventKind: `team.lane.${parsed.action}`,
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `lane-${parsed.action}`, output.result) };
 }
 
@@ -484,7 +497,12 @@ function runDispatchRecord(parsed, options = {}) {
   } else {
     throw new CommandError(DISPATCH_USAGE);
   }
-  const output = mutateV2Team(parsed.taskId, action, options);
+  const output = mutateV2Team(parsed.taskId, action, {
+    ...options,
+    operationId: parsed.operationId,
+    operationData: { ...parsed },
+    eventKind: `team.dispatch.${parsed.action}`,
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `dispatch-${parsed.action}`, output.result) };
 }
 
@@ -536,7 +554,9 @@ function agentsFromListResult(result) {
 
 function runObserveAttempt(parsed, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, parsed.taskId, clock);
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  validateTaskFile(taskFile);
+  readJsonObject(taskStateFile(paths, parsed.taskId));
   const existingTeam = requireV2Team(paths, parsed.taskId);
   const attempt = (existingTeam.attempts || []).find((item) => item.attempt_id === parsed.attemptId);
   if (!attempt) throw new CommandError(`unknown attempt: ${parsed.attemptId}`);
@@ -649,7 +669,22 @@ function runObserveAttempt(parsed, options = {}) {
     observationId: parsed.observationId,
     observation,
     now,
-  }), { ...options, clock, environment, paths });
+  }), {
+    ...options,
+    clock,
+    environment,
+    paths,
+    operationId,
+    operationData: {
+      taskId: parsed.taskId,
+      operationId,
+      attemptId: parsed.attemptId,
+      observationId: parsed.observationId,
+      observerAction: parsed.observerAction,
+      observerArgsJson: parsed.observerArgsJson || "",
+    },
+    eventKind: "team.attempt.observed",
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, "attempt-observe", output.result) };
 }
 
@@ -694,7 +729,12 @@ function runAttemptRecord(parsed, options = {}) {
       throw new CommandError(ATTEMPT_USAGE);
     }
     return transitioned;
-  }, options);
+  }, {
+    ...options,
+    operationId: parsed.operationId,
+    operationData: { ...parsed, evidenceRefs },
+    eventKind: `team.attempt.${parsed.action}`,
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `attempt-${parsed.action}`, output.result) };
 }
 
@@ -707,7 +747,12 @@ function runFallbackRecord(parsed, options = {}) {
     ...parsed,
     evidenceRefs,
     now,
-  }), options);
+  }), {
+    ...options,
+    operationId: parsed.operationId,
+    operationData: { ...parsed, evidenceRefs },
+    eventKind: "team.attempt.fallback",
+  });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, "fallback-record", output.result) };
 }
 
@@ -791,10 +836,11 @@ function validateTeamArtifact(paths, taskId, label, file, backend) {
 function runRecordFinalize(parsed, options = {}) {
   validateFinalStatus(parsed.status);
   const { clock, environment, paths } = commandOptions(options);
-  const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  validateTaskFile(taskFile);
   const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
   if (currentState.active_team && currentState.active_team.schema_version === 2) {
-    return runRecordFinalizeV2(parsed, { clock, environment, paths, taskFile });
+    return runRecordFinalizeV2(parsed, { ...options, clock, environment, paths });
   }
   validateBackend(parsed.backend);
   const currentBackend = getTaskField(taskFile, "active_team_backend");
@@ -829,33 +875,54 @@ function runRecordFinalize(parsed, options = {}) {
   const decision = relativeToCodeHome(paths, decisionAbsolute);
   const staffing = relativeToCodeHome(paths, staffingAbsolute);
   const mode = getTaskField(taskFile, "active_team_mode");
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    updateTaskCommand(
-      paths,
-      parsed.taskId,
-      {
+  mutateTaskRuntime(
+    paths,
+    parsed.taskId,
+    {
+      kind: "team.finalized",
+      operationId: options.operationId,
+      data: {
+        backend: parsed.backend,
+        status: parsed.status,
+        round,
+        decision,
+        staffing,
+      },
+    },
+    () => {
+      const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      validateTaskFile(currentFile);
+      const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
         active_team_backend: parsed.backend,
         active_team_status: parsed.status,
         active_team_decision: decision,
-      },
-      {
-        "active_team.backend": parsed.backend,
-        "active_team.mode": mode,
-        "active_team.status": parsed.status,
-        "active_team.decision": decision,
-        "active_team.round_file": round,
-        "active_team.staffing": staffing,
-        "active_team.temp_dir": "",
-      },
-      clock,
-    );
-  });
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "team-record-finalize",
-    `${parsed.backend}/${parsed.status} round=${round}`,
-    clock,
+      });
+      const state = projectTaskState(
+        paths,
+        parsed.taskId,
+        taskContent,
+        readJsonObject(taskStateFile(paths, parsed.taskId)),
+        clock,
+      );
+      state.active_team = {
+        ...(state.active_team || {}),
+        backend: parsed.backend,
+        mode,
+        status: parsed.status,
+        decision,
+        round_file: round,
+        staffing,
+        temp_dir: "",
+      };
+      return {
+        projection: { task_content: taskContent, state },
+        legacy: [{
+          kind: "team-record-finalize",
+          detail: `${parsed.backend}/${parsed.status} round=${round}`,
+        }],
+      };
+    },
+    { clock, environment },
   );
   return {
     exitCode: 0,
@@ -881,24 +948,20 @@ function backendAssertionMatches(asserted, effective, hasDispatches, resolvedReq
 }
 
 function runRecordFinalizeV2(parsed, context) {
-  const { clock, environment, paths, taskFile } = context;
-  let finalizedTeam;
-  let effectiveBackend;
-  let sidecarFile;
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const current = requireV2Team(paths, parsed.taskId);
-    if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(current.status)) {
-      throw new CommandError(`team-record-finalize requires an active v2 team record in running status`);
+  const { clock, paths } = context;
+  const sidecarFile = path.join(teamDir(paths, parsed.taskId), "backend-v2.json");
+  const output = mutateV2Team(parsed.taskId, (team) => {
+    if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
+      throw new CommandError("team-record-finalize requires an active v2 team record in running status");
     }
     const roundAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team round", parsed.roundFile);
     const decisionAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team decision", parsed.decisionFile);
     const staffingAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team staffing", parsed.staffingFile);
-    const team = current;
     if (team.lanes.some((lane) => lane.status !== "closed")) {
       throw new CommandError("v2 finalize requires all lanes closed");
     }
     deriveTeam(team);
-    effectiveBackend = team.effective_backend;
+    const effectiveBackend = team.effective_backend;
     if (parsed.backend && !backendAssertionMatches(
       parsed.backend, effectiveBackend, team.dispatches.length > 0,
       team.resolved_requested_backend,
@@ -929,29 +992,37 @@ function runRecordFinalizeV2(parsed, context) {
     }
     const sidecar = backendSidecar(team);
     team.backend = new Set(["native", "paseo"]).has(effectiveBackend) ? effectiveBackend : "native";
-    sidecarFile = path.join(teamDir(paths, parsed.taskId), "backend-v2.json");
     team.backend_sidecar = relativeToCodeHome(paths, sidecarFile);
-    const snapshots = [
-      snapshotPromotionFile(taskFile, "task file", true),
-      snapshotPromotionFile(taskStateFile(paths, parsed.taskId), "task state", true),
-      snapshotPromotionFile(sidecarFile, "team backend sidecar"),
-    ];
-    try {
-      atomicWriteJson(sidecarFile, sidecar);
-      writeV2Projection(paths, parsed.taskId, team, clock);
-    } catch (error) {
-      for (const snapshot of snapshots.reverse()) restorePromotionFile(snapshot);
-      throw error;
-    }
-    finalizedTeam = team;
+    return {
+      team,
+      files: [{
+        path: "team/backend-v2.json",
+        content_base64: Buffer.from(`${JSON.stringify(sidecar, null, 2)}\n`).toString("base64"),
+      }],
+      result: {
+        effective_backend: effectiveBackend,
+        round_file: team.round_file,
+      },
+      legacy: [{
+        kind: "team-record-finalize",
+        detail: `${effectiveBackend}/${parsed.status} round=${team.round_file}`,
+      }],
+    };
+  }, {
+    ...context,
+    operationId: context.operationId,
+    operationData: {
+      backend: parsed.backend,
+      status: parsed.status,
+      roundFile: parsed.roundFile,
+      decisionFile: parsed.decisionFile,
+      staffingFile: parsed.staffingFile,
+    },
+    eventKind: "team.finalized",
+    legacyKind: "team-record-finalize",
+    legacyDetail: `${parsed.backend}/${parsed.status} round=${parsed.roundFile}`,
   });
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "team-record-finalize",
-    `${effectiveBackend}/${parsed.status} round=${finalizedTeam.round_file}`,
-    clock,
-  );
+  const effectiveBackend = output.result.effective_backend;
   return {
     exitCode: 0,
     lines: [
@@ -987,10 +1058,11 @@ function runLoopRecord(parsed, options = {}) {
     validateReason(parsed.maxTime, "loop max time");
   }
   const { clock, environment, paths } = commandOptions(options);
-  const taskFile = prepareTaskCommand(paths, parsed.taskId, clock);
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  validateTaskFile(taskFile);
   const state = readJsonObject(taskStateFile(paths, parsed.taskId));
   if (state.active_team && state.active_team.schema_version === 2) {
-    return runLoopRecordV2(parsed, { clock, environment, paths, taskFile });
+    return runLoopRecordV2(parsed, { ...options, clock, environment, paths });
   }
   validateBackend(parsed.backend);
   if (getTaskField(taskFile, "active_team_backend") !== parsed.backend) {
@@ -1009,42 +1081,63 @@ function runLoopRecord(parsed, options = {}) {
   const staffing = relativeToCodeHome(paths, staffingFile);
   const loop = relativeToCodeHome(paths, loopAbsolute);
   const mode = getTaskField(taskFile, "active_team_mode") || "execute";
-  const stateUpdates = {
-    "active_team.backend": parsed.backend,
-    "active_team.mode": mode,
-    "active_team.status": parsed.status,
-    "active_team.decision": decision,
-    "active_team.staffing": staffing,
-    "active_team.loop.status": parsed.status,
-    "active_team.loop.file": loop,
-    "active_team.loop.iteration": parsed.iterations,
-  };
-  if (parsed.maxIterations) {
-    stateUpdates["active_team.loop.max_iterations"] = parsed.maxIterations;
-  }
-  if (parsed.maxTime) {
-    stateUpdates["active_team.loop.max_time"] = parsed.maxTime;
-  }
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    updateTaskCommand(
-      paths,
-      parsed.taskId,
-      {
+  mutateTaskRuntime(
+    paths,
+    parsed.taskId,
+    {
+      kind: "team.loop.recorded",
+      operationId: options.operationId,
+      data: {
+        backend: parsed.backend,
+        status: parsed.status,
+        loop,
+        iterations: Number(parsed.iterations),
+        max_iterations: parsed.maxIterations ? Number(parsed.maxIterations) : null,
+        max_time: parsed.maxTime || "",
+      },
+    },
+    () => {
+      const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      validateTaskFile(currentFile);
+      const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
         active_team_backend: parsed.backend,
         active_team_mode: mode,
         active_team_status: parsed.status,
         active_team_decision: decision,
-      },
-      stateUpdates,
-      clock,
-    );
-  });
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "team-loop-record",
-    `${parsed.backend}/${parsed.status} loop=${loop} iterations=${parsed.iterations}`,
-    clock,
+      });
+      const nextState = projectTaskState(
+        paths,
+        parsed.taskId,
+        taskContent,
+        readJsonObject(taskStateFile(paths, parsed.taskId)),
+        clock,
+      );
+      const nextLoop = {
+        ...((nextState.active_team || {}).loop || {}),
+        status: parsed.status,
+        file: loop,
+        iteration: Number(parsed.iterations),
+      };
+      if (parsed.maxIterations) nextLoop.max_iterations = Number(parsed.maxIterations);
+      if (parsed.maxTime) nextLoop.max_time = parsed.maxTime;
+      nextState.active_team = {
+        ...(nextState.active_team || {}),
+        backend: parsed.backend,
+        mode,
+        status: parsed.status,
+        decision,
+        staffing,
+        loop: nextLoop,
+      };
+      return {
+        projection: { task_content: taskContent, state: nextState },
+        legacy: [{
+          kind: "team-loop-record",
+          detail: `${parsed.backend}/${parsed.status} loop=${loop} iterations=${parsed.iterations}`,
+        }],
+      };
+    },
+    { clock, environment },
   );
   return {
     exitCode: 0,
@@ -1059,15 +1152,13 @@ function runLoopRecord(parsed, options = {}) {
 }
 
 function runLoopRecordV2(parsed, context) {
-  const { clock, environment, paths } = context;
-  let effective;
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const team = requireV2Team(paths, parsed.taskId);
+  const { clock, paths } = context;
+  const output = mutateV2Team(parsed.taskId, (team) => {
     if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
       throw new CommandError("team-loop-record requires an active v2 team record in running status");
     }
     deriveTeam(team);
-    effective = team.effective_backend;
+    const effective = team.effective_backend;
     if (parsed.backend && !backendAssertionMatches(
       parsed.backend, effective, team.dispatches.length > 0,
       team.resolved_requested_backend,
@@ -1098,12 +1189,30 @@ function runLoopRecordV2(parsed, context) {
         recorded_at: timestampSeconds(clock),
       });
     }
-    writeV2Projection(paths, parsed.taskId, team, clock);
+    return {
+      team,
+      result: { effective_backend: effective },
+      legacy: [{
+        kind: "team-loop-record",
+        detail: `${effective}/${parsed.status} loop=${team.loop.file} iterations=${parsed.iterations}`,
+      }],
+    };
+  }, {
+    ...context,
+    operationId: context.operationId,
+    operationData: {
+      backend: parsed.backend,
+      status: parsed.status,
+      loopFile: parsed.loopFile,
+      iterations: Number(parsed.iterations),
+      maxIterations: parsed.maxIterations ? Number(parsed.maxIterations) : null,
+      maxTime: parsed.maxTime || "",
+    },
+    eventKind: "team.loop.recorded",
+    legacyKind: "team-loop-record",
+    legacyDetail: `${parsed.backend}/${parsed.status} loop=${parsed.loopFile} iterations=${parsed.iterations}`,
   });
-  appendLegacyRuntimeEvent(
-    paths, parsed.taskId, "team-loop-record",
-    `${effective}/${parsed.status} loop=${parsed.loopFile} iterations=${parsed.iterations}`, clock,
-  );
+  const effective = output.result.effective_backend;
   return {
     exitCode: 0,
     lines: [
@@ -1124,8 +1233,9 @@ function runStatus(argv, options = {}) {
   if (argv.length !== 1) {
     throw new CommandError(STATUS_USAGE);
   }
-  const { clock, paths } = commandOptions(options);
-  prepareTaskCommand(paths, argv[0], clock);
+  const { paths } = commandOptions(options);
+  const taskFile = requireTaskFile(paths.tasksDir, argv[0]);
+  validateTaskFile(taskFile);
   const state = readJsonObject(taskStateFile(paths, argv[0]));
   const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
   const loop = team.loop && typeof team.loop === "object" ? team.loop : {};
@@ -1180,12 +1290,12 @@ function runStop(argv, options = {}) {
     throw new CommandError(STOP_USAGE);
   }
   const { clock, environment, paths } = commandOptions(options);
-  prepareTaskCommand(paths, argv[0], clock);
+  const taskFile = requireTaskFile(paths.tasksDir, argv[0]);
+  validateTaskFile(taskFile);
   const decision = relativeToCodeHome(paths, teamDecisionFile(paths, argv[0]));
   const state = readJsonObject(taskStateFile(paths, argv[0]));
   if (state.active_team && state.active_team.schema_version === 2) {
-    withLock(teamLockFile(argv[0], environment), () => {
-      const team = requireV2Team(paths, argv[0]);
+    mutateV2Team(argv[0], (team) => {
       if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
         throw new CommandError(`team run is not mutable: ${team.status}`);
       }
@@ -1195,19 +1305,54 @@ function runStop(argv, options = {}) {
       }
       team.status = "stopped";
       team.decision = decision;
-      writeV2Projection(paths, argv[0], team, clock);
+      return { team };
+    }, {
+      ...options,
+      clock,
+      environment,
+      paths,
+      operationId: options.operationId,
+      operationData: { status: "stopped" },
+      eventKind: "team.stopped",
+      legacyKind: "team-stop",
+      legacyDetail: "stopped",
     });
-    appendLegacyRuntimeEvent(paths, argv[0], "team-stop", "stopped", clock);
     return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
   }
-  updateTaskCommand(
+  mutateTaskRuntime(
     paths,
     argv[0],
-    { active_team_status: "stopped", active_team_decision: decision },
-    { "active_team.status": "stopped", "active_team.decision": decision },
-    clock,
+    {
+      kind: "team.stopped",
+      operationId: options.operationId,
+      data: { status: "stopped" },
+    },
+    () => {
+      const currentFile = requireTaskFile(paths.tasksDir, argv[0]);
+      validateTaskFile(currentFile);
+      const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
+        active_team_status: "stopped",
+        active_team_decision: decision,
+      });
+      const nextState = projectTaskState(
+        paths,
+        argv[0],
+        taskContent,
+        readJsonObject(taskStateFile(paths, argv[0])),
+        clock,
+      );
+      nextState.active_team = {
+        ...(nextState.active_team || {}),
+        status: "stopped",
+        decision,
+      };
+      return {
+        projection: { task_content: taskContent, state: nextState },
+        legacy: [{ kind: "team-stop", detail: "stopped" }],
+      };
+    },
+    { clock, environment },
   );
-  appendLegacyRuntimeEvent(paths, argv[0], "team-stop", "stopped", clock);
   return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
 }
 
@@ -1216,71 +1361,99 @@ function runPromote(parsed, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-    validateTaskFile(taskFile);
-    const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-    const activeTeam = state.active_team && typeof state.active_team === "object"
-      ? state.active_team
-      : {};
-    if (activeTeam.schema_version === 2
-      && !new Set(["running", "promoted:execute", "promoted:worktree"])
-        .has(activeTeam.status)) {
-      throw new CommandError(`team run is not mutable: ${activeTeam.status}`);
-    }
-    const snapshots = [
-      snapshotPromotionFile(taskFile, "task file", true),
-      snapshotPromotionFile(taskStateFile(paths, parsed.taskId), "task state"),
-      snapshotPromotionFile(decisionFile, "team decision"),
-      snapshotPromotionFile(taskRuntimeFile(paths, parsed.taskId), "task runtime"),
-    ];
-    let mode = getTaskField(taskFile, "active_team_mode");
-    if (parsed.target === "execute") {
-      mode = "execute";
-    }
-    const status = `promoted:${parsed.target}`;
-    const stateUpdates = {
-      "active_team.mode": mode,
-      "active_team.status": status,
-      "active_team.promoted_to": parsed.target,
-    };
-    if (parsed.target === "execute") {
-      stateUpdates["active_team.authorization_ref"] = parsed.authorizationRef;
-    }
-    try {
-      updateTaskCommand(
-        paths,
-        parsed.taskId,
-        {
+  const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+  validateTaskFile(taskFile);
+  const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+  const authorizationLine = parsed.target === "execute"
+    ? `- authorization_ref: ${parsed.authorizationRef}\n`
+    : "";
+  const promotionBlock =
+    `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}` +
+    `- created_at: ${timestampSeconds(clock)}\n`;
+  const projectionFile = (team) => ({
+    path: "team/decision.md",
+    content_base64: Buffer.from(`${fs.existsSync(decisionFile) ? fs.readFileSync(decisionFile, "utf8") : ""}${promotionBlock}`)
+      .toString("base64"),
+  });
+  if (state.active_team && state.active_team.schema_version === 2) {
+    mutateV2Team(parsed.taskId, (team) => {
+      if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
+        throw new CommandError(`team run is not mutable: ${team.status}`);
+      }
+      const mode = parsed.target === "execute" ? "execute" : team.mode;
+      team.mode = mode;
+      team.status = `promoted:${parsed.target}`;
+      team.promoted_to = parsed.target;
+      team.decision = decision;
+      if (parsed.target === "execute") team.authorization_ref = parsed.authorizationRef;
+      return { team, files: [projectionFile(team)] };
+    }, {
+      ...options,
+      clock,
+      environment,
+      paths,
+      operationId: options.operationId,
+      operationData: {
+        target: parsed.target,
+        authorization_ref: parsed.authorizationRef || "",
+      },
+      eventKind: "team.promoted",
+      legacyKind: "team-promote",
+      legacyDetail: parsed.target,
+    });
+  } else {
+    mutateTaskRuntime(
+      paths,
+      parsed.taskId,
+      {
+        kind: "team.promoted",
+        operationId: options.operationId,
+        data: {
+          target: parsed.target,
+          authorization_ref: parsed.authorizationRef || "",
+        },
+      },
+      () => {
+        const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+        validateTaskFile(currentFile);
+        const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
+        const activeTeam = currentState.active_team && typeof currentState.active_team === "object"
+          ? currentState.active_team
+          : {};
+        const mode = parsed.target === "execute"
+          ? "execute"
+          : getTaskField(currentFile, "active_team_mode");
+        const status = `promoted:${parsed.target}`;
+        const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
           active_team_mode: mode,
           active_team_status: status,
           active_team_decision: decision,
-        },
-        stateUpdates,
-        clock,
-      );
-      const authorizationLine = parsed.target === "execute"
-        ? `- authorization_ref: ${parsed.authorizationRef}\n`
-        : "";
-      fs.appendFileSync(
-        decisionFile,
-        `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
-        "utf8",
-      );
-      appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
-    } catch (error) {
-      try {
-        for (const snapshot of snapshots.reverse()) {
-          restorePromotionFile(snapshot);
-        }
-      } catch (rollbackError) {
-        throw new CommandError(
-          `team promotion failed and rollback failed: ${error.message}; ${rollbackError.message}`,
+        });
+        const nextState = projectTaskState(
+          paths, parsed.taskId, taskContent, currentState, clock,
         );
-      }
-      throw error;
-    }
-  });
+        nextState.active_team = {
+          ...activeTeam,
+          mode,
+          status,
+          promoted_to: parsed.target,
+          decision,
+        };
+        if (parsed.target === "execute") {
+          nextState.active_team.authorization_ref = parsed.authorizationRef;
+        }
+        return {
+          projection: {
+            task_content: taskContent,
+            state: nextState,
+            files: [projectionFile(activeTeam)],
+          },
+          legacy: [{ kind: "team-promote", detail: parsed.target }],
+        };
+      },
+      { clock, environment },
+    );
+  }
   const lines = [
     `task_id: ${parsed.taskId}`,
     `target: ${parsed.target}`,

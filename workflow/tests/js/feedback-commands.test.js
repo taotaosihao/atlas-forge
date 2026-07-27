@@ -78,6 +78,10 @@ function readJsonLines(file) {
     .map((line) => JSON.parse(line));
 }
 
+function legacyShape(event) {
+  return { kind: event.kind, detail: event.detail, created_at: event.created_at };
+}
+
 test("promotes the latest failed verification into trace and regression records", (t) => {
   assert.equal(
     tracePreview(Array.from({ length: 121 }, (_, index) => `${index}`).join("\n")).split(
@@ -137,7 +141,7 @@ test("promotes the latest failed verification into trace and regression records"
   const state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.trace.latest_source, latest);
   assert.equal(state.trace.latest_type, "regression");
-  assert.deepEqual(readJsonLines(taskRuntimeFile(paths, taskId)).at(-1), {
+  assert.deepEqual(legacyShape(readJsonLines(taskRuntimeFile(paths, taskId)).at(-1)), {
     kind: "trace-promote",
     detail: `${candidate} regression`,
     created_at: "2026-07-10T11:01:02Z",

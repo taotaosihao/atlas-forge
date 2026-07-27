@@ -13,6 +13,7 @@ const DIRECT_ROUTES = new Map([
   ["archive", "./task/cli.js"],
   ["stale", "./task/cli.js"],
   ["show", "./task/cli.js"],
+  ["reconcile", "./task/cli.js"],
   ["scaffold-intake", "./artifact/cli.js"],
   ["scaffold-brainstorm", "./artifact/cli.js"],
   ["scaffold-clarify", "./artifact/cli.js"],

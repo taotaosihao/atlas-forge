@@ -164,16 +164,28 @@ test("creates a task, state projection, scaffold, and schema-v1 event in JavaScr
   assert.match(fs.readFileSync(file, "utf8"), /## Success Criteria\nkeeper behavior/);
   assert.equal(fs.existsSync(path.join(paths.artifactsDir, taskId, "context.md")), true);
   assert.equal(JSON.parse(fs.readFileSync(taskStateFile(paths, taskId), "utf8")).status, "todo");
-  assert.deepEqual(readEvents(paths, taskId), [
+  const [createdEvent] = readEvents(paths, taskId);
+  assert.deepEqual(
+    {
+      schema_version: createdEvent.schema_version,
+      task_id: createdEvent.task_id,
+      kind: createdEvent.kind,
+      occurred_at: createdEvent.occurred_at,
+      data: createdEvent.data,
+    },
     {
       schema_version: 1,
-      event_id: "event-created",
       task_id: taskId,
       kind: "task.created",
       occurred_at: "2026-07-10T02:03:04.567Z",
       data: { from: null, to: "todo" },
     },
-  ]);
+  );
+  assert.equal(createdEvent.event_id, "legacy-event-created");
+  assert.equal(createdEvent.authoritative_event_id, "event-created");
+  assert.equal(createdEvent.derived_from_event_id, "event-created");
+  assert.equal(createdEvent.derived_from_schema, 2);
+  assert.equal(createdEvent.revision, 1);
 });
 
 test("serializes parallel init-task calls and removes the init lock", async (t) => {

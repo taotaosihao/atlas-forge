@@ -105,15 +105,20 @@ function writeVerificationRecord(record) {
   return record.recordFile;
 }
 
-function writeVerificationIdentityRecord(recordFile, record) {
+function buildVerificationIdentityRecord(record) {
   const withoutId = { ...record };
   delete withoutId.record_id;
-  const value = { ...withoutId, record_id: digestCanonical(withoutId) };
+  return { ...withoutId, record_id: digestCanonical(withoutId) };
+}
+
+function writeVerificationIdentityRecord(recordFile, record) {
+  const value = buildVerificationIdentityRecord(record);
   atomicWriteJson(recordFile, value);
   return value;
 }
 
 module.exports = {
+  buildVerificationIdentityRecord,
   outputPreview,
   renderVerificationRecord,
   writeVerificationIdentityRecord,

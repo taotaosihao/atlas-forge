@@ -80,6 +80,10 @@ function readEvents(paths, taskId) {
     .map((line) => JSON.parse(line));
 }
 
+function legacyShape(event) {
+  return { kind: event.kind, detail: event.detail, created_at: event.created_at };
+}
+
 test("runs a passing argv command and records independent verification metadata", (t) => {
   const { environment, home, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment);
@@ -163,7 +167,7 @@ test("runs a passing argv command and records independent verification metadata"
     state.verification.evidence_refs,
     "verification/manual.md https://example.invalid/run/1",
   );
-  assert.deepEqual(readEvents(paths, taskId).at(-1), {
+  assert.deepEqual(legacyShape(readEvents(paths, taskId).at(-1)), {
     kind: "verify",
     detail: `${formatCommand(parsed.command)} => passed`,
     created_at: "2026-07-10T09:15:00Z",
