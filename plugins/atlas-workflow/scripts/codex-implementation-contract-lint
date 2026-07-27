@@ -7,6 +7,7 @@ const path = require("path");
 const { TextDecoder } = require("util");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
+const { extractExecutionPlan } = require("../contracts/team-sdd/validators/execution-plan");
 const {
   computeGoalRef,
   digestFile,
@@ -110,9 +111,9 @@ Options:
   --file <path>  Markdown implementation contract to validate.
   --strict       Require contract_semantics_version.
   --new-authoring
-                 Require strict semantics version 2 for newly authored contracts.
+                 Require strict semantics version 3 for newly authored contracts.
   --authority-slice <dir>
-                 Canonical Team SDD slice used to validate semantics-v2 goal
+                 Canonical Team SDD slice used to validate semantics-v2/v3 goal
                  and current-required authority. Repeat for multiple slices.
   --help         Show this help.
 
@@ -237,8 +238,8 @@ function loadAuthoritySlices(slicePaths) {
       const resolutionFile = path.join(sliceDir, "controller-resolution.json");
       const brief = readCanonicalJson(briefFile, "brief.json");
       const briefErrors = validateBrief(brief);
-      if (brief.schema_version !== 2 || briefErrors.length > 0) {
-        throw new Error(`invalid brief v2: ${briefErrors.join("; ")}`);
+      if (![2, 3].includes(brief.schema_version) || briefErrors.length > 0) {
+        throw new Error(`invalid brief v2/v3: ${briefErrors.join("; ")}`);
       }
       const expectedSliceDir = path.join(
         workflowRoot(),
@@ -1280,6 +1281,22 @@ function validateVersionTwo(content, fields, initialDiagnostics, authority, stri
   return diagnostics;
 }
 
+function validateVersionThree(content, fields, initialDiagnostics, authority, strict) {
+  const diagnostics = validateVersionTwo(content, fields, initialDiagnostics, authority, strict);
+  try {
+    extractExecutionPlan(content);
+  } catch (error) {
+    diagnostics.push(makeDiagnostic(
+      "ERROR",
+      "EXECUTION_PLAN_INVALID",
+      "atlas-execution-plan+json",
+      0,
+      error.message,
+    ));
+  }
+  return diagnostics;
+}
+
 function sortDiagnostics(diagnostics) {
   return diagnostics.sort((left, right) => (
     left.line - right.line
@@ -1320,13 +1337,13 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
     if (newAuthoring) {
       diagnostic = makeDiagnostic(
         "ERROR",
-        "NEW_AUTHORING_REQUIRES_V2",
+        "NEW_AUTHORING_REQUIRES_V3",
         "contract_semantics_version",
         0,
-        "newly authored contracts must use contract_semantics_version: 2",
+        "newly authored contracts must use contract_semantics_version: 3",
       );
     } else if (strict) {
-      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1 or 2");
+      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1, 2, or 3");
     } else {
       diagnostic = makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
     }
@@ -1337,36 +1354,44 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
     return ok ? 0 : 1;
   }
 
-  if (!["1", "2"].includes(version.value)) {
+  if (!["1", "2", "3"].includes(version.value)) {
     const diagnostics = sortDiagnostics([
       ...parsed.diagnostics,
-      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1 or 2 is supported"),
+      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1, 2, or 3 is supported"),
     ]);
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
     printSummary(false, absolute, strict, newAuthoring, version.value || "invalid", diagnostics);
     return 1;
   }
 
-  const versionDiagnostics = newAuthoring && version.value !== "2"
+  const versionDiagnostics = newAuthoring && version.value !== "3"
     ? [makeDiagnostic(
       "ERROR",
-      "NEW_AUTHORING_REQUIRES_V2",
+      "NEW_AUTHORING_REQUIRES_V3",
       version.key,
       version.line,
-      "newly authored contracts must use contract_semantics_version: 2",
+      "newly authored contracts must use contract_semantics_version: 3",
     )]
     : [];
   const diagnostics = sortDiagnostics([
     ...versionDiagnostics,
-    ...(version.value === "2"
-      ? validateVersionTwo(
+    ...(version.value === "3"
+      ? validateVersionThree(
         content,
         parsed.fields,
         parsed.diagnostics,
         authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
         strict,
       )
-      : validateVersionOne(parsed.fields, parsed.diagnostics)),
+      : version.value === "2"
+        ? validateVersionTwo(
+          content,
+          parsed.fields,
+          parsed.diagnostics,
+          authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+          strict,
+        )
+        : validateVersionOne(parsed.fields, parsed.diagnostics)),
   ]);
   diagnostics.forEach((item) => printDiagnostic(item, absolute));
   const ok = !diagnostics.some((item) => item.severity === "ERROR");

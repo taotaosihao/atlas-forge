@@ -84,10 +84,15 @@ native_execute_state="$CODEX_WORKFLOW_ROOT/artifacts/$native_execute_id/state.js
 native_execute_runtime="$CODEX_WORKFLOW_ROOT/artifacts/$native_execute_id/runtime.jsonl"
 native_execute_state_before="$(cksum "$native_execute_state")"
 native_execute_runtime_before="$(cksum "$native_execute_runtime")"
-expect_fail "native execute start requires authorization ref" "$BIN" team-record-start "$native_execute_id" "execute objective" --mode execute --agents 1 --roles executor
+native_execute_contract="$ATLAS_FORGE_ROOT/test/fixtures/team-sdd/valid/execution-contract-v3.md"
+native_execute_brief_bin="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-brief"
+native_execute_base="$(git -C "$ATLAS_FORGE_ROOT" rev-parse HEAD)"
+node "$native_execute_brief_bin" --task "$native_execute_id" --slice slice-one --repo "$ATLAS_FORGE_ROOT" --base "$native_execute_base" --contract "$native_execute_contract" >/dev/null
+native_execute_brief="$CODEX_WORKFLOW_ROOT/artifacts/$native_execute_id/team/sdd/slices/slice-one/brief.json"
+expect_fail "native execute start requires authorization ref" "$BIN" team-record-start "$native_execute_id" "execute objective" --mode execute --agents 1 --roles executor --brief "$native_execute_brief" --operation-id native-execute-start
 [[ "$(cksum "$native_execute_state")" == "$native_execute_state_before" ]]
 [[ "$(cksum "$native_execute_runtime")" == "$native_execute_runtime_before" ]]
-$BIN team-record-start "$native_execute_id" "execute objective" --mode execute --agents 1 --roles executor --authorization-ref user-message:execute-contract >/dev/null
+$BIN team-record-start "$native_execute_id" "execute objective" --mode execute --agents 1 --roles executor --authorization-ref user-message:execute-contract --brief "$native_execute_brief" --operation-id native-execute-start >/dev/null
 grep -Eq '"authorization_ref":[[:space:]]*"user-message:execute-contract"' "$native_execute_state"
 
 native_explicit_id="$($BIN init-task "contract explicit native selection" "explicit native selection")"
@@ -98,8 +103,10 @@ $BIN team-record-start "$native_explicit_id" "explicit native objective" --backe
 grep -Eq '"authority_ref":[[:space:]]*"user-message:explicit-native-contract"' "$CODEX_WORKFLOW_ROOT/artifacts/$native_explicit_id/state.json"
 
 native_promote_state_before="$(cksum "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json")"
-expect_fail "native execute promotion requires authorization ref" "$BIN" team-promote "$native_roles_id" --to execute
+node "$native_execute_brief_bin" --task "$native_roles_id" --slice slice-one --repo "$ATLAS_FORGE_ROOT" --base "$native_execute_base" --contract "$native_execute_contract" >/dev/null
+native_promote_brief="$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/team/sdd/slices/slice-one/brief.json"
+expect_fail "native execute promotion requires authorization ref" "$BIN" team-promote "$native_roles_id" --to execute --brief "$native_promote_brief" --operation-id native-promote-execute
 [[ "$(cksum "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json")" == "$native_promote_state_before" ]]
-$BIN team-promote "$native_roles_id" --to execute --authorization-ref user-message:promote-contract >/dev/null
+$BIN team-promote "$native_roles_id" --to execute --authorization-ref user-message:promote-contract --brief "$native_promote_brief" --operation-id native-promote-execute >/dev/null
 grep -Eq '"authorization_ref":[[:space:]]*"user-message:promote-contract"' "$CODEX_WORKFLOW_ROOT/artifacts/$native_roles_id/state.json"
 pass "native team record observability"

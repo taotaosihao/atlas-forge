@@ -6,7 +6,7 @@
 const { CommandError } = require("../core/command-runtime");
 
 const RECORD_START_USAGE =
-  'usage: codex-workflow team-record-start <task-id> "<objective>" --mode discuss|execute [--backend native|paseo] [--fallback-policy codex|none] [--agents N] [--roles "<roles>"] [--providers "<providers>"] [--selection-authority-kind user-message|operator-input] [--selection-authority-ref <ref>] [--authorization-ref <user-message-ref>]';
+  'usage: codex-workflow team-record-start <task-id> "<objective>" --mode discuss|execute [--brief <brief.json>] [--operation-id <id>] [--backend native|paseo] [--fallback-policy codex|none] [--agents N] [--roles "<roles>"] [--providers "<providers>"] [--selection-authority-kind user-message|operator-input] [--selection-authority-ref <ref>] [--authorization-ref <user-message-ref>]';
 const RECORD_FINALIZE_USAGE =
   "usage: codex-workflow team-record-finalize <task-id> --backend native|paseo --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>";
 const LOOP_RECORD_USAGE =
@@ -14,7 +14,7 @@ const LOOP_RECORD_USAGE =
 const STATUS_USAGE = "usage: codex-workflow team-status <task-id>";
 const STOP_USAGE = "usage: codex-workflow team-stop <task-id>";
 const PROMOTE_USAGE =
-  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish [--authorization-ref <user-message-ref>]";
+  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish [--authorization-ref <user-message-ref>] [--brief <brief.json>] [--operation-id <id>]";
 const SELECTION_USAGE = "usage: codex-workflow team-selection-record <task-id> --operation-id <id> --event-id <id> --kind backend|model|capability [options]";
 const LANE_USAGE = "usage: codex-workflow team-lane-record <task-id> --operation-id <id> --action open|close --lane <id> [options]";
 const DISPATCH_USAGE = "usage: codex-workflow team-dispatch-record <task-id> --operation-id <id> --action open|dispose|close --dispatch <id> [options]";
@@ -309,6 +309,8 @@ function parseRecordStartArgs(argv) {
       selectionAuthorityKind: "",
       selectionAuthorityRef: "",
       authorizationRef: "",
+      briefPath: "",
+      operationId: "",
     },
     flags: {
       "--backend": "backend",
@@ -320,11 +322,20 @@ function parseRecordStartArgs(argv) {
       "--selection-authority-kind": "selectionAuthorityKind",
       "--selection-authority-ref": "selectionAuthorityRef",
       "--authorization-ref": "authorizationRef",
+      "--brief": "briefPath",
+      "--operation-id": "operationId",
     },
     required: [
       ["mode", "missing team mode"],
     ],
   });
+  if (parsed.mode === "execute") {
+    if (!parsed.briefPath) throw new CommandError("execute Team start requires --brief");
+    if (!parsed.operationId) throw new CommandError("execute Team start requires --operation-id");
+  }
+  if (parsed.operationId && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parsed.operationId)) {
+    throw new CommandError("team start operation id must be a safe identifier");
+  }
   return { ...parsed, objective: argv[1], taskId: argv[0] };
 }
 
@@ -407,11 +418,23 @@ function parsePromoteArgs(argv) {
   const parsed = parseFlags(argv, 1, {
     name: "team-promote",
     usage: PROMOTE_USAGE,
-    defaults: { target: "", authorizationRef: "" },
-    flags: { "--to": "target", "--authorization-ref": "authorizationRef" },
+    defaults: { target: "", authorizationRef: "", briefPath: "", operationId: "" },
+    flags: {
+      "--to": "target",
+      "--authorization-ref": "authorizationRef",
+      "--brief": "briefPath",
+      "--operation-id": "operationId",
+    },
   });
   if (!new Set(["execute", "worktree", "finish"]).has(parsed.target)) {
     throw new CommandError(`invalid promotion target: ${parsed.target}`);
+  }
+  if (parsed.target === "execute") {
+    if (!parsed.briefPath) throw new CommandError("execute Team promotion requires --brief");
+    if (!parsed.operationId) throw new CommandError("execute Team promotion requires --operation-id");
+  }
+  if (parsed.operationId && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parsed.operationId)) {
+    throw new CommandError("team promotion operation id must be a safe identifier");
   }
   return { ...parsed, taskId: argv[0] };
 }

@@ -45,6 +45,11 @@ const {
 const { classifyPaseoObservation } = require("./backend-failures");
 const { launchLabel, observePaseoCommand, reconcileLaunch } = require("./paseo-observer");
 const {
+  admitTeamStart,
+  globalAdmissionLockFile,
+  validateTeamWriterAdmission,
+} = require("./admission");
+const {
   ATTEMPT_USAGE,
   DISPATCH_USAGE,
   FALLBACK_USAGE,
@@ -174,15 +179,18 @@ function mutateV2Team(taskId, operationFn, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
   prepareTaskCommand(paths, taskId, clock);
   let output;
-  withLock(teamLockFile(taskId, environment), () => {
-    const team = requireV2Team(paths, taskId);
-    try {
-      output = operationFn(team, timestampSeconds(clock));
-    } catch (error) {
-      if (error instanceof RegistryError) throw new CommandError(error.message);
-      throw error;
-    }
-    writeV2Projection(paths, taskId, output.team, clock);
+  withLock(globalAdmissionLockFile(paths), () => {
+    withLock(teamLockFile(taskId, environment), () => {
+      const team = requireV2Team(paths, taskId);
+      try {
+        output = operationFn(team, timestampSeconds(clock));
+      } catch (error) {
+        if (error instanceof RegistryError) throw new CommandError(error.message);
+        throw error;
+      }
+      validateTeamWriterAdmission(paths, taskId, output.team);
+      writeV2Projection(paths, taskId, output.team, clock);
+    });
   });
   return { ...output, paths };
 }
@@ -213,71 +221,124 @@ function runRecordStart(parsed, options = {}) {
     validateReason(parsed.selectionAuthorityRef, "selection authority ref");
   }
   validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
-  const { clock, environment, paths } = commandOptions(options);
+  const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const staffingFile = teamStaffingFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
   const staffing = relativeToCodeHome(paths, staffingFile);
   let team;
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-    const { task } = validateTaskFile(taskFile);
-    readJsonObject(taskStateFile(paths, parsed.taskId));
-    if (task.status !== "doing") {
-      throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
-    }
-    prepareTaskCommand(paths, parsed.taskId, clock);
-    const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-    const previous = state.active_team && typeof state.active_team === "object"
-      ? state.active_team : {};
-    const generation = previous.schema_version === 2 ? Number(previous.generation || 0) + 1 : 1;
-    const now = timestampSeconds(clock);
-    try {
-      team = createTeamRun({
-        previous,
+  let replayed = false;
+  withLock(globalAdmissionLockFile(paths), () => {
+    withLock(teamLockFile(parsed.taskId, environment), () => {
+      const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      const { task } = validateTaskFile(taskFile);
+      if (task.status !== "doing") {
+        throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
+      }
+      const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+      const admission = admitTeamStart({
+        briefPath: parsed.briefPath,
+        clock,
+        cwd,
         mode: parsed.mode,
-        objective: parsed.objective,
-        configuredBackend: parsed.backend || null,
-        fallbackPolicy,
-        authorizationRef: parsed.authorizationRef,
-        agents: parsed.agents,
-        roles: parsed.roles,
-        providers: parsed.providers,
-        decision,
-        staffing,
-        now,
-        teamSelection: parsed.backend ? {
-          eventId: `selection-team-${String(generation).padStart(4, "0")}`,
-          kind: "backend",
-          scope: "team",
-          authorityKind: parsed.selectionAuthorityKind,
-          authorityRef: parsed.selectionAuthorityRef,
-          backend,
-        } : null,
+        paths,
+        taskId: parsed.taskId,
       });
-    } catch (error) {
-      if (error instanceof RegistryError) throw new CommandError(error.message);
-      throw error;
-    }
-    writeV2Projection(paths, parsed.taskId, team, clock);
+      const previous = state.active_team && typeof state.active_team === "object"
+        ? state.active_team : {};
+      if (parsed.operationId && previous.start_operation_id === parsed.operationId) {
+        const previousIdentity = {
+          mode: previous.mode,
+          objective: previous.objective,
+          configuredBackend: previous.configured_backend,
+          fallbackPolicy: previous.configured_fallback_policy,
+          authorizationRef: previous.authorization_ref,
+          agents: previous.agents,
+          roles: previous.roles,
+          providers: previous.providers,
+          selectionAuthorityKind: previous.selection_events?.[0]?.authority_kind || "",
+          selectionAuthorityRef: previous.selection_events?.[0]?.authority_ref || "",
+          briefSha256: previous.admission?.brief?.sha256 || "",
+        };
+        const replayIdentity = {
+          mode: parsed.mode,
+          objective: parsed.objective,
+          configuredBackend: parsed.backend || null,
+          fallbackPolicy,
+          authorizationRef: parsed.mode === "execute" ? parsed.authorizationRef : "",
+          agents: parsed.agents || "",
+          roles: parsed.roles || "",
+          providers: parsed.providers || "",
+          selectionAuthorityKind: parsed.backend ? parsed.selectionAuthorityKind : "",
+          selectionAuthorityRef: parsed.backend ? parsed.selectionAuthorityRef : "",
+          briefSha256: admission.brief?.sha256 || "",
+        };
+        if (JSON.stringify(previousIdentity) !== JSON.stringify(replayIdentity)) {
+          throw new CommandError(`team start operation_id replay conflict: ${parsed.operationId}`);
+        }
+        team = previous;
+        replayed = true;
+        return;
+      }
+      prepareTaskCommand(paths, parsed.taskId, clock);
+      const generation = previous.schema_version === 2 ? Number(previous.generation || 0) + 1 : 1;
+      const now = timestampSeconds(clock);
+      try {
+        team = createTeamRun({
+          previous,
+          mode: parsed.mode,
+          objective: parsed.objective,
+          configuredBackend: parsed.backend || null,
+          fallbackPolicy,
+          authorizationRef: parsed.authorizationRef,
+          agents: parsed.agents,
+          roles: parsed.roles,
+          providers: parsed.providers,
+          decision,
+          staffing,
+          now,
+          teamSelection: parsed.backend ? {
+            eventId: `selection-team-${String(generation).padStart(4, "0")}`,
+            kind: "backend",
+            scope: "team",
+            authorityKind: parsed.selectionAuthorityKind,
+            authorityRef: parsed.selectionAuthorityRef,
+            backend,
+          } : null,
+        });
+      } catch (error) {
+        if (error instanceof RegistryError) throw new CommandError(error.message);
+        throw error;
+      }
+      team.admission = admission;
+      team.admitted_owned_paths = admission.admitted_owned_paths;
+      team.slice_id = admission.brief?.slice_id || "";
+      team.start_operation_id = parsed.operationId || "";
+      writeV2Projection(paths, parsed.taskId, team, clock);
+    });
   });
-  appendLegacyRuntimeEvent(
-    paths,
-    parsed.taskId,
-    "team-record-start",
-    `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
-    clock,
-  );
+  if (!replayed) {
+    appendLegacyRuntimeEvent(
+      paths,
+      parsed.taskId,
+      "team-record-start",
+      `${backend}/${parsed.mode} roles=${parsed.roles || "dynamic"}`,
+      clock,
+    );
+  }
   const lines = [
     `task_id: ${parsed.taskId}`,
     `backend: ${backend}`,
     `mode: ${parsed.mode}`,
-    "status: running",
+    `status: ${team.status}`,
     `decision: ${decisionFile}`,
     `staffing: ${staffingFile}`,
   ];
   if (parsed.mode === "execute") {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+    lines.push(`brief: ${team.admission.brief.path}`);
+    lines.push(`slice_id: ${team.slice_id}`);
+    lines.push(`operation_id: ${team.start_operation_id}`);
   }
   if (parsed.providers) {
     lines.push(`providers: ${parsed.providers}`);
@@ -1213,73 +1274,109 @@ function runStop(argv, options = {}) {
 
 function runPromote(parsed, options = {}) {
   validateExecutionAuthorization(parsed.target, parsed.authorizationRef);
-  const { clock, environment, paths } = commandOptions(options);
+  const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
-  withLock(teamLockFile(parsed.taskId, environment), () => {
-    const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-    validateTaskFile(taskFile);
-    const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-    const activeTeam = state.active_team && typeof state.active_team === "object"
-      ? state.active_team
-      : {};
-    if (activeTeam.schema_version === 2
-      && !new Set(["running", "promoted:execute", "promoted:worktree"])
-        .has(activeTeam.status)) {
-      throw new CommandError(`team run is not mutable: ${activeTeam.status}`);
-    }
-    const snapshots = [
-      snapshotPromotionFile(taskFile, "task file", true),
-      snapshotPromotionFile(taskStateFile(paths, parsed.taskId), "task state"),
-      snapshotPromotionFile(decisionFile, "team decision"),
-      snapshotPromotionFile(taskRuntimeFile(paths, parsed.taskId), "task runtime"),
-    ];
-    let mode = getTaskField(taskFile, "active_team_mode");
-    if (parsed.target === "execute") {
-      mode = "execute";
-    }
-    const status = `promoted:${parsed.target}`;
-    const stateUpdates = {
-      "active_team.mode": mode,
-      "active_team.status": status,
-      "active_team.promoted_to": parsed.target,
-    };
-    if (parsed.target === "execute") {
-      stateUpdates["active_team.authorization_ref"] = parsed.authorizationRef;
-    }
-    try {
-      updateTaskCommand(
-        paths,
-        parsed.taskId,
-        {
-          active_team_mode: mode,
-          active_team_status: status,
-          active_team_decision: decision,
-        },
-        stateUpdates,
-        clock,
-      );
-      const authorizationLine = parsed.target === "execute"
-        ? `- authorization_ref: ${parsed.authorizationRef}\n`
-        : "";
-      fs.appendFileSync(
-        decisionFile,
-        `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
-        "utf8",
-      );
-      appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
-    } catch (error) {
-      try {
-        for (const snapshot of snapshots.reverse()) {
-          restorePromotionFile(snapshot);
-        }
-      } catch (rollbackError) {
-        throw new CommandError(
-          `team promotion failed and rollback failed: ${error.message}; ${rollbackError.message}`,
-        );
+  let replayed = false;
+  withLock(globalAdmissionLockFile(paths), () => {
+    withLock(teamLockFile(parsed.taskId, environment), () => {
+      const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
+      validateTaskFile(taskFile);
+      const state = readJsonObject(taskStateFile(paths, parsed.taskId));
+      const activeTeam = state.active_team && typeof state.active_team === "object"
+        ? state.active_team
+        : {};
+      if (activeTeam.schema_version === 2
+        && !new Set(["running", "promoted:execute", "promoted:worktree"])
+          .has(activeTeam.status)) {
+        throw new CommandError(`team run is not mutable: ${activeTeam.status}`);
       }
-      throw error;
-    }
+      const admission = parsed.target === "execute" ? admitTeamStart({
+        briefPath: parsed.briefPath,
+        clock,
+        cwd,
+        mode: "execute",
+        paths,
+        taskId: parsed.taskId,
+      }) : null;
+      if (parsed.target === "execute"
+        && activeTeam.execution_operation_id === parsed.operationId) {
+        if (activeTeam.authorization_ref !== parsed.authorizationRef
+          || activeTeam.admission?.brief?.sha256 !== admission.brief.sha256) {
+          throw new CommandError(`team promotion operation_id replay conflict: ${parsed.operationId}`);
+        }
+        replayed = true;
+        return;
+      }
+      const snapshots = [
+        snapshotPromotionFile(taskFile, "task file", true),
+        snapshotPromotionFile(taskStateFile(paths, parsed.taskId), "task state"),
+        snapshotPromotionFile(decisionFile, "team decision"),
+        snapshotPromotionFile(taskRuntimeFile(paths, parsed.taskId), "task runtime"),
+      ];
+      let mode = getTaskField(taskFile, "active_team_mode");
+      if (parsed.target === "execute") mode = "execute";
+      const status = `promoted:${parsed.target}`;
+      const promotedTeam = activeTeam.schema_version === 2
+        ? JSON.parse(JSON.stringify(activeTeam))
+        : null;
+      if (promotedTeam) {
+        promotedTeam.mode = mode;
+        promotedTeam.status = status;
+        promotedTeam.promoted_to = parsed.target;
+      }
+      if (parsed.target === "execute" && promotedTeam) {
+        promotedTeam.authorization_ref = parsed.authorizationRef;
+        promotedTeam.admission = admission;
+        promotedTeam.admitted_owned_paths = admission.admitted_owned_paths;
+        promotedTeam.slice_id = admission.brief.slice_id;
+        promotedTeam.execution_operation_id = parsed.operationId;
+      }
+      try {
+        if (promotedTeam) {
+          promotedTeam.decision = decision;
+          validateTeamWriterAdmission(paths, parsed.taskId, promotedTeam);
+          writeV2Projection(paths, parsed.taskId, promotedTeam, clock);
+        } else {
+          updateTaskCommand(
+            paths,
+            parsed.taskId,
+            {
+              active_team_mode: mode,
+              active_team_status: status,
+              active_team_decision: decision,
+            },
+            {
+              "active_team.mode": mode,
+              "active_team.status": status,
+              "active_team.promoted_to": parsed.target,
+              "active_team.authorization_ref": parsed.target === "execute"
+                ? parsed.authorizationRef
+                : activeTeam.authorization_ref || "",
+            },
+            clock,
+          );
+        }
+        const authorizationLine = parsed.target === "execute"
+          ? `- authorization_ref: ${parsed.authorizationRef}\n- brief: ${admission.brief.path}\n- operation_id: ${parsed.operationId}\n`
+          : "";
+        fs.appendFileSync(
+          decisionFile,
+          `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLine}- created_at: ${timestampSeconds(clock)}\n`,
+          "utf8",
+        );
+        appendLegacyRuntimeEvent(paths, parsed.taskId, "team-promote", parsed.target, clock);
+      } catch (error) {
+        try {
+          for (const snapshot of snapshots.reverse()) restorePromotionFile(snapshot);
+        } catch (rollbackError) {
+          throw new CommandError(
+            `team promotion failed and rollback failed: ${error.message}; ${rollbackError.message}`,
+          );
+        }
+        throw error;
+      }
+    });
   });
   const lines = [
     `task_id: ${parsed.taskId}`,
@@ -1288,7 +1385,10 @@ function runPromote(parsed, options = {}) {
   ];
   if (parsed.target === "execute") {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+    lines.push(`brief: ${parsed.briefPath}`);
+    lines.push(`operation_id: ${parsed.operationId}`);
   }
+  if (replayed) lines.push("replayed: true");
   return {
     exitCode: 0,
     lines,

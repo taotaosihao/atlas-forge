@@ -77,7 +77,7 @@ Follow this loop:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,spec,analysis,decision`
     - use a narrower `--require` list only when the missing artifact is intentionally out of scope and explain why.
 19. Promote explicitly with:
-    - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to execute`
+    - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to execute --authorization-ref <user-message-ref> --brief <canonical-brief.json> --operation-id <id>`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to worktree`
     - `~/.codex/workflow/bin/codex-workflow team-promote <task-id> --to finish`
 20. In the final reply, include the task id, `decision.md` path, staffing path if produced, workflow docs bundle path if written, authoritative contract path if produced, readiness result if run, promotion state, and any open decision.
