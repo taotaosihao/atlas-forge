@@ -32,7 +32,7 @@ const RESUME_USAGE = "usage: codex-workflow resume <task-id>";
 const ARCHIVE_USAGE = 'usage: codex-workflow archive <task-id> --reason "<reason>"';
 const STALE_USAGE = "usage: codex-workflow stale [--days <n>|--days=<n>]";
 const RECONCILE_USAGE =
-  "usage: codex-workflow reconcile <task-id> [--apply --authority-ref <ref>]";
+  'usage: codex-workflow reconcile <task-id> [--apply --authority-ref <ref> --reason "<reason>"]';
 
 class CliError extends Error {
   constructor(message, exitCode = 1) {
@@ -207,7 +207,7 @@ function parseStaleArgs(argv) {
 
 function parseReconcileArgs(argv) {
   if (argv.length < 1) throw new CliError(RECONCILE_USAGE);
-  const result = { apply: false, authorityRef: "", taskId: argv[0] };
+  const result = { apply: false, authorityRef: "", reason: "", taskId: argv[0] };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--apply" && !result.apply) {
@@ -216,11 +216,16 @@ function parseReconcileArgs(argv) {
       result.authorityRef = argv[++index];
     } else if (argument.startsWith("--authority-ref=") && !result.authorityRef) {
       result.authorityRef = argument.slice("--authority-ref=".length);
+    } else if (argument === "--reason" && !result.reason && index + 1 < argv.length) {
+      result.reason = argv[++index];
+    } else if (argument.startsWith("--reason=") && !result.reason) {
+      result.reason = argument.slice("--reason=".length);
     } else {
       throw new CliError(RECONCILE_USAGE);
     }
   }
-  if (!result.apply && result.authorityRef) throw new CliError(RECONCILE_USAGE);
+  if (!result.apply && (result.authorityRef || result.reason)) throw new CliError(RECONCILE_USAGE);
+  if (result.apply && (!result.authorityRef || !result.reason)) throw new CliError(RECONCILE_USAGE);
   return result;
 }
 

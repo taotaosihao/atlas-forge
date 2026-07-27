@@ -6,15 +6,15 @@ const { resolvePaths, taskArtifactDir } = require("./paths");
 const { recordTaskRuntimeEvent } = require("./task-mutation");
 const {
   requireTaskFile,
-  updateTaskFields,
+  renderTaskFields,
   validateTaskFile,
 } = require("../task/repository");
 const {
   readJsonObject,
   ensureTaskRuntimeScaffold,
-  setTaskStateFields,
+  projectTaskState,
   taskStateFile,
-  writeTaskState,
+  timestampSeconds,
 } = require("../task/runtime");
 
 class CommandError extends Error {
@@ -69,14 +69,46 @@ function prepareTaskCommand(paths, taskId, clock) {
 }
 
 function updateTaskCommand(paths, taskId, headerUpdates, stateUpdates, clock) {
-  const file = requireTaskFile(paths.tasksDir, taskId);
-  readJsonObject(taskStateFile(paths, taskId));
-  if (Object.keys(headerUpdates).length > 0) {
-    updateTaskFields(file, headerUpdates);
-  }
-  writeTaskState(paths, taskId, clock);
-  if (Object.keys(stateUpdates).length > 0) {
-    setTaskStateFields(paths, taskId, stateUpdates, clock);
+  return recordTaskRuntimeEvent(
+    paths,
+    taskId,
+    {
+      kind: "compatibility.task-update",
+      data: { header_updates: headerUpdates, state_updates: stateUpdates },
+    },
+    [],
+    {
+      clock,
+      projectionTransform({ taskContent, state }) {
+        const rendered = renderTaskFields(taskContent, headerUpdates);
+        const projected = projectTaskState(paths, taskId, rendered, state, clock);
+        applyStateUpdates(projected, stateUpdates);
+        projected.updated_at = timestampSeconds(clock);
+        return { taskContent: rendered, state: projected };
+      },
+    },
+  );
+}
+
+function castStateValue(value) {
+  if (value === "__TRUE__") return true;
+  if (value === "__FALSE__") return false;
+  if (value === "__NULL__") return null;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+
+function applyStateUpdates(state, updates) {
+  for (const [key, rawValue] of Object.entries(updates)) {
+    const parts = key.split(".");
+    let cursor = state;
+    for (const part of parts.slice(0, -1)) {
+      if (!cursor[part] || typeof cursor[part] !== "object" || Array.isArray(cursor[part])) {
+        cursor[part] = {};
+      }
+      cursor = cursor[part];
+    }
+    cursor[parts.at(-1)] = castStateValue(String(rawValue));
   }
 }
 

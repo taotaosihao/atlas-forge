@@ -14,6 +14,10 @@ const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
 ));
+const { updateTaskCommand } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/command-runtime.js",
+));
 const { createTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
@@ -159,10 +163,11 @@ test("ready evaluates requested artifacts without interpreting admission-shaped 
   const taskId = createFixtureTask(environment, "Admission-independent readiness");
   appendSubstantiveArtifacts(paths, taskId);
   const stateFile = taskStateFile(paths, taskId);
-  const state = readJsonObject(stateFile);
-  state.severity = "Critical";
-  state.admission = { disposition: "visible-follow-up", repair_status: "open" };
-  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  updateTaskCommand(paths, taskId, {}, {
+    severity: "Critical",
+    "admission.disposition": "visible-follow-up",
+    "admission.repair_status": "open",
+  }, fixedClock);
 
   const result = runReady(parseReadyArgs([taskId]), { clock: fixedClock, environment });
   assert.equal(result.exitCode, 0);

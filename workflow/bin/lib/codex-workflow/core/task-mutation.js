@@ -190,7 +190,7 @@ function projectionMatches(paths, taskId, projection) {
   }
 }
 
-function mutationOptions(options, currentRevision) {
+function pauseBeforeMutation(options) {
   const environment = options.environment || process.env;
   if (environment.CODEX_WORKFLOW_TEST_MUTATION_PAUSE_AFTER_OBSERVE) {
     const milliseconds = Number(environment.CODEX_WORKFLOW_TEST_MUTATION_PAUSE_AFTER_OBSERVE) * 1000;
@@ -199,18 +199,24 @@ function mutationOptions(options, currentRevision) {
     }
     sleepMilliseconds(milliseconds);
   }
-  return options.expectedRevision === undefined ? currentRevision : options.expectedRevision;
 }
 
 function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
   const file = taskEventFile(paths, taskId);
-  const observedEvents = readAuthoritativeEvents(file, taskId);
-  const observedRevision = observedEvents.at(-1)?.revision || 0;
-  const expectedRevision = mutationOptions(options, observedRevision);
   const operationId = input.operationId || options.operationId || crypto.randomUUID();
   const data = clone(input.data || {});
+  pauseBeforeMutation(options);
   return withLock(taskMutationLockFile(paths, taskId), () => {
     const events = readAuthoritativeEvents(file, taskId);
+    const latest = events.at(-1);
+    const currentRevision = latest?.revision || 0;
+    const expectedRevision = options.expectedRevision === undefined
+      ? currentRevision
+      : options.expectedRevision;
+    if (latest && !projectionMatches(paths, taskId, latest.projection)) {
+      applyTaskProjection(paths, taskId, latest.projection);
+    }
+    if (latest) appendMissingLegacyRows(paths, taskId, latest);
     const existing = events.find((event) => event.operation_id === operationId);
     if (existing) {
       const digest = eventPayloadDigest({
@@ -222,19 +228,24 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       if (existing.kind !== input.kind || existing.payload_digest !== digest) {
         throw new TaskMutationError(`operation_id replay payload conflict: ${operationId}`);
       }
-      if (!projectionMatches(paths, taskId, existing.projection)) {
-        applyTaskProjection(paths, taskId, existing.projection);
-      }
       appendMissingLegacyRows(paths, taskId, existing);
-      return { event: existing, replay: true, result: clone(existing.result || {}) };
+      return {
+        event: existing,
+        latest: existing.event_id === latest.event_id,
+        replay: true,
+        result: clone(existing.result || {}),
+      };
     }
-    const currentRevision = events.at(-1)?.revision || 0;
     if (expectedRevision !== currentRevision) {
       throw new TaskMutationError(
         `stale task revision: expected ${expectedRevision}, current ${currentRevision}`,
       );
     }
-    const output = transition({ events, revision: currentRevision });
+    const output = transition({
+      currentProjection: latest ? clone(latest.projection) : null,
+      events,
+      revision: currentRevision,
+    });
     const event = {
       schema_version: 2,
       event_id: options.eventId ? options.eventId() : crypto.randomUUID(),
@@ -280,7 +291,7 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       );
     }
     appendMissingLegacyRows(paths, taskId, event);
-    return { event, replay: false, result: clone(event.result) };
+    return { event, latest: true, replay: false, result: clone(event.result) };
   });
 }
 
@@ -289,21 +300,29 @@ function recordTaskRuntimeEvent(paths, taskId, input, legacy, options = {}) {
     paths,
     taskId,
     input,
-    () => {
+    ({ currentProjection }) => {
       const files = taskProjectionFiles(paths, taskId);
       let taskContent;
       let state;
-      try {
-        taskContent = fs.readFileSync(files.task, "utf8");
-        state = JSON.parse(fs.readFileSync(files.state, "utf8"));
-      } catch (error) {
-        if (error.code === "ENOENT") {
-          throw new TaskMutationError(`missing task projection for runtime event: ${taskId}`);
+      if (currentProjection) {
+        taskContent = currentProjection.task_content;
+        state = clone(currentProjection.state);
+      } else {
+        try {
+          taskContent = fs.readFileSync(files.task, "utf8");
+          state = JSON.parse(fs.readFileSync(files.state, "utf8"));
+        } catch (error) {
+          if (error.code === "ENOENT") {
+            throw new TaskMutationError(`missing task projection for runtime event: ${taskId}`);
+          }
+          if (error instanceof SyntaxError) {
+            throw new TaskMutationError(`corrupt task state for runtime event: ${taskId}`);
+          }
+          throw error;
         }
-        if (error instanceof SyntaxError) {
-          throw new TaskMutationError(`corrupt task state for runtime event: ${taskId}`);
-        }
-        throw error;
+      }
+      if (options.projectionTransform) {
+        ({ taskContent, state } = options.projectionTransform({ taskContent, state }));
       }
       return {
         projection: { task_content: taskContent, state },

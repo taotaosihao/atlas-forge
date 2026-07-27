@@ -82,6 +82,8 @@ function readAuthoritativeEvents(file, taskId = "") {
     throw error;
   }
   const events = [];
+  const eventIds = new Set();
+  const operationIds = new Set();
   for (const [index, line] of text.split("\n").entries()) {
     if (!line.trim()) continue;
     let event;
@@ -128,12 +130,14 @@ function readAuthoritativeEvents(file, taskId = "") {
     if (event.event_digest !== authoritativeEventDigest(event)) {
       throw new Error(`authoritative event record digest mismatch at revision ${event.revision}`);
     }
-    if (events.some((item) => item.event_id === event.event_id)) {
+    if (eventIds.has(event.event_id)) {
       throw new Error(`duplicate authoritative event_id: ${event.event_id}`);
     }
-    if (events.some((item) => item.operation_id === event.operation_id)) {
+    if (operationIds.has(event.operation_id)) {
       throw new Error(`duplicate authoritative operation_id: ${event.operation_id}`);
     }
+    eventIds.add(event.event_id);
+    operationIds.add(event.operation_id);
     events.push(event);
   }
   return events;
