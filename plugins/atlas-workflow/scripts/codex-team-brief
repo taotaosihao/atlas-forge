@@ -9,7 +9,9 @@ const childProcess = require("child_process");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const {
   POLICY_ID,
+  estimateOverBudget,
   extractExecutionPlan,
+  repositoryBroadPath,
   sha256Value,
 } = require("../contracts/team-sdd/validators/execution-plan");
 
@@ -339,24 +341,21 @@ function legacyBrief(options, baseSha) {
   };
 }
 
-function measuredSize(slice) {
-  return {
-    changed_files: slice.owned_paths.length,
-    loc: 0,
-    wall_clock_minutes: 0,
-    required_checks: slice.checks.length,
-  };
-}
-
 function sizeGate(slice) {
-  const measured = measuredSize(slice);
-  const overBudget = measured.changed_files > slice.budget.max_changed_files
-    || measured.required_checks > slice.budget.max_required_checks;
-  if (!overBudget) return { decision: "pass", policy_id: POLICY_ID, measured, exception: null };
+  const overBudget = estimateOverBudget(slice.estimate, slice.budget, slice.checks)
+    || slice.owned_paths.some(repositoryBroadPath);
+  if (!overBudget) {
+    return { decision: "pass", policy_id: POLICY_ID, estimate: slice.estimate, exception: null };
+  }
   if (!slice.size_exception) {
     throw new Error(`slice ${slice.slice_id} exceeds ${POLICY_ID} and requires a complete size_exception`);
   }
-  return { decision: "exception", policy_id: POLICY_ID, measured, exception: slice.size_exception };
+  return {
+    decision: "exception",
+    policy_id: POLICY_ID,
+    estimate: slice.estimate,
+    exception: slice.size_exception,
+  };
 }
 
 function v3Brief(options, baseSha, contract, plan, slice) {
@@ -411,6 +410,13 @@ function compatibilityPlan(options) {
       risk_class: "medium",
       failure_domain: "legacy-single-slice",
       rollback_boundary: "one logical commit",
+      estimate: {
+        estimated_changed_files: Math.max(1, options.owned.length),
+        estimated_net_loc: 1200,
+        target_p90_minutes: 120,
+        serial_dependency_depth: 0,
+        independent_vertical_count: 1,
+      },
       budget: {
         max_changed_files: Math.max(1, options.owned.length),
         max_loc: 1200,

@@ -69,8 +69,11 @@ const V3_KEYS = [
 const CONTRACT_KEYS = ["path", "sha256", "semantics_version", "execution_plan_sha256"];
 const DEPENDENCY_KEYS = ["slice_id", "required_outcome", "keeper_outputs"];
 const BUDGET_KEYS = ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"];
-const SIZE_GATE_KEYS = ["decision", "policy_id", "measured", "exception"];
-const MEASURED_KEYS = ["changed_files", "loc", "wall_clock_minutes", "required_checks"];
+const SIZE_GATE_KEYS = ["decision", "policy_id", "estimate", "exception"];
+const ESTIMATE_KEYS = [
+  "estimated_changed_files", "estimated_net_loc", "target_p90_minutes",
+  "serial_dependency_depth", "independent_vertical_count",
+];
 
 function validateExactObject(value, label, keys, errors) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -175,10 +178,11 @@ function validateV3(value, errors) {
       errors.push("size_gate.decision must be one of: pass, split_required, exception");
     }
     if (value.size_gate.policy_id !== POLICY_ID) errors.push(`size_gate.policy_id must equal ${POLICY_ID}`);
-    if (validateExactObject(value.size_gate.measured, "size_gate.measured", MEASURED_KEYS, errors)) {
-      for (const key of MEASURED_KEYS) {
-        if (!Number.isInteger(value.size_gate.measured[key]) || value.size_gate.measured[key] < 0) {
-          errors.push(`size_gate.measured.${key} must be a non-negative integer`);
+    if (validateExactObject(value.size_gate.estimate, "size_gate.estimate", ESTIMATE_KEYS, errors)) {
+      for (const key of ESTIMATE_KEYS) {
+        const minimum = key === "serial_dependency_depth" ? 0 : 1;
+        if (!Number.isInteger(value.size_gate.estimate[key]) || value.size_gate.estimate[key] < minimum) {
+          errors.push(`size_gate.estimate.${key} must be an integer >= ${minimum}`);
         }
       }
     }

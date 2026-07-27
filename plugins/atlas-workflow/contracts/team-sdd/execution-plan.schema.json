@@ -6,7 +6,7 @@
     "size_policy": {
       "type": "object",
       "required": ["policy_id"],
-      "properties": { "policy_id": { "type": "string", "enum": ["atlas-slice-size-v1"] } },
+      "properties": { "policy_id": { "type": "string", "enum": ["atlas-slice-size-v2"] } },
       "additionalProperties": false
     },
     "slices": {
@@ -14,7 +14,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["slice_id", "objective", "depends_on", "keeper_outputs", "owned_paths", "acceptance_refs", "risk_class", "failure_domain", "rollback_boundary", "budget", "checks"],
+        "required": ["slice_id", "objective", "depends_on", "keeper_outputs", "owned_paths", "acceptance_refs", "risk_class", "failure_domain", "rollback_boundary", "estimate", "budget", "checks"],
         "properties": {
           "slice_id": { "type": "string" },
           "objective": { "type": "string" },
@@ -26,6 +26,18 @@
           "risk_class": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
           "failure_domain": { "type": "string" },
           "rollback_boundary": { "type": "string" },
+          "estimate": {
+            "type": "object",
+            "required": ["estimated_changed_files", "estimated_net_loc", "target_p90_minutes", "serial_dependency_depth", "independent_vertical_count"],
+            "properties": {
+              "estimated_changed_files": { "type": "integer", "minimum": 1 },
+              "estimated_net_loc": { "type": "integer", "minimum": 1 },
+              "target_p90_minutes": { "type": "integer", "minimum": 1 },
+              "serial_dependency_depth": { "type": "integer", "minimum": 0 },
+              "independent_vertical_count": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          },
           "budget": {
             "type": "object",
             "required": ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"],

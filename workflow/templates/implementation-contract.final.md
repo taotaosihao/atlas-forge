@@ -22,7 +22,7 @@ product_ui_not_applicable_reason:
 {
   "schema_version": 1,
   "size_policy": {
-    "policy_id": "atlas-slice-size-v1"
+    "policy_id": "atlas-slice-size-v2"
   },
   "slices": [
     {
@@ -36,6 +36,13 @@ product_ui_not_applicable_reason:
       "risk_class": "medium",
       "failure_domain": "bounded-slice",
       "rollback_boundary": "one logical commit",
+      "estimate": {
+        "estimated_changed_files": 8,
+        "estimated_net_loc": 800,
+        "target_p90_minutes": 90,
+        "serial_dependency_depth": 0,
+        "independent_vertical_count": 1
+      },
       "budget": {
         "max_changed_files": 12,
         "max_loc": 1200,

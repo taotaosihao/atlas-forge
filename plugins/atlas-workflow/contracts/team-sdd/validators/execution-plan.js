@@ -6,7 +6,7 @@ const {
   isObject,
 } = require("./common");
 
-const POLICY_ID = "atlas-slice-size-v1";
+const POLICY_ID = "atlas-slice-size-v2";
 const RISK_CLASSES = new Set(["low", "medium", "high", "critical"]);
 const GATE_CLASSES = new Set([
   "unit", "integration", "contract", "lint", "typecheck", "build", "e2e",
@@ -27,11 +27,15 @@ const SIZE_POLICY_KEYS = ["policy_id"];
 const SLICE_KEYS = [
   "slice_id", "objective", "depends_on", "keeper_outputs", "owned_paths",
   "forbidden_paths", "acceptance_refs", "risk_class", "failure_domain",
-  "rollback_boundary", "budget", "checks", "size_exception",
+  "rollback_boundary", "estimate", "budget", "checks", "size_exception",
 ];
 const REQUIRED_SLICE_KEYS = SLICE_KEYS.filter((key) => !["forbidden_paths", "size_exception"].includes(key));
 const BUDGET_KEYS = [
   "max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks",
+];
+const ESTIMATE_KEYS = [
+  "estimated_changed_files", "estimated_net_loc", "target_p90_minutes",
+  "serial_dependency_depth", "independent_vertical_count",
 ];
 const CHECK_KEYS = ["check_id", "gate_class", "command", "final_only", "cache_policy"];
 const EXCEPTION_KEYS = ["authority_ref", "expires_at", "reason", "compensating_controls"];
@@ -110,6 +114,23 @@ function pathsOverlap(left, right) {
     || rightPrefix.startsWith(`${leftPrefix}/`);
 }
 
+function repositoryBroadPath(raw) {
+  const prefix = pathPrefix(raw);
+  if (!prefix) return true;
+  const normalized = String(raw).replace(/^\.\//, "").replace(/\/+$/g, "");
+  if (normalized === "." || normalized === "**" || normalized === "**/*") return true;
+  return /[*?\[\]{}]/.test(normalized) && prefix.split("/").length <= 1;
+}
+
+function estimateOverBudget(estimate, budget, checks) {
+  return estimate.estimated_changed_files > budget.max_changed_files
+    || estimate.estimated_net_loc > budget.max_loc
+    || estimate.target_p90_minutes > budget.max_wall_clock_minutes
+    || estimate.serial_dependency_depth > 2
+    || estimate.independent_vertical_count > 1
+    || checks.length > budget.max_required_checks;
+}
+
 function validateException(value, location, errors) {
   if (!isObject(value)) {
     push(errors, location, "must be an object");
@@ -166,6 +187,22 @@ function validateSlice(slice, index, errors) {
   }
   nonEmptyString(slice.failure_domain, `${location}.failure_domain`, errors);
   nonEmptyString(slice.rollback_boundary, `${location}.rollback_boundary`, errors);
+  if (!isObject(slice.estimate)) {
+    push(errors, `${location}.estimate`, "must be an object");
+  } else {
+    exactKeys(slice.estimate, ESTIMATE_KEYS, ESTIMATE_KEYS, `${location}.estimate`, errors);
+    for (const key of ESTIMATE_KEYS) {
+      const minimum = key === "serial_dependency_depth" ? 0 : 1;
+      if (!Number.isInteger(slice.estimate[key]) || slice.estimate[key] < minimum) {
+        push(errors, `${location}.estimate.${key}`, `must be an integer >= ${minimum}`);
+      }
+    }
+    if (Array.isArray(slice.depends_on)
+      && Number.isInteger(slice.estimate.serial_dependency_depth)
+      && slice.estimate.serial_dependency_depth < (slice.depends_on.length > 0 ? 1 : 0)) {
+      push(errors, `${location}.estimate.serial_dependency_depth`, "cannot be zero when the slice has dependencies");
+    }
+  }
   if (!isObject(slice.budget)) {
     push(errors, `${location}.budget`, "must be an object");
   } else {
@@ -182,9 +219,10 @@ function validateSlice(slice, index, errors) {
     slice.checks.forEach((check, checkIndex) => validateCheck(check, `${location}.checks[${checkIndex}]`, errors));
   }
   if (slice.size_exception !== undefined) validateException(slice.size_exception, `${location}.size_exception`, errors);
-  if (isObject(slice.budget) && Array.isArray(slice.owned_paths) && Array.isArray(slice.checks)) {
-    const overBudget = slice.owned_paths.length > slice.budget.max_changed_files
-      || slice.checks.length > slice.budget.max_required_checks;
+  if (isObject(slice.estimate) && isObject(slice.budget)
+    && Array.isArray(slice.owned_paths) && Array.isArray(slice.checks)) {
+    const overBudget = estimateOverBudget(slice.estimate, slice.budget, slice.checks)
+      || slice.owned_paths.some(repositoryBroadPath);
     if (overBudget && slice.size_exception === undefined) {
       push(errors, location, `slice exceeds ${POLICY_ID} and requires size_exception`);
     } else if (!overBudget && slice.size_exception !== undefined) {
@@ -253,6 +291,26 @@ function validateGraph(slices, errors) {
     visited.add(id);
   }
   for (const id of ids.keys()) visit(id, []);
+  const depths = new Map();
+  function dependencyDepth(id, trail = new Set()) {
+    if (depths.has(id)) return depths.get(id);
+    if (trail.has(id) || !ids.has(id)) return 0;
+    const nextTrail = new Set(trail).add(id);
+    const dependencies = (ids.get(id).depends_on || []).filter((dependency) => ids.has(dependency));
+    const depth = dependencies.length === 0
+      ? 0
+      : 1 + Math.max(...dependencies.map((dependency) => dependencyDepth(dependency, nextTrail)));
+    depths.set(id, depth);
+    return depth;
+  }
+  slices.forEach((slice, index) => {
+    if (!isObject(slice) || !ids.has(slice.slice_id) || !isObject(slice.estimate)) return;
+    const expected = dependencyDepth(slice.slice_id);
+    if (slice.estimate.serial_dependency_depth !== expected) {
+      push(errors, `slices[${index}].estimate.serial_dependency_depth`,
+        `must equal dependency DAG depth ${expected}`);
+    }
+  });
 }
 
 function validateExecutionPlan(value) {
@@ -298,8 +356,10 @@ module.exports = {
   PERMANENT_GATE_CLASSES,
   POLICY_ID,
   canonicalJson,
+  estimateOverBudget,
   extractExecutionPlan,
   pathsOverlap,
+  repositoryBroadPath,
   sha256Value,
   validateCheck,
   validateException,

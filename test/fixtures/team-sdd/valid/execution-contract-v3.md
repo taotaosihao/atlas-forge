@@ -6,7 +6,7 @@ contract_semantics_version: 3
 ```atlas-execution-plan+json
 {
   "schema_version": 1,
-  "size_policy": { "policy_id": "atlas-slice-size-v1" },
+  "size_policy": { "policy_id": "atlas-slice-size-v2" },
   "slices": [
     {
       "slice_id": "slice-one",
@@ -19,6 +19,7 @@ contract_semantics_version: 3
       "risk_class": "medium",
       "failure_domain": "first-slice",
       "rollback_boundary": "one logical commit",
+      "estimate": { "estimated_changed_files": 3, "estimated_net_loc": 200, "target_p90_minutes": 45, "serial_dependency_depth": 0, "independent_vertical_count": 1 },
       "budget": { "max_changed_files": 4, "max_loc": 400, "max_wall_clock_minutes": 60, "max_required_checks": 2 },
       "checks": [
         { "check_id": "slice-one-contract", "gate_class": "contract", "command": "true", "final_only": false, "cache_policy": "identity-bound" }
@@ -35,6 +36,7 @@ contract_semantics_version: 3
       "risk_class": "high",
       "failure_domain": "second-slice",
       "rollback_boundary": "one logical commit",
+      "estimate": { "estimated_changed_files": 3, "estimated_net_loc": 200, "target_p90_minutes": 45, "serial_dependency_depth": 1, "independent_vertical_count": 1 },
       "budget": { "max_changed_files": 4, "max_loc": 400, "max_wall_clock_minutes": 60, "max_required_checks": 2 },
       "checks": [
         { "check_id": "slice-two-contract", "gate_class": "contract", "command": "true", "final_only": false, "cache_policy": "identity-bound" }
@@ -51,6 +53,7 @@ contract_semantics_version: 3
       "risk_class": "low",
       "failure_domain": "third-slice",
       "rollback_boundary": "one logical commit",
+      "estimate": { "estimated_changed_files": 3, "estimated_net_loc": 200, "target_p90_minutes": 45, "serial_dependency_depth": 2, "independent_vertical_count": 1 },
       "budget": { "max_changed_files": 4, "max_loc": 400, "max_wall_clock_minutes": 60, "max_required_checks": 2 },
       "checks": [
         { "check_id": "slice-three-contract", "gate_class": "contract", "command": "true", "final_only": false, "cache_policy": "identity-bound" }

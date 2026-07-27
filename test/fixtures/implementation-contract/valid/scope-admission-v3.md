@@ -16,7 +16,7 @@ product_ui_not_applicable_reason: This fixture has no user interface behavior.
 {
   "schema_version": 1,
   "size_policy": {
-    "policy_id": "atlas-slice-size-v1"
+    "policy_id": "atlas-slice-size-v2"
   },
   "slices": [
     {
@@ -30,6 +30,13 @@ product_ui_not_applicable_reason: This fixture has no user interface behavior.
       "risk_class": "medium",
       "failure_domain": "contract-authority",
       "rollback_boundary": "one logical commit",
+      "estimate": {
+        "estimated_changed_files": 10,
+        "estimated_net_loc": 1000,
+        "target_p90_minutes": 100,
+        "serial_dependency_depth": 0,
+        "independent_vertical_count": 1
+      },
       "budget": {
         "max_changed_files": 12,
         "max_loc": 1200,
