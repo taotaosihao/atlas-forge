@@ -15,6 +15,8 @@ first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
 product_ui_gate: required | not_applicable
 product_ui_not_applicable_reason:
+durable_product_naming_gate: required | not_applicable
+durable_product_naming_not_applicable_reason:
 
 ## Execution Plan
 
@@ -103,6 +105,18 @@ product_ui_not_applicable_reason:
 - Reverse guard: served UI evidence does not replace required hard safety-gate evidence.
 - Not-applicable boundary: only genuinely headless CLI/worker/library/scanner work or tiny changes that do not alter user-visible UI behavior. A product task with no served app is not tiny solely because the slice is small.
 
+## Durable Product Naming Boundary
+
+- stable_product_terms:
+- delivery_only_terms:
+- compatibility_bound_names: none | <explicit identifiers and rationale>
+- naming_verification:
+- Stable-name rule: new or renamed durable product files, directories, exported or internal symbols, APIs, schemas, and capability identifiers use domain or capability language that remains true after the current delivery phase ends.
+- Delivery-name rule: task IDs, ticket IDs, roadmap gates, phases, slices, agent names, and acceptance-stage labels stay in workflow/evidence artifacts and purpose-built verifier names; they do not become durable product names merely for implementation traceability.
+- Existing-precedent rule: a neighboring legacy name is evidence to inspect, not automatic authority to copy a delivery-only term into a new durable name.
+- Compatibility boundary: historical migrations, persisted schema/protocol identifiers, receipts, and evidence namespaces may retain delivery terms only when listed in `compatibility_bound_names`; do not mechanically rename them with ordinary product code.
+- Not-applicable boundary: no durable product identifier is created or renamed. A substantive reason is required; a small implementation slice is not sufficient by itself.
+
 ## Acceptance Criteria
 
 | ID | Criterion | Required | Verification | Authority |
@@ -159,6 +173,7 @@ Keep `visible-follow-up` and `informational` findings visible here or by stable 
 - [ ] Superseded requirements are not included as executable instructions.
 - [ ] Review notes are linked in provenance, not pasted into the body.
 - [ ] Required acceptance criteria and validation rows are complete.
+- [ ] New or renamed durable product identifiers satisfy the Durable Product Naming Boundary.
 - [ ] Every finding-derived executable requirement cites `current-required:<finding_id>`.
 - [ ] Visible follow-up and informational findings remain provenance only.
 - [ ] Git evidence stays within the phase evidence budget or the exception is explained.

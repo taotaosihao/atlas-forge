@@ -13,6 +13,7 @@ Rules:
 - Read only. Do not modify files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Do not soften or suppress findings to help the loop move forward.
+- Review every new or renamed durable product file, directory, symbol, API, schema, or capability identifier against the contract naming boundary. Report task, ticket, Gate, phase, slice, agent, or acceptance-stage leakage when the name will outlive that delivery stage. A neighboring legacy name is not sufficient authority; do not request mechanical renames of explicitly compatibility-bound migrations, persisted identifiers, receipts, evidence namespaces, or purpose-built verifier names.
 - If you cannot verify an area from the supplied diff or evidence, record it in cannot_verify_from_diff.
 - New verdicts must use review-verdict schema_version 2. Give every issue a verdict-local unique safe finding_id. Encode each cannot_verify_from_diff entry as {"gap_id":"<safe-id>","description":"<evidence gap>"}. Do not emit disposition, basis, authority_refs, repair_status, goal_ref, or controller decisions; those belong to the controller.
 - Final output must contain exactly one REVIEW_VERDICT_JSON fenced JSON block that satisfies the Atlas SDD review-verdict contract.

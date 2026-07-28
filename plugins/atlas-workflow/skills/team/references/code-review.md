@@ -42,6 +42,8 @@ Each actionable finding should include:
 
 Use review categories as prompts, not universal gates. Select from correctness and edge cases; authentication, authorization, secrets, injection, and trust boundaries; errors and failure semantics; concurrency, transactions, idempotency, and state consistency; performance and resource behavior; compatibility, migration, and rollback; coupling, duplication, and testability; critical-path, failure-path, and regression tests; and system boundaries or long-horizon tradeoffs.
 
+When the diff creates or renames durable product files, directories, symbols, APIs, schemas, or capability identifiers, compare them with the contract's stable product terms and delivery-only terms. Task IDs, ticket IDs, Gate/phase/slice labels, agent names, and acceptance-stage labels should not survive in product names after the delivery stage ends. A neighboring legacy name is not sufficient authority. Exempt only purpose-built workflow/verifier artifacts or explicitly compatibility-bound migrations, persisted protocol/schema identifiers, receipts, and historical evidence namespaces; do not recommend mechanical compatibility-surface renames.
+
 Do not impose language-independent numeric rules for function length, cyclomatic complexity, or nesting depth. Treat them as contextual signals only. Do not claim that absence of a finding proves absence of risk.
 
 ## Focused Deliberation

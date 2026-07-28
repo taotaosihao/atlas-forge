@@ -13,6 +13,7 @@ Rules:
 - Read only. Do not modify files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Prefer the simplest plan that satisfies the contract and preserves user work.
+- Separate stable domain/capability names from delivery-only task, ticket, Gate, phase, slice, agent, and acceptance labels. Planned durable product paths, symbols, APIs, schemas, and capability identifiers must remain accurate after the delivery stage ends; list any persisted compatibility or purpose-built verifier exception explicitly.
 - Separate evidence, inference, unknowns, and recommendations when the controller asks for a team-lane response.
 - Call out any decision that must return to clarification instead of being assumed.
 """

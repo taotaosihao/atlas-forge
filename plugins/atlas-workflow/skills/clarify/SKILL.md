@@ -66,6 +66,9 @@ Follow this loop:
    - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
    - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
    - what failure or ambiguity should stop implementation and return to the user
+   - whether `Durable product naming gate` is `required` or `not_applicable`; new or renamed durable product files, directories, symbols, APIs, schemas, and capability identifiers normally require it, while `not_applicable` requires a substantive reason that no durable identifier changes
+   - when the naming gate is required, name `stable_product_terms`, `delivery_only_terms`, `compatibility_bound_names`, and `naming_verification`; task/ticket IDs, roadmap gates, phases, slices, agent names, and acceptance-stage labels are delivery language and must not leak into durable product names merely for traceability
+   - allow delivery terms in historical migrations, persisted protocol/schema identifiers, receipts, evidence namespaces, or purpose-built verifier names only when the compatibility or artifact boundary is explicit; a neighboring legacy name is not automatic authority to copy it
    - for non-tiny implementation work that could spend early phases on
      contracts, scanners, fixtures, headless models, research, or evidence
      before changing the requested behavior, whether `First-code guard` is
@@ -115,6 +118,7 @@ Follow this loop:
    - no contradictory or mirrored scope in supporting artifacts
    - assumptions are labelled
    - acceptance criteria match the verification plan
+   - durable product naming uses stable domain/capability language, and every delivery-only or compatibility-bound exception is explicit
    - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
    - for a newly authored final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --new-authoring --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; new authoring requires semantics v3, while the lint must validate the execution plan, contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
    - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`
