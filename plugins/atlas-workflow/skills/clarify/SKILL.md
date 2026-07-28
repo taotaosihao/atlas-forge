@@ -47,7 +47,7 @@ Follow this loop:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent clarify --risk <low|medium|high> --decision use --reason "<why boundaries must be locked>"`
    - If office-hours or brainstorm is intentionally skipped because the direction is already chosen, record a separate skip reason only when that choice is non-obvious.
 4. Read any existing `workflow/artifacts/<task-id>/context.md`, `decision.md`, `spec.md`, or `analysis.md` before writing new boundaries.
-5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, and do not use discovery, review wording, or generic completeness language to broaden it.
+5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, state stable product/domain/capability language before delivery labels in concise goals and execution briefs, and do not use discovery, review wording, or generic completeness language to broaden it. Task, Gate, phase, slice, and acceptance labels remain delivery metadata rather than the only identity of the product behavior.
 6. Collect brownfield facts after the Goal is frozen. Classify every discovered item as `goal:<requirement-ref>`, controller-resolved `current-required:<finding_id>`, or non-executable `follow-up`. Discovery cannot rewrite the frozen Goal; only a validated controller resolution can admit a non-Goal finding into the current delivery.
 7. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
 8. Select one canonical scope source. Reuse a substantive existing issue, PRD, design, or contract when it already contains the locked scope. When implementation-contract value is already known, author that contract as the canonical source instead of first creating a duplicate `clarify.md`; otherwise run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>` and make `workflow/artifacts/<task-id>/clarify.md` canonical. Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope. Any necessary supporting note must cite the canonical source instead of repeating it.
@@ -66,9 +66,6 @@ Follow this loop:
    - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
    - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
    - what failure or ambiguity should stop implementation and return to the user
-   - whether `Durable product naming gate` is `required` or `not_applicable`; new or renamed durable product files, directories, symbols, APIs, schemas, and capability identifiers normally require it, while `not_applicable` requires a substantive reason that no durable identifier changes
-   - when the naming gate is required, name `stable_product_terms`, `delivery_only_terms`, `compatibility_bound_names`, and `naming_verification`; task/ticket IDs, roadmap gates, phases, slices, agent names, and acceptance-stage labels are delivery language and must not leak into durable product names merely for traceability
-   - allow delivery terms in historical migrations, persisted protocol/schema identifiers, receipts, evidence namespaces, or purpose-built verifier names only when the compatibility or artifact boundary is explicit; a neighboring legacy name is not automatic authority to copy it
    - for non-tiny implementation work that could spend early phases on
      contracts, scanners, fixtures, headless models, research, or evidence
      before changing the requested behavior, whether `First-code guard` is
@@ -118,7 +115,6 @@ Follow this loop:
    - no contradictory or mirrored scope in supporting artifacts
    - assumptions are labelled
    - acceptance criteria match the verification plan
-   - durable product naming uses stable domain/capability language, and every delivery-only or compatibility-bound exception is explicit
    - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
    - for a newly authored final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --new-authoring --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; new authoring requires semantics v3, while the lint must validate the execution plan, contract `task_id`, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready
    - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`

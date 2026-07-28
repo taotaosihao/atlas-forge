@@ -23,13 +23,13 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.
 - Treat the current user goal and existing authoritative spec as the scope. Do not create a second roadmap/scope state machine.
+- For product implementation, make the stable domain or capability identity prominent in the execution objective and name new long-lived files and symbols from that identity plus their actual responsibility. Task, Gate, phase, slice, and acceptance labels are delivery metadata unless the object itself is delivery-scoped; do not copy a nearby delivery-prefixed implementation as a naming precedent solely because it is similar or recent.
 - Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while scope and authority remain unchanged. Persistence wording alone does not expand a narrower goal.
 
 ## Artifacts And Context
 
 - Create durable documentation only when ambiguity, risk, handoff, audit, or release value justifies it. Reuse existing issues, PRDs, specs, or contracts instead of mirroring them.
 - A lightweight contract should name goal, non-goals, acceptance, real verification, and true return conditions. Do not add staffing/evidence files solely to satisfy a file checklist.
-- Before creating or renaming durable product files, directories, symbols, APIs, schemas, or capability identifiers, separate stable domain/capability terms from delivery-only task, ticket, Gate, phase, slice, agent, or acceptance labels. Delivery-only terms stay in workflow/evidence artifacts and purpose-built verifiers unless an explicit persisted compatibility boundary requires them; do not copy a neighboring legacy delivery name by default.
 - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Keep raw logs, traces, screenshots, dumps, retry output, and intermediate repair output outside Git by default.
 - Long work crossing compaction or handoff uses one non-Git rolling checkpoint that is overwritten rather than appended.
@@ -37,7 +37,6 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 ## Review, Commits, And Completion
 
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
-- Review new or renamed durable identifiers against the contract's naming boundary. Treat delivery-stage leakage as a finding when the name will outlive that stage; do not mechanically rename migrations, persisted protocol/schema identifiers, receipts, or historical evidence namespaces.
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
 - Run focused verification first and broaden with blast radius. If a check cannot run, record the exact command and reason.
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.

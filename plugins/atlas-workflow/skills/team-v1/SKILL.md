@@ -32,6 +32,7 @@ Follow this loop:
    - In legacy `team-v1`, 3 is the default, not a hard limit. Use `--agents N` when a legacy round needs more lanes; lanes beyond the named seed roles are recorded as `lane-4`, `lane-5`, and so on.
 7. Use execute mode when the round should focus on implementation roles:
    - `~/.codex/workflow/bin/codex-workflow team-start <task-id> "<objective>" --mode execute`
+   - Lead product implementation objectives with stable domain/capability identity and actual responsibility. Keep task, Gate, phase, slice, and acceptance labels as delivery metadata rather than using them as the default product architecture or naming namespace.
 8. Use the legacy Atlas-managed bounded team loop when the user wants the old CLI-backed loop:
    - `~/.codex/workflow/bin/codex-workflow team-loop <task-id> "<objective>" --max-iterations 5 --max-time 1h`
    - Add `--verify-check "<command>"` when a shell command can objectively prove the goal.
@@ -48,7 +49,6 @@ Follow this loop:
     - Use it for non-tiny local work with UI/API/CLI/background-job behavior, cross-file changes, or meaningful edge cases.
     - The contract owner is the main implementer unless the team explicitly assigns a separate reviewer.
     - The contract must preserve the team decision and must not add new scope.
-    - New or renamed durable product files, directories, symbols, APIs, schemas, and capability identifiers use stable domain/capability language. Keep task, ticket, Gate, phase, slice, agent, and acceptance labels in delivery artifacts unless the contract explicitly records a persisted compatibility or purpose-built verifier boundary; a neighboring legacy name is not automatic authority.
     - After review, the final implementation contract must be a clean rewrite of the settled requirements in `implementation-contract.final.md`; keep review history in `reviews/` or `decisions/`, not appended to the final executable contract body.
     - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
     - Review severity, `required_fix`, affected rows, and remediation prose do not grant scope. For SDD v2, every validated controller finding with `disposition: current-required` remains projected into executable requirements whether `repair_status` is `open` or `resolved`; only `open` findings block or create repair feedback.

@@ -9,8 +9,6 @@ first_code_guard: not_applicable
 first_code_not_applicable_reason: This fixture validates planning contract structure only.
 product_ui_gate: not_applicable
 product_ui_not_applicable_reason: This fixture has no user interface behavior.
-durable_product_naming_gate: not_applicable
-durable_product_naming_not_applicable_reason: This planning fixture does not create or rename durable product identifiers.
 
 ## Execution Plan
 

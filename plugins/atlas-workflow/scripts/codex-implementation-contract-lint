@@ -24,8 +24,6 @@ const ENVELOPE_FIELDS = new Set([
   "first_code_not_applicable_reason",
   "product_ui_gate",
   "product_ui_not_applicable_reason",
-  "durable_product_naming_gate",
-  "durable_product_naming_not_applicable_reason",
 ]);
 
 const FIRST_CODE_FIELDS = [
@@ -48,18 +46,7 @@ const PRODUCT_UI_FIELDS = [
   "stop_if_no_ui_by_phase",
 ];
 
-const DURABLE_PRODUCT_NAMING_FIELDS = [
-  "stable_product_terms",
-  "delivery_only_terms",
-  "compatibility_bound_names",
-  "naming_verification",
-];
-
-const DETAIL_FIELDS = new Set([
-  ...FIRST_CODE_FIELDS,
-  ...PRODUCT_UI_FIELDS,
-  ...DURABLE_PRODUCT_NAMING_FIELDS,
-]);
+const DETAIL_FIELDS = new Set([...FIRST_CODE_FIELDS, ...PRODUCT_UI_FIELDS]);
 const RECOGNIZED_FIELDS = new Set([...ENVELOPE_FIELDS, ...DETAIL_FIELDS]);
 const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
 const GATE_VALUES = new Set(["required", "not_applicable"]);
@@ -109,11 +96,6 @@ const PRODUCT_UI_HEADINGS = new Set([
   "产品/ui 验收门禁",
   "产品/ui 接受门禁",
 ]);
-const DURABLE_PRODUCT_NAMING_HEADINGS = new Set([
-  "durable product naming boundary",
-  "持久产品命名边界",
-  "长期产品命名边界",
-]);
 
 class CliError extends Error {}
 class InputError extends Error {}
@@ -121,9 +103,9 @@ class InputError extends Error {}
 function usage() {
   console.log(`usage: codex-implementation-contract-lint --file <path> [--strict] [--new-authoring] [--authority-slice <dir>]...
 
-Validates versioned first-code, Product/UI, and new-authoring durable product
-naming semantics in an implementation contract. Unversioned historical
-contracts pass with a warning unless --strict is supplied.
+Validates versioned first-code and Product/UI semantics in an implementation
+contract. Unversioned historical contracts pass with a warning unless
+--strict is supplied.
 
 Options:
   --file <path>  Markdown implementation contract to validate.
@@ -426,9 +408,7 @@ function parseFields(content) {
         ? "first_code"
         : PRODUCT_UI_HEADINGS.has(heading)
           ? "product_ui"
-          : DURABLE_PRODUCT_NAMING_HEADINGS.has(heading)
-            ? "durable_product_naming"
-            : null;
+          : null;
     }
     const atxHeading = /^ {0,3}(#{1,6})(?:[ \t]+(.*?)[ \t]*#*[ \t]*)?$/.exec(line);
     if (atxHeading) {
@@ -443,9 +423,7 @@ function parseFields(content) {
         ? "first_code"
         : level === 2 && PRODUCT_UI_HEADINGS.has(heading)
           ? "product_ui"
-          : level === 2 && DURABLE_PRODUCT_NAMING_HEADINGS.has(heading)
-            ? "durable_product_naming"
-            : null;
+          : null;
     }
     previousVisibleLine = line;
 
@@ -476,11 +454,7 @@ function parseFields(content) {
         "top-level detail fields must appear before any H2-H6 section",
       ));
     } else if (DETAIL_FIELDS.has(key) && style === "bullet") {
-      const expectedSection = FIRST_CODE_FIELDS.includes(key)
-        ? "first_code"
-        : PRODUCT_UI_FIELDS.includes(key)
-          ? "product_ui"
-          : "durable_product_naming";
+      const expectedSection = FIRST_CODE_FIELDS.includes(key) ? "first_code" : "product_ui";
       if (machineSection !== expectedSection) {
         diagnostics.push(makeDiagnostic(
           "ERROR",
@@ -1108,99 +1082,6 @@ function validateVersionOne(fields, initialDiagnostics) {
   return diagnostics;
 }
 
-function validateDurableProductNaming(fields, initialDiagnostics, required) {
-  const diagnostics = [...initialDiagnostics];
-  const add = (code, field, line, message) => {
-    diagnostics.push(makeDiagnostic("ERROR", code, field, line, message));
-  };
-  const get = (key) => fields.get(key) || null;
-  const gate = get("durable_product_naming_gate");
-
-  if (!gate) {
-    if (required) {
-      add(
-        "DURABLE_PRODUCT_NAMING_GATE_MISSING",
-        "durable_product_naming_gate",
-        0,
-        "newly authored contracts must declare the durable product naming gate",
-      );
-    }
-    return diagnostics;
-  }
-  if (isPlaceholder(gate.value) || !GATE_VALUES.has(gate.value)) {
-    add(
-      "DURABLE_PRODUCT_NAMING_GATE_INVALID",
-      gate.key,
-      gate.line,
-      "allowed values: required, not_applicable",
-    );
-    return diagnostics;
-  }
-
-  const workType = get("work_type");
-  if (workType && WORK_TYPES.has(workType.value)
-    && workType.value !== "implementation" && gate.value !== "not_applicable") {
-    add(
-      "DURABLE_PRODUCT_NAMING_GATE_WORK_TYPE_CONFLICT",
-      gate.key,
-      gate.line,
-      "non-implementation work must mark the durable product naming gate not_applicable",
-    );
-  }
-
-  if (gate.value === "required") {
-    const reason = get("durable_product_naming_not_applicable_reason");
-    if (reason && reason.value.trim()) {
-      add(
-        "REASON_CONFLICTS_WITH_REQUIRED_GATE",
-        reason.key,
-        reason.line,
-        "not-applicable reason must be empty when the durable product naming gate is required",
-      );
-    }
-    for (const key of DURABLE_PRODUCT_NAMING_FIELDS) {
-      const record = get(key);
-      if (!record) {
-        add("REQUIRED_FIELD_MISSING", key, 0, "required field is missing");
-        continue;
-      }
-      const explicitNoCompatibilityNames = key === "compatibility_bound_names"
-        && unwrapScalar(record.value).toLowerCase() === "none";
-      const unresolvedCompatibilityTemplate = key === "compatibility_bound_names"
-        && /\|\s*<[^<>]+>/.test(record.value);
-      if (!explicitNoCompatibilityNames
-        && (unresolvedCompatibilityTemplate
-          || isPlaceholder(record.value)
-          || isNotApplicableToken(record.value))) {
-        add("REQUIRED_FIELD_PLACEHOLDER", key, record.line, "required field must contain a substantive value");
-      }
-    }
-  } else {
-    const reason = get("durable_product_naming_not_applicable_reason");
-    if (!reason || isPlaceholder(reason.value) || isNotApplicableToken(reason.value)) {
-      add(
-        "NOT_APPLICABLE_REASON_REQUIRED",
-        "durable_product_naming_not_applicable_reason",
-        reason?.line || 0,
-        "a substantive reason is required when the durable product naming gate is not_applicable",
-      );
-    }
-    for (const key of DURABLE_PRODUCT_NAMING_FIELDS) {
-      const record = get(key);
-      if (record && !isInactiveValue(record.value)) {
-        add(
-          "FIELD_CONFLICTS_WITH_NOT_APPLICABLE",
-          key,
-          record.line,
-          "durable product naming detail must be empty or not_applicable when the gate is not_applicable",
-        );
-      }
-    }
-  }
-
-  return diagnostics;
-}
-
 function visibleContentLines(content) {
   const results = [];
   let fence = null;
@@ -1400,12 +1281,8 @@ function validateVersionTwo(content, fields, initialDiagnostics, authority, stri
   return diagnostics;
 }
 
-function validateVersionThree(content, fields, initialDiagnostics, authority, strict, newAuthoring) {
-  const diagnostics = validateDurableProductNaming(
-    fields,
-    validateVersionTwo(content, fields, initialDiagnostics, authority, strict),
-    newAuthoring,
-  );
+function validateVersionThree(content, fields, initialDiagnostics, authority, strict) {
+  const diagnostics = validateVersionTwo(content, fields, initialDiagnostics, authority, strict);
   try {
     extractExecutionPlan(content);
   } catch (error) {
@@ -1505,7 +1382,6 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
         parsed.diagnostics,
         authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
         strict,
-        newAuthoring,
       )
       : version.value === "2"
         ? validateVersionTwo(

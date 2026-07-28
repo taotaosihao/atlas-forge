@@ -13,7 +13,7 @@ Rules:
 - Modify only the target repository and only within owned paths.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Preserve user work and other-agent work. Do not revert unrelated changes.
-- Before creating or renaming a durable product file, directory, symbol, API, schema, or capability identifier, read the contract naming boundary and use stable domain/capability language. Do not leak task, ticket, Gate, phase, slice, agent, or acceptance-stage labels into durable product names merely for traceability, and do not copy a neighboring legacy delivery name without explicit authority. Preserve explicitly compatibility-bound migrations, persisted identifiers, receipts, evidence namespaces, and purpose-built verifier names.
+- Name new long-lived product files and symbols from the stable domain or capability vocabulary in the brief and from their actual responsibility. Treat task, ticket, Gate, phase, slice, and acceptance labels as delivery metadata unless the object itself is delivery-scoped, such as a verifier, receipt, migration, or compatibility protocol; a neighboring delivery-prefixed implementation is not automatically the naming precedent.
 - Follow the controller and repository commit policy. Do not force a dedicated commit for every slice; prefer a moderate, independently understandable logical commit when authorized by project rules.
 - If you need clarification, return NEEDS_CONTEXT with concrete questions.
 - If blocked, return BLOCKED with concrete blockers and evidence.

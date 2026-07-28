@@ -70,19 +70,6 @@ run_v3_new_authoring_valid() {
   pass "$label"
 }
 
-run_v3_new_authoring_invalid() {
-  local label="$1" file="$2" authority_slice="$3" expected_code="$4" status
-  case_paths
-  set +e
-  "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"
-  status=$?
-  set -e
-  [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
-  grep -q '^implementation_contract_lint: false$' "$CASE_STDOUT" || show_failure "$label"
-  grep -q "^ERROR $expected_code " "$CASE_STDERR" || show_failure "$label"
-  pass "$label"
-}
-
 run_old_new_authoring_invalid() {
   local label="$1" file="$2" status
   case_paths
@@ -339,32 +326,6 @@ run_v3_new_authoring_valid \
   'new authoring accepts a v3 goal-only authority slice' \
   "$FIXTURE_ROOT/valid/scope-admission-v3.md" \
   "$GOAL_ONLY_SLICE"
-run_v3_new_authoring_valid \
-  'new authoring accepts a required durable product naming boundary' \
-  "$FIXTURE_ROOT/valid/durable-product-naming-v3.md" \
-  "$GOAL_ONLY_SLICE"
-missing_naming_gate="$TMP_ROOT/missing-durable-product-naming-gate.md"
-sed '/^durable_product_naming_/d' "$FIXTURE_ROOT/valid/scope-admission-v3.md" > "$missing_naming_gate"
-run_v3_new_authoring_invalid \
-  'new authoring requires a durable product naming gate declaration' \
-  "$missing_naming_gate" \
-  "$GOAL_ONLY_SLICE" \
-  DURABLE_PRODUCT_NAMING_GATE_MISSING
-missing_stable_terms="$TMP_ROOT/missing-stable-product-terms.md"
-sed '/^- stable_product_terms:/d' "$FIXTURE_ROOT/valid/durable-product-naming-v3.md" > "$missing_stable_terms"
-run_v3_new_authoring_invalid \
-  'required durable product naming rejects missing stable terms' \
-  "$missing_stable_terms" \
-  "$GOAL_ONLY_SLICE" \
-  REQUIRED_FIELD_MISSING
-unresolved_compatibility_names="$TMP_ROOT/unresolved-compatibility-bound-names.md"
-sed 's/^- compatibility_bound_names: none$/- compatibility_bound_names: none | <explicit identifiers and rationale>/' \
-  "$FIXTURE_ROOT/valid/durable-product-naming-v3.md" > "$unresolved_compatibility_names"
-run_v3_new_authoring_invalid \
-  'required durable product naming rejects unresolved compatibility placeholders' \
-  "$unresolved_compatibility_names" \
-  "$GOAL_ONLY_SLICE" \
-  REQUIRED_FIELD_PLACEHOLDER
 run_old_new_authoring_invalid \
   'new authoring rejects semantics v2 compatibility contracts' \
   "$goal_only_contract"
@@ -738,14 +699,6 @@ for template in implementation-contract.md implementation-contract.final.md; do
   grep -q '^work_type: implementation | planning | review | audit | docs-only$' "$file"
   grep -q '^first_code_not_applicable_reason:$' "$file"
   grep -q '^product_ui_not_applicable_reason:$' "$file"
-  grep -q '^durable_product_naming_gate: required | not_applicable$' "$file"
-  grep -q '^durable_product_naming_not_applicable_reason:$' "$file"
-  grep -q '^## Durable Product Naming Boundary$' "$file"
-  grep -q '^- stable_product_terms:$' "$file"
-  grep -q '^- delivery_only_terms:$' "$file"
-  grep -q '^- compatibility_bound_names: none | <explicit identifiers and rationale>$' "$file"
-  grep -q '^- naming_verification:$' "$file"
-  grep -q 'Existing-precedent rule: a neighboring legacy name is evidence to inspect, not automatic authority' "$file"
   grep -q 'first_code_slice_kind: product | runtime | api | cli | workflow | scanner_behavior' "$file"
   grep -q 'Versioned stop: semantics version 1 requires `stop_if_no_code_by_phase`' "$file"
   ! grep -q 'Default stop:' "$file"
@@ -774,18 +727,6 @@ grep -q 'Create a repo docs bundle, `contract-index.md`, staffing file, or durab
 grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Durable product naming gate' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'stable_product_terms.*delivery_only_terms.*compatibility_bound_names.*naming_verification' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'neighboring legacy name is not automatic authority' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'separate stable domain/capability terms from delivery-only' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/task/SKILL.md"
-grep -q 'Review new or renamed durable identifiers against the contract' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/task/SKILL.md"
-grep -q 'review stable domain/capability language separately from delivery-only' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
-grep -q 'New or renamed durable product files.*stable domain/capability language' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team-v1/SKILL.md"
-grep -q 'compare them with the contract.*stable product terms and delivery-only terms' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/code-review.md"
-grep -q 'read the contract naming boundary and use stable domain/capability language' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-implementer.toml"
-grep -q 'Review every new or renamed durable product file' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-reviewer.toml"
-grep -q 'Separate stable domain/capability names from delivery-only' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-planner.toml"
-grep -q 'Check that new or renamed durable product files' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-phase-reviewer.toml"
 for contract_authoring_skill in task clarify team team-v1; do
   contract_authoring_file="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/$contract_authoring_skill/SKILL.md"
   grep -q 'authority-backed facts determine an environment, status, verification level, or conclusion' "$contract_authoring_file"
