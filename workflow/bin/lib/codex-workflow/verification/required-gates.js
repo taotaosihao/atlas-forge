@@ -5,6 +5,7 @@ const path = require("path");
 const childProcess = require("child_process");
 const { taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
+const { captureWorktreeSnapshot } = require("../core/worktree-snapshot");
 const {
   captureVerificationIdentity,
   digestCanonical,
@@ -381,6 +382,7 @@ function executionCompletionAdmission(paths, taskId, state) {
     reasons.push("execution authority required slice set does not match its plan");
   }
   const recordIds = [];
+  const acceptedEvents = [];
   let events = [];
   try {
     events = readAuthoritativeEvents(
@@ -404,6 +406,8 @@ function executionCompletionAdmission(paths, taskId, state) {
       || terminal.result?.accepted?.operation_id !== accepted.operation_id
       || terminal.revision !== accepted.revision) {
       reasons.push(`accepted slice is not the latest authoritative terminal: ${slice.slice_id}`);
+    } else {
+      acceptedEvents.push(terminal);
     }
     if (accepted.task_id !== taskId || accepted.slice_id !== slice.slice_id
       || accepted.contract_sha256 !== authority.contract_sha256
@@ -478,7 +482,44 @@ function executionCompletionAdmission(paths, taskId, state) {
       }
     }
   }
+  let completionSnapshot = null;
+  const finalAcceptance = acceptedEvents.sort((left, right) => left.revision - right.revision).at(-1);
+  if (!finalAcceptance) {
+    reasons.push("missing final authoritative slice acceptance snapshot");
+  } else if (repo) {
+    const accepted = finalAcceptance.result?.accepted;
+    const actual = accepted?.actual_size || {};
+    const acceptedHead = actual.accepted_head_sha || actual.start_head_sha || "";
+    const acceptedTree = actual.accepted_tree_oid || actual.current_tree_oid || "";
+    if (!acceptedTree) {
+      reasons.push("final slice acceptance is missing its worktree snapshot");
+    } else {
+      try {
+        const current = captureWorktreeSnapshot(repo);
+        if (!acceptedHead) {
+          reasons.push("final slice acceptance is missing its HEAD snapshot");
+        } else if (current.head_sha !== acceptedHead) {
+          reasons.push("repository HEAD changed after final slice acceptance");
+        }
+        if (current.tree_oid !== acceptedTree) {
+          reasons.push("repository worktree changed after final slice acceptance");
+        }
+        completionSnapshot = {
+          schema_version: 1,
+          repo_realpath: repo,
+          head_sha: current.head_sha,
+          tree_oid: current.tree_oid,
+          source_slice_id: accepted?.slice_id || "",
+          source_acceptance_event_id: finalAcceptance.event_id,
+          source_acceptance_revision: finalAcceptance.revision,
+        };
+      } catch (error) {
+        reasons.push(`unable to capture completion repository snapshot: ${error.message}`);
+      }
+    }
+  }
   return {
+    completionSnapshot,
     identityDigest: "",
     passed: reasons.length === 0,
     reasons,

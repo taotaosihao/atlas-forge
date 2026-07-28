@@ -30,6 +30,10 @@ const { taskEventFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/task-mutation.js",
 ));
+const { taskMutationLockFile } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/lock.js",
+));
 const { archiveTask, completeTask, createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
@@ -282,6 +286,63 @@ function executionBrief(paths, taskId, options = {}) {
     plan,
     repo,
   };
+}
+
+function acceptedExecution(environment, paths, title = "Accepted execution") {
+  const taskId = createFixtureTask(environment, title);
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const ownedRoot = `workflow/test-owned/${taskId}`;
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+    ownedPaths: [`${ownedRoot}/**`],
+  });
+  const source = path.join(admission.repo, ownedRoot, "source.js");
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, "module.exports = 'accepted';\n");
+  spawnSync("git", ["-C", admission.repo, "add", `${ownedRoot}/source.js`]);
+  const stagedSource = spawnSync(
+    "git", ["-C", admission.repo, "diff", "--cached", "--quiet"], { encoding: "utf8" },
+  );
+  if (stagedSource.status === 1) {
+    const sourceCommit = spawnSync(
+      "git", ["-C", admission.repo, "commit", "-qm", "test: seed accepted source"],
+      { encoding: "utf8" },
+    );
+    assert.equal(sourceCommit.status, 0, sourceCommit.stderr);
+  } else {
+    assert.equal(stagedSource.status, 0, stagedSource.stderr);
+  }
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute accepted snapshot", "--mode=execute",
+    "--authorization-ref=user-message:accepted-snapshot",
+    `--brief=${admission.briefPath}`, "--operation-id=start-accepted-snapshot",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-accepted-snapshot",
+  });
+  const keeperRelative = `${ownedRoot}/keeper.txt`;
+  const keeper = path.join(admission.repo, keeperRelative);
+  fs.writeFileSync(keeper, "accepted keeper\n");
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-accepted-snapshot",
+    recordToken: "20260729T010000000000001",
+  });
+  runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-snapshot",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]), { environment });
+  return { admission, checkCommand, keeper, keeperRelative, source, taskId };
+}
+
+function authoritativeEvents(paths, taskId) {
+  return fs.readFileSync(taskEventFile(paths, taskId), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line));
 }
 
 function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
@@ -1042,6 +1103,189 @@ test("task completion requires every command-bound admitted gate", (t) => {
   assert.deepEqual(
     archivedState.execution_authority.completion,
     completedState.execution_authority.completion,
+  );
+});
+
+test("completion is bound to the final accepted HEAD and worktree snapshot", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = acceptedExecution(environment, paths, "Completion snapshot binding");
+  const { admission, checkCommand, keeperRelative, source, taskId } = fixture;
+  const acceptedState = readJsonObject(taskStateFile(paths, taskId));
+  const firstAcceptance = acceptedState.slice_acceptances["execution-slice"];
+  assert.match(firstAcceptance.actual_size.accepted_head_sha, /^[a-f0-9]{40}$/);
+  assert.match(firstAcceptance.actual_size.accepted_tree_oid, /^[a-f0-9]{40}$/);
+  assert.equal(
+    firstAcceptance.actual_size.accepted_tree_oid,
+    firstAcceptance.actual_size.current_tree_oid,
+  );
+
+  fs.writeFileSync(source, "module.exports = 'changed after acceptance';\n");
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-source-drift" }),
+    /repository worktree changed after final slice acceptance/,
+  );
+  fs.writeFileSync(source, "module.exports = 'accepted';\n");
+
+  const untracked = path.join(path.dirname(source), "untracked.txt");
+  fs.writeFileSync(untracked, "untracked after acceptance\n");
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-untracked-drift" }),
+    /repository worktree changed after final slice acceptance/,
+  );
+  fs.rmSync(untracked);
+
+  const headDrift = spawnSync(
+    "git", ["-C", admission.repo, "commit", "--allow-empty", "-qm", "test: drift accepted HEAD"],
+    { encoding: "utf8" },
+  );
+  assert.equal(headDrift.status, 0, headDrift.stderr);
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-head-drift" }),
+    /repository HEAD changed after final slice acceptance/,
+  );
+  assert.equal(
+    spawnSync("git", [
+      "-C", admission.repo, "update-ref", "HEAD", firstAcceptance.actual_size.accepted_head_sha,
+    ]).status,
+    0,
+  );
+
+  const outside = path.join(admission.repo, "outside-owned-path.txt");
+  fs.writeFileSync(outside, "outside ownership after acceptance\n");
+  assert.throws(
+    () => completeTask(taskId, { environment, operationId: "done-after-outside-drift" }),
+    /repository worktree changed after final slice acceptance/,
+  );
+  fs.rmSync(outside);
+
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "reverify-restored-snapshot",
+    recordToken: "20260729T010000000000002",
+  });
+  runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=reaccept-restored-snapshot",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]), { environment });
+  const finalAcceptanceEvent = authoritativeEvents(paths, taskId).at(-1);
+  assert.equal(finalAcceptanceEvent.kind, "slice.accepted");
+  completeTask(taskId, { environment, operationId: "done-restored-reverified-snapshot" });
+
+  const completed = readJsonObject(taskStateFile(paths, taskId));
+  assert.deepEqual(completed.completion.completion_snapshot, {
+    schema_version: 1,
+    repo_realpath: admission.repo,
+    head_sha: finalAcceptanceEvent.result.accepted.actual_size.accepted_head_sha,
+    tree_oid: finalAcceptanceEvent.result.accepted.actual_size.accepted_tree_oid,
+    source_slice_id: "execution-slice",
+    source_acceptance_event_id: finalAcceptanceEvent.event_id,
+    source_acceptance_revision: finalAcceptanceEvent.revision,
+  });
+});
+
+test("done and archived tasks reject acceptance, supersede, and verification writes", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = acceptedExecution(environment, paths, "Closed execution immutability");
+  const { admission, checkCommand, keeperRelative, taskId } = fixture;
+  completeTask(taskId, { environment, operationId: "done-before-closed-writes" });
+  const doneEventCount = authoritativeEvents(paths, taskId).length;
+  const doneState = readJsonObject(taskStateFile(paths, taskId));
+
+  assert.throws(() => runSliceSupersede(parseSliceSupersedeArgs([
+    taskId, "--slice-id=execution-slice", "--operation-id=supersede-after-done",
+    "--authority-ref=user-message:closed-task", "--reason=must remain immutable",
+  ]), { environment }), /team-slice-supersede requires task status doing; current status: done/);
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-after-done",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]), { environment }), /team-slice-accept requires task status doing; current status: done/);
+  const verifySentinel = path.join(admission.repo, "verify-after-done-ran.txt");
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", process.execPath, "-e",
+    `require('fs').writeFileSync(${JSON.stringify(verifySentinel)}, 'ran')`,
+  ]), { cwd: admission.repo, environment }), /verify requires task status doing; current status: done/);
+  assert.equal(fs.existsSync(verifySentinel), false);
+  assert.equal(authoritativeEvents(paths, taskId).length, doneEventCount);
+  assert.equal(doneState.slice_acceptances["execution-slice"].status, "accepted");
+
+  archiveTask(taskId, "retain immutable completion", {
+    environment,
+    operationId: "archive-closed-execution",
+  });
+  const archivedEventCount = authoritativeEvents(paths, taskId).length;
+  assert.throws(() => runSliceSupersede(parseSliceSupersedeArgs([
+    taskId, "--slice-id=execution-slice", "--operation-id=supersede-after-archive",
+    "--authority-ref=user-message:archived-task", "--reason=must remain immutable",
+  ]), { environment }), /team-slice-supersede requires task status doing; current status: archived/);
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-after-archive",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]), { environment }), /team-slice-accept requires task status doing; current status: archived/);
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), { cwd: admission.repo, environment }), /verify requires task status doing; current status: archived/);
+  assert.equal(authoritativeEvents(paths, taskId).length, archivedEventCount);
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).slice_acceptances["execution-slice"].status,
+    "accepted",
+  );
+});
+
+test("failed and cancelled completion also close slice mutation authority", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  for (const outcome of ["failed", "cancelled"]) {
+    const fixture = acceptedExecution(environment, paths, `Closed ${outcome} execution`);
+    completeTask(fixture.taskId, {
+      environment,
+      operationId: `complete-${outcome}-execution`,
+      outcome,
+      authorityRef: `user-message:${outcome}-execution`,
+      evidenceRefs: [`team/${outcome}.md`],
+    });
+    const before = authoritativeEvents(paths, fixture.taskId).length;
+    assert.throws(() => runSliceSupersede(parseSliceSupersedeArgs([
+      fixture.taskId, "--slice-id=execution-slice", `--operation-id=supersede-after-${outcome}`,
+      `--authority-ref=user-message:${outcome}`, "--reason=completion is terminal",
+    ]), { environment }), /requires task status doing; current status: done/);
+    assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+      fixture.taskId, `--brief=${fixture.admission.briefPath}`,
+      `--operation-id=accept-after-${outcome}`,
+      `--keeper-output=event:execution-slice-complete=${fixture.keeperRelative}`,
+    ]), { environment }), /requires task status doing; current status: done/);
+    assert.equal(authoritativeEvents(paths, fixture.taskId).length, before);
+  }
+});
+
+test("completion and supersede serialize to one terminal result", async (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = acceptedExecution(environment, paths, "Concurrent completion immutability");
+  const completion = spawnWorkflow({
+    ...environment,
+    CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE: "0.25",
+  }, ["done", fixture.taskId], fixture.admission.repo);
+  await waitForFile(`${taskMutationLockFile(paths, fixture.taskId)}.dir`);
+  const supersede = spawnWorkflow(environment, [
+    "team-slice-supersede", fixture.taskId, "--slice-id=execution-slice",
+    "--operation-id=supersede-concurrent-completion",
+    "--authority-ref=user-message:concurrent-completion",
+    "--reason=prove terminal mutation serialization",
+  ], fixture.admission.repo);
+  const [completed, superseded] = await Promise.all([completion, supersede]);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(superseded.status, 1, superseded.stdout);
+  assert.match(superseded.stderr, /requires task status doing; current status: done/);
+  const state = readJsonObject(taskStateFile(paths, fixture.taskId));
+  assert.equal(state.status, "done");
+  assert.equal(state.slice_acceptances["execution-slice"].status, "accepted");
+  assert.equal(
+    authoritativeEvents(paths, fixture.taskId).filter((event) => event.kind === "slice.superseded").length,
+    0,
   );
 });
 

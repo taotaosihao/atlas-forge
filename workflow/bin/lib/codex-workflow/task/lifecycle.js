@@ -375,6 +375,7 @@ function completeTask(
         outcome,
         authority_ref: authorityRef,
         evidence_refs: [...evidenceRefs],
+        completion_snapshot: verification.completionSnapshot || null,
         verification_record_id: verification.recordId || "",
         verification_identity_digest: verification.identityDigest || "",
         verification_record_ids: verification.recordIds || (

@@ -3,12 +3,12 @@
 const childProcess = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { CommandError } = require("../core/command-runtime");
 const { taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { taskEventFile } = require("../core/task-mutation");
+const { captureWorktreeSnapshot: captureRepositorySnapshot } = require("../core/worktree-snapshot");
 const { pathsOverlap } = require("./lane-registry");
 const { sha256 } = require("../verification/identity");
 const { validateGateRecord } = require("../verification/required-gates");
@@ -222,34 +222,11 @@ function gitOutput(repo, args, label) {
 }
 
 function captureWorktreeSnapshot(repo) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-slice-snapshot."));
-  const indexFile = path.join(temporary, "index");
-  const environment = { ...process.env, GIT_INDEX_FILE: indexFile };
-  const run = (args, label) => {
-    const result = childProcess.spawnSync("git", ["-C", repo, ...args], {
-      encoding: "utf8",
-      env: environment,
-    });
-    if (result.error || result.status !== 0) {
-      throw new CommandError(
-        `${label}: ${(result.stderr || result.error?.message || "git failed").trim()}`,
-      );
-    }
-    return result.stdout.trim();
+  const snapshot = captureRepositorySnapshot(repo);
+  return {
+    ...snapshot,
+    worktree_manifest_digest: `sha256:${digestValue(snapshot)}`,
   };
-  try {
-    run(["read-tree", "HEAD"], "unable to initialize slice snapshot");
-    run(["add", "-A", "--", "."], "unable to capture slice worktree");
-    const treeOid = run(["write-tree"], "unable to write slice snapshot tree");
-    const headSha = gitOutput(repo, ["rev-parse", "--verify", "HEAD^{commit}"], "unable to capture slice HEAD");
-    return {
-      tree_oid: treeOid,
-      head_sha: headSha,
-      worktree_manifest_digest: `sha256:${digestValue({ head_sha: headSha, tree_oid: treeOid })}`,
-    };
-  } finally {
-    fs.rmSync(temporary, { force: true, recursive: true });
-  }
 }
 
 function validateRepository(brief, cwd) {

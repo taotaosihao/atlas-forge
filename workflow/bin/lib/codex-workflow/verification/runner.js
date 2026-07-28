@@ -14,6 +14,7 @@ const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
 const {
   parseTaskHeader,
   renderTaskFields,
+  requireOpenExecutionTask,
   requireTaskFile,
   validateTaskFile,
 } = require("../task/repository");
@@ -235,17 +236,21 @@ function runVerification(parsed, options = {}) {
   const latest = observedEvents.at(-1);
   const observedRevision = observedEvents.at(-1)?.revision || 0;
   let latestState;
+  let latestTask;
   let taskTitle;
   if (latest) {
     latestState = latest.projection.state;
     const fields = parseTaskHeader(latest.projection.task_content);
+    latestTask = { status: fields.status?.[0] || "" };
     taskTitle = fields.title?.[0] || parsed.taskId;
   } else {
     const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
     const { task } = validateTaskFile(taskFile);
+    latestTask = task;
     latestState = readJsonObject(taskStateFile(paths, parsed.taskId));
     taskTitle = task.title;
   }
+  requireOpenExecutionTask(latestTask, "verify");
   ensureTaskRuntimeScaffold(paths, parsed.taskId, taskTitle);
   const commandText = formatCommand(parsed.command).trimEnd();
   const requiredGate = bindRequiredCheck({
@@ -385,7 +390,8 @@ function runVerification(parsed, options = {}) {
       },
       ({ revision }) => {
         const currentFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        validateTaskFile(currentFile);
+        const { task } = validateTaskFile(currentFile);
+        requireOpenExecutionTask(task, "verify");
         const taskContent = renderTaskFields(fs.readFileSync(currentFile, "utf8"), {
           last_verified_at: verifiedAt,
         });

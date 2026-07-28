@@ -66,10 +66,13 @@ function temporaryWorkflow(t) {
 }
 
 function createFixtureTask(environment, title = "Verification runner") {
-  return createTask(title, "verification record contract", {
+  const options = {
     clock: fixedClock,
     environment,
-  });
+  };
+  const taskId = createTask(title, "verification record contract", options);
+  startTask(taskId, options);
+  return taskId;
 }
 
 function readEvents(paths, taskId) {
@@ -385,7 +388,6 @@ test("shares the JavaScript record writer with smoke and preserves preview limit
 test("keeps the Bash smoke command compatible with the JavaScript record writer", (t) => {
   const { environment } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Smoke writer");
-  startTask(taskId, { clock: fixedClock, environment });
   const mockCodex = path.join(environment.CODEX_HOME_ROOT, "mock-codex");
   fs.writeFileSync(
     mockCodex,

@@ -7,7 +7,12 @@ const { CommandError, commandOptions } = require("../core/command-runtime");
 const { sha256 } = require("../verification/identity");
 const { mutateTaskRuntime } = require("../core/task-mutation");
 const { taskArtifactDir } = require("../core/paths");
-const { renderTaskFields, requireTaskFile, validateTaskFile } = require("../task/repository");
+const {
+  renderTaskFields,
+  requireOpenExecutionTask,
+  requireTaskFile,
+  validateTaskFile,
+} = require("../task/repository");
 const { projectTaskState, readJsonObject, taskStateFile, timestampSeconds } = require("../task/runtime");
 const { requiredGateAdmission } = require("../verification/required-gates");
 const { teamClosureIssues } = require("./lane-registry");
@@ -174,6 +179,8 @@ function actualSliceSize(brief, startSnapshot) {
     if (/^\d+$/.test(deleted)) loc += Number(deleted);
   }
   return {
+    accepted_head_sha: current.head_sha,
+    accepted_tree_oid: current.tree_oid,
     changed_files: changedFiles.length,
     changed_paths: changedFiles,
     current_tree_oid: current.tree_oid,
@@ -316,7 +323,8 @@ function runSliceAccept(parsed, options = {}) {
         }
         keepers = currentKeepers;
         const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        validateTaskFile(taskFile);
+        const { task } = validateTaskFile(taskFile);
+        requireOpenExecutionTask(task, "team-slice-accept");
         const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {});
         const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
         const gates = requiredGateAdmission(paths, parsed.taskId, currentState, {
@@ -436,7 +444,8 @@ function runSliceSupersede(parsed, options = {}) {
       },
       () => {
         const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        validateTaskFile(taskFile);
+        const { task } = validateTaskFile(taskFile);
+        requireOpenExecutionTask(task, "team-slice-supersede");
         const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {});
         const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
         const accepted = currentState.slice_acceptances?.[parsed.sliceId];

@@ -173,6 +173,15 @@ function requireTaskFile(tasksDir, taskId) {
   throw new TaskRepositoryError(message);
 }
 
+function requireOpenExecutionTask(task, command) {
+  if (!task || task.status !== "doing") {
+    throw new TaskRepositoryError(
+      `${command} requires task status doing; current status: ${task?.status || "missing"}`,
+    );
+  }
+  return task;
+}
+
 function shouldListTask(status, taskId, cutoffDay, includeArchived = false) {
   if (status === "archived" && !includeArchived) {
     return false;
@@ -206,6 +215,7 @@ module.exports = {
   listTaskRecords,
   parseTaskHeader,
   renderTaskFields,
+  requireOpenExecutionTask,
   requireTaskFile,
   shouldListTask,
   splitTaskDocument,
