@@ -53,6 +53,7 @@ const EXPECTED_ROUTES = {
     "team-dispatch-record",
     "team-fallback-record",
     "team-lane-record",
+    "team-loop",
     "team-loop-record",
     "team-promote",
     "team-record-finalize",
@@ -60,6 +61,7 @@ const EXPECTED_ROUTES = {
     "team-selection-record",
     "team-slice-accept",
     "team-slice-supersede",
+    "team-start",
     "team-status",
     "team-stop",
   ],
@@ -77,8 +79,6 @@ const LEGACY_COMMANDS = [
   "smoke",
   "self-test",
   "install-hooks",
-  "team-start",
-  "team-loop",
 ];
 
 test("does not expose a retry lifecycle command or admission shortcut", () => {
@@ -103,8 +103,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 42 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 42);
+test("routes exactly 44 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 44);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)

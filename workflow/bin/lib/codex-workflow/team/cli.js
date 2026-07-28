@@ -31,12 +31,15 @@ const {
   runSliceAccept,
   runSliceSupersede,
 } = require("./slice-acceptance");
+const { runLegacyTeamCommand } = require("./legacy-bridge");
 
 function main(argv) {
   try {
     const command = argv[0];
     let result;
-    if (command === "team-record-start") {
+    if (command === "team-start" || command === "team-loop") {
+      result = runLegacyTeamCommand(argv);
+    } else if (command === "team-record-start") {
       result = runRecordStart(parseRecordStartArgs(argv.slice(1)));
     } else if (command === "team-record-finalize") {
       result = runRecordFinalize(parseRecordFinalizeArgs(argv.slice(1)));
@@ -64,7 +67,7 @@ function main(argv) {
       result = runSliceSupersede(parseSliceSupersedeArgs(argv.slice(1)));
     } else {
       throw new CommandError(
-        "usage: codex-workflow {team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede}",
+        "usage: codex-workflow {team-start|team-loop|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede}",
       );
     }
     process.stdout.write(`${result.lines.join("\n")}\n`);
