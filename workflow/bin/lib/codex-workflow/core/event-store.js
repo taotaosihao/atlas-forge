@@ -61,8 +61,18 @@ function authoritativeEventDigest(event) {
   return sha256(canonicalJson(record));
 }
 
+function fsyncDirectory(directory) {
+  const descriptor = fs.openSync(directory, "r");
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 function appendAuthoritativeEvent(file, event) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const existed = fs.existsSync(file);
   const descriptor = fs.openSync(file, "a");
   try {
     fs.writeSync(descriptor, `${JSON.stringify(event)}\n`, null, "utf8");
@@ -70,6 +80,7 @@ function appendAuthoritativeEvent(file, event) {
   } finally {
     fs.closeSync(descriptor);
   }
+  if (!existed) fsyncDirectory(path.dirname(file));
   return event;
 }
 
@@ -105,6 +116,15 @@ function readAuthoritativeEvents(file, taskId = "") {
       || !event.projection.state || typeof event.projection.state !== "object"
       || Array.isArray(event.projection.state)) {
       throw new Error(`corrupt authoritative event at line ${index + 1}: projection required`);
+    }
+    if (event.projection.files_semantics !== undefined
+      && !new Set(["delta", "snapshot"]).has(event.projection.files_semantics)) {
+      throw new Error(
+        `corrupt authoritative event at line ${index + 1}: invalid projection files semantics`,
+      );
+    }
+    if (event.projection.files !== undefined && !Array.isArray(event.projection.files)) {
+      throw new Error(`corrupt authoritative event at line ${index + 1}: projection files must be an array`);
     }
     if (taskId && event.task_id !== taskId) {
       throw new Error(`authoritative event task mismatch at revision ${event.revision}`);

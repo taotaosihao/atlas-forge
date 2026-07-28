@@ -20,8 +20,13 @@ const {
   startTask,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/task/lifecycle.js"));
 const {
+  mutateTaskRuntime,
   taskEventFile,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/core/task-mutation.js"));
+const {
+  appendAuthoritativeEvent,
+  authoritativeEventDigest,
+} = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/core/event-store.js"));
 const {
   appendReconciliationAudit,
   readReconciliationAudit,
@@ -106,6 +111,7 @@ test("F1: verification records also remain absent before authoritative append", 
   const { environment, paths } = temporaryWorkflow(t);
   const options = { clock: clockAt("2026-07-27T10:00:30Z"), environment };
   const taskId = createTask("Verification F1", "records follow the event", options);
+  startTask(taskId, { ...options, operationId: "start-verification-f1" });
   const before = snapshot(paths, taskId);
   const verificationDir = path.join(paths.artifactsDir, taskId, "verification");
 
@@ -293,6 +299,144 @@ test("F5: reconcile is dry-run by default and authority-gated apply rebuilds pro
     .trim().split("\n").map((line) => JSON.parse(line)).at(-1);
   assert.equal(repairedRow.derived_from_event_id, eventRows(paths, taskId).at(-1).event_id);
   assert.equal(readReconciliationAudit(paths, taskId).length, 4);
+});
+
+test("F5C: reconcile folds historical file deltas and restores early verification sidecars", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const options = { clock: clockAt("2026-07-27T10:03:45Z"), environment };
+  const taskId = createTask("Event F5C", "restore historical sidecars", options);
+  startTask(taskId, { ...options, operationId: "start-f5c" });
+  const verification = runVerification(
+    parseVerifyArgs([taskId, "--", process.execPath, "-e", "process.exit(0)"]),
+    {
+      ...options,
+      operationId: "verify-f5c",
+      recordToken: "20260727T100345000000000",
+    },
+  );
+  const expectedRecord = fs.readFileSync(verification.recordFile);
+  const expectedIdentity = fs.readFileSync(verification.identityFile);
+  blockTask(taskId, "make verification an earlier event", {
+    ...options,
+    operationId: "block-f5c",
+  });
+
+  const events = eventRows(paths, taskId);
+  const latest = events.at(-1);
+  assert.equal(latest.projection.files_semantics, "snapshot");
+  assert.deepEqual(
+    latest.projection.files.map((entry) => entry.path),
+    [
+      "verification/20260727T100345000000000.json",
+      "verification/20260727T100345000000000.md",
+    ],
+  );
+
+  for (const event of events) {
+    delete event.projection.files_semantics;
+    if (event.kind !== "verification.recorded") event.projection.files = [];
+    event.event_digest = authoritativeEventDigest(event);
+  }
+  fs.writeFileSync(
+    taskEventFile(paths, taskId),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  );
+  fs.unlinkSync(verification.recordFile);
+  fs.unlinkSync(verification.identityFile);
+
+  assert.equal(reconcileTaskRuntime(taskId, { environment }).status, "diverged");
+  const repaired = reconcileTaskRuntime(taskId, {
+    apply: true,
+    authorityRef: "user-message:repair-historical-sidecars",
+    reason: "restore every authoritative historical projection file",
+    clock: clockAt("2026-07-27T10:03:50Z"),
+    environment,
+  });
+  assert.equal(repaired.status, "current");
+  assert.deepEqual(fs.readFileSync(verification.recordFile), expectedRecord);
+  assert.deepEqual(fs.readFileSync(verification.identityFile), expectedIdentity);
+});
+
+test("F5D: cumulative snapshots retain tombstones and reconcile removes resurrected files", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const options = { clock: clockAt("2026-07-27T10:03:55Z"), environment };
+  const taskId = createTask("Event F5D", "preserve projection tombstones", options);
+  startTask(taskId, { ...options, operationId: "start-f5d" });
+  const sidecar = path.join(paths.artifactsDir, taskId, "managed.txt");
+  mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "test.file-created", operationId: "create-managed-file" },
+    ({ currentProjection }) => ({
+      projection: {
+        task_content: currentProjection.task_content,
+        state: currentProjection.state,
+        files: [{
+          path: "managed.txt",
+          content_base64: Buffer.from("authoritative\n").toString("base64"),
+        }],
+      },
+    }),
+    options,
+  );
+  mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "test.file-deleted", operationId: "delete-managed-file" },
+    ({ currentProjection }) => ({
+      projection: {
+        task_content: currentProjection.task_content,
+        state: currentProjection.state,
+        files: [{ path: "managed.txt", deleted: true }],
+      },
+    }),
+    options,
+  );
+  const latest = eventRows(paths, taskId).at(-1);
+  assert.equal(latest.projection.files_semantics, "snapshot");
+  assert.deepEqual(latest.projection.files, [{ path: "managed.txt", deleted: true }]);
+  assert.equal(fs.existsSync(sidecar), false);
+
+  fs.writeFileSync(sidecar, "resurrected\n");
+  assert.equal(reconcileTaskRuntime(taskId, { environment }).status, "diverged");
+  const repaired = reconcileTaskRuntime(taskId, {
+    apply: true,
+    authorityRef: "user-message:restore-tombstone",
+    reason: "remove a file deleted by authoritative projection",
+    environment,
+  });
+  assert.equal(repaired.status, "current");
+  assert.equal(fs.existsSync(sidecar), false);
+});
+
+test("F5E: first authoritative event creation fsyncs the parent directory", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-event-fsync."));
+  const directory = path.join(root, "events");
+  const file = path.join(directory, "events-v2.jsonl");
+  t.after(() => fs.rmSync(root, { force: true, recursive: true }));
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const opened = new Map();
+  const synced = [];
+  fs.openSync = function instrumentedOpen(target, flags, ...args) {
+    const descriptor = originalOpen.call(fs, target, flags, ...args);
+    opened.set(descriptor, path.resolve(target));
+    return descriptor;
+  };
+  fs.fsyncSync = function instrumentedFsync(descriptor) {
+    synced.push(opened.get(descriptor) || "unknown");
+    return originalFsync.call(fs, descriptor);
+  };
+  try {
+    appendAuthoritativeEvent(file, { event: 1 });
+    assert.deepEqual(synced, [file, directory]);
+    synced.length = 0;
+    appendAuthoritativeEvent(file, { event: 2 });
+    assert.deepEqual(synced, [file]);
+  } finally {
+    fs.openSync = originalOpen;
+    fs.fsyncSync = originalFsync;
+  }
 });
 
 test("F5B: reconcile audit WAL prevents unaudited projection recovery", (t) => {

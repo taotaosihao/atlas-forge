@@ -11,6 +11,7 @@ const {
   appendMissingLegacyRows,
   applyTaskProjection,
   derivedLegacyRows,
+  materializeTaskProjection,
   projectionMatches,
   resolveProjectionFile,
   taskEventFile,
@@ -149,11 +150,11 @@ function reconciliationStatus(paths, taskId, latest, events = latest ? [latest] 
   if (revision < latest.revision) return "behind";
   if (revision > latest.revision) return "ahead";
   if (state.last_event_id !== latest.event_id) return "diverged";
-  if (!projectionMatches(paths, taskId, latest.projection)) return "diverged";
+  if (!projectionMatches(paths, taskId, materializeTaskProjection(events))) return "diverged";
   return missingLegacyProjection(paths, taskId, events) ? "behind" : "current";
 }
 
-function backupProjection(paths, taskId, authorityRef, clock, latest) {
+function backupProjection(paths, taskId, authorityRef, clock, latest, projection) {
   const date = clock();
   const value = date instanceof Date ? date : new Date(date);
   const token = value.toISOString().replace(/[-:.]/g, "");
@@ -178,7 +179,7 @@ function backupProjection(paths, taskId, authorityRef, clock, latest) {
       manifest.files[name] = null;
     }
   }
-  for (const entry of latest.projection.files || []) {
+  for (const entry of projection.files || []) {
     const file = resolveProjectionFile(paths, taskId, entry.path);
     try {
       manifest.projection_files[entry.path] = fs.readFileSync(file).toString("base64");
@@ -210,6 +211,7 @@ function reconcileTaskRuntime(taskId, options = {}) {
   const run = () => {
     const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
     const latest = events.at(-1);
+    const projection = materializeTaskProjection(events);
     const before = reconciliationStatus(paths, taskId, latest, events);
     const appendAudit = options.appendAudit || appendReconciliationAudit;
     const auditRows = readReconciliationAudit(paths, taskId);
@@ -242,7 +244,7 @@ function reconcileTaskRuntime(taskId, options = {}) {
           previous_projection_digest: incomplete.previous_projection_digest,
           restored_event_id: latest.event_id,
           restored_revision: latest.revision,
-          restored_projection_digest: sha256(canonicalJson(latest.projection)),
+          restored_projection_digest: sha256(canonicalJson(projection)),
           backup_manifest_digest: incomplete.backup_manifest_digest,
           occurred_at: occurredAt(),
           recovered_incomplete: true,
@@ -273,6 +275,7 @@ function reconcileTaskRuntime(taskId, options = {}) {
       options.authorityRef,
       clock,
       latest,
+      projection,
     );
     const backupManifest = fs.readFileSync(backup);
     const previousProjectionDigest = sha256(canonicalJson({
@@ -293,7 +296,7 @@ function reconcileTaskRuntime(taskId, options = {}) {
     }, options.auditId);
     try {
       const applyProjection = options.applyProjection || applyTaskProjection;
-      applyProjection(paths, taskId, latest.projection);
+      applyProjection(paths, taskId, projection);
       for (const event of events) appendMissingLegacyRows(paths, taskId, event);
     } catch (error) {
       appendAudit(paths, taskId, "reconciliation.failed", {
@@ -314,7 +317,7 @@ function reconcileTaskRuntime(taskId, options = {}) {
       previous_projection_digest: previousProjectionDigest,
       restored_event_id: latest.event_id,
       restored_revision: latest.revision,
-      restored_projection_digest: sha256(canonicalJson(latest.projection)),
+      restored_projection_digest: sha256(canonicalJson(projection)),
       backup_manifest_digest: sha256(backupManifest),
       occurred_at: occurredAt(),
     }, options.auditId);

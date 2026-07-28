@@ -37,7 +37,29 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function finalizedProjection(projection, event, paths) {
+function materializedProjectionFiles(events) {
+  const files = new Map();
+  for (const event of events) {
+    const projection = event?.projection || {};
+    if (projection.files_semantics === "snapshot") files.clear();
+    for (const entry of projection.files || []) {
+      files.set(entry.path, clone(entry));
+    }
+  }
+  return [...files.values()].sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function materializeTaskProjection(events) {
+  const latest = events.at(-1);
+  if (!latest) return null;
+  return {
+    ...clone(latest.projection),
+    files: materializedProjectionFiles(events),
+    files_semantics: "snapshot",
+  };
+}
+
+function finalizedProjection(projection, event, paths, events = []) {
   if (!projection || typeof projection !== "object" || Array.isArray(projection)) {
     throw new TaskMutationError("task mutation must return a projection object");
   }
@@ -65,6 +87,13 @@ function finalizedProjection(projection, event, paths) {
       throw new TaskMutationError(`projection file requires content_base64: ${entry.path}`);
     }
   }
+  const files = new Map(
+    (projection.files_semantics === "snapshot" ? [] : materializedProjectionFiles(events))
+      .map((entry) => [entry.path, entry]),
+  );
+  for (const entry of output.files) files.set(entry.path, entry);
+  output.files = [...files.values()].sort((left, right) => left.path.localeCompare(right.path));
+  output.files_semantics = "snapshot";
   Object.assign(output.state, {
     runtime_revision: event.revision,
     last_event_id: event.event_id,
@@ -209,12 +238,13 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
   return withLock(taskMutationLockFile(paths, taskId), () => {
     const events = readAuthoritativeEvents(file, taskId);
     const latest = events.at(-1);
+    const currentProjection = materializeTaskProjection(events);
     const currentRevision = latest?.revision || 0;
     const expectedRevision = options.expectedRevision === undefined
       ? currentRevision
       : options.expectedRevision;
-    if (latest && !projectionMatches(paths, taskId, latest.projection)) {
-      applyTaskProjection(paths, taskId, latest.projection);
+    if (latest && !projectionMatches(paths, taskId, currentProjection)) {
+      applyTaskProjection(paths, taskId, currentProjection);
     }
     if (latest) appendMissingLegacyRows(paths, taskId, latest);
     const existing = events.find((event) => event.operation_id === operationId);
@@ -242,7 +272,7 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       );
     }
     const output = transition({
-      currentProjection: latest ? clone(latest.projection) : null,
+      currentProjection: currentProjection ? clone(currentProjection) : null,
       events,
       revision: currentRevision,
     });
@@ -272,7 +302,7 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       result: clone(output.result || {}),
       legacy: clone(output.legacy || []),
     };
-    event.projection = finalizedProjection(output.projection, event, paths);
+    event.projection = finalizedProjection(output.projection, event, paths, events);
     event.event_digest = authoritativeEventDigest(event);
     if (options.failBeforeEventAppend) {
       throw new TaskMutationError("injected failure before authoritative event append");
@@ -339,6 +369,8 @@ module.exports = {
   appendMissingLegacyRows,
   applyTaskProjection,
   derivedLegacyRows,
+  materializeTaskProjection,
+  materializedProjectionFiles,
   mutateTaskRuntime,
   projectionMatches,
   recordTaskRuntimeEvent,
