@@ -396,6 +396,19 @@ function providerRuntimeModeIds(result, provider) {
     : [];
 }
 
+const DIRECT_PROVIDER_MODEL_FAMILIES = new Map([
+  ["claude", "claude"],
+  ["codex", "non-claude"],
+  ["deepseek", "non-claude"],
+  ["glm", "non-claude"],
+  ["kimi", "non-claude"],
+  ["openai", "non-claude"],
+]);
+
+function directProviderModelFamily(provider) {
+  return DIRECT_PROVIDER_MODEL_FAMILIES.get(String(provider || "").toLowerCase()) || "";
+}
+
 function providerModelFamily(result, provider) {
   if (!result || !result.observation || result.observation.exit_code !== 0) return "";
   let payload;
@@ -434,7 +447,9 @@ function capabilityFromObserverResult(result, providerResult, provider, model) {
   ).toLowerCase();
   if (!new Set(["claude", "non-claude"]).has(modelFamily)) {
     modelFamily = visibleClaude ? "claude"
-      : providerModelFamily(providerResult, provider) || "unknown";
+      : providerModelFamily(providerResult, provider)
+        || directProviderModelFamily(provider)
+        || "unknown";
   }
   return {
     modelFamily,

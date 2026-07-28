@@ -2253,20 +2253,6 @@ test("dispatch precedence and Claude manual-only admission fail closed", (t) => 
     /unknown team-attempt-record option: --model-family/,
   );
   recordCapability(environment, taskId, {
-    snapshotId: "openai-family-unspecified", provider: "openai",
-    model: "gpt-family-unspecified", family: undefined,
-  });
-  assert.throws(
-    () => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
-      taskId, "--operation-id=openai-family-unspecified-reserve", "--action=reserve",
-      "--dispatch=paseo-dispatch", "--attempt=openai-family-unspecified",
-      "--provider=openai", "--model=gpt-family-unspecified",
-      "--capability-snapshot=openai-family-unspecified",
-      "--launch-operation-id=launch-openai-family-unspecified",
-    ]),
-    /MODEL_FAMILY_UNVERIFIED/,
-  );
-  recordCapability(environment, taskId, {
     snapshotId: "claude-capability", provider: "anthropic-gateway",
     model: "sonnet-exact", family: "claude",
   });
@@ -2293,6 +2279,80 @@ test("dispatch precedence and Claude manual-only admission fail closed", (t) => 
   assert.equal(team.dispatches.find((item) => item.dispatch_id === "native-dispatch").resolved_requested_backend, "native");
   assert.equal(team.dispatches.find((item) => item.dispatch_id === "paseo-dispatch").resolved_requested_backend, "paseo");
   assert.equal(team.attempts.find((item) => item.attempt_id === "claude-manual").model_selection_event_id, "claude-model-selection");
+});
+
+test("direct non-Claude providers and exact unknown selections pass model admission", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Scoped unknown model admission");
+  startPaseoRecord(environment, taskId);
+
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=kimi-lane-open", "--action=open", "--lane=kimi-ui",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=kimi-dispatch-open", "--action=open", "--lane=kimi-ui",
+    "--dispatch=kimi-ui-dispatch",
+  ]);
+  recordCapability(environment, taskId, {
+    snapshotId: "kimi-capability", provider: "kimi",
+    model: "zenmux-kimi/moonshotai/kimi-k3", family: undefined,
+    runtimeModes: ["default"],
+  });
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=kimi-attempt-reserve", "--action=reserve",
+    "--dispatch=kimi-ui-dispatch", "--attempt=kimi-ui-attempt",
+    "--provider=kimi", "--model=zenmux-kimi/moonshotai/kimi-k3",
+    "--capability-snapshot=kimi-capability", "--launch-operation-id=launch-kimi-ui",
+  ]);
+
+  recordCapability(environment, taskId, {
+    snapshotId: "openai-capability", provider: "openai",
+    model: "gpt-family-unspecified", family: undefined,
+  });
+
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=unknown-lane-open", "--action=open", "--lane=unknown-exact",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=unknown-dispatch-open", "--action=open", "--lane=unknown-exact",
+    "--dispatch=unknown-exact-dispatch",
+  ]);
+  recordCapability(environment, taskId, {
+    snapshotId: "unknown-exact-capability", provider: "custom-gateway",
+    model: "opaque-model-id", family: "unclassified",
+  });
+  invokeControl(runSelectionRecord, parseSelectionArgs, environment, [
+    taskId, "--operation-id=unknown-model-selection-op",
+    "--event-id=unknown-model-selection", "--kind=model",
+    "--scope=dispatch:unknown-exact-dispatch", "--authority-kind=user-message",
+    "--authority-ref=user-message:unknown-exact", "--provider=custom-gateway",
+    "--model=opaque-model-id",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=unknown-exact-reserve", "--action=reserve",
+    "--dispatch=unknown-exact-dispatch", "--attempt=unknown-exact-attempt",
+    "--provider=custom-gateway", "--model=opaque-model-id",
+    "--capability-snapshot=unknown-exact-capability",
+    "--model-selection-event=unknown-model-selection",
+    "--launch-operation-id=launch-unknown-exact",
+  ]);
+
+  const team = readTeam(paths, taskId);
+  assert.equal(
+    team.capability_snapshots.find((item) => item.snapshot_id === "kimi-capability").model_family,
+    "non-claude",
+  );
+  assert.equal(
+    team.capability_snapshots.find((item) => item.snapshot_id === "openai-capability").model_family,
+    "non-claude",
+  );
+  assert.equal(
+    team.attempts.find((item) => item.attempt_id === "kimi-ui-attempt").model_selection_event_id,
+    "",
+  );
+  const unknownAttempt = team.attempts.find((item) => item.attempt_id === "unknown-exact-attempt");
+  assert.equal(unknownAttempt.model_family, "unknown");
+  assert.equal(unknownAttempt.model_selection_event_id, "unknown-model-selection");
 });
 
 test("Paseo launch reconciliation binds only the exact observed actor", (t) => {

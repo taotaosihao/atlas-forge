@@ -74,10 +74,13 @@ When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.
 Provider mode IDs are not portable and must not be hardcoded or copied across
 providers. Generic routing may recommend only models whose trusted capability
-identity is explicitly non-Claude. Any direct or gateway Claude-family model
-requires an exact provider/model manually supplied by the user or operator;
-Atlas never chooses, completes, upgrades, or substitutes a Claude model.
-Unknown model family fails closed as `MODEL_FAMILY_UNVERIFIED`.
+identity is explicitly non-Claude, including providers in Atlas's controlled
+direct-provider identity map. Unknown gateway aliases are never automatically
+recommended. Any direct or gateway Claude-family model requires an exact
+provider/model manually supplied by the user or operator; Atlas never chooses,
+completes, upgrades, or substitutes a Claude model. An unknown identity requires
+an exact controller-attested provider/model selection; without one it fails as
+`MODEL_FAMILY_UNVERIFIED`, while an attested attempt remains visibly unverified.
 Attempts reference a controller-observed capability snapshot rather than
 accepting caller-authored family or digest claims. Paseo quiescence likewise
 requires a receipt correlated to the exact attempt, launch, and actor before a

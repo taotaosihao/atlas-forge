@@ -473,7 +473,7 @@ function openDispatch(teamInput, input) {
   });
 }
 
-function validateClaudeGate(team, dispatch, input) {
+function validateModelIdentityGate(team, dispatch, input) {
   if (dispatch.resolved_requested_backend !== "paseo") return;
   const snapshot = team.capability_snapshots.find(
     (item) => item.snapshot_id === input.capabilitySnapshotId,
@@ -485,13 +485,17 @@ function validateClaudeGate(team, dispatch, input) {
     throw new RegistryError("attempt provider/model differs from capability snapshot");
   }
   const family = snapshot.model_family;
-  if (family === "unknown") throw new RegistryError("MODEL_FAMILY_UNVERIFIED");
   const visiblyClaude = /(^|[-_/.])claude($|[-_/.])/.test(`${provider}/${model}`.toLowerCase());
-  if (family === "claude" || visiblyClaude) {
-    if (!input.modelSelectionEventId) throw new RegistryError("CLAUDE_MODEL_SELECTION_REQUIRED");
+  const claudeFamily = family === "claude" || visiblyClaude;
+  if ((family === "unknown" || claudeFamily) && !input.modelSelectionEventId) {
+    throw new RegistryError(
+      claudeFamily ? "CLAUDE_MODEL_SELECTION_REQUIRED" : "MODEL_FAMILY_UNVERIFIED",
+    );
+  }
+  if (family === "unknown" || claudeFamily) {
     const event = findSelection(team, input.modelSelectionEventId, "model", dispatch.lane_id, dispatch.dispatch_id);
     if (event.provider !== provider || event.model !== model) {
-      throw new RegistryError("Claude model selection event does not match provider/model");
+      throw new RegistryError("model selection event does not match provider/model");
     }
   }
   if (input.runtimeModeId && !snapshot.runtime_mode_ids.includes(input.runtimeModeId)) {
@@ -555,7 +559,9 @@ function createReservedAttempt(team, dispatch, lane, input) {
     }
     if (backend !== predecessor.backend) throw new RegistryError("retry backend must match predecessor");
   }
-  const capabilitySnapshot = backend === "paseo" ? validateClaudeGate(team, dispatch, input) : null;
+  const capabilitySnapshot = backend === "paseo"
+    ? validateModelIdentityGate(team, dispatch, input)
+    : null;
   const writable = input.writable === undefined ? lane.writable : Boolean(input.writable);
   const requestedPaths = Array.isArray(input.ownedPaths) && input.ownedPaths.length > 0
     ? input.ownedPaths

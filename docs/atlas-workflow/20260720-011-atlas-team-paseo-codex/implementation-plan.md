@@ -22,7 +22,9 @@ Team review 使用多角色讨价还价协议：角色和数量按风险推荐�
 分歧仍会改变结论时，交给人工裁决。
 
 Claude-family model 只能由用户或操作方手工给出精确 model ID。Atlas 不得按角色、provider、catalog、
-“latest”或 gateway 猜测/补全 Claude model；无法确定 model family 时 fail closed。
+“latest”或 gateway 猜测/补全 Claude model。Atlas 受控 direct-provider 身份表中的非 Claude provider
+可以正常自动路由；未知 gateway alias 不参加自动推荐，只有带精确人工选择事件时才可运行并保持
+identity unverified 披露。
 
 本次修订只关闭 `20260720-013` Team Review 指出的可实施性缺口，不新增产品能力；同一组 reviewer
 定向复审已收敛并恢复 `implementation-ready`。本文件不授权代码实施、安装态刷新、live E2E、push
@@ -97,18 +99,21 @@ event，显式 native override 则必须引用 scope 匹配的 `backend=native` 
 model identity 归一为 `claude|non-claude|unknown`：
 
 - direct `claude` provider 或可信 capability metadata 明确属于 Claude 时为 `claude`；
-- 可信 metadata 明确排除 Claude 时为 `non-claude`；
+- 可信 metadata 明确排除 Claude，或 provider 位于 Atlas 受控 direct-provider identity map 时为
+  `non-claude`；当前映射只包含模型族固定的 `codex`、`openai`、`deepseek`、`glm` 和 `kimi`，不包含
+  `zenmux`、`copilot`、`opencode` 等多模型或可扩展 gateway；
 - gateway、自定义 alias 或 metadata 不足以判断时为 `unknown`。
 
 Generic Paseo routing 只允许从明确的 `non-claude` 集合推荐。`claude` 必须引用 `kind=model` 的人工
 authority event，且 event 内含精确 provider/model；缺失时返回
-`CLAUDE_MODEL_SELECTION_REQUIRED`。`unknown` 不得按非 Claude 自动运行，返回
-`MODEL_FAMILY_UNVERIFIED`；用户补充精确 model 和可信 identity 后才能继续。
+`CLAUDE_MODEL_SELECTION_REQUIRED`。`unknown` 不得按非 Claude 自动推荐；缺少精确、scope 匹配的人工
+model selection event 时返回 `MODEL_FAMILY_UNVERIFIED`。已有该 event 时允许尝试，但 capability snapshot
+和最终披露继续标记 `model_family=unknown`，不得伪称身份已验证。
 
 live catalog 对 Claude 只验证人工指定值是否存在，不参与选择。attempt 保存实际采用的 catalog entry
 及 capability snapshot digest；digest 证明本次判断输入，不证明 provider 永远可信。已完整人工指定但
-运行时不可用属于 `model_unavailable`；缺少人工选择或 family 不明属于 admission/input failure，均
-不得伪装成已启动 Paseo 后的 operational fallback。
+运行时不可用属于 `model_unavailable`；Claude 缺少人工选择，或 unknown 缺少精确人工选择属于
+admission/input failure，均不得伪装成已启动 Paseo 后的 operational fallback。
 
 ## 4. Team run、dispatch 与 attempt 状态机
 
@@ -239,7 +244,7 @@ source/channel/code/message。source 不可信或证据不足归类 `unknown`，
 `cli_unavailable`、`daemon_unavailable`、`runtime_crashed`、`timeout_no_useful_output`。
 
 测试失败、代码 bug、`REQUEST_CHANGES`、证据分歧、scope/authority conflict、Claude 人工选择缺失、
-model family unknown 和用户决策均是 semantic/input/authority outcome，不触发 fallback。
+unknown model family 缺少精确人工选择和用户决策均是 semantic/input/authority outcome，不触发 fallback。
 
 ### 6.2 Retry 与 fallback 顺序
 
