@@ -190,9 +190,10 @@ The compatibility-only live-host contract remains available through
 installation state and is intentionally excluded from Atlas CI and normal
 development checks.
 
-GitHub Actions runs four read-only jobs: `manifest-release-integrity`,
-`repo-contract`, `host-layout-fixtures`, and `docs-links`. The hosted jobs do
-not use Codex credentials, marketplace network access, or Multica tests.
+GitHub Actions runs five read-only jobs: `manifest-release-integrity`,
+`repo-contract`, `host-layout-fixtures`, `source-lint`, and `docs-links`. The
+hosted jobs do not use Codex credentials, marketplace network access, or
+Multica tests.
 
 After an Atlas plugin release slice is content- and review-frozen, update its
 release identity before committing:

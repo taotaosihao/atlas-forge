@@ -1,6 +1,6 @@
 # Workflow Helper
 
-Use `~/.codex/workflow/bin/codex-workflow` for bounded work that is more than a tiny maintenance action.
+Use `~/.codex/workflow/bin/codex-workflow` when bounded work benefits from durable tracking, recovery, explicit verification, or handoff.
 
 Do not use workflow for these tiny tasks:
 
@@ -9,19 +9,19 @@ Do not use workflow for these tiny tasks:
 - status checks, information lookups, or result summaries
 - one or two wording, comment, or example edits that do not change behavior
 
-If the work changes behavior, fixes a bug, adjusts tests, touches multiple files in a connected way, or needs branch isolation, it is not a tiny task and should use workflow.
+Behavior changes, test updates, multiple files, or general complexity do not by themselves require workflow. Clear, low-risk, verifiable work may execute directly; use workflow when its durable state or gates materially serve the task.
 
 ## Quick Loop
 
-1. Create a task.
-2. List tasks and pick one.
+1. List tasks and reuse a relevant `doing` task.
+2. Only when no relevant task exists, create one with `init-task`.
 3. Mark it active with `start`.
-4. Search MemPalace for related prior decisions, sessions, and legacy lessons.
+4. Search MemPalace only when the user requests it or prior decisions are material evidence for the current work.
 5. Verify the work with real commands.
-6. Create one dedicated commit for the completed feature or fix using `type[optional scope]: <description>`.
-7. Finish it with `done`.
+6. During authorized implementation, create moderate Conventional Commits that are independently understandable, verified, and reversible; do not force one commit per task or slice.
+7. Finish the whole authorized goal with `done`.
 8. Review it with `show`.
-9. After the task is done, rely on MemPalace hooks/mining for memory; use `learn` only for legacy manual archival.
+9. After the task is done, rely on MemPalace hooks/mining when memory capture is requested or materially useful; use `learn` only for legacy manual archival.
 10. Use `doctor`, `smoke`, `verify`, and `team-*` when the task needs environment checks, executable validation, or discussion rounds.
 
 ## Commands
@@ -116,6 +116,16 @@ For an admitted execution-v3 slice, bind every required check to the canonical b
 ~/.codex/workflow/bin/codex-workflow team-slice-supersede <task-id> \
   --slice-id <slice-id> --operation-id <id> --authority-ref <ref> --reason "<reason>"
 ```
+
+Execution-v3 keeps the admitted HEAD exact through verification, slice
+acceptance, and succeeded `done`; the accepted `tree_oid` binds staged and
+untracked implementation content without requiring an intermediate commit.
+After `done`, the integration owner commits exactly that accepted tree and then
+archives the task. Archive rejects worktree drift, a HEAD whose commit tree does
+not equal the accepted tree, or a non-descendant commit, and records the final
+commit under `completion.final_commit_link`. This is the only supported
+execution-v3 commit sequence; `logical_outcome` is not a validator requirement
+to commit before verification or slice acceptance.
 
 Verification records bind the result to the current Git/worktree, cwd, argv,
 non-secret environment policy, toolchain, lockfiles, submodules, and explicit
@@ -222,11 +232,12 @@ Scaffold a design-fidelity review task plus contract/report/verdict artifacts:
 
 Lightweight implementation contracts:
 
-- Use `workflow/templates/implementation-contract.md` before non-tiny local
-  implementation work when the task changes user-visible behavior, touches
-  multiple files, changes UI/API/CLI/background-job behavior, or has meaningful
-  edge cases.
-- Tiny precise fixes may skip the contract when the acceptance path is obvious.
+- Use `workflow/templates/implementation-contract.md` when machine-checkable
+  scope admission, cross-session handoff, audit, or release value justifies its
+  maintenance cost.
+- Clear, low-risk work may skip the contract even when it changes behavior or
+  touches multiple files, provided the acceptance path remains explicit and
+  verifiable.
 - The contract records goal, non-goals, acceptance criteria, real validation
   steps, evidence paths, and stop conditions. It is the Atlas workflow
   lightweight counterpart to the full Multica sprint contract.

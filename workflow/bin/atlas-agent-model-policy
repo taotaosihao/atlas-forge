@@ -67,14 +67,35 @@ function resolvePolicy(catalog, policy) {
     }
     roles[role] = { model: model.slug, model_reasoning_effort: profile.reasoning_effort };
   }
-  return { family: `${latestFamily.major}.${latestFamily.minor}`, roles };
+  return {
+    family: `${latestFamily.major}.${latestFamily.minor}`,
+    capabilities: Object.fromEntries(
+      Object.entries(capabilityModels).map(([capability, model]) => [capability, model.slug]),
+    ),
+    roles,
+  };
 }
 
 function readAgent(file) {
   const source = fs.readFileSync(file, 'utf8');
   const model = source.match(/^model\s*=\s*"([^"]+)"/m)?.[1];
   const effort = source.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1];
-  return { model, model_reasoning_effort: effort };
+  return { model, model_reasoning_effort: effort, source };
+}
+
+function modelAlias(model) {
+  return String(model || '').split('-').at(-1).toLowerCase();
+}
+
+function escapeExpression(value) {
+  return value.replace(/[|\\{}()[\]^$+*?.-]/g, '\\$&');
+}
+
+function contradictoryAliases(source, expectedModel, capabilityModels) {
+  const expected = modelAlias(expectedModel);
+  return [...new Set(Object.values(capabilityModels).map(modelAlias))]
+    .filter((alias) => alias && alias !== expected)
+    .filter((alias) => new RegExp(`\\b${escapeExpression(alias)}\\b`, 'i').test(source));
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -88,7 +109,8 @@ const agentsDir = path.resolve(args.agents_dir || managedAgentsDir);
 const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), readJson(policyFile, 'policy'));
 
 if (args.command === 'resolve') {
-  process.stdout.write(`${JSON.stringify(resolved, null, 2)}\n`);
+  const { capabilities: _capabilities, ...publicResolved } = resolved;
+  process.stdout.write(`${JSON.stringify(publicResolved, null, 2)}\n`);
   process.exit(0);
 }
 
@@ -102,6 +124,10 @@ for (const [role, expected] of Object.entries(resolved.roles)) {
   }
   if (actual.model !== expected.model || actual.model_reasoning_effort !== expected.model_reasoning_effort) {
     fail(`${role} is stale: expected ${expected.model}/${expected.model_reasoning_effort}, found ${actual.model || 'missing'}/${actual.model_reasoning_effort || 'missing'}`);
+  }
+  const contradictions = contradictoryAliases(actual.source, expected.model, resolved.capabilities);
+  if (contradictions.length > 0) {
+    fail(`${role} prose contradicts ${expected.model}: found alternate model aliases ${contradictions.join(', ')}`);
   }
 }
 

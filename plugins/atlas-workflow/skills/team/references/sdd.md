@@ -31,7 +31,14 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
 
 - For semantics-v2 implementation contracts, every required acceptance or edge-case row derived from review must cite `current-required:<finding_id>`; goal-derived rows cite `goal:<requirement-ref>`. Project only admitted findings into Goal, Acceptance, Completion, Edge Cases, or Required safe fallback, and keep other findings in `Finding Provenance`.
 - Strict semantics-v2 contract lint verifies this attribution against one or more canonical SDD slice directories supplied with repeated `--authority-slice`; it validates each brief, verdict, controller resolution, task binding, goal ref, and `current-required` finding instead of trusting token shape or natural-language severity/remediation.
-- Commit at moderate verified logical outcomes, not every repair round.
+- Execution-v3 verifies and accepts the exact admitted HEAD plus the current
+  worktree tree, so do not commit a slice before its required verification,
+  acceptance, and whole-goal `done`. After successful `done`, the integration
+  owner commits exactly the accepted tree and archives the task; archive records
+  `completion.final_commit_link` and fails closed on tree drift, a commit-tree
+  mismatch, or a non-descendant commit. `logical_outcome` does not force a
+  pre-verification or per-slice commit. Outside execution-v3, keep using moderate
+  verified logical commits rather than one commit per repair round.
 - Regenerate review input after a repair and inspect new direct regressions normally.
 - Run branch/integration review only when integration risk justifies it.
 - Keep raw logs, traces, screenshots, dumps, and intermediate repair output outside Git. Keep one rolling runtime checkpoint for cross-compaction continuity instead of replaying all ledgers.

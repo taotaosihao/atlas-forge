@@ -52,6 +52,16 @@ fi
 make_agents "$TMP_ROOT/agents-6.1" 6.1
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.1.json" --agents-dir "$TMP_ROOT/agents-6.1"
 
+cp -R "$TMP_ROOT/agents-5.6" "$TMP_ROOT/agents-stale-prose"
+printf 'developer_instructions = "Routine verification belongs to the Terra verifier."\n' \
+  >> "$TMP_ROOT/agents-stale-prose/atlas-sdd-browser-verifier.toml"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
+  --catalog "$TMP_ROOT/5.6.json" \
+  --agents-dir "$TMP_ROOT/agents-stale-prose" >/dev/null 2>&1; then
+  echo "expected contradictory model-family prose to fail closed" >&2
+  exit 1
+fi
+
 make_catalog "$TMP_ROOT/incomplete.json" 5.8 no
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/incomplete.json" >/dev/null 2>&1; then
   echo "expected an incomplete latest family to fail closed" >&2
