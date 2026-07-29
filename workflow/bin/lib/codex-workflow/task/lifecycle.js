@@ -1,10 +1,12 @@
 "use strict";
 
+const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { sleepMilliseconds, withLock } = require("../core/lock");
 const { resolvePaths, taskArtifactDirRelative } = require("../core/paths");
 const { mutateTaskRuntime } = require("../core/task-mutation");
+const { captureWorktreeSnapshot } = require("../core/worktree-snapshot");
 const { taskIdTitleToken } = require("./id");
 const {
   listTaskRecords,
@@ -57,6 +59,58 @@ function validateReason(label, reason) {
       `unsafe ${label}: reason must be a single non-empty line`,
     );
   }
+}
+
+function gitOutput(repo, args, label) {
+  const result = childProcess.spawnSync("git", ["-C", repo, ...args], {
+    encoding: "utf8",
+  });
+  if (result.error || result.status !== 0) {
+    throw new TaskLifecycleError(
+      `${label}: ${(result.stderr || result.error?.message || "git failed").trim()}`,
+    );
+  }
+  return result.stdout.trim();
+}
+
+function finalCommitLink(state, clock, revision) {
+  const completion = state.completion;
+  const snapshot = completion?.outcome === "succeeded"
+    ? completion.completion_snapshot
+    : null;
+  if (!snapshot?.repo_realpath || !snapshot.head_sha || !snapshot.tree_oid) return null;
+  const current = captureWorktreeSnapshot(snapshot.repo_realpath);
+  if (current.tree_oid !== snapshot.tree_oid) {
+    throw new TaskLifecycleError(
+      "successful execution worktree changed after completion; restore the accepted tree before archive",
+    );
+  }
+  const committedTree = gitOutput(
+    snapshot.repo_realpath,
+    ["rev-parse", "--verify", `${current.head_sha}^{tree}`],
+    "unable to inspect final execution commit",
+  );
+  if (committedTree !== snapshot.tree_oid) {
+    throw new TaskLifecycleError(
+      "successful execution must commit the exact accepted tree before archive",
+    );
+  }
+  gitOutput(
+    snapshot.repo_realpath,
+    ["merge-base", "--is-ancestor", snapshot.head_sha, current.head_sha],
+    "final execution commit must descend from the completed HEAD",
+  );
+  return {
+    schema_version: 1,
+    repo_realpath: snapshot.repo_realpath,
+    head_sha: current.head_sha,
+    tree_oid: current.tree_oid,
+    completion_head_sha: snapshot.head_sha,
+    source_completion_revision: state.execution_authority?.completion?.completed_revision
+      || state.runtime_revision,
+    linked_revision: revision + 1,
+    linked_at: timestampSeconds(clock),
+  };
 }
 
 function pauseFromEnvironment(environment, name) {
@@ -422,7 +476,7 @@ function archiveTask(taskId, reason, options = {}) {
     paths,
     taskId,
     { kind: "task.archived", operationId: options.operationId, data: { reason } },
-    () => {
+    ({ revision }) => {
       const file = requireTaskFile(paths.tasksDir, taskId);
       const { task } = validateTaskFile(file);
       if (task.status === "archived") {
@@ -436,11 +490,17 @@ function archiveTask(taskId, reason, options = {}) {
       const taskContent = renderTaskFields(fs.readFileSync(file, "utf8"), {
         status: "archived", updated: localDay(clock), archived_reason: reason, archived_at: archivedAt,
       });
-      const state = projectTaskState(
-        paths, taskId, taskContent, readJsonObject(taskStateFile(paths, taskId)), clock,
-      );
+      const currentState = readJsonObject(taskStateFile(paths, taskId));
+      const commitLink = task.status === "done"
+        ? finalCommitLink(currentState, clock, revision)
+        : null;
+      const state = projectTaskState(paths, taskId, taskContent, currentState, clock);
+      if (commitLink) {
+        state.completion = { ...state.completion, final_commit_link: commitLink };
+      }
       return {
         projection: { task_content: taskContent, state },
+        result: { final_commit_link: commitLink },
         legacy: [lifecycleLegacy("task.archived", { from: task.status, to: "archived", reason })],
       };
     },

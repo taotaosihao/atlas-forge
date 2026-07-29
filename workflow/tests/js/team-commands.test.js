@@ -30,6 +30,10 @@ const { taskEventFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/task-mutation.js",
 ));
+const { reconcileTaskRuntime } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/reconcile.js",
+));
 const { taskMutationLockFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/lock.js",
@@ -344,6 +348,78 @@ function authoritativeEvents(paths, taskId) {
   return fs.readFileSync(taskEventFile(paths, taskId), "utf8")
     .trim().split("\n").map((line) => JSON.parse(line));
 }
+
+function commitAcceptedWorktree(repo, message) {
+  assert.equal(spawnSync("git", ["-C", repo, "add", "-A"]).status, 0);
+  const committed = spawnSync("git", ["-C", repo, "commit", "-qm", message], {
+    encoding: "utf8",
+  });
+  assert.equal(committed.status, 0, committed.stderr);
+  return {
+    head_sha: spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).stdout.trim(),
+    tree_oid: spawnSync("git", ["-C", repo, "rev-parse", "HEAD^{tree}"], {
+      encoding: "utf8",
+    }).stdout.trim(),
+  };
+}
+
+test("managed SDD ledger rows survive canonical mutation and reconciliation", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = acceptedExecution(environment, paths, "Managed progress ledger");
+  const progress = path.join(
+    paths.artifactsDir, fixture.taskId, "team", "sdd", "progress.jsonl",
+  );
+  const appended = spawnSync(process.execPath, [
+    TEAM_LEDGER_BIN, "--task", fixture.taskId, "append", "--event", "fix_started", "--json",
+    JSON.stringify({ task_id: fixture.taskId, slice_id: "execution-slice", iteration: 1 }),
+  ], { encoding: "utf8", env: environment });
+  assert.equal(appended.status, 0, appended.stderr);
+  assert.equal(authoritativeEvents(paths, fixture.taskId).at(-1).kind, "team.ledger.appended");
+
+  updateTaskCommand(
+    paths,
+    fixture.taskId,
+    {},
+    { current_phase: "repair" },
+    clockAt("2026-07-29T01:05:00.000Z"),
+  );
+  assert.match(fs.readFileSync(progress, "utf8"), /"event":"fix_started"/);
+
+  fs.appendFileSync(progress, `${JSON.stringify({ forged: true })}\n`);
+  assert.equal(reconcileTaskRuntime(fixture.taskId, { environment }).status, "diverged");
+  reconcileTaskRuntime(fixture.taskId, {
+    apply: true,
+    authorityRef: "test:restore-managed-progress",
+    environment,
+    reason: "restore canonical managed progress projection",
+  });
+  const reconciled = fs.readFileSync(progress, "utf8");
+  assert.match(reconciled, /"event":"fix_started"/);
+  assert.doesNotMatch(reconciled, /"forged":true/);
+});
+
+test("first canonical ledger append adopts a valid pre-event progress file", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Adopt legacy progress ledger");
+  const progress = path.join(paths.artifactsDir, taskId, "team", "sdd", "progress.jsonl");
+  fs.mkdirSync(path.dirname(progress), { recursive: true });
+  fs.writeFileSync(progress, `${JSON.stringify({
+    schema_version: 1,
+    event: "run_started",
+    task_id: taskId,
+    timestamp: "2026-07-29T01:00:00.000Z",
+  })}\n`);
+  const appended = spawnSync(process.execPath, [
+    TEAM_LEDGER_BIN, "--task", taskId, "append", "--event", "preflight_clean", "--json",
+    JSON.stringify({ task_id: taskId }),
+  ], { encoding: "utf8", env: environment });
+  assert.equal(appended.status, 0, appended.stderr);
+  const rows = fs.readFileSync(progress, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(rows.map((row) => row.event), ["run_started", "preflight_clean"]);
+  assert.equal(authoritativeEvents(paths, taskId).at(-1).kind, "team.ledger.appended");
+});
 
 function startNativeRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z") {
   return runRecordStart(
@@ -1094,6 +1170,7 @@ test("task completion requires every command-bound admitted gate", (t) => {
   assert.equal(completedState.execution_authority.status, "active");
   assert.equal(completedState.execution_authority.completion.completed_revision, completedState.runtime_revision);
   assert.equal(executionCompletionAdmission(paths, taskId, completedState).passed, true);
+  commitAcceptedWorktree(admission.repo, "test: finalize required gates");
   archiveTask(taskId, "completed execution retained for audit", {
     environment,
     operationId: "archive-completed-execution",
@@ -1185,6 +1262,30 @@ test("completion is bound to the final accepted HEAD and worktree snapshot", (t)
     source_acceptance_event_id: finalAcceptanceEvent.event_id,
     source_acceptance_revision: finalAcceptanceEvent.revision,
   });
+  assert.throws(() => archiveTask(taskId, "reject uncommitted execution", {
+    environment,
+    operationId: "archive-uncommitted-snapshot",
+  }), /must commit the exact accepted tree before archive/);
+  const finalCommit = commitAcceptedWorktree(
+    admission.repo,
+    "test: commit accepted execution snapshot",
+  );
+  archiveTask(taskId, "retain final committed execution", {
+    environment,
+    operationId: "archive-final-committed-snapshot",
+  });
+  const archived = readJsonObject(taskStateFile(paths, taskId));
+  assert.deepEqual(archived.completion.final_commit_link, {
+    schema_version: 1,
+    repo_realpath: admission.repo,
+    head_sha: finalCommit.head_sha,
+    tree_oid: finalCommit.tree_oid,
+    completion_head_sha: completed.completion.completion_snapshot.head_sha,
+    source_completion_revision: completed.runtime_revision,
+    linked_revision: archived.runtime_revision,
+    linked_at: archived.completion.final_commit_link.linked_at,
+  });
+  assert.match(archived.completion.final_commit_link.linked_at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test("done and archived tasks reject acceptance, supersede, and verification writes", (t) => {
@@ -1213,6 +1314,7 @@ test("done and archived tasks reject acceptance, supersede, and verification wri
   assert.equal(authoritativeEvents(paths, taskId).length, doneEventCount);
   assert.equal(doneState.slice_acceptances["execution-slice"].status, "accepted");
 
+  commitAcceptedWorktree(admission.repo, "test: finalize closed execution");
   archiveTask(taskId, "retain immutable completion", {
     environment,
     operationId: "archive-closed-execution",

@@ -71,7 +71,30 @@ function ledgerPath(taskId) {
   return path.join(sddDir(taskId), "progress.jsonl");
 }
 
-function appendEvent(options) {
+function taskEventPath(taskId) {
+  return path.join(workflowRoot(), "artifacts", taskId, "events-v2.jsonl");
+}
+
+function loadCanonicalAppender() {
+  const candidates = [
+    ...(process.env.CODEX_WORKFLOW_BIN ? [path.join(
+      path.dirname(path.resolve(process.env.CODEX_WORKFLOW_BIN)),
+      "lib", "codex-workflow", "team", "progress-ledger.js",
+    )] : []),
+    path.join(
+      workflowRoot(), "bin", "lib", "codex-workflow", "team", "progress-ledger.js",
+    ),
+    path.resolve(
+      __dirname, "../../../workflow/bin/lib/codex-workflow/team/progress-ledger.js",
+    ),
+  ];
+  for (const file of candidates) {
+    if (fs.existsSync(file)) return require(file).appendLedgerEvent;
+  }
+  throw new Error("canonical workflow ledger appender is unavailable");
+}
+
+function ledgerEvent(options) {
   if (!options.event) {
     throw new Error("append requires --event");
   }
@@ -92,6 +115,21 @@ function appendEvent(options) {
   const errors = validateLedgerEvent(event);
   if (errors.length > 0) {
     throw new Error(errors.join("; "));
+  }
+  return event;
+}
+
+function appendEvent(options) {
+  const event = ledgerEvent(options);
+  if (fs.existsSync(taskEventPath(options.task))) {
+    loadCanonicalAppender()(options.task, event, {
+      environment: {
+        ...process.env,
+        ATLAS_WORKFLOW_PLUGIN_ROOT: path.resolve(__dirname, ".."),
+      },
+    });
+    console.log(`appended: ${event.event}`);
+    return;
   }
   fs.mkdirSync(sddDir(options.task), { recursive: true });
   fs.appendFileSync(ledgerPath(options.task), `${JSON.stringify(event)}\n`, "utf8");

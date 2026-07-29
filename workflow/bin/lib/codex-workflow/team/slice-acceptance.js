@@ -23,6 +23,11 @@ const {
   validateDependencies,
 } = require("./admission");
 const { sleepMilliseconds, withLock } = require("../core/lock");
+const {
+  appendProgressProjection,
+  loadLedgerValidator,
+  readProgressFile,
+} = require("./progress-ledger");
 
 const SLICE_ACCEPT_USAGE =
   "usage: codex-workflow team-slice-accept <task-id> --brief <brief.json> --operation-id <id> --keeper-output <declared-ref>=<file>...";
@@ -226,15 +231,8 @@ function readBriefForKeeperBindings(parsed) {
   };
 }
 
-function progressProjection(paths, taskId, accepted) {
-  const file = path.join(taskArtifactDir(paths, taskId), "team", "sdd", "progress.jsonl");
-  let current = "";
-  try {
-    current = fs.readFileSync(file, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const row = {
+function acceptedProgressEvent(taskId, accepted) {
+  return {
     schema_version: 1,
     event: "slice_complete",
     task_id: taskId,
@@ -244,10 +242,6 @@ function progressProjection(paths, taskId, accepted) {
     keeper_outputs: accepted.keeper_outputs.map((item) => item.reference),
     authority: "derived-from-authoritative-slice-accepted",
     operation_id: accepted.operation_id,
-  };
-  return {
-    path: "team/sdd/progress.jsonl",
-    content_base64: Buffer.from(`${current}${JSON.stringify(row)}\n`).toString("base64"),
   };
 }
 
@@ -292,6 +286,7 @@ function acceptedDependentSlices(paths, taskId, state, dependencySliceId) {
 
 function runSliceAccept(parsed, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
+  const validateLedgerEvent = loadLedgerValidator(environment, paths);
   const { brief, briefIdentity, repo } = readBriefForKeeperBindings(parsed);
   let keepers = keeperBindings(parsed, repo);
   const declared = [...brief.keeper_outputs].sort();
@@ -312,7 +307,7 @@ function runSliceAccept(parsed, options = {}) {
           slice_id: brief.slice_id,
         },
       },
-      ({ events, revision }) => {
+      ({ currentProjection, events, revision }) => {
         const currentBrief = briefRequestIdentity(parsed.briefPath);
         if (JSON.stringify(currentBrief) !== JSON.stringify(briefIdentity)) {
           throw new CommandError("Team brief changed while slice acceptance was being evaluated");
@@ -403,7 +398,11 @@ function runSliceAccept(parsed, options = {}) {
           projection: {
             task_content: taskContent,
             state,
-            files: [progressProjection(paths, parsed.taskId, accepted)],
+            files: [appendProgressProjection(
+              currentProjection,
+              acceptedProgressEvent(parsed.taskId, accepted),
+              readProgressFile(paths, parsed.taskId, validateLedgerEvent),
+            )],
           },
           result: { accepted },
           legacy: [{ kind: "slice-accepted", detail: brief.slice_id }],
