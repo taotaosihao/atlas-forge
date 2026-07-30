@@ -194,6 +194,16 @@ Release-readiness invariant: only a Team execution-v3 product_release whose immu
 - Return when the whole authorized goal is complete, continuing needs new authority or a user-owned decision, an external state must change, or safe work can no longer make material progress.
 - Elapsed time, rounds, agents, commits, tokens, and tool calls are telemetry, not default semantic stop conditions.
 
+## Product-Manager Progress Reports
+
+For every meaningful implementation checkpoint and the final reply, the main Codex translates internal Team evidence into a one-screen product-manager body in this order:
+
+- `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
+- `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; do not paste agent reports or use a command name or green gate as the explanation.
+- `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
+
+Agent activity, files changed, and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent/backend details, JSON, or command lists. Keep those exact facts in a short `技术追溯` section after the acceptance body when they aid audit or handoff. Structured agent output, ledgers, receipts, and raw logs remain internal evidence inputs rather than user-facing report prose.
+
 ## Deliberative Team Review
 
 For a substantive Team review, first define the actual review scope: the working tree, commit range, pull request, phase, or named files; the applicable goal and authoritative contract; and the evidence or checks already available.
@@ -247,4 +257,4 @@ When Paseo was selected or a fallback occurred, report the selection scope and a
 - Team decision artifacts use `backend: native|paseo|mixed|none` matching admitted results; `none` means no result was admitted and is never a selectable runtime backend. A v2 finalization writes stable provenance to `team/backend-v2.json`; mixed results remain traceable to admitted native and Paseo attempts. Legacy artifacts without that sidecar retain their historical native/Paseo marker contract.
 - Keep raw logs and intermediate agent output outside Git. Persist the smallest conclusion required for verification or handoff.
 
-In the final reply, report the task id, actual agents used, integrated outcome, verification, commits, and actionable residual risk.
+In the final reply, follow the product-manager structure above. Put the task id, agents/backends used, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.

@@ -126,6 +126,20 @@ test("creates the four phase conclusion files and rejects unsafe phase ids", (t)
     assert.match(text, new RegExp(`task_id: ${taskId}`));
     assert.match(text, /phase_id: phase-4a/);
   }
+  const report = fs.readFileSync(path.join(phaseDir, "phase-review-report.md"), "utf8");
+  for (const heading of [
+    "## 阶段结论",
+    "## 完成与产品经理验收",
+    "## 已测试的能力",
+    "## 未完成、风险与下一验收点",
+    "## 技术追溯（按需查看）",
+  ]) {
+    assert.match(report, new RegExp(heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.ok(report.indexOf("## 完成与产品经理验收") < report.indexOf("## 技术追溯"));
+  assert.match(report, /产品经理怎么验收/);
+  assert.match(report, /应看到的结果/);
+  assert.match(report, /实际结果/);
   assert.throws(
     () => scaffoldPhase(taskId, "../bad", { clock: fixedClock, environment }),
     (error) =>

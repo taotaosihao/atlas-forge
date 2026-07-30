@@ -1,30 +1,43 @@
-# Phase Review Report
+# 阶段验收汇报
 
 task_id: {{TASK_ID}}
 phase_id: {{PHASE_ID}}
 created: {{CREATED}}
 artifact_category: phase_conclusion
 
-## Phase Summary
+> 正文控制在一屏，只报告可观察的产品结果。命令、路径、哈希、门禁编号和原始输出只放在文末“技术追溯”。
 
--
+## 阶段结论
 
-## Gate Result
+- 验收状态：`可验收 | 部分可验收 | 不可验收`
+- 一句话结果：
+- 当前可验收范围：
+- 本阶段未包含：
 
-- Status:
-- Required checks:
-- Reviewer:
+## 完成与产品经理验收
 
-## Evidence Budget
+| 已完成功能或用户能力 | 产品经理怎么验收 | 应看到的结果 | 实际结果 | 结论 | 直接证据 |
+| --- | --- | --- | --- | --- | --- |
+| 用户现在可以…… | 以用户操作描述 |  |  | `通过 / 未通过 / 未验证` | 界面、操作或业务结果 |
 
-- Git evidence file count:
-- Git evidence size:
-- Exception needed:
+## 已测试的能力
 
-## Blocking Defects
+| 能力或场景 | 怎么测试 | 结果 | 未覆盖边界 | 直接证据 |
+| --- | --- | --- | --- | --- |
+|  |  |  |  |  |
 
--
+## 未完成、风险与下一验收点
 
-## Raw Artifacts Opened
+- 未完成：
+- 对产品的影响：
+- 是否阻塞本阶段验收：`是 | 否`
+- 下一验收点：
+- 没有时明确写“无”；不能省略失败检查或未验证能力。
 
-- None by default.
+## 技术追溯（按需查看）
+
+- 必跑检查及结论：
+- 评审人 / 候选版本或 commit：
+- 阻断缺陷：无。
+- Git 证据文件数 / 总大小 / 例外：
+- 已打开的原始材料：默认无；只有阻断缺陷、门禁争议或结论缺少引用时才列出。

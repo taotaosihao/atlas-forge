@@ -48,6 +48,16 @@ When the authorized target is a `product_release`, route its execution and certi
 - Keep raw logs, traces, screenshots, dumps, retry output, and intermediate repair output outside Git by default.
 - Long work crossing compaction or handoff uses one non-Git rolling checkpoint that is overwritten rather than appended.
 
+## Product-Manager Progress Reports
+
+For every meaningful implementation checkpoint and the final reply, keep the product-manager body to one screen and use this order:
+
+- `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
+- `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; a command name or green gate alone is not a capability explanation.
+- `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
+
+Files changed and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent JSON, or command lists. Put exact engineering details in a short `技术追溯` section after the acceptance body when they aid audit or handoff.
+
 ## Review, Commits, And Completion
 
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
@@ -56,4 +66,4 @@ When the authorized target is a `product_release`, route its execution and certi
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.
 - Run `~/.codex/workflow/bin/codex-workflow done <task-id>` only when the whole authorized goal is actually complete.
 
-In the final reply, report the task id, behavior/files changed, verification, commits, and actionable residual risk.
+In the final reply, follow the product-manager structure above. Put the task id, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.
