@@ -3,6 +3,7 @@
 const { loadBundledProfile, profileBinding } = require("./profile");
 
 const TARGET_DELIVERY_CLASSES = new Set(["exploration", "product_release", "non_product"]);
+const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
 const RELEASE_STAGES = new Set(["mvp", "beta", "limited_release", "general_availability", "scaled"]);
 const ISOLATION_BOUNDARIES = Object.freeze([
   "route", "brand", "data", "credentials", "runtime", "release_config", "user_reachability",
@@ -196,10 +197,24 @@ function extractReleaseIntent(markdown) {
   return intent;
 }
 
+function extractContractWorkType(markdown) {
+  const matches = [...String(markdown).matchAll(/^work_type:[ \t]*([^\r\n]+?)[ \t]*$/gm)];
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one work_type field, found ${matches.length}`);
+  }
+  const workType = matches[0][1].trim();
+  if (!WORK_TYPES.has(workType)) {
+    throw new Error(`unsupported work_type: ${workType}`);
+  }
+  return workType;
+}
+
 module.exports = {
   ISOLATION_BOUNDARIES,
   RELEASE_STAGES,
   TARGET_DELIVERY_CLASSES,
+  WORK_TYPES,
+  extractContractWorkType,
   extractReleaseIntent,
   validateReleaseIntent,
 };

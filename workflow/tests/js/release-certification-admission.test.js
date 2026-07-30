@@ -100,13 +100,13 @@ function releasePlan(intent) {
   };
 }
 
-function contractMarkdown(intent, plan) {
+function contractMarkdown(intent, plan, workType = "implementation") {
   return [
     "# Governed product release",
     "",
     "task_id: release-task",
     "contract_semantics_version: 4",
-    "work_type: implementation",
+    `work_type: ${workType}`,
     "",
     "```atlas-release-intent+json",
     JSON.stringify(intent, null, 2),
@@ -125,7 +125,7 @@ function git(repo, args) {
   return result.stdout.trim();
 }
 
-function fixture(t) {
+function fixture(t, { workType = "implementation" } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-release-admission."));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const environment = {
@@ -143,7 +143,7 @@ function fixture(t) {
   const intent = productIntent();
   const plan = releasePlan(intent);
   const contract = path.join(repo, "implementation-contract.final.md");
-  fs.writeFileSync(contract, contractMarkdown(intent, plan));
+  fs.writeFileSync(contract, contractMarkdown(intent, plan, workType));
   git(repo, ["add", "implementation-contract.final.md"]);
   git(repo, ["commit", "-qm", "test: add release contract"]);
   const base = git(repo, ["rev-parse", "HEAD"]);
@@ -160,7 +160,7 @@ function fixture(t) {
     taskArtifactDir(paths, "release-task"),
     "team/sdd/slices/release-slice/brief.json",
   );
-  return { base, briefPath, contract, environment, intent, paths, plan, repo };
+  return { base, briefPath, contract, environment, intent, paths, plan, repo, workType };
 }
 
 test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy", (t) => {
@@ -169,7 +169,11 @@ test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy",
   assert.deepEqual(validateBrief(brief), []);
   assert.equal(brief.schema_version, 3);
   assert.equal(brief.contract.semantics_version, 4);
+  assert.equal(brief.contract.work_type, "implementation");
   assert.deepEqual(brief.contract.release, value.plan.release);
+  const missingWorkType = structuredClone(brief);
+  delete missingWorkType.contract.work_type;
+  assert.match(validateBrief(missingWorkType).join("\n"), /missing required key: work_type/);
 
   const admission = admitTeamStart({
     briefPath: value.briefPath,
@@ -181,10 +185,43 @@ test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy",
     taskId: "release-task",
   });
   assert.equal(admission.mode, "execution-v3");
+  assert.equal(admission.brief.work_type, "implementation");
   assert.deepEqual(admission.brief.release, value.plan.release);
   const state = {};
   const authority = bindExecutionAuthority(state, admission, 1);
+  assert.equal(authority.work_type, "implementation");
   assert.deepEqual(authority.release_binding, value.plan.release);
+});
+
+test("planning and review keep product_release classification but cannot enter certification execution", (t) => {
+  for (const workType of ["planning", "review"]) {
+    const value = fixture(t, { workType });
+    const brief = JSON.parse(fs.readFileSync(value.briefPath, "utf8"));
+    assert.deepEqual(validateBrief(brief), []);
+    assert.equal(brief.contract.work_type, workType);
+    assert.equal(brief.contract.release.target_delivery_class, "product_release");
+
+    const discussed = admitTeamStart({
+      briefPath: value.briefPath,
+      clock: () => new Date("2026-07-30T00:00:00Z"),
+      cwd: value.repo,
+      environment: value.environment,
+      mode: "discuss",
+      paths: value.paths,
+      taskId: "release-task",
+    });
+    assert.equal(discussed.mode, "discuss-v3");
+    assert.equal(discussed.brief.work_type, workType);
+    assert.throws(() => admitTeamStart({
+      briefPath: value.briefPath,
+      clock: () => new Date("2026-07-30T00:00:00Z"),
+      cwd: value.repo,
+      environment: value.environment,
+      mode: "execute",
+      paths: value.paths,
+      taskId: "release-task",
+    }), /product_release Team execution requires work_type implementation/);
+  }
 });
 
 test("Team admission rejects missing or replaceable Profile identity", (t) => {
@@ -216,6 +253,19 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
     paths: value.paths,
     taskId: "release-task",
   }), /brief release binding does not match/);
+
+  const replacedWorkType = structuredClone(original);
+  replacedWorkType.contract.work_type = "review";
+  fs.writeFileSync(value.briefPath, `${JSON.stringify(replacedWorkType, null, 2)}\n`);
+  assert.throws(() => admitTeamStart({
+    briefPath: value.briefPath,
+    clock: () => new Date("2026-07-30T00:00:00Z"),
+    cwd: value.repo,
+    environment: value.environment,
+    mode: "execute",
+    paths: value.paths,
+    taskId: "release-task",
+  }), /brief work_type does not match/);
 });
 
 test("brief compiler rejects an author-replaced evaluator", (t) => {

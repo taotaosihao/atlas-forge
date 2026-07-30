@@ -50,6 +50,7 @@ assert.match(text.task, /planning or review that directly authors or gates a nam
 assert.match(text.team, /Planning or review that directly authors or gates a named externally usable candidate retains `product_release`/);
 assert.match(text.team, /recomputes typed facts from raw inputs/);
 assert.match(text.team, /Agents, reviewers, verifiers, arbitrary successful commands.*cannot create or overwrite `release_decision`/s);
+assert.match(text.team, /release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`/);
 assert.match(text.team, /Never convert an inadmissible sweep into a derived `cannot_verify` decision/);
 assert.match(text.design, /only the four typed formal Web UI facts/);
 assert.match(text.design, /do not write `certified`/);

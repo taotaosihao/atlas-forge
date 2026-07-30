@@ -417,6 +417,7 @@ function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
 test("Team final sweep persists the only derived certified decision", (t) => {
   const value = releaseFixture(t);
   const beforeAcceptance = readJsonObject(taskStateFile(value.paths, value.taskId));
+  assert.equal(beforeAcceptance.execution_authority.work_type, "implementation");
   const gates = requiredGateAdmission(value.paths, value.taskId, beforeAcceptance, {
     environment: value.environment,
   });
@@ -442,6 +443,18 @@ test("Team final sweep persists the only derived certified decision", (t) => {
       .releaseDecision.status,
     "certified",
   );
+});
+
+test("non-implementation release authority cannot derive a completion decision", (t) => {
+  const value = releaseFixture(t);
+  const state = readJsonObject(taskStateFile(value.paths, value.taskId));
+  state.execution_authority.work_type = "planning";
+  const completion = executionCompletionAdmission(value.paths, value.taskId, state, {
+    environment: value.environment,
+  });
+  assert.equal(completion.passed, false);
+  assert.equal(completion.releaseDecision, null);
+  assert.match(completion.reasons.join("\n"), /work_type implementation/);
 });
 
 test("direct task verification can finish work but can never certify a release", (t) => {
@@ -513,6 +526,7 @@ test("candidate or typed-fact drift invalidates the final sweep", (t) => {
     repo: value.repo,
     snapshot: value.snapshot,
     taskId: value.taskId,
+    workType: "implementation",
   });
   assert.equal(admitted.admissible, true, admitted.reasons.join("\n"));
 
@@ -527,6 +541,7 @@ test("candidate or typed-fact drift invalidates the final sweep", (t) => {
     repo: value.repo,
     snapshot: value.snapshot,
     taskId: value.taskId,
+    workType: "implementation",
   });
   assert.equal(drifted.admissible, false);
   assert.match(drifted.reasons.join("\n"), /changed after verification/);
@@ -612,6 +627,7 @@ test("mixed candidate receipts cannot be assembled into a release", (t) => {
     repo: value.repo,
     snapshot: value.snapshot,
     taskId: value.taskId,
+    workType: "implementation",
   });
   assert.equal(mixed.admissible, false);
   assert.match(mixed.reasons.join("\n"), /do not bind one identical candidate manifest/);

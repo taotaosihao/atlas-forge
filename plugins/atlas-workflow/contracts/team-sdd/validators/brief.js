@@ -72,6 +72,7 @@ const RELEASE_KEYS = [
   "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
   "check_definition_set_sha256", "requirement_refs",
 ];
+const WORK_TYPES = ["implementation", "planning", "review", "audit", "docs-only"];
 const DEPENDENCY_KEYS = ["slice_id", "required_outcome", "keeper_outputs"];
 const BUDGET_KEYS = ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"];
 const SIZE_GATE_KEYS = ["decision", "policy_id", "estimate", "exception"];
@@ -132,9 +133,11 @@ function validateV3(value, errors) {
   if (path.isAbsolute(value.requirements_path || "")) errors.push("requirements_path must be relative");
   if (path.isAbsolute(value.global_constraints_path || "")) errors.push("global_constraints_path must be relative");
 
-  const contractKeys = value.contract?.release === undefined
-    ? CONTRACT_KEYS
-    : [...CONTRACT_KEYS, "release"];
+  const contractKeys = [
+    ...CONTRACT_KEYS,
+    ...(value.contract?.semantics_version === 4 ? ["work_type"] : []),
+    ...(value.contract?.release === undefined ? [] : ["release"]),
+  ];
   if (validateExactObject(value.contract, "contract", contractKeys, errors)) {
     if (typeof value.contract.path !== "string" || !path.isAbsolute(value.contract.path)) {
       errors.push("contract.path must be an absolute path");
@@ -146,6 +149,10 @@ function validateV3(value, errors) {
     }
     if (![1, 2, 3, 4].includes(value.contract.semantics_version)) {
       errors.push("contract.semantics_version must be one of: 1, 2, 3, 4");
+    }
+    if (value.contract.semantics_version === 4
+      && !WORK_TYPES.includes(value.contract.work_type)) {
+      errors.push(`contract.work_type must be one of: ${WORK_TYPES.join(", ")}`);
     }
     if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.execution_plan_sha256 || "")) {
       errors.push("contract.execution_plan_sha256 must use sha256:<hex>");

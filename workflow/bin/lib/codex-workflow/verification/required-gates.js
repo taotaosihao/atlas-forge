@@ -135,8 +135,14 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
   }
   if (brief.slice_id !== identity.slice_id
     || brief.contract?.sha256 !== identity.contract_sha256
-    || brief.contract?.execution_plan_sha256 !== identity.execution_plan_sha256) {
+    || brief.contract?.execution_plan_sha256 !== identity.execution_plan_sha256
+    || brief.contract?.work_type !== identity.work_type) {
     throw new RequiredGateError("admitted Team brief contract identity no longer matches");
+  }
+  if (brief.contract?.release && brief.contract.work_type !== "implementation") {
+    throw new RequiredGateError(
+      "release verification requires admitted work_type implementation",
+    );
   }
   const contractFile = canonicalFile(brief.contract.path, "admitted implementation contract");
   if (sha256(fs.readFileSync(contractFile)) !== identity.contract_sha256) {
@@ -347,6 +353,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
         repo: context.repo,
         snapshot,
         taskId,
+        workType: context.brief.contract.work_type,
       });
       if (!releaseCertification.admissible) {
         reasons.push(...releaseCertification.reasons.map((reason) => `release final sweep: ${reason}`));
@@ -570,7 +577,9 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
     }
   }
   if (authority.release_binding) {
-    if (!completionSnapshot || !repo || !contractMarkdown) {
+    if (authority.work_type !== "implementation") {
+      reasons.push("release completion authority requires work_type implementation");
+    } else if (!completionSnapshot || !repo || !contractMarkdown) {
       reasons.push("release certification requires a stable final completion snapshot");
     } else {
       releaseCertification = evaluateReleaseSweep({
@@ -582,6 +591,7 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
         repo,
         snapshot: completionSnapshot,
         taskId,
+        workType: authority.work_type,
       });
       if (!releaseCertification.admissible) {
         reasons.push(...releaseCertification.reasons.map((reason) => `release final sweep: ${reason}`));

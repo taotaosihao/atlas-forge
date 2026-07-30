@@ -318,11 +318,18 @@ function evaluateReleaseSweep({
   repo,
   snapshot,
   taskId,
+  workType,
 }) {
   const reasons = [];
   const summaries = [];
   try {
     const contracts = loadReleaseContracts(environment, paths);
+    const contractWorkType = contracts.extractContractWorkType(contractMarkdown);
+    if (workType !== "implementation" || contractWorkType !== workType) {
+      throw new ReleaseCertificationError(
+        "release certification requires hash-bound work_type implementation",
+      );
+    }
     const intent = contracts.extractReleaseIntent(contractMarkdown);
     if (!same(contracts.releasePlanBinding(intent), releaseBinding)) {
       throw new ReleaseCertificationError("release intent no longer matches execution authority");

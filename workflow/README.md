@@ -161,6 +161,12 @@ Completion derives the read-only result only after the whole terminal sweep:
 - missing Team authority or an incomplete, stale, malformed, unsupported, or
   mixed-candidate sweep is inadmissible and produces no decision.
 
+The hash-bound contract `work_type` is projected into brief v3 and persistent
+execution authority. Planning and review may retain a `product_release` target
+and use Team discuss mode, but release-bearing execution admission and
+completion both require `work_type=implementation`; otherwise no release
+decision can be derived.
+
 Direct Task work may finish a contributing implementation but cannot close a
 `product_release` goal. Unsupported API, CLI, worker, mixed, and unknown
 surfaces fail before release admission and have a release-readiness assessment

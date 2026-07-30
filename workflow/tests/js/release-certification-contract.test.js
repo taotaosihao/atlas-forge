@@ -21,6 +21,7 @@ const {
 ));
 const {
   ISOLATION_BOUNDARIES,
+  extractContractWorkType,
   extractReleaseIntent,
   validateReleaseIntent,
 } = require(path.join(
@@ -144,6 +145,16 @@ test("release intent block is singular and strict", () => {
   const unknown = productIntent();
   unknown.author_status = "certified";
   assert.ok(validateReleaseIntent(unknown).some((error) => error.includes("unknown key: author_status")));
+});
+
+test("contract work type is singular and normalized for release authority binding", () => {
+  assert.equal(extractContractWorkType("work_type: implementation\n"), "implementation");
+  assert.equal(extractContractWorkType("work_type: review\n"), "review");
+  assert.throws(
+    () => extractContractWorkType("work_type: planning\nwork_type: implementation\n"),
+    /exactly one work_type/,
+  );
+  assert.throws(() => extractContractWorkType("work_type: release\n"), /unsupported work_type/);
 });
 
 test("anchor corpus stays small, explicit, and fail-closed", () => {

@@ -15,6 +15,7 @@ const {
   sha256Value,
 } = require("../contracts/team-sdd/validators/execution-plan");
 const {
+  extractContractWorkType,
   extractReleaseIntent,
 } = require("../contracts/release-certification/validators/release-intent");
 
@@ -176,10 +177,12 @@ function readContract(options) {
     throw new Error("--contract must exist and be a file");
   }
   const text = fs.readFileSync(contractPath, "utf8");
+  const semanticsVersion = contractSemanticsVersion(text);
   return {
     path: contractPath,
     sha256: sha256(contractPath),
-    semanticsVersion: contractSemanticsVersion(text),
+    semanticsVersion,
+    workType: semanticsVersion === 4 ? extractContractWorkType(text) : null,
     text,
   };
 }
@@ -377,6 +380,7 @@ function v3Brief(options, baseSha, contract, plan, slice) {
       sha256: `sha256:${contract.sha256}`,
       semantics_version: contract.semanticsVersion,
       execution_plan_sha256: `sha256:${sha256Value(plan)}`,
+      ...(contract.workType ? { work_type: contract.workType } : {}),
       ...(plan.release ? { release: plan.release } : {}),
     },
     dependencies: slice.depends_on.map((sliceId) => ({

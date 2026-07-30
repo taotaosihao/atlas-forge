@@ -280,11 +280,13 @@ function validateContractBinding(brief, repo, environment, paths) {
     throw new CommandError("brief contract semantics version does not match a supported execution contract");
   }
   let plan;
+  let workType = null;
   if (semanticsVersion === 4) {
     const contracts = loadCanonicalExecutionContracts(environment, paths);
     if (!contracts) throw new CommandError("canonical release execution validators are unavailable");
     let intent;
     try {
+      workType = contracts.extractContractWorkType(markdown);
       intent = contracts.extractReleaseIntent(markdown);
       plan = contracts.extractExecutionPlan(markdown);
     } catch (error) {
@@ -299,10 +301,16 @@ function validateContractBinding(brief, repo, environment, paths) {
     if (!same(brief.contract.release || null, expectedRelease)) {
       throw new CommandError("brief release binding does not match the contract release plan");
     }
+    if (brief.contract.work_type !== workType) {
+      throw new CommandError("brief work_type does not match the hash-bound contract");
+    }
   } else {
     plan = executionPlan(markdown);
     if (brief.contract.release !== undefined) {
       throw new CommandError("semantics-v3 brief cannot carry a release binding");
+    }
+    if (brief.contract.work_type !== undefined) {
+      throw new CommandError("semantics-v3 brief cannot carry work_type");
     }
   }
   const expectedPlan = SHA256.exec(brief.contract.execution_plan_sha256 || "");
@@ -335,7 +343,7 @@ function validateContractBinding(brief, repo, environment, paths) {
   for (const [label, actual, expected] of bindings) {
     if (!same(actual, expected)) throw new CommandError(`brief ${label} does not match the contract plan`);
   }
-  return { contractDigest, contractFile, plan, planDigest };
+  return { contractDigest, contractFile, plan, planDigest, workType };
 }
 
 function validateSizeGate(brief, clock) {
@@ -654,6 +662,11 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
   if (file !== expected) throw new CommandError(`Team brief is not at its canonical task path: ${expected}`);
   const repo = validateRepository(brief, cwd);
   const binding = validateContractBinding(brief, repo, environment, paths);
+  if (mode === "execute" && binding.plan.release && binding.workType !== "implementation") {
+    throw new CommandError(
+      "product_release Team execution requires work_type implementation; planning and review may discuss but cannot certify",
+    );
+  }
   validateSizeGate(brief, clock);
   validateDependencies(paths, brief, {
     captureIdentity,
@@ -670,6 +683,7 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
       contract_path: binding.contractFile,
       contract_sha256: `sha256:${binding.contractDigest}`,
       execution_plan_sha256: `sha256:${binding.planDigest}`,
+      ...(binding.workType ? { work_type: binding.workType } : {}),
       ...(binding.plan.release ? { release: binding.plan.release } : {}),
       base_sha: brief.base_sha,
       repo,
@@ -709,6 +723,7 @@ function bindExecutionAuthority(state, admission, revision) {
     execution_plan_sha256: admission.brief.execution_plan_sha256,
     repo_realpath: admission.brief.repo,
     required_slices: [...admission.required_slices],
+    ...(admission.brief.work_type ? { work_type: admission.brief.work_type } : {}),
     ...(admission.brief.release ? { release_binding: admission.brief.release } : {}),
   };
   const existing = state.execution_authority;
@@ -718,7 +733,7 @@ function bindExecutionAuthority(state, admission, revision) {
       throw new CommandError("task execution authority has an invalid persistent state");
     }
     for (const field of [
-      "contract_path", "contract_sha256", "execution_plan_sha256", "repo_realpath",
+      "contract_path", "contract_sha256", "execution_plan_sha256", "repo_realpath", "work_type",
     ]) {
       if (existing[field] !== requested[field]) {
         throw new CommandError(

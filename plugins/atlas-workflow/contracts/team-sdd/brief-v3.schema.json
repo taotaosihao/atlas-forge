@@ -18,6 +18,7 @@
         "sha256": { "type": "string" },
         "semantics_version": { "type": "integer", "enum": [1, 2, 3, 4] },
         "execution_plan_sha256": { "type": "string" },
+        "work_type": { "type": "string", "enum": ["implementation", "planning", "review", "audit", "docs-only"] },
         "release": {
           "type": "object",
           "required": ["target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256", "check_definition_set_sha256", "requirement_refs"],
@@ -32,6 +33,22 @@
           "additionalProperties": false
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "semantics_version": { "const": 4 } },
+            "required": ["semantics_version"]
+          },
+          "then": { "required": ["work_type"] }
+        },
+        {
+          "if": {
+            "properties": { "semantics_version": { "enum": [1, 2, 3] } },
+            "required": ["semantics_version"]
+          },
+          "then": { "not": { "required": ["work_type"] } }
+        }
+      ],
       "additionalProperties": false
     },
     "dependencies": {

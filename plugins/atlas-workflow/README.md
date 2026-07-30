@@ -171,6 +171,12 @@ data candidate. Official digest-pinned adapters recompute typed facts from raw
 evidence; passing commands, screenshots, design approval, Business Acceptance,
 or agent/reviewer approval cannot write the decision.
 
+Brief v3 and persistent execution authority also bind the contract's exact
+`work_type`. Planning and review may continue to govern a `product_release` in
+Team discuss mode, but release-bearing execution and completion require the
+hash-bound value `implementation`; no other work type can derive a release
+decision.
+
 Only the completion-derived `release_decision.status=certified` supports a
 source-level release-ready claim. `denied` means an admissible same-candidate
 sweep contains a failed fact; `cannot_verify` means such a sweep contains an
