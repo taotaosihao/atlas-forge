@@ -10,6 +10,7 @@ const ANCHORS = path.join(ROOT, "test/fixtures/implementation-contract/release-c
 const {
   BUNDLED_PROFILE_DIGESTS,
   PROFILE_DIMENSIONS,
+  assertBundledComponentIntegrity,
   assertBundledProfileIntegrity,
   loadBundledProfile,
   profileBinding,
@@ -65,6 +66,10 @@ test("bundled web-ui-v1 is immutable, complete, and non-waivable", () => {
   const mutated = clone(profile);
   mutated.requirements[0].assertion = "A changed policy under the same profile identity.";
   assert.throws(() => assertBundledProfileIntegrity("web-ui-v1", mutated), /integrity mismatch/);
+
+  const replacedComponent = clone(profile);
+  replacedComponent.requirements[0].check_definition.collector_adapter.sha256 = digest("0");
+  assert.throws(() => assertBundledComponentIntegrity(replacedComponent), /component integrity mismatch/);
 
   const incomplete = clone(profile);
   incomplete.requirements.pop();

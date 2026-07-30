@@ -27,10 +27,11 @@
     "versionedRef": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version"],
+      "required": ["id", "version", "sha256"],
       "properties": {
         "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-        "version": { "type": "integer", "minimum": 1 }
+        "version": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
       }
     },
     "checkDefinition": {

@@ -12,9 +12,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.capability-truth.v1",
-        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "capability-truth-v1", "version": 1 },
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1, "sha256": "sha256:056993c81c8eb34ff61c2e0403cbce9d57ef7fb9bdcac87fcb339e796953a730" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "capability-truth-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "all-declared-affordances-have-typed-truth-evidence",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["served-ui", "browser-flow"]
@@ -28,9 +28,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.critical-journey.v1",
-        "collector_adapter": { "id": "business-acceptance-v2", "version": 2 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "critical-journey-v1", "version": 1 },
+        "collector_adapter": { "id": "business-acceptance-v2", "version": 2, "sha256": "sha256:c3d8f4481dece3db0f5dd92fec5c8656fe1ea34af3efe45108eec3d574ffe19e" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "critical-journey-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "business-acceptance-verdict-is-accepted",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["browser-flow"]
@@ -44,9 +44,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.surface-states.v1",
-        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "surface-states-v1", "version": 1 },
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1, "sha256": "sha256:056993c81c8eb34ff61c2e0403cbce9d57ef7fb9bdcac87fcb339e796953a730" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "surface-states-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "all-applicable-surface-states-have-typed-evidence",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["served-ui", "browser-flow"]
@@ -60,9 +60,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.formal-content-ia.v1",
-        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "formal-content-ia-v1", "version": 1 },
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1, "sha256": "sha256:056993c81c8eb34ff61c2e0403cbce9d57ef7fb9bdcac87fcb339e796953a730" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "formal-content-ia-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "formal-content-review-is-accepted-with-no-meta-leakage",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["served-ui", "browser-flow"]
@@ -76,9 +76,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.production-data.v1",
-        "collector_adapter": { "id": "release-data-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "production-data-v1", "version": 1 },
+        "collector_adapter": { "id": "release-data-v1", "version": 1, "sha256": "sha256:c73987ac5b19339db6de1c270c00464dd3fa8eb50f66e46757e80288b2405424" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "production-data-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "production-path-and-data-lifecycle-evidence-pass",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["data-consistency", "integration"]
@@ -92,9 +92,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.accessibility-quality.v1",
-        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "accessibility-quality-v1", "version": 1 },
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1, "sha256": "sha256:056993c81c8eb34ff61c2e0403cbce9d57ef7fb9bdcac87fcb339e796953a730" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "accessibility-quality-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "all-declared-accessibility-and-quality-budgets-pass",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["served-ui", "browser-flow"]
@@ -108,9 +108,9 @@
       "waiver_policy": "never",
       "check_definition": {
         "definition_id": "web-ui-v1.security-operability.v1",
-        "collector_adapter": { "id": "release-operability-v1", "version": 1 },
-        "fact_schema": { "id": "release-fact-v1", "version": 1 },
-        "evaluator": { "id": "security-operability-v1", "version": 1 },
+        "collector_adapter": { "id": "release-operability-v1", "version": 1, "sha256": "sha256:b41e4d4644067ca85a9e55099ea5ed228fc9228e8c5ac010ec092453333f2f7c" },
+        "fact_schema": { "id": "release-fact-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
+        "evaluator": { "id": "security-operability-v1", "version": 1, "sha256": "sha256:1897c974782f8da74820b10417e50a043f3a44d70b32323d4ace1a41532f36af" },
         "pass_rule": "security-and-operability-evidence-pass",
         "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
         "allowed_gate_classes": ["auth", "permission", "security", "backup", "restore", "postflight"]

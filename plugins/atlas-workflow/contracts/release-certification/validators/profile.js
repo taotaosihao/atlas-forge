@@ -15,7 +15,22 @@ const PROFILE_DIMENSIONS = Object.freeze([
 ]);
 
 const BUNDLED_PROFILE_DIGESTS = Object.freeze({
-  "web-ui-v1": "sha256:20b72fda17fca13e7c323fba10a3a9bb276403164b71295df0e0405f705d4687",
+  "web-ui-v1": "sha256:b63388d9e375eb8311d51845645b051a06600ee0a584ce35e029d78e1ac1fda6",
+});
+
+const BUNDLED_COMPONENT_FILES = Object.freeze({
+  "collector_adapter:business-acceptance-v2@2": path.join(__dirname, "..", "adapters", "business-acceptance-v2.js"),
+  "collector_adapter:formal-web-ui-v1@1": path.join(__dirname, "..", "adapters", "formal-web-ui-v1.js"),
+  "collector_adapter:release-data-v1@1": path.join(__dirname, "..", "adapters", "release-data-v1.js"),
+  "collector_adapter:release-operability-v1@1": path.join(__dirname, "..", "adapters", "release-operability-v1.js"),
+  "fact_schema:release-fact-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:capability-truth-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:critical-journey-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:surface-states-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:formal-content-ia-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:production-data-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:accessibility-quality-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:security-operability-v1@1": path.join(__dirname, "evidence.js"),
 });
 
 const CANDIDATE_COMPONENTS = new Set([
@@ -86,12 +101,15 @@ function uniqueEnumArray(value, allowed, location, errors) {
 }
 
 function validateVersionedRef(value, location, errors) {
-  if (!exactKeys(value, ["id", "version"], ["id", "version"], location, errors)) return;
+  if (!exactKeys(value, ["id", "version", "sha256"], ["id", "version", "sha256"], location, errors)) return;
   if (typeof value.id !== "string" || !SAFE_ID.test(value.id)) {
     errors.push(`${location}.id: must be a safe identifier`);
   }
   if (!Number.isInteger(value.version) || value.version < 1) {
     errors.push(`${location}.version: must be a positive integer`);
+  }
+  if (typeof value.sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/.test(value.sha256)) {
+    errors.push(`${location}.sha256: must be a sha256:<64 lowercase hex> digest`);
   }
 }
 
@@ -194,6 +212,25 @@ function assertBundledProfileIntegrity(profileRef, value) {
   }
 }
 
+function digestFile(file) {
+  return `sha256:${crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex")}`;
+}
+
+function assertBundledComponentIntegrity(profile) {
+  for (const requirement of profile.requirements) {
+    for (const field of ["collector_adapter", "fact_schema", "evaluator"]) {
+      const ref = requirement.check_definition[field];
+      const key = `${field}:${ref.id}@${ref.version}`;
+      const file = BUNDLED_COMPONENT_FILES[key];
+      if (!file) throw new Error(`unknown immutable release component: ${key}`);
+      const actualDigest = digestFile(file);
+      if (ref.sha256 !== actualDigest) {
+        throw new Error(`release component integrity mismatch for ${key}: expected ${ref.sha256}, got ${actualDigest}`);
+      }
+    }
+  }
+}
+
 function loadBundledProfile(profileRef) {
   if (!Object.hasOwn(BUNDLED_PROFILE_DIGESTS, profileRef)) {
     throw new Error(`unknown release profile: ${String(profileRef)}`);
@@ -212,6 +249,7 @@ function loadBundledProfile(profileRef) {
     throw new Error(`release profile file identity mismatch: ${profileRef} != ${value.profile_id}`);
   }
   assertBundledProfileIntegrity(profileRef, value);
+  assertBundledComponentIntegrity(value);
   return value;
 }
 
@@ -224,11 +262,11 @@ function profileBinding(profile) {
       definition_ref: requirement.check_definition.definition_id,
       definition_sha256: digestValue(requirement.check_definition),
       evaluator_ref: `${requirement.check_definition.evaluator.id}@${requirement.check_definition.evaluator.version}`,
-      evaluator_sha256: digestValue(requirement.check_definition.evaluator),
+      evaluator_sha256: requirement.check_definition.evaluator.sha256,
       fact_schema_ref: `${requirement.check_definition.fact_schema.id}@${requirement.check_definition.fact_schema.version}`,
-      fact_schema_sha256: digestValue(requirement.check_definition.fact_schema),
+      fact_schema_sha256: requirement.check_definition.fact_schema.sha256,
       collector_adapter_ref: `${requirement.check_definition.collector_adapter.id}@${requirement.check_definition.collector_adapter.version}`,
-      collector_adapter_sha256: digestValue(requirement.check_definition.collector_adapter),
+      collector_adapter_sha256: requirement.check_definition.collector_adapter.sha256,
       pass_rule_sha256: digestValue(requirement.check_definition.pass_rule),
     },
   ]));
@@ -242,9 +280,11 @@ function profileBinding(profile) {
 
 module.exports = {
   ALLOWED_GATE_CLASSES,
+  BUNDLED_COMPONENT_FILES,
   BUNDLED_PROFILE_DIGESTS,
   CANDIDATE_COMPONENTS,
   PROFILE_DIMENSIONS,
+  assertBundledComponentIntegrity,
   assertBundledProfileIntegrity,
   bundledProfilePath,
   digestValue,
