@@ -150,8 +150,18 @@ test("anchor corpus stays small, explicit, and fail-closed", () => {
   const cases = JSON.parse(fs.readFileSync(ANCHORS, "utf8"));
   assert.ok(cases.length >= 8 && cases.length <= 12);
   assert.equal(new Set(cases.map((item) => item.case_id)).size, cases.length);
-  assert.ok(cases.every((item) => typeof item.must_not_pass_reason === "string" && item.must_not_pass_reason.length >= 20));
-  assert.ok(cases.some((item) => item.expected_release_decision === "denied"));
-  assert.ok(cases.some((item) => item.expected_release_decision === "cannot_verify"));
-  assert.ok(cases.some((item) => item.target_delivery_class === "exploration"));
+  assert.ok(cases.every((item) => (
+    item.scenario_input
+    && typeof item.scenario_input.request === "string"
+    && item.scenario_input.request.length >= 40
+    && item.oracle
+    && typeof item.oracle.must_not_pass_reason === "string"
+    && item.oracle.must_not_pass_reason.length >= 20
+  )));
+  assert.ok(cases.every((item) => !Object.hasOwn(item.scenario_input, "target_delivery_class")));
+  assert.ok(cases.some((item) => item.oracle.expected_release_decision === "denied"));
+  assert.ok(cases.some((item) => item.oracle.expected_release_decision === "cannot_verify"));
+  assert.ok(cases.some((item) => item.oracle.expected_release_decision === "certified"));
+  assert.ok(cases.some((item) => item.oracle.target_delivery_class === "exploration"));
+  assert.ok(cases.some((item) => item.oracle.target_delivery_class === "non_product"));
 });

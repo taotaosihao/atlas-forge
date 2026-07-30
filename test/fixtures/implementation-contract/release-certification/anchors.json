@@ -1,92 +1,182 @@
 [
   {
     "case_id": "exploration-isolated-demo",
-    "work_type": "implementation",
-    "target_delivery_class": "exploration",
-    "surface_kinds": [],
-    "expected_profile": null,
-    "expected_release_decision": null,
-    "must_not_pass_reason": "An isolated demo may validate assumptions but cannot claim an MVP or release-ready product."
+    "scenario_input": {
+      "request": "Build an isolated throwaway navigation demo to test comprehension; do not present it as an MVP or product release.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": false, "explicit_exploration_only": true, "standalone_non_product_deliverable": false, "surface_kinds": [] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "exploration", "expected_profile": null, "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "not_applicable", "expected_release_decision": null,
+      "must_not_pass_reason": "An isolated demo may validate assumptions but cannot claim an MVP or source-level release-ready product."
+    }
   },
   {
     "case_id": "planning-web-ui-mvp",
-    "work_type": "planning",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": null,
-    "must_not_pass_reason": "Planning may define certification but cannot claim that an unimplemented candidate is certified."
+    "scenario_input": {
+      "request": "Plan the release contract for the named externally usable Web UI MVP candidate; do not implement or certify it yet.",
+      "activity": "planning",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "Planning may define certification but cannot claim that an unimplemented candidate is certified."
+    }
   },
   {
     "case_id": "implementation-web-ui-mvp",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "cannot_verify",
-    "must_not_pass_reason": "A served happy path alone is not a same-candidate final certification sweep."
+    "scenario_input": {
+      "request": "Evaluate the externally usable Web UI MVP after a Team final sweep; only happy-path UI evidence exists for one required fact.",
+      "activity": "implementation",
+      "evaluation_actor": "completion_evaluator",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "team_execution_v3", "final_sweep": "admissible", "final_sweep_fact_outcomes": ["passed", "passed", "cannot_verify", "passed", "passed", "passed", "passed"], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "already_bound",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": "cannot_verify",
+      "must_not_pass_reason": "A happy-path-only formal fact remains cannot_verify even inside a complete same-candidate final sweep."
+    }
   },
   {
     "case_id": "unsupported-api-product",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["api"],
-    "expected_profile": null,
-    "expected_release_decision": "cannot_verify",
-    "must_not_pass_reason": "API products cannot be relabeled non-product or silently certified by web-ui-v1."
+    "scenario_input": {
+      "request": "Ship the named API product as an MVP and report whether it is release-ready under the available Atlas profiles.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["api"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": null, "team_route": "blocked_before_admission",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "API products cannot be relabeled non-product or given a fabricated completion decision through web-ui-v1."
+    }
   },
   {
     "case_id": "unsupported-cli-product",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["cli"],
-    "expected_profile": null,
-    "expected_release_decision": "cannot_verify",
-    "must_not_pass_reason": "CLI products require a future dedicated Profile."
+    "scenario_input": {
+      "request": "Ship the named CLI product as Beta and report whether it is release-ready under the available Atlas profiles.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["cli"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": null, "team_route": "blocked_before_admission",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "CLI products require a dedicated immutable Profile and cannot receive a fabricated release decision."
+    }
   },
   {
     "case_id": "dead-control",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "denied",
-    "must_not_pass_reason": "A visible affordance without its represented behavior fails capability truth."
+    "scenario_input": {
+      "request": "Evaluate the named Web UI product after the terminal Team sweep proved that a visible primary control has no represented behavior.",
+      "activity": "implementation",
+      "evaluation_actor": "completion_evaluator",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "team_execution_v3", "final_sweep": "admissible", "final_sweep_fact_outcomes": ["failed", "passed", "passed", "passed", "passed", "passed", "passed"], "observed_fact_outcomes": ["failed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "already_bound",
+      "release_readiness_assessment": "not_release_ready", "expected_release_decision": "denied",
+      "must_not_pass_reason": "A visible affordance without its represented behavior is a failed fact and cannot be certified."
+    }
   },
   {
     "case_id": "demo-seed-leakage",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "denied",
-    "must_not_pass_reason": "DEMO or acceptance data on the product runtime fails production-data semantics."
+    "scenario_input": {
+      "request": "Evaluate the named Web UI product after the terminal Team sweep proved that the product runtime exposes DEMO acceptance seed data.",
+      "activity": "implementation",
+      "evaluation_actor": "completion_evaluator",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "team_execution_v3", "final_sweep": "admissible", "final_sweep_fact_outcomes": ["passed", "passed", "passed", "passed", "failed", "passed", "passed"], "observed_fact_outcomes": ["failed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "already_bound",
+      "release_readiness_assessment": "not_release_ready", "expected_release_decision": "denied",
+      "must_not_pass_reason": "DEMO or acceptance data on the product runtime is a failed production-data fact."
+    }
   },
   {
     "case_id": "claim-limitation-conflict",
-    "work_type": "review",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "denied",
-    "must_not_pass_reason": "A limitation cannot contradict a claimed critical outcome."
+    "scenario_input": {
+      "request": "Review the named Web UI release candidate whose claimed critical outcome conflicts with a documented limitation; do not run certification.",
+      "activity": "review",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": ["failed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "not_release_ready", "expected_release_decision": null,
+      "must_not_pass_reason": "A review may report the claim conflict as a failed fact but cannot author a release decision."
+    }
   },
   {
     "case_id": "candidate-drift",
-    "work_type": "review",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "cannot_verify",
-    "must_not_pass_reason": "Receipts from another source, artifact, config, runtime, data, intent, or policy identity are stale."
+    "scenario_input": {
+      "request": "Review the named Web UI release candidate after receipts from another candidate were mixed into the terminal Team sweep.",
+      "activity": "review",
+      "evaluation_actor": "completion_evaluator",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "team_execution_v3", "final_sweep": "inadmissible", "final_sweep_fact_outcomes": ["passed", "passed", "passed", "passed", "passed", "passed", "passed"], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "already_bound",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "Candidate drift makes the sweep inadmissible, so no completion-derived release decision exists."
+    }
   },
   {
     "case_id": "direct-product-implementation",
-    "work_type": "implementation",
-    "target_delivery_class": "product_release",
-    "surface_kinds": ["web_ui"],
-    "expected_profile": "web-ui-v1",
-    "expected_release_decision": "cannot_verify",
-    "must_not_pass_reason": "V1 certification requires Team execution-v3 authority; direct task completion is not a release decision."
+    "scenario_input": {
+      "request": "Finish the named Web UI MVP through a direct Task and report it as release-ready after its local tests pass.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": ["passed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "required",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "Direct Task completion has no release decision and must reroute the product-release goal through Team execution-v3."
+    }
+  },
+  {
+    "case_id": "certified-web-ui-candidate",
+    "scenario_input": {
+      "request": "Report the source-level release readiness of the named pure Web UI candidate after one admissible same-candidate Team final sweep passed every Profile fact.",
+      "activity": "implementation",
+      "evaluation_actor": "completion_evaluator",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "team_execution_v3", "final_sweep": "admissible", "final_sweep_fact_outcomes": ["passed", "passed", "passed", "passed", "passed", "passed", "passed"], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "web-ui-v1", "team_route": "already_bound",
+      "release_readiness_assessment": "source_release_ready", "expected_release_decision": "certified",
+      "must_not_pass_reason": "Certified proves source-level release readiness only and never proves deployment, publication, or actual release."
+    }
+  },
+  {
+    "case_id": "standalone-release-documentation",
+    "scenario_input": {
+      "request": "Write a standalone explanation of the product release process; do not author, gate, ship, or certify any candidate.",
+      "activity": "docs-only",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": false, "explicit_exploration_only": false, "standalone_non_product_deliverable": true, "surface_kinds": [] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "non_product", "expected_profile": null, "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "not_applicable", "expected_release_decision": null,
+      "must_not_pass_reason": "Product-themed standalone documentation does not govern a release candidate and must not fabricate certification."
+    }
   }
 ]
