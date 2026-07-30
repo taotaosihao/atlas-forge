@@ -1,0 +1,92 @@
+[
+  {
+    "case_id": "exploration-isolated-demo",
+    "work_type": "implementation",
+    "target_delivery_class": "exploration",
+    "surface_kinds": [],
+    "expected_profile": null,
+    "expected_release_decision": null,
+    "must_not_pass_reason": "An isolated demo may validate assumptions but cannot claim an MVP or release-ready product."
+  },
+  {
+    "case_id": "planning-web-ui-mvp",
+    "work_type": "planning",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": null,
+    "must_not_pass_reason": "Planning may define certification but cannot claim that an unimplemented candidate is certified."
+  },
+  {
+    "case_id": "implementation-web-ui-mvp",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "cannot_verify",
+    "must_not_pass_reason": "A served happy path alone is not a same-candidate final certification sweep."
+  },
+  {
+    "case_id": "unsupported-api-product",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["api"],
+    "expected_profile": null,
+    "expected_release_decision": "cannot_verify",
+    "must_not_pass_reason": "API products cannot be relabeled non-product or silently certified by web-ui-v1."
+  },
+  {
+    "case_id": "unsupported-cli-product",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["cli"],
+    "expected_profile": null,
+    "expected_release_decision": "cannot_verify",
+    "must_not_pass_reason": "CLI products require a future dedicated Profile."
+  },
+  {
+    "case_id": "dead-control",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "denied",
+    "must_not_pass_reason": "A visible affordance without its represented behavior fails capability truth."
+  },
+  {
+    "case_id": "demo-seed-leakage",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "denied",
+    "must_not_pass_reason": "DEMO or acceptance data on the product runtime fails production-data semantics."
+  },
+  {
+    "case_id": "claim-limitation-conflict",
+    "work_type": "review",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "denied",
+    "must_not_pass_reason": "A limitation cannot contradict a claimed critical outcome."
+  },
+  {
+    "case_id": "candidate-drift",
+    "work_type": "review",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "cannot_verify",
+    "must_not_pass_reason": "Receipts from another source, artifact, config, runtime, data, intent, or policy identity are stale."
+  },
+  {
+    "case_id": "direct-product-implementation",
+    "work_type": "implementation",
+    "target_delivery_class": "product_release",
+    "surface_kinds": ["web_ui"],
+    "expected_profile": "web-ui-v1",
+    "expected_release_decision": "cannot_verify",
+    "must_not_pass_reason": "V1 certification requires Team execution-v3 authority; direct task completion is not a release decision."
+  }
+]

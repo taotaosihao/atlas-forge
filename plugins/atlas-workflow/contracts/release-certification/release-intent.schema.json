@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas-forge.local/schemas/release-certification/release-intent-v1.json",
+  "title": "Atlas Release Intent v1",
+  "oneOf": [
+    { "$ref": "#/$defs/productRelease" },
+    { "$ref": "#/$defs/exploration" },
+    { "$ref": "#/$defs/nonProduct" }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "contentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "sha256"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "profileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_ref", "profile_sha256"],
+      "properties": {
+        "profile_ref": { "const": "web-ui-v1" },
+        "profile_sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "productRelease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_delivery_class",
+        "target_delivery_authority_ref",
+        "release_stage",
+        "surface_inventory",
+        "surface_kinds",
+        "release_profile_refs",
+        "release_claim_refs",
+        "audience_refs",
+        "critical_outcome_refs"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "target_delivery_class": { "const": "product_release" },
+        "target_delivery_authority_ref": { "type": "string", "minLength": 1 },
+        "release_stage": {
+          "enum": ["mvp", "beta", "limited_release", "general_availability", "scaled"]
+        },
+        "surface_inventory": { "$ref": "#/$defs/contentRef" },
+        "surface_kinds": {
+          "type": "array",
+          "prefixItems": [{ "const": "web_ui" }],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "release_profile_refs": {
+          "type": "array",
+          "prefixItems": [{ "$ref": "#/$defs/profileRef" }],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "release_claim_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "audience_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "critical_outcome_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "exploration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_delivery_class",
+        "target_delivery_authority_ref",
+        "artifact_kind",
+        "allowed_claims",
+        "isolation_boundaries",
+        "promotion_policy"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "target_delivery_class": { "const": "exploration" },
+        "target_delivery_authority_ref": { "type": "string", "minLength": 1 },
+        "artifact_kind": { "enum": ["spike", "prototype", "demo"] },
+        "allowed_claims": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "isolation_boundaries": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["route", "brand", "data", "credentials", "runtime", "release_config", "user_reachability"]
+          }
+        },
+        "promotion_policy": { "enum": ["discard", "revalidate"] }
+      }
+    },
+    "nonProduct": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_delivery_class",
+        "target_delivery_authority_ref",
+        "deliverable_kind",
+        "not_applicable_reason"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "target_delivery_class": { "const": "non_product" },
+        "target_delivery_authority_ref": { "type": "string", "minLength": 1 },
+        "deliverable_kind": { "type": "string", "minLength": 1 },
+        "not_applicable_reason": { "type": "string", "minLength": 20 }
+      }
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "profile_id": "web-ui-v1",
+  "surface_kind": "web_ui",
+  "target_delivery_class": "product_release",
+  "requirements": [
+    {
+      "requirement_id": "web-ui-v1.capability-truth",
+      "dimension": "capability-truth",
+      "assertion": "Every visible or claimed affordance performs its represented behavior or is explicitly unavailable without misleading the user.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.capability-truth.v1",
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "capability-truth-v1", "version": 1 },
+        "pass_rule": "all-declared-affordances-have-typed-truth-evidence",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["served-ui", "browser-flow"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.critical-journey",
+      "dimension": "critical-journey",
+      "assertion": "Every claimed primary role completes an end-to-end journey and verifies the resulting business outcome.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.critical-journey.v1",
+        "collector_adapter": { "id": "business-acceptance-v2", "version": 2 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "critical-journey-v1", "version": 1 },
+        "pass_rule": "business-acceptance-verdict-is-accepted",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["browser-flow"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.surface-states",
+      "dimension": "surface-states",
+      "assertion": "The released surface covers applicable loading, empty, error, permission, disabled, destructive, recovery, long-content, and target-viewport states.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.surface-states.v1",
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "surface-states-v1", "version": 1 },
+        "pass_rule": "all-applicable-surface-states-have-typed-evidence",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["served-ui", "browser-flow"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.formal-content-ia",
+      "dimension": "formal-content-ia",
+      "assertion": "Information architecture and content use product and business language without unapproved demo, placeholder, acceptance, implementation, or debugging meta-narrative.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.formal-content-ia.v1",
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "formal-content-ia-v1", "version": 1 },
+        "pass_rule": "formal-content-review-is-accepted-with-no-meta-leakage",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["served-ui", "browser-flow"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.production-data",
+      "dimension": "production-data",
+      "assertion": "The release runtime follows production data semantics and isolates demo or acceptance data from product routes and claims.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.production-data.v1",
+        "collector_adapter": { "id": "release-data-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "production-data-v1", "version": 1 },
+        "pass_rule": "production-path-and-data-lifecycle-evidence-pass",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["data-consistency", "integration"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.accessibility-quality",
+      "dimension": "accessibility-quality",
+      "assertion": "The claimed surface meets its keyboard, focus, semantic, readability, viewport, and declared quality budgets.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.accessibility-quality.v1",
+        "collector_adapter": { "id": "formal-web-ui-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "accessibility-quality-v1", "version": 1 },
+        "pass_rule": "all-declared-accessibility-and-quality-budgets-pass",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["served-ui", "browser-flow"]
+      }
+    },
+    {
+      "requirement_id": "web-ui-v1.security-operability",
+      "dimension": "security-operability",
+      "assertion": "Authentication, authorization, privacy, secrets, observability, failure diagnosis, recovery, rollback, and support boundaries match the release claims.",
+      "required": true,
+      "waiver_policy": "never",
+      "check_definition": {
+        "definition_id": "web-ui-v1.security-operability.v1",
+        "collector_adapter": { "id": "release-operability-v1", "version": 1 },
+        "fact_schema": { "id": "release-fact-v1", "version": 1 },
+        "evaluator": { "id": "security-operability-v1", "version": 1 },
+        "pass_rule": "security-and-operability-evidence-pass",
+        "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"],
+        "allowed_gate_classes": ["auth", "permission", "security", "backup", "restore", "postflight"]
+      }
+    }
+  ]
+}

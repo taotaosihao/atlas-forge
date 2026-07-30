@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas-forge.local/schemas/release-certification/profile-v1.json",
+  "title": "Atlas Release Certification Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "surface_kind",
+    "target_delivery_class",
+    "requirements"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "profile_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "surface_kind": { "const": "web_ui" },
+    "target_delivery_class": { "const": "product_release" },
+    "requirements": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/requirement" }
+    }
+  },
+  "$defs": {
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "checkDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_id",
+        "collector_adapter",
+        "fact_schema",
+        "evaluator",
+        "pass_rule",
+        "required_candidate_components",
+        "allowed_gate_classes"
+      ],
+      "properties": {
+        "definition_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "collector_adapter": { "$ref": "#/$defs/versionedRef" },
+        "fact_schema": { "$ref": "#/$defs/versionedRef" },
+        "evaluator": { "$ref": "#/$defs/versionedRef" },
+        "pass_rule": { "type": "string", "minLength": 1 },
+        "required_candidate_components": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["source", "artifact", "surface_inventory", "config", "runtime", "data"]
+          }
+        },
+        "allowed_gate_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "unit", "integration", "contract", "lint", "typecheck", "build", "e2e",
+              "auth", "permission", "security", "data-consistency", "migration", "backup",
+              "restore", "served-ui", "browser-flow", "install", "postflight",
+              "release-identity", "collision", "downgrade", "symlink", "exact-layout"
+            ]
+          }
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirement_id",
+        "dimension",
+        "assertion",
+        "required",
+        "waiver_policy",
+        "check_definition"
+      ],
+      "properties": {
+        "requirement_id": { "type": "string", "minLength": 1 },
+        "dimension": {
+          "enum": [
+            "capability-truth",
+            "critical-journey",
+            "surface-states",
+            "formal-content-ia",
+            "production-data",
+            "accessibility-quality",
+            "security-operability"
+          ]
+        },
+        "assertion": { "type": "string", "minLength": 1 },
+        "required": { "const": true },
+        "waiver_policy": { "const": "never" },
+        "check_definition": { "$ref": "#/$defs/checkDefinition" }
+      }
+    }
+  }
+}
