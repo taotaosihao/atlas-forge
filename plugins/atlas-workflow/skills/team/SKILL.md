@@ -172,8 +172,9 @@ Release-readiness invariant: only a Team execution-v3 product_release whose immu
 
 - Classify target delivery independently from work type. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` but cannot certify it; only standalone work whose contract governs no release candidate may be `non_product` with a substantive reason. Explicit demo/prototype/spike work is `exploration`, remains isolated, and cannot make product-stage or release-readiness claims.
 - A newly authored `product_release` uses contract semantics v4, execution-plan schema version 2, brief schema version 3, and the exact immutable Profile binding. Planning/review briefs may retain `product_release` and enter `discuss-v3`, but release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`. `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor.
+- Its `target_delivery_authority_ref` must exactly equal the current controller-recordable `user-message:` or `operator-input:` execution authorization. Unresolved `goal:` and `current-required:` references cannot enter release certification.
 - Every Profile check belongs to one terminal release-certification slice that transitively depends on all other executable slices. Its fresh receipts must bind the same final source, artifact, surface inventory, config, runtime, data, intent, policy, and final worktree candidate.
-- The release collector reloads the digest-pinned official adapters, recomputes typed facts from raw inputs, and compares them before completion derives the decision. Agents, reviewers, verifiers, arbitrary successful commands, and controller-authored prose cannot create or overwrite `release_decision`.
+- The release collector reloads the digest-pinned official adapters, recomputes typed facts from raw inputs, and compares them before completion derives the decision. Adapter consistency, self-authored raw data, content hashes, stdout, and arbitrary passing commands are not producer authority; missing workflow-bound producer provenance makes the fact `cannot_verify`. Agents, reviewers, verifiers, and controller-authored prose cannot create or overwrite `release_decision`.
 - Report a completion-derived `certified`, `denied`, or `cannot_verify` exactly. Missing, stale, mixed-candidate, or malformed final-sweep evidence is never promoted to a pass. Release certification v1 supports only a pure Web UI under `web-ui-v1`; API, CLI, worker, mixed, and unknown product surfaces fail before release admission, so report their requested release conclusion as `cannot_verify` without inventing a completion `release_decision`.
 - When no completion decision exists, keep `release_decision` absent: report the readiness assessment as `cannot_verify` unless a separately established current failed fact proves the candidate is not release-ready. Never convert an inadmissible sweep into a derived `cannot_verify` decision.
 
@@ -203,6 +204,8 @@ For every meaningful implementation checkpoint and the final reply, the main Cod
 - `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
 
 Agent activity, files changed, and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent/backend details, JSON, or command lists. Keep those exact facts in a short `技术追溯` section after the acceptance body when they aid audit or handoff. Structured agent output, ledgers, receipts, and raw logs remain internal evidence inputs rather than user-facing report prose.
+
+Generate canonical phase status with `codex-workflow project-phase-report <task-id> <phase-id>`. The scaffold is only an unprojected sentinel; do not hand-write acceptance coverage, receipt results, or a release decision into it.
 
 ## Deliberative Team Review
 

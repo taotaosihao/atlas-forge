@@ -1,43 +1,23 @@
-# 阶段验收汇报
+# 阶段验收汇报（未投影）
 
 task_id: {{TASK_ID}}
 phase_id: {{PHASE_ID}}
 created: {{CREATED}}
-artifact_category: phase_conclusion
+artifact_category: phase_projection_sentinel
 
-> 正文控制在一屏，只报告可观察的产品结果。命令、路径、哈希、门禁编号和原始输出只放在文末“技术追溯”。
+> Canonical 状态：未投影。此文件不能作为验收或 release 证据。
 
-## 阶段结论
+请在权威 slice acceptance 或 completion 更新后运行：
 
-- 验收状态：`可验收 | 部分可验收 | 不可验收`
-- 一句话结果：
-- 当前可验收范围：
-- 本阶段未包含：
+```bash
+codex-workflow project-phase-report {{TASK_ID}} {{PHASE_ID}}
+```
 
-## 完成与产品经理验收
+投影命令会使用绑定后的 implementation contract、权威 slice acceptance、verification events 与 `completion.release_decision` 原子覆盖本文件。人工编辑不会改变任何权威状态。
 
-| 已完成功能或用户能力 | 产品经理怎么验收 | 应看到的结果 | 实际结果 | 结论 | 直接证据 |
-| --- | --- | --- | --- | --- | --- |
-| 用户现在可以…… | 以用户操作描述 |  |  | `通过 / 未通过 / 未验证` | 界面、操作或业务结果 |
+## 投影后将包含
 
-## 已测试的能力
-
-| 能力或场景 | 怎么测试 | 结果 | 未覆盖边界 | 直接证据 |
-| --- | --- | --- | --- | --- |
-|  |  |  |  |  |
-
-## 未完成、风险与下一验收点
-
-- 未完成：
-- 对产品的影响：
-- 是否阻塞本阶段验收：`是 | 否`
-- 下一验收点：
-- 没有时明确写“无”；不能省略失败检查或未验证能力。
-
-## 技术追溯（按需查看）
-
-- 必跑检查及结论：
-- 评审人 / 候选版本或 commit：
-- 阻断缺陷：无。
-- Git 证据文件数 / 总大小 / 例外：
-- 已打开的原始材料：默认无；只有阻断缺陷、门禁争议或结论缺少引用时才列出。
+- 产品经理可理解的已完成能力与验收方法；
+- 已测试能力及其权威 receipt；
+- 未完成项和下一验收点；
+- 与阶段验收严格分离的 release decision。

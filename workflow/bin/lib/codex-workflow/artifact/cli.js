@@ -12,6 +12,7 @@ const {
 } = require("./provenance");
 const { ROUTE_USAGE, parseRouteArgs, writeRouteDecision } = require("./routing");
 const { ArtifactError } = require("./runtime");
+const { PhaseReportError, writePhaseReportProjection } = require("./phase-report");
 const {
   ArtifactScaffoldError,
   scaffoldBrainstorm,
@@ -27,6 +28,7 @@ const USAGE = {
   "scaffold-clarify": "usage: codex-workflow scaffold-clarify <task-id>",
   "scaffold-team": "usage: codex-workflow scaffold-team <task-id>",
   "scaffold-phase": "usage: codex-workflow scaffold-phase <task-id> <phase-id>",
+  "project-phase-report": "usage: codex-workflow project-phase-report <task-id> <phase-id>",
   "route-decision": ROUTE_USAGE,
   checkpoint: CHECKPOINT_USAGE,
   "source-snapshot": SOURCE_USAGE,
@@ -65,7 +67,11 @@ function runScaffold(command, argv, environment = process.env) {
 }
 
 function runPlanning(command, argv, environment = process.env) {
-  if (command === "route-decision") {
+  if (command === "project-phase-report") {
+    if (argv.length !== 2) throw new ArtifactCliError(USAGE[command]);
+    const result = writePhaseReportProjection(argv[0], argv[1], { environment });
+    writeLines([`projected\t${result.file}`]);
+  } else if (command === "route-decision") {
     const parsed = parseRouteArgs(argv);
     if (parsed.help) {
       process.stderr.write(`${ROUTE_USAGE}\n`);
@@ -100,6 +106,7 @@ function main(argv) {
       !(error instanceof ArtifactCliError) &&
       !(error instanceof ArtifactError) &&
       !(error instanceof ArtifactScaffoldError) &&
+      !(error instanceof PhaseReportError) &&
       !(error instanceof TaskRepositoryError)
     ) {
       process.stderr.write(`${error.message || String(error)}\n`);

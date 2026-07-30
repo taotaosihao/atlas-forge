@@ -25,6 +25,8 @@ This is the execution clarification layer:
 
 Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
 
+For release-bearing execution, `target_delivery_authority_ref` must exactly match a current controller-recordable `user-message:` or `operator-input:` authorization; unresolved workflow references fail closed. Reports, raw files, hashes, stdout, and exit-zero commands remain claims until a workflow-bound producer supplies canonical provenance, otherwise the fact is `cannot_verify`.
+
 ## Short Request Clarification
 
 When clarifying a one-line or low-information request, explicitly turn the short

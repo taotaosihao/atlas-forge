@@ -33,6 +33,8 @@ Release-readiness invariant: only a Team execution-v3 product_release whose immu
 
 When the authorized target is a `product_release`, route its execution and certification through Team execution-v3. Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal. In the final reply, report an existing completion-derived `release_decision.status` exactly. When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`; only a separately established current failed fact supports saying the candidate is not release-ready.
 
+Release-bearing execution requires `target_delivery_authority_ref` to equal the current controller-recordable `user-message:` or `operator-input:` authorization exactly; unresolved `goal:` and `current-required:` references fail closed. A self-authored report, raw file, content hash, stdout, or exit-zero command is not a trusted producer; without workflow-bound producer provenance, the corresponding release fact is `cannot_verify`.
+
 ## Execution Authority
 
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.
@@ -57,6 +59,8 @@ For every meaningful implementation checkpoint and the final reply, keep the pro
 - `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
 
 Files changed and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent JSON, or command lists. Put exact engineering details in a short `技术追溯` section after the acceptance body when they aid audit or handoff.
+
+For canonical phase status, run `codex-workflow project-phase-report <task-id> <phase-id>`. The scaffold is only an unprojected sentinel; never hand-author its acceptance coverage, receipt status, or release decision.
 
 ## Review, Commits, And Completion
 

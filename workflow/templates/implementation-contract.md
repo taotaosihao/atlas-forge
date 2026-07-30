@@ -16,11 +16,13 @@ product_ui_not_applicable_reason:
 
 Choose exactly one `target_delivery_class` branch from `release-intent.schema.json`. The example below is the supported v1 product-release branch; exploration and non-product must use their own strict fields.
 
+For a product release that will enter execution, bind the exact controller-recordable `user-message:` or `operator-input:` authorization that will be supplied to Team start. `goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority in v1.
+
 ```atlas-release-intent+json
 {
   "schema_version": 1,
   "target_delivery_class": "product_release",
-  "target_delivery_authority_ref": "goal:<requirement-ref>",
+  "target_delivery_authority_ref": "user-message:<message-id>",
   "release_stage": "mvp",
   "surface_inventory": {
     "ref": "<acceptance-ref>",

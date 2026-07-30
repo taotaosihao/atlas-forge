@@ -29,4 +29,6 @@ For a `product_release`, the strict critical journey uses the named real integra
 
 In release mode, this protocol supplies only the Profile-bound `critical-journey` fact through the official Business Acceptance adapter. An unconditional accepted verdict with both required goals and real integration may map to `passed`; rejected or failed acceptance maps to `failed`; conditional, blocked, missing, ambiguous, simulator-only, or unresolved evidence maps to `cannot_verify` according to the adapter contract.
 
+The verdict and acceptance report remain claims until a workflow-bound producer receipt binds their source, producer, requirement, and immutable candidate. Content addressing alone does not establish that provenance; without it, the effective release fact is `cannot_verify`.
+
 Business Acceptance completion or stakeholder approval never grants certification. Only the Team execution-v3 completion-derived `release_decision.status` may be reported as the source-level release-readiness result, and its `certified`, `denied`, or `cannot_verify` value must be preserved exactly. Even `certified` does not prove or authorize installation, push, deployment, publication, or actual release.
