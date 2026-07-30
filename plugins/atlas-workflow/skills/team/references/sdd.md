@@ -42,3 +42,12 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
 - Regenerate review input after a repair and inspect new direct regressions normally.
 - Run branch/integration review only when integration risk justifies it.
 - Keep raw logs, traces, screenshots, dumps, and intermediate repair output outside Git. Keep one rolling runtime checkpoint for cross-compaction continuity instead of replaying all ledgers.
+
+## Product Release Certification
+
+Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+
+- For an admitted `product_release`, brief schema version 3 preserves the exact semantics-v4 release intent, execution-plan schema version 2, immutable Profile digest, component digests, and final-only check definitions.
+- Put all Profile checks in one terminal release-certification slice that transitively depends on every other executable slice. Attach each recomputed typed fact to its required-gate receipt, and require every receipt to bind the same final candidate manifest and final repository tree.
+- Implementers, reviewers, verifiers, subagents, and the controller may supply raw inputs, reports, facts, or receipts only through their assigned contracts. They never author `release_decision`; completion derives `certified`, `denied`, or `cannot_verify` after validating the whole sweep.
+- Slice completion, review approval, a passing command, and whole-task completion without a derived decision are not release readiness. Missing, stale, malformed, mixed-candidate, or unsupported evidence must remain inadmissible or `cannot_verify`, never a synthesized pass.

@@ -19,6 +19,20 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 6. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
 7. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision`; tiny or already-documented work needs no duplicate routing artifact.
 
+## Release Target Routing
+
+Classify the requested target deliverable independently from the current work type:
+
+- Use `product_release` when the target is an externally usable product candidate at any product stage. `MVP`, `Beta`, limited release, GA, and scaled operation change scope or maturity, never the formal-quality floor.
+- Use `exploration` only for an explicit spike, prototype, or demo. Keep it isolated from production identity, data, runtime, distribution, and release claims; promotion requires fresh product-release authoring and verification.
+- Use `non_product` only for a standalone deliverable such as analysis, documentation, or review whose current contract governs no release candidate, and record a substantive reason. Do not relabel an unsupported or incomplete product as non-product.
+- Work type and delivery target are orthogonal: planning or review that directly authors or gates a named externally usable candidate retains `product_release`, but its own completion is not candidate evidence or certification. Merely mentioning a product without governing a release candidate remains `non_product`.
+- Release certification v1 supports only a pure Web UI through immutable Profile `web-ui-v1`. API, CLI, worker, mixed, and unknown product surfaces fail authoring/admission; report the requested release conclusion as `cannot_verify` without inventing a completion `release_decision`, forcing them through this Profile, or relabeling them.
+
+Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+
+When the authorized target is a `product_release`, route its execution and certification through Team execution-v3. Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal. In the final reply, report an existing completion-derived `release_decision.status` exactly. When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`; only a separately established current failed fact supports saying the candidate is not release-ready.
+
 ## Execution Authority
 
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.

@@ -163,8 +163,19 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 ```
 
 - `authorization_ref` is an audit guard against accidental promotion, not a host capability. Never fabricate it from workflow artifacts.
-- Execute start and promotion require the canonical semantics-v3 `brief.json`; Team revalidates its contract/plan digests, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock.
+- Execute start and promotion require canonical brief schema v3 binding an admitted contract semantics v3 or v4; Team revalidates its contract/plan digests, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock.
 - Discuss starts and non-execute promotions do not require the reference.
+
+## Release Certification
+
+Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+
+- Classify target delivery independently from work type. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` but cannot certify it; only standalone work whose contract governs no release candidate may be `non_product` with a substantive reason. Explicit demo/prototype/spike work is `exploration`, remains isolated, and cannot make product-stage or release-readiness claims.
+- A newly authored `product_release` uses contract semantics v4, execution-plan schema version 2, brief schema version 3, Team execution-v3, and the exact immutable Profile binding. `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor.
+- Every Profile check belongs to one terminal release-certification slice that transitively depends on all other executable slices. Its fresh receipts must bind the same final source, artifact, surface inventory, config, runtime, data, intent, policy, and final worktree candidate.
+- The release collector reloads the digest-pinned official adapters, recomputes typed facts from raw inputs, and compares them before completion derives the decision. Agents, reviewers, verifiers, arbitrary successful commands, and controller-authored prose cannot create or overwrite `release_decision`.
+- Report a completion-derived `certified`, `denied`, or `cannot_verify` exactly. Missing, stale, mixed-candidate, or malformed final-sweep evidence is never promoted to a pass. Release certification v1 supports only a pure Web UI under `web-ui-v1`; API, CLI, worker, mixed, and unknown product surfaces fail before release admission, so report their requested release conclusion as `cannot_verify` without inventing a completion `release_decision`.
+- When no completion decision exists, keep `release_decision` absent: report the readiness assessment as `cannot_verify` unless a separately established current failed fact proves the candidate is not release-ready. Never convert an inadmissible sweep into a derived `cannot_verify` decision.
 
 ## Minimal Agent Planning
 
