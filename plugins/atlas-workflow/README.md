@@ -146,6 +146,38 @@ the goal neutral, place the condition once in the existing contract structure,
 and replace stale wording instead of appending exception sections or mirrored
 requirements.
 
+## Product Release Certification
+
+Atlas classifies the target governed by a contract separately from the current
+work type. A named externally usable candidate remains `product_release` even
+when the current activity is planning or review. An explicit spike, prototype,
+or demo is `exploration` and must remain isolated from production identity,
+data, runtime, distribution, and release-readiness claims. A standalone
+analysis, document, or review that governs no candidate may use `non_product`
+with a substantive reason.
+
+`MVP`, `Beta`, limited release, GA, and scaled operation change scope or
+maturity, not the formal-quality floor. Release certification v1 supports only
+a pure Web UI through the immutable `web-ui-v1` Profile. API, CLI, worker,
+mixed, and unknown product surfaces fail authoring/admission until a dedicated
+Profile exists; report their release-readiness assessment as `cannot_verify`
+without inventing a completion decision or relabeling the product.
+
+A newly authored `product_release` uses contract semantics v4, execution-plan
+schema version 2, brief schema version 3, and Team execution-v3. Every Profile
+check runs in one terminal slice that depends on all implementation slices and
+binds the same final source, artifact, surface inventory, config, runtime, and
+data candidate. Official digest-pinned adapters recompute typed facts from raw
+evidence; passing commands, screenshots, design approval, Business Acceptance,
+or agent/reviewer approval cannot write the decision.
+
+Only the completion-derived `release_decision.status=certified` supports a
+source-level release-ready claim. `denied` means an admissible same-candidate
+sweep contains a failed fact; `cannot_verify` means such a sweep contains an
+unresolved fact. Without Team authority, or with an inadmissible, mixed, or
+stale sweep, the system produces no decision. Certification never authorizes
+installation, push, deployment, publication, or actual release.
+
 ## Concise Phase Evidence
 
 Keep Git evidence to the smallest durable conclusion needed for review or

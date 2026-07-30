@@ -49,7 +49,9 @@
     "defaultPrompt": [
       "\u751f\u6210\u9879\u76ee\u6587\u6863\u3001workflow artifacts \u548c\u7528\u6237\u603b\u7ed3\u65f6\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00\u3002",
       "Use $atlas-workflow:task for bounded implementation or diagnosis; use $atlas-workflow:clarify when boundaries are unclear.",
-      "Use Codex-native $atlas-workflow:team. Paseo requires explicit Team/lane/dispatch selection; never auto-select Claude models."
+      "Use Codex-native $atlas-workflow:team. Paseo requires explicit Team/lane/dispatch selection; never auto-select Claude models.",
+      "Classify the governed target separately from work_type: named external candidates remain product_release, isolated demos are exploration, and standalone work governing no candidate is non_product.",
+      "For product_release at every stage, only Team execution-v3 completion-derived release_decision.status=certified supports a source-level release-ready claim; it never authorizes install, push, deploy, publication, or actual release."
     ],
     "brandColor": "#0F766E"
   }

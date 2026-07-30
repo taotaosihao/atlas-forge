@@ -132,6 +132,45 @@ non-secret environment policy, toolchain, lockfiles, submodules, and explicit
 inputs. General verification remains supplemental and cannot satisfy a declared
 required gate. Any snapshot change after verification requires a new verification.
 
+### Product release verification
+
+For a valid pure Web UI `product_release`, contract semantics v4 binds the
+immutable `web-ui-v1` Profile, execution-plan schema version 2 projects every
+Profile requirement into one terminal certification slice, and brief schema
+version 3 carries the exact policy identities into Team execution-v3.
+
+Release evidence lives under the canonical task artifact directory:
+
+- `release/candidate-manifest.json` binds the admitted repo HEAD/tree and the
+  content-addressed artifact, surface inventory, config, runtime, and data inputs.
+- `release/raw/*.json` contains adapter inputs; `release/facts/*.json` contains
+  typed facts. Each required verification binds exactly one candidate manifest,
+  one fact, its raw input, every candidate component, and every evidence ref by
+  `--input`.
+- The final sweep reloads the digest-pinned plugin adapters, recomputes each fact,
+  and rejects policy, fact, input, candidate, or final-worktree drift.
+
+The verification command's success means the typed fact was recorded and
+recomputed correctly; it does not mean the fact outcome was `passed`.
+Completion derives the read-only result only after the whole terminal sweep:
+
+- any `failed` fact produces `release_decision.status=denied`;
+- otherwise any `cannot_verify` fact produces
+  `release_decision.status=cannot_verify`;
+- all required facts `passed` produces `release_decision.status=certified`;
+- missing Team authority or an incomplete, stale, malformed, unsupported, or
+  mixed-candidate sweep is inadmissible and produces no decision.
+
+Direct Task work may finish a contributing implementation but cannot close a
+`product_release` goal. Unsupported API, CLI, worker, mixed, and unknown
+surfaces fail before release admission and have a release-readiness assessment
+of `cannot_verify`, not a fabricated completion record. The same assessment
+applies to direct or inadmissible work with no decision unless a separately
+established current failed fact proves the candidate is not release-ready. Even
+`certified` means source-level release-ready only; installation, push,
+deployment, publication, and actual release require separate authority and
+evidence.
+
 Install Codex Bash hooks for workflow evidence capture:
 
 ```bash
