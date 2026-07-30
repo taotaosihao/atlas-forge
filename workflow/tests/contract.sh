@@ -690,6 +690,33 @@ rg -q "Goal B business UI acceptance closure" "$ATLAS_FORGE_ROOT/workflow/templa
 rg -q "Dual-goal rule" "$ATLAS_FORGE_ROOT/workflow/templates/business-verdict.md"
 rg -q "evidence_rules" "$ATLAS_FORGE_ROOT/workflow/templates/contract-index.md"
 rg -q "Raw Run Artifacts" "$ATLAS_FORGE_ROOT/workflow/templates/design-review-report.md"
+design_review_paths="$(
+  "$ATLAS_FORGE_ROOT/workflow/bin/codex-design-review" init \
+    "ordinary fidelity" "/settings" "design.fig"
+)"
+design_review_task_id="$(sed -n 's/^task_id: //p' <<<"$design_review_paths")"
+test -n "$design_review_task_id"
+design_review_dir="$CODEX_WORKFLOW_ROOT/design-reviews/$design_review_task_id"
+rg -q "Must-Match Rules" "$design_review_dir/contract.md"
+rg -q "Allowed Tolerances" "$design_review_dir/contract.md"
+rg -q "Hard Gates" "$design_review_dir/contract.md"
+node - "$design_review_dir/verdict.json" <<'NODE'
+const fs = require("fs");
+const verdict = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (verdict.status !== "blocked" || verdict.severity !== "unknown"
+  || !Array.isArray(verdict.hard_failures) || !Array.isArray(verdict.soft_findings)
+  || !Array.isArray(verdict.evidence?.viewports_covered)
+  || !Array.isArray(verdict.evidence?.states_covered)
+  || Object.hasOwn(verdict, "candidate_manifest_digest")
+  || Object.hasOwn(verdict, "dimensions")) {
+  throw new Error("ordinary design-review verdict lost its generic fidelity contract");
+}
+NODE
+! rg -q "candidate_manifest_digest|owner_decision|release_requirement" \
+  "$design_review_dir/contract.md" "$design_review_dir/verdict.json"
+rg -q "canonical .*raw adapter input" "$source_skills_root/design-review/SKILL.md"
+rg -q "never replace or reinterpret the generic verdict as release evidence" \
+  "$source_skills_root/design-review/SKILL.md"
 rg -q "Concise Phase Evidence" "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
 rg -q "workflow working notes by default" "$source_skills_root/intake/SKILL.md"
 rg -q "do not mirror an execution-ready scope into a repo bundle unless handoff, audit, release, or existing project authority requires it" "$source_skills_root/clarify/SKILL.md"

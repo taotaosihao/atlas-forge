@@ -23,18 +23,18 @@ Follow this loop:
 2. Run `~/.codex/workflow/bin/codex-workflow list`.
 3. Reuse a relevant `doing` task if one already exists. Otherwise prefer:
    - `~/.codex/workflow/bin/codex-design-review init "<short title>" "<page url or route>" "<design source>"`
-   - This creates and starts a bounded task and scaffolds:
+   - This creates and starts a bounded ordinary design-fidelity task and scaffolds:
      - `contract.md`
      - `report.md`
      - `verdict.json`
    - If the page or design source is missing, create a normal bounded task instead and ask one short blocking question.
-4. Read `docs/design-fidelity-verification-playbook.md` if you need the detailed acceptance model. For release-mode review, use the scaffolded schema-version-2 contract and verdict as the field contract; load the immutable Profile instead of reproducing its full policy in this prompt.
+4. Read `docs/design-fidelity-verification-playbook.md` if you need the detailed acceptance model. The scaffolded contract and verdict remain the generic fidelity record. Release-mode evidence exists only inside an admitted Team release check: load the immutable Profile, write the canonical formal Web UI raw adapter input under the task `release/raw/` artifact path, and bind that exact file through the admitted check's `verify --input` instead of redefining the generic verdict.
 5. Build a design contract before judging:
    - must-match rules
    - allowed tolerances
    - target viewports
    - required states and interactions
-   - for release mode, the final candidate manifest digest, content-addressed surface inventory, accountable human owner, and content-addressed owner-decision evidence
+   - for release mode, separately verify that the admitted Team check binds the final candidate manifest digest, content-addressed surface inventory, accountable human owner, and content-addressed owner-decision evidence
 6. Collect evidence from the implementation with real tools:
    - the served final candidate and representative screenshots for the required viewports
    - DOM/text structure
@@ -49,15 +49,15 @@ Follow this loop:
    - multi-viewport behavior
    - interaction coverage
    - overall visual coherence
-   - in release mode, record only the four typed formal Web UI facts assigned by the template and bind every fact to the unchanged candidate; dead controls, happy-path-only coverage, engineering/meta content leakage, missing owner acceptance, or missing stable evidence fail or remain `cannot_verify` as the field contract specifies
-8. Write the result into the scaffolded `report.md` and schema-version-2 `verdict.json`. Screenshots and model judgment alone never prove interaction behavior, owner acceptance, or release readiness.
+   - in release mode, record only the four typed formal Web UI facts assigned by the immutable Profile and official adapter, and bind every fact to the unchanged candidate; dead controls, happy-path-only coverage, engineering/meta content leakage, missing owner acceptance, or missing stable evidence fail or remain `cannot_verify` as the adapter contract specifies
+8. Write the ordinary result into the scaffolded `report.md` and generic `verdict.json`. In release mode, additionally write the canonical `formal-web-ui-v1@1` raw adapter input under the task `release/raw/` artifact path and bind that exact file through the admitted check's `verify --input`; never replace or reinterpret the generic verdict as release evidence. Screenshots and model judgment alone never prove interaction behavior, owner acceptance, or release readiness.
 9. Port the useful Reflection ideas, not the OpenCode runtime hooks:
    - prefer evidence over claims
    - keep implementation and judgment separate
    - use explicit gates
    - keep retries bounded
 10. If the verdict is incomplete but the remaining work is agent-actionable, continue with targeted fixes, rerun the failed checks, then rerun the full desktop and mobile review. After 3 failed loops, stop and report the blocker clearly.
-11. Before reporting success, verify with real commands and tools. Do not claim design fidelity based only on “looks right”. Report each formal fact as `passed`, `failed`, or `cannot_verify`; do not write `certified`.
+11. Before reporting success, verify with real commands and tools. Do not claim design fidelity based only on “looks right”. In release mode, report each formal fact as `passed`, `failed`, or `cannot_verify`; do not write `certified`.
 12. When the review work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`. Review-task completion is not product-release certification.
 13. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
-14. In the final reply, include the task id, verdict path, candidate identity when release mode was active, verification commands and results, and any remaining fidelity risks. Mention a release decision only when a separate Team completion-derived record was supplied, and quote its status exactly.
+14. In the final reply, include the task id, generic verdict path, canonical raw-input path and candidate identity when release mode was active, verification commands and results, and any remaining fidelity risks. Mention a release decision only when a separate Team completion-derived record was supplied, and quote its status exactly.

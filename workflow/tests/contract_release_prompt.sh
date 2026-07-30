@@ -54,6 +54,8 @@ assert.match(text.team, /release-bearing `execution-v3` admission and completion
 assert.match(text.team, /Never convert an inadmissible sweep into a derived `cannot_verify` decision/);
 assert.match(text.design, /only the four typed formal Web UI facts/);
 assert.match(text.design, /do not write `certified`/);
+assert.match(text.design, /scaffolded contract and verdict remain the generic fidelity record/);
+assert.match(text.design, /never replace or reinterpret the generic verdict as release evidence/);
 assert.match(text.business, /real integration path/);
 assert.match(text.business, /only the Profile-bound `critical-journey` fact/);
 assert.match(text.business, /conditional, blocked, missing, ambiguous, simulator-only, or unresolved evidence maps to `cannot_verify`/);
