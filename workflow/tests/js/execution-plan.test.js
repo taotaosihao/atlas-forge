@@ -303,3 +303,32 @@ test("execution plan versions stay bound to contract and delivery semantics", ()
     /semantics-v3 contracts require execution-plan schema version 1/,
   );
 });
+
+test("execution plan JSON Schema publishes both v1 and release-bound v2", () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(
+    ROOT,
+    "../plugins/atlas-workflow/contracts/team-sdd/execution-plan.schema.json",
+  ), "utf8"));
+  assert.equal(schema.$schema, "http://json-schema.org/draft-07/schema#");
+  assert.equal(schema.oneOf.length, 2);
+  const branch = (version) => schema.oneOf.find((item) => (
+    item.properties.schema_version.enum.includes(version)
+  ));
+  const v1 = branch(1);
+  const v2 = branch(2);
+  assert.ok(v1);
+  assert.ok(v2.required.includes("release"));
+  assert.equal(v2.properties.release.$ref, "#/definitions/release_binding");
+  assert.equal(v1.properties.slices.items.$ref, "#/definitions/slice_v1");
+  assert.equal(v2.properties.slices.items.$ref, "#/definitions/slice_v2");
+  assert.equal(schema.definitions.slice_v1.properties.checks.items.$ref, "#/definitions/check_v1");
+  assert.equal(schema.definitions.slice_v2.properties.checks.items.$ref, "#/definitions/check_v2");
+  assert.equal(
+    schema.definitions.check_v2.properties.release_requirement.$ref,
+    "#/definitions/release_requirement",
+  );
+  assert.ok(schema.definitions.release_requirement.required.includes("collector_adapter_sha256"));
+  assert.ok(schema.definitions.release_requirement.required.includes("fact_schema_sha256"));
+  assert.ok(schema.definitions.release_requirement.required.includes("evaluator_sha256"));
+  assert.ok(schema.definitions.release_requirement.required.includes("pass_rule_sha256"));
+});
