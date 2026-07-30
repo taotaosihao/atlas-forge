@@ -223,6 +223,58 @@ test("schema v2 projects every immutable Profile requirement exactly once", () =
   assert.match(validateExecutionPlan(replacedEvaluator, { releaseIntent: intent }).join("\n"), /immutable Profile Check Definition/);
 });
 
+test("schema v2 runs the complete release sweep in one terminal slice", () => {
+  const intent = productIntent();
+  const disconnected = releasePlan(intent);
+  disconnected.slices.unshift({
+    slice_id: "implementation-slice",
+    objective: "Implement the candidate before the global release sweep.",
+    depends_on: [],
+    keeper_outputs: ["candidate:implemented"],
+    owned_paths: ["product/runtime/**"],
+    forbidden_paths: ["plugins/multica-sdlc/**"],
+    acceptance_refs: ["AC-IMPLEMENTED"],
+    risk_class: "high",
+    failure_domain: "candidate-implementation",
+    rollback_boundary: "one implementation commit",
+    estimate: {
+      estimated_changed_files: 2,
+      estimated_net_loc: 100,
+      target_p90_minutes: 60,
+      serial_dependency_depth: 0,
+      independent_vertical_count: 1,
+    },
+    budget: {
+      max_changed_files: 4,
+      max_loc: 400,
+      max_wall_clock_minutes: 90,
+      max_required_checks: 1,
+    },
+    checks: [{
+      check_id: "implementation-contract",
+      gate_class: "contract",
+      command: "node --test product/runtime.test.js",
+      final_only: false,
+      cache_policy: "identity-bound",
+    }],
+  });
+  assert.match(
+    validateExecutionPlan(disconnected, { releaseIntent: intent }).join("\n"),
+    /must transitively depend on every other slice/,
+  );
+
+  disconnected.slices[1].depends_on = ["implementation-slice"];
+  disconnected.slices[1].estimate.serial_dependency_depth = 1;
+  assert.deepEqual(validateExecutionPlan(disconnected, { releaseIntent: intent }), []);
+
+  const split = clone(disconnected);
+  split.slices[0].checks.push(split.slices[1].checks.pop());
+  assert.match(
+    validateExecutionPlan(split, { releaseIntent: intent }).join("\n"),
+    /one terminal certification slice/,
+  );
+});
+
 test("schema v2 rejects stale policy identity and downgraded release checks", () => {
   const intent = productIntent();
   const stale = releasePlan(intent);

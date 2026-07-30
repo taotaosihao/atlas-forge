@@ -364,6 +364,7 @@ function validateReleasePlan(plan, intent, errors) {
 
   const requirements = new Map(profile.requirements.map((requirement) => [requirement.requirement_id, requirement]));
   const projected = new Set();
+  const releaseSliceIds = new Set();
   plan.slices.forEach((slice, sliceIndex) => {
     for (const [checkIndex, check] of (slice.checks || []).entries()) {
       if (!isObject(check) || check.release_requirement === undefined) continue;
@@ -386,6 +387,7 @@ function validateReleasePlan(plan, intent, errors) {
         push(errors, `${location}.requirement_ref`, `duplicate release requirement projection: ${requirementRef}`);
       }
       projected.add(requirementRef);
+      releaseSliceIds.add(slice.slice_id);
       const expected = releaseRequirementProjection(profile, binding, requirement);
       for (const field of RELEASE_REQUIREMENT_KEYS) {
         if (canonicalJson(check.release_requirement[field]) !== canonicalJson(expected[field])) {
@@ -404,6 +406,31 @@ function validateReleasePlan(plan, intent, errors) {
   for (const requirementRef of requirements.keys()) {
     if (!projected.has(requirementRef)) {
       push(errors, "slices", `missing release requirement projection: ${requirementRef}`);
+    }
+  }
+  if (releaseSliceIds.size > 1) {
+    push(errors, "slices", "all release requirements must run in one terminal certification slice");
+  } else if (releaseSliceIds.size === 1) {
+    const releaseSliceId = [...releaseSliceIds][0];
+    const slices = new Map(plan.slices.map((slice) => [slice.slice_id, slice]));
+    const dependencies = new Set();
+    function collectDependencies(sliceId) {
+      for (const dependency of slices.get(sliceId)?.depends_on || []) {
+        if (dependencies.has(dependency)) continue;
+        dependencies.add(dependency);
+        collectDependencies(dependency);
+      }
+    }
+    collectDependencies(releaseSliceId);
+    const missingDependencies = plan.slices
+      .map((slice) => slice.slice_id)
+      .filter((sliceId) => sliceId !== releaseSliceId && !dependencies.has(sliceId));
+    if (missingDependencies.length > 0) {
+      push(
+        errors,
+        "slices",
+        `release certification slice ${releaseSliceId} must transitively depend on every other slice: ${missingDependencies.join(", ")}`,
+      );
     }
   }
 }
