@@ -38,12 +38,12 @@ function digest(char) {
   return `sha256:${char.repeat(64)}`;
 }
 
-function productIntent() {
+function productIntent(authorityRef = "user-message:release") {
   const profile = loadBundledProfile("web-ui-v1");
   return {
     schema_version: 1,
     target_delivery_class: "product_release",
-    target_delivery_authority_ref: "goal:REL-PRODUCT",
+    target_delivery_authority_ref: authorityRef,
     release_stage: "mvp",
     surface_inventory: { ref: "AC-SURFACE", sha256: digest("a") },
     surface_kinds: ["web_ui"],
@@ -125,7 +125,7 @@ function git(repo, args) {
   return result.stdout.trim();
 }
 
-function fixture(t, { workType = "implementation" } = {}) {
+function fixture(t, { authorityRef = "user-message:release", workType = "implementation" } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-release-admission."));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const environment = {
@@ -140,7 +140,7 @@ function fixture(t, { workType = "implementation" } = {}) {
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "atlas@example.test"]);
   git(repo, ["config", "user.name", "Atlas Test"]);
-  const intent = productIntent();
+  const intent = productIntent(authorityRef);
   const plan = releasePlan(intent);
   const contract = path.join(repo, "implementation-contract.final.md");
   fs.writeFileSync(contract, contractMarkdown(intent, plan, workType));
@@ -176,6 +176,7 @@ test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy",
   assert.match(validateBrief(missingWorkType).join("\n"), /missing required key: work_type/);
 
   const admission = admitTeamStart({
+    authorizationRef: "user-message:release",
     briefPath: value.briefPath,
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
@@ -213,6 +214,7 @@ test("planning and review keep product_release classification but cannot enter c
     assert.equal(discussed.mode, "discuss-v3");
     assert.equal(discussed.brief.work_type, workType);
     assert.throws(() => admitTeamStart({
+      authorizationRef: "user-message:release",
       briefPath: value.briefPath,
       clock: () => new Date("2026-07-30T00:00:00Z"),
       cwd: value.repo,
@@ -232,6 +234,7 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
   delete missing.contract.release;
   fs.writeFileSync(value.briefPath, `${JSON.stringify(missing, null, 2)}\n`);
   assert.throws(() => admitTeamStart({
+    authorizationRef: "user-message:release",
     briefPath: value.briefPath,
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
@@ -245,6 +248,7 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
   replaced.contract.release.profile_sha256 = digest("b");
   fs.writeFileSync(value.briefPath, `${JSON.stringify(replaced, null, 2)}\n`);
   assert.throws(() => admitTeamStart({
+    authorizationRef: "user-message:release",
     briefPath: value.briefPath,
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
@@ -258,6 +262,7 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
   replacedWorkType.contract.work_type = "review";
   fs.writeFileSync(value.briefPath, `${JSON.stringify(replacedWorkType, null, 2)}\n`);
   assert.throws(() => admitTeamStart({
+    authorizationRef: "user-message:release",
     briefPath: value.briefPath,
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
@@ -266,6 +271,37 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
     paths: value.paths,
     taskId: "release-task",
   }), /brief work_type does not match/);
+});
+
+test("product_release execution requires the exact controller-recordable delivery authority", (t) => {
+  const value = fixture(t);
+  const admit = (authorizationRef) => admitTeamStart({
+    authorizationRef,
+    briefPath: value.briefPath,
+    clock: () => new Date("2026-07-30T00:00:00Z"),
+    cwd: value.repo,
+    environment: value.environment,
+    mode: "execute",
+    paths: value.paths,
+    taskId: "release-task",
+  });
+  assert.equal(admit("user-message:release").brief.delivery_authority_ref, "user-message:release");
+  assert.throws(() => admit("user-message:other"), /exact user-message or operator-input authority/);
+  assert.throws(() => admit(""), /exact user-message or operator-input authority/);
+
+  for (const unresolved of ["goal:REL-PRODUCT", "current-required:REL-PRODUCT"]) {
+    const unresolvedFixture = fixture(t, { authorityRef: unresolved });
+    assert.throws(() => admitTeamStart({
+      authorizationRef: unresolved,
+      briefPath: unresolvedFixture.briefPath,
+      clock: () => new Date("2026-07-30T00:00:00Z"),
+      cwd: unresolvedFixture.repo,
+      environment: unresolvedFixture.environment,
+      mode: "execute",
+      paths: unresolvedFixture.paths,
+      taskId: "release-task",
+    }), /exact user-message or operator-input authority/);
+  }
 });
 
 test("brief compiler rejects an author-replaced evaluator", (t) => {

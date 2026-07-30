@@ -26,6 +26,7 @@ const {
   timestampSeconds,
 } = require("../task/runtime");
 const { captureVerificationIdentity, sha256 } = require("./identity");
+const { validateReleaseProducerProvenance } = require("./release-provenance");
 const {
   buildVerificationIdentityRecord,
   renderVerificationRecord,
@@ -315,6 +316,32 @@ function runVerification(parsed, options = {}) {
       inputPaths: parsed.inputPaths || [],
     });
     const snapshotStable = before.identityDigest === after.identityDigest;
+    const completedRequiredGate = requiredGate ? {
+      ...requiredGate,
+      candidate_tree_oid: after.identity.worktree.tree_oid,
+    } : null;
+    let producerProvenance = null;
+    // This callback is an in-process trust boundary. The public CLI never resolves it from
+    // arguments, environment, stdout, or raw evidence; production producers must be registered here.
+    if (exitCode === 0 && snapshotStable && completedRequiredGate?.release_requirement
+      && typeof options.resolveReleaseProducer === "function") {
+      producerProvenance = options.resolveReleaseProducer({
+        command: [...parsed.command],
+        cwd,
+        identity: after.identity,
+        requiredGate: JSON.parse(JSON.stringify(completedRequiredGate)),
+        stderrFile,
+        stdoutFile,
+        taskId: parsed.taskId,
+      });
+      const provenanceErrors = validateReleaseProducerProvenance(producerProvenance, {
+        identity: after.identity,
+        requirementRef: completedRequiredGate.release_requirement.requirement_ref,
+      });
+      if (provenanceErrors.length > 0) {
+        throw new CommandError(`release producer resolver returned invalid provenance: ${provenanceErrors.join("; ")}`);
+      }
+    }
     const identityRecord = buildVerificationIdentityRecord({
       schema_version: requiredGate ? 3 : 2,
       task_id: parsed.taskId,
@@ -323,7 +350,7 @@ function runVerification(parsed, options = {}) {
       verdict,
       outcome,
       provenance: requiredGate ? "fresh-executed" : "executed",
-      ...(requiredGate ? { required_gate: requiredGate } : {}),
+      ...(completedRequiredGate ? { required_gate: completedRequiredGate } : {}),
       identity: after.identity,
       identity_digest: after.identityDigest,
       pre_identity_digest: before.identityDigest,
@@ -333,6 +360,7 @@ function runVerification(parsed, options = {}) {
         stdout_sha256: sha256(fs.readFileSync(stdoutFile)),
         stderr_sha256: sha256(fs.readFileSync(stderrFile)),
         evidence_refs: [...parsed.evidenceRefs],
+        ...(producerProvenance ? { producer_provenance: producerProvenance } : {}),
       },
     });
     const identityReference = relativeToCodeHome(paths, identityFile);
@@ -383,7 +411,7 @@ function runVerification(parsed, options = {}) {
           record_id: identityRecord.record_id,
           identity_digest: identityRecord.identity_digest,
           observed_revision: observedRevision,
-          required_gate: requiredGate,
+          required_gate: completedRequiredGate,
           verdict,
           outcome,
         },
@@ -407,12 +435,12 @@ function runVerification(parsed, options = {}) {
           ...(state.verification || {}),
           ...stateFields,
         };
-        if (requiredGate) {
+        if (completedRequiredGate) {
           state.verification.schema_version = 3;
           state.verification.required_gates = {
             ...(state.verification.required_gates || {}),
-            [requiredGate.check_id]: {
-              ...requiredGate,
+            [completedRequiredGate.check_id]: {
+              ...completedRequiredGate,
               completed_at: verifiedAt,
               event_revision: revision + 1,
               identity_digest: identityRecord.identity_digest,

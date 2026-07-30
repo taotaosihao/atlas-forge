@@ -9,6 +9,7 @@ const { taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { taskEventFile } = require("../core/task-mutation");
 const { captureWorktreeSnapshot: captureRepositorySnapshot } = require("../core/worktree-snapshot");
+const { executionAuthorityTeam } = require("./execution-authority-event");
 const { pathsOverlap } = require("./lane-registry");
 const { sha256 } = require("../verification/identity");
 const { validateGateRecord } = require("../verification/required-gates");
@@ -281,6 +282,7 @@ function validateContractBinding(brief, repo, environment, paths) {
   }
   let plan;
   let workType = null;
+  let releaseIntent = null;
   if (semanticsVersion === 4) {
     const contracts = loadCanonicalExecutionContracts(environment, paths);
     if (!contracts) throw new CommandError("canonical release execution validators are unavailable");
@@ -288,6 +290,7 @@ function validateContractBinding(brief, repo, environment, paths) {
     try {
       workType = contracts.extractContractWorkType(markdown);
       intent = contracts.extractReleaseIntent(markdown);
+      releaseIntent = intent;
       plan = contracts.extractExecutionPlan(markdown);
     } catch (error) {
       throw new CommandError(`semantics-v4 release contract is invalid: ${error.message}`);
@@ -343,7 +346,7 @@ function validateContractBinding(brief, repo, environment, paths) {
   for (const [label, actual, expected] of bindings) {
     if (!same(actual, expected)) throw new CommandError(`brief ${label} does not match the contract plan`);
   }
-  return { contractDigest, contractFile, plan, planDigest, workType };
+  return { contractDigest, contractFile, plan, planDigest, releaseIntent, workType };
 }
 
 function validateSizeGate(brief, clock) {
@@ -431,12 +434,14 @@ function validateDependencies(paths, brief, options = {}) {
         || !/^sha256:[a-f0-9]{64}$/.test(record.record_id || "")
         || record.record_digest !== record.record_id
         || !/^sha256:[a-f0-9]{64}$/.test(record.identity_digest || "")
+        || !/^[a-f0-9]{40}$/.test(record.candidate_tree_oid || "")
+        || record.candidate_tree_oid !== accepted.actual_size?.accepted_tree_oid
         || record.outcome !== "passed" || record.provenance !== "fresh-executed"
       ))) {
       throw new CommandError(`dependency authoritative acceptance is invalid: ${dependency.slice_id}`);
     }
     const matchingRunEvent = events.slice(0, events.indexOf(terminal) + 1).findLast((event) => {
-      const team = event.kind === "team.started" ? event.result?.team : null;
+      const team = executionAuthorityTeam(event);
       return team?.team_run_id === accepted.team_run_id
         && team?.generation === accepted.generation
         && team?.slice_id === dependency.slice_id
@@ -648,7 +653,7 @@ function globalAdmissionLockFile(paths) {
   return path.join(paths.stateDir, ".team-execution-admission.lock");
 }
 
-function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, mode, paths, taskId }) {
+function admitTeamStart({ authorizationRef, briefPath, captureIdentity, clock, cwd, environment, mode, paths, taskId }) {
   if (mode === "discuss") {
     if (!briefPath) return { mode: "discuss-compat", brief: null, admitted_owned_paths: [] };
   } else if (!briefPath) {
@@ -666,6 +671,15 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
     throw new CommandError(
       "product_release Team execution requires work_type implementation; planning and review may discuss but cannot certify",
     );
+  }
+  if (mode === "execute" && binding.plan.release) {
+    const authorityRef = binding.releaseIntent?.target_delivery_authority_ref || "";
+    if (!/^(?:user-message|operator-input):/.test(authorityRef)
+      || authorityRef !== authorizationRef) {
+      throw new CommandError(
+        "product_release Team execution requires the exact user-message or operator-input authority bound by release intent",
+      );
+    }
   }
   validateSizeGate(brief, clock);
   validateDependencies(paths, brief, {
@@ -685,6 +699,9 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
       execution_plan_sha256: `sha256:${binding.planDigest}`,
       ...(binding.workType ? { work_type: binding.workType } : {}),
       ...(binding.plan.release ? { release: binding.plan.release } : {}),
+      ...(binding.plan.release ? {
+        delivery_authority_ref: binding.releaseIntent.target_delivery_authority_ref,
+      } : {}),
       base_sha: brief.base_sha,
       repo,
     },
@@ -725,6 +742,9 @@ function bindExecutionAuthority(state, admission, revision) {
     required_slices: [...admission.required_slices],
     ...(admission.brief.work_type ? { work_type: admission.brief.work_type } : {}),
     ...(admission.brief.release ? { release_binding: admission.brief.release } : {}),
+    ...(admission.brief.release ? {
+      delivery_authority_ref: admission.brief.delivery_authority_ref,
+    } : {}),
   };
   const existing = state.execution_authority;
   if (existing) {
@@ -744,6 +764,11 @@ function bindExecutionAuthority(state, admission, revision) {
     if (!same(existing.release_binding || null, requested.release_binding || null)) {
       throw new CommandError(
         "task execution authority release binding changed; explicit replan is required",
+      );
+    }
+    if ((existing.delivery_authority_ref || "") !== (requested.delivery_authority_ref || "")) {
+      throw new CommandError(
+        "task execution authority delivery authority changed; explicit replan is required",
       );
     }
     if (!same(existing.required_slices, requested.required_slices)) {

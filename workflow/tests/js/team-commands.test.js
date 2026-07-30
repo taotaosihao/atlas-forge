@@ -850,9 +850,12 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   );
 
   runRecordStart(parseRecordStartArgs([
-    taskId, "execute foundation slice", "--mode=execute",
-    "--authorization-ref=user-message:foundation-execute",
-    `--brief=${admission.briefPaths.foundation}`, "--operation-id=start-foundation",
+    taskId, "discuss foundation slice", "--mode=discuss",
+    `--brief=${admission.briefPaths.foundation}`, "--operation-id=discuss-foundation",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([
+    taskId, "--to=execute", "--authorization-ref=user-message:foundation-execute",
+    `--brief=${admission.briefPaths.foundation}`, "--operation-id=promote-foundation",
   ]), { cwd: admission.repo, environment });
   runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
     environment,
@@ -1132,6 +1135,14 @@ test("task completion requires every command-bound admitted gate", (t) => {
   assert.equal(state.verification.schema_version, 3);
   assert.deepEqual(Object.keys(state.verification.required_gates).sort(), ["contracts", "security"]);
   assert.equal(state.verification.required_gates.security.provenance, "fresh-executed");
+  assert.match(state.verification.required_gates.security.candidate_tree_oid, /^[a-f0-9]{40}$/);
+  const securityIdentity = JSON.parse(fs.readFileSync(path.resolve(
+    paths.codeHome, state.verification.required_gates.security.identity_record,
+  ), "utf8"));
+  assert.equal(
+    state.verification.required_gates.security.candidate_tree_oid,
+    securityIdentity.identity.worktree.tree_oid,
+  );
   const imported = JSON.parse(JSON.stringify(state));
   imported.verification.required_gates.security.provenance = "imported";
   assert.equal(requiredGateAdmission(paths, taskId, imported, { environment }).passed, false);
@@ -1594,6 +1605,56 @@ test("slice acceptance rejects actual diff drift beyond 150 percent", (t) => {
     taskId, `--brief=${admission.briefPath}`, "--operation-id=accept-size-drift",
     "--keeper-output=event:execution-slice-complete=src/bounded/keeper.txt",
   ]), { environment }), /slice requires pause\/replan: actual size/);
+});
+
+test("slice acceptance rejects candidate B changed after gates verified candidate A", async (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Candidate tree race");
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+    ownedPaths: ["src/candidate-race/**"],
+  });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "verify immutable candidate A", "--mode=execute",
+    "--authorization-ref=user-message:candidate-race",
+    `--brief=${admission.briefPath}`, "--operation-id=start-candidate-race",
+  ]), { cwd: admission.repo, environment });
+  runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-candidate-race-team",
+  });
+  const keeperRelative = "src/candidate-race/keeper.txt";
+  const keeper = path.join(admission.repo, keeperRelative);
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "candidate A\n");
+  runVerification(parseVerifyArgs([
+    taskId, `--brief=${admission.briefPath}`, "--slice-id=execution-slice",
+    "--check-id=execution-contract", "--", ...checkCommand,
+  ]), {
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-candidate-a",
+    recordToken: "20260730T120800000000001",
+  });
+
+  const marker = path.join(paths.root, "candidate-race-ready");
+  const accepting = spawnWorkflow({
+    ...environment,
+    CODEX_WORKFLOW_TEST_SLICE_ACCEPT_PAUSE_AFTER_DEPENDENCIES: "0.5",
+    CODEX_WORKFLOW_TEST_SLICE_ACCEPT_PAUSE_MARKER: marker,
+  }, [
+    "team-slice-accept", taskId, `--brief=${admission.briefPath}`,
+    "--operation-id=accept-candidate-b",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ], admission.repo);
+  await waitForFile(marker);
+  fs.writeFileSync(keeper, "candidate B\n");
+  const result = await accepting;
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /candidate changed after required verification/);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).slice_acceptances?.["execution-slice"], undefined);
+  assert.notEqual(authoritativeEvents(paths, taskId).at(-1).kind, "slice.accepted");
 });
 
 test("discuss compatibility never grants a writable lease", (t) => {

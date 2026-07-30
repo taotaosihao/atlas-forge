@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { captureWorktreeSnapshot } = require("../core/worktree-snapshot");
 
 const ENVIRONMENT_NAMES = Object.freeze([
   "CI",
@@ -259,11 +260,13 @@ function captureVerificationIdentity({
   ]);
   const untracked = untrackedManifest(repoRoot);
   const submodules = runGit(repoRoot, ["submodule", "status", "--recursive"]);
+  const snapshot = captureWorktreeSnapshot(repoRoot);
   const normalizedArgv = [...argv].map(String);
   const identity = {
     repo_root_realpath: repoRoot,
     head_commit: gitText(repoRoot, ["rev-parse", "--verify", "HEAD^{commit}"]),
     worktree: {
+      tree_oid: snapshot.tree_oid,
       tracked_diff_sha256: sha256(trackedDiff),
       staged_diff_sha256: sha256(stagedDiff),
       untracked_manifest_sha256: digestCanonical(untracked),

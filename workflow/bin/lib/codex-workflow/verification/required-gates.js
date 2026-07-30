@@ -6,13 +6,17 @@ const childProcess = require("child_process");
 const { taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { captureWorktreeSnapshot } = require("../core/worktree-snapshot");
+const { executionAuthorityTeam } = require("../team/execution-authority-event");
 const {
   captureVerificationIdentity,
   digestCanonical,
   identityInputPaths,
   sha256,
 } = require("./identity");
-const { evaluateReleaseSweep } = require("./release-certification");
+const {
+  evaluateReleaseSweep,
+  resolveValidatedReleaseIntent,
+} = require("./release-certification");
 
 const PERMANENT_FRESH_GATE_CLASSES = new Set([
   "auth", "permission", "security", "data-consistency", "migration", "backup",
@@ -270,6 +274,14 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
     if (record.identity?.head_commit !== expected.admission_head_sha) {
       reasons.push(`required verification gate ${expected.check_id} ran at the wrong admitted HEAD`);
     }
+    if (!/^[a-f0-9]{40}$/.test(record.identity?.worktree?.tree_oid || "")) {
+      reasons.push(`required verification gate ${expected.check_id} is missing its candidate tree`);
+    }
+    if (!/^[a-f0-9]{40}$/.test(gate.candidate_tree_oid || "")
+      || gate.candidate_tree_oid !== record.required_gate?.candidate_tree_oid
+      || gate.candidate_tree_oid !== record.identity?.worktree?.tree_oid) {
+      reasons.push(`required verification gate ${expected.check_id} candidate tree binding is invalid`);
+    }
     const ancestor = childProcess.spawnSync(
       "git", ["-C", expected.repo_realpath, "merge-base", "--is-ancestor", expected.base_sha, "HEAD"],
     );
@@ -298,6 +310,29 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
   return record;
 }
 
+function validateDeliveryAuthority(events, authority, targetAuthorityRef, reasons) {
+  if (!authority?.release_binding) return;
+  const authorityRef = authority.delivery_authority_ref;
+  const revision = Number(authority.established_revision || 0);
+  if (!/^(?:user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(authorityRef || "")
+    || authorityRef !== targetAuthorityRef || !Number.isInteger(revision) || revision < 1) {
+    reasons.push("release delivery authority is unresolved or is not controller-originated");
+    return;
+  }
+  const event = events.find((candidate) => candidate.revision === revision);
+  const team = executionAuthorityTeam(event);
+  if (!team
+    || event.data?.authorization_ref !== authorityRef
+    || event.data?.contract_sha256 !== authority.contract_sha256
+    || event.data?.execution_plan_sha256 !== authority.execution_plan_sha256
+    || team.admission?.brief?.contract_sha256 !== authority.contract_sha256
+    || team.admission?.brief?.execution_plan_sha256 !== authority.execution_plan_sha256
+    || event.projection?.state?.execution_authority?.delivery_authority_ref !== authorityRef
+    || event.projection?.state?.execution_authority?.established_revision !== revision) {
+    reasons.push("release delivery authority is not bound to its authoritative controller event");
+  }
+}
+
 function requiredGateAdmission(paths, taskId, state, options = {}) {
   const context = admittedExecutionBrief(paths, taskId, state);
   if (!context) return null;
@@ -309,6 +344,26 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     : {};
   const reasons = [];
   const records = [];
+  let authorityEvents = [];
+  try {
+    authorityEvents = readAuthoritativeEvents(
+      path.join(taskArtifactDir(paths, taskId), "events-v2.jsonl"), taskId,
+    );
+    let targetAuthorityRef = "";
+    if (context.brief.contract.release) {
+      targetAuthorityRef = resolveValidatedReleaseIntent({
+        contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
+        environment: options.environment || process.env,
+        paths,
+        releaseBinding: context.brief.contract.release,
+      }).intent.target_delivery_authority_ref;
+    }
+    validateDeliveryAuthority(
+      authorityEvents, state.execution_authority, targetAuthorityRef, reasons,
+    );
+  } catch (error) {
+    reasons.push(`unable to validate release delivery authority: ${error.message}`);
+  }
   const expectedChecks = (context.brief.checks || []).map((check) => ({
     admission_head_sha: context.admission.slice_start_snapshot.head_sha,
     admission_tree_oid: context.admission.slice_start_snapshot.tree_oid,
@@ -331,6 +386,12 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     );
     if (record) records.push(record);
   }
+  const candidateTrees = new Set(records
+    .map((record) => record.required_gate?.candidate_tree_oid)
+    .filter(Boolean));
+  if (records.length > 0 && candidateTrees.size !== 1) {
+    reasons.push("required verification gates do not bind one immutable candidate tree");
+  }
   const nonFinalRevision = Math.max(0, ...expectedChecks
     .filter((check) => !check.final_only)
     .map((check) => Number(gates[check.check_id]?.event_revision || 0)));
@@ -348,7 +409,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
         contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
         environment: options.environment || process.env,
         paths,
-        receipts: records,
+        receipts: records.map((record) => gates[record.required_gate.check_id]),
         releaseBinding: context.brief.contract.release,
         repo: context.repo,
         snapshot,
@@ -366,6 +427,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     (releaseCertification?.receiptSummaries || []).map((item) => [item.check_id, item]),
   );
   return {
+    candidateTreeOid: candidateTrees.size === 1 ? [...candidateTrees][0] : "",
     identityDigest: records.length === 1 ? records[0].identity_digest : "",
     passed: reasons.length === 0,
     reasons,
@@ -381,6 +443,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
         event_revision: gate.event_revision || 0,
         identity_digest: record.identity_digest,
         identity_record: gate.identity_record || "",
+        candidate_tree_oid: record.required_gate?.candidate_tree_oid || "",
         outcome: record.outcome,
         provenance: record.provenance,
         record_digest: record.record_id,
@@ -406,6 +469,7 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
   let repo = "";
   let plan = null;
   let contractMarkdown = "";
+  let targetAuthorityRef = "";
   try {
     repo = canonicalDirectory(authority.repo_realpath, "execution authority repository");
     if (repo !== authority.repo_realpath) reasons.push("execution authority repository mismatch");
@@ -425,6 +489,14 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
     plan = JSON.parse(matches[0][1]);
     if (digestCanonical(plan) !== authority.execution_plan_sha256) {
       reasons.push("execution authority plan sha256 no longer matches");
+    }
+    if (authority.release_binding) {
+      targetAuthorityRef = resolveValidatedReleaseIntent({
+        contractMarkdown,
+        environment: options.environment || process.env,
+        paths,
+        releaseBinding: authority.release_binding,
+      }).intent.target_delivery_authority_ref;
     }
   } catch (error) {
     reasons.push(`unable to load task execution authority: ${error.message}`);
@@ -446,6 +518,7 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
   } catch (error) {
     reasons.push(`unable to load authoritative slice evidence: ${error.message}`);
   }
+  validateDeliveryAuthority(events, authority, targetAuthorityRef, reasons);
   for (const slice of slices) {
     const accepted = state.slice_acceptances?.[slice.slice_id];
     if (!accepted || accepted.status !== "accepted") {
@@ -508,6 +581,7 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
         || record.repo_realpath !== repo
         || record.admission_head_sha !== accepted.actual_size?.start_head_sha
         || record.admission_tree_oid !== accepted.actual_size?.start_tree_oid
+        || record.candidate_tree_oid !== accepted.actual_size?.accepted_tree_oid
         || digestCanonical(record.release_requirement || null)
           !== digestCanonical(check.release_requirement || null)
         || record.outcome !== "passed" || record.provenance !== "fresh-executed"
@@ -519,7 +593,8 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
         || verificationEvent.revision >= accepted.revision
         || verificationEvent.data?.record_id !== record.record_id
         || verificationEvent.data?.identity_digest !== record.identity_digest
-        || verificationEvent.data?.required_gate?.check_id !== check.check_id) {
+        || verificationEvent.data?.required_gate?.check_id !== check.check_id
+        || verificationEvent.data?.required_gate?.candidate_tree_oid !== record.candidate_tree_oid) {
         reasons.push(`accepted slice verification event is invalid: ${slice.slice_id}/${check.check_id}`);
       } else {
         recordIds.push(record.record_id);
@@ -579,6 +654,8 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
   if (authority.release_binding) {
     if (authority.work_type !== "implementation") {
       reasons.push("release completion authority requires work_type implementation");
+    } else if (reasons.length > 0) {
+      reasons.push("release certification requires valid completion and delivery authority evidence");
     } else if (!completionSnapshot || !repo || !contractMarkdown) {
       reasons.push("release certification requires a stable final completion snapshot");
     } else {

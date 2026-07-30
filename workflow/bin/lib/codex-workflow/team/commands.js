@@ -252,6 +252,7 @@ function runRecordStart(parsed, options = {}) {
         },
         ({ revision }) => {
           const admission = admitTeamStart({
+            authorizationRef: parsed.authorizationRef,
             briefPath: parsed.briefPath,
             captureIdentity: options.captureIdentity,
             clock,
@@ -1425,6 +1426,7 @@ function runPromote(parsed, options = {}) {
         },
         ({ revision }) => {
           const admission = parsed.target === "execute" ? admitTeamStart({
+            authorizationRef: parsed.authorizationRef,
             briefPath: parsed.briefPath,
             captureIdentity: options.captureIdentity,
             clock,

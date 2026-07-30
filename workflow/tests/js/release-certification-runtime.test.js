@@ -33,6 +33,12 @@ const {
 const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/core/paths",
 ));
+const { readAuthoritativeEvents } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/core/event-store",
+));
+const { taskEventFile } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/core/task-mutation",
+));
 const { captureWorktreeSnapshot } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/core/worktree-snapshot",
 ));
@@ -50,7 +56,7 @@ const {
   parseVerifyArgs,
   runVerification,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/runner"));
-const { captureVerificationIdentity, sha256 } = require(path.join(
+const { captureVerificationIdentity, digestCanonical, sha256 } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/identity",
 ));
 const { buildVerificationIdentityRecord } = require(path.join(
@@ -246,7 +252,11 @@ function buildFacts(profile, policies, raw, candidateDigest) {
   return facts;
 }
 
-function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
+function releaseFixture(t, {
+  formalOwnerStatus = "accepted",
+  promotedExecution = false,
+  trustedProducer = false,
+} = {}) {
   const { environment, paths, root } = temporaryWorkflow(t);
   const taskId = createTask("Release runtime", "derive a formal release decision", { clock, environment });
   startTask(taskId, { clock, environment });
@@ -269,7 +279,7 @@ function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
   const intent = {
     schema_version: 1,
     target_delivery_class: "product_release",
-    target_delivery_authority_ref: "goal:REL-PRODUCT",
+    target_delivery_authority_ref: "user-message:release",
     release_stage: "mvp",
     surface_inventory: { ref: "surface-inventory", sha256: sha256(fs.readFileSync(surfaceFile)) },
     surface_kinds: ["web_ui"],
@@ -331,11 +341,22 @@ function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
   const briefPath = path.join(
     taskArtifactDir(paths, taskId), "team/sdd/slices/release-slice/brief.json",
   );
-  runRecordStart(parseRecordStartArgs([
-    taskId, "execute final release sweep", "--mode=execute",
-    "--authorization-ref=user-message:release", `--brief=${briefPath}`,
-    "--operation-id=start-release-sweep",
-  ]), { cwd: repo, environment });
+  if (promotedExecution) {
+    runRecordStart(parseRecordStartArgs([
+      taskId, "discuss final release sweep", "--mode=discuss", `--brief=${briefPath}`,
+      "--operation-id=discuss-release-sweep",
+    ]), { cwd: repo, environment });
+    runPromote(parsePromoteArgs([
+      taskId, "--to=execute", "--authorization-ref=user-message:release",
+      `--brief=${briefPath}`, "--operation-id=promote-release-sweep",
+    ]), { cwd: repo, environment });
+  } else {
+    runRecordStart(parseRecordStartArgs([
+      taskId, "execute final release sweep", "--mode=execute",
+      "--authorization-ref=user-message:release", `--brief=${briefPath}`,
+      "--operation-id=start-release-sweep",
+    ]), { cwd: repo, environment });
+  }
   runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
     environment, operationId: "finish-release-team",
   });
@@ -405,6 +426,17 @@ function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
       environment,
       operationId: `verify-${requirement.dimension}`,
       recordToken: `20260730T08000000000000${index}`,
+      ...(trustedProducer ? {
+        resolveReleaseProducer: ({ identity, requiredGate }) => ({
+          schema_version: 1,
+          producer_ref: "atlas-test-release-producer@1",
+          producer_sha256: identity.toolchain.find((item) => item.sha256)?.sha256,
+          source_ref: rawPaths[policy.collector_adapter_ref],
+          source_sha256: sha256(fs.readFileSync(rawPaths[policy.collector_adapter_ref])),
+          candidate_manifest_digest: candidate.manifest_digest,
+          requirement_refs: [requiredGate.release_requirement.requirement_ref],
+        }),
+      } : {}),
     });
   }
   return {
@@ -414,7 +446,7 @@ function releaseFixture(t, { formalOwnerStatus = "accepted" } = {}) {
   };
 }
 
-test("Team final sweep persists the only derived certified decision", (t) => {
+test("self-attested release JSON plus an exit-zero command cannot certify a product", (t) => {
   const value = releaseFixture(t);
   const beforeAcceptance = readJsonObject(taskStateFile(value.paths, value.taskId));
   assert.equal(beforeAcceptance.execution_authority.work_type, "implementation");
@@ -422,8 +454,11 @@ test("Team final sweep persists the only derived certified decision", (t) => {
     environment: value.environment,
   });
   assert.equal(gates.passed, true, gates.reasons.join("\n"));
-  assert.equal(gates.releaseDecision.status, "certified");
+  assert.equal(gates.releaseDecision.status, "cannot_verify");
   assert.equal(gates.verificationRecords.filter((item) => item.release_fact_id).length, 7);
+  assert.ok(gates.verificationRecords.every((item) => (
+    item.release_fact_outcome === "cannot_verify"
+  )));
 
   runSliceAccept(parseSliceAcceptArgs([
     value.taskId, `--brief=${value.briefPath}`, "--operation-id=accept-release-sweep",
@@ -433,16 +468,94 @@ test("Team final sweep persists the only derived certified decision", (t) => {
     clock, environment: value.environment, operationId: "complete-release-task",
   });
   const completed = readJsonObject(taskStateFile(value.paths, value.taskId));
-  assert.equal(completed.completion.release_decision.status, "certified");
+  assert.equal(completed.completion.release_decision.status, "cannot_verify");
   assert.equal(completed.completion.release_decision.authority, "derived-from-final-release-sweep");
   assert.equal(completed.completion.release_decision.candidate_manifest_digest,
     JSON.parse(fs.readFileSync(value.candidatePath)).manifest_digest);
   assert.match(completed.completion.release_decision.decision_id, /^sha256:[a-f0-9]{64}$/);
+  assert.ok(completed.completion.release_decision.requirement_results.every((result) => (
+    result.submitted_outcome === "passed"
+    && result.outcome === "cannot_verify"
+    && /^sha256:[a-f0-9]{64}$/.test(result.fact_id)
+    && /^sha256:[a-f0-9]{64}$/.test(result.result_id)
+    && result.result_id === digestCanonical({
+      requirement_ref: result.requirement_ref,
+      fact_id: result.fact_id,
+      submitted_outcome: result.submitted_outcome,
+      outcome: result.outcome,
+      reason_codes: result.reason_codes,
+    })
+  )));
   assert.equal(
     executionCompletionAdmission(value.paths, value.taskId, completed, { environment: value.environment })
       .releaseDecision.status,
+    "cannot_verify",
+  );
+});
+
+test("promoted execution with event-bound producer provenance can certify", (t) => {
+  const value = releaseFixture(t, { promotedExecution: true, trustedProducer: true });
+  const beforeAcceptance = readJsonObject(taskStateFile(value.paths, value.taskId));
+  const events = readAuthoritativeEvents(taskEventFile(value.paths, value.taskId), value.taskId);
+  const authorityEvent = events.find((event) => (
+    event.revision === beforeAcceptance.execution_authority.established_revision
+  ));
+  assert.equal(authorityEvent.kind, "team.promoted");
+  assert.equal(authorityEvent.data.target, "execute");
+  assert.equal(authorityEvent.data.authorization_ref, "user-message:release");
+
+  const finishEvent = events.find((event) => (
+    event.kind === "team.promoted" && event.data?.target === "finish"
+  ));
+  const wrongTarget = structuredClone(beforeAcceptance);
+  wrongTarget.execution_authority.established_revision = finishEvent.revision;
+  const rejected = requiredGateAdmission(value.paths, value.taskId, wrongTarget, {
+    environment: value.environment,
+  });
+  assert.equal(rejected.passed, false);
+  assert.match(rejected.reasons.join("\n"), /release delivery authority/);
+
+  const gates = requiredGateAdmission(value.paths, value.taskId, beforeAcceptance, {
+    environment: value.environment,
+  });
+  assert.equal(gates.passed, true, gates.reasons.join("\n"));
+  assert.equal(gates.releaseDecision.status, "certified");
+  assert.ok(gates.verificationRecords.every((item) => item.release_fact_outcome === "passed"));
+
+  runSliceAccept(parseSliceAcceptArgs([
+    value.taskId, `--brief=${value.briefPath}`, "--operation-id=accept-trusted-release-sweep",
+    `--keeper-output=release:final-sweep=${value.keeperRelative}`,
+  ]), { environment: value.environment });
+  completeTask(value.taskId, {
+    clock, environment: value.environment, operationId: "complete-trusted-release-task",
+  });
+  assert.equal(
+    readJsonObject(taskStateFile(value.paths, value.taskId)).completion.release_decision.status,
     "certified",
   );
+});
+
+test("release completion rejects a missing or mismatched controller authority event", (t) => {
+  const value = releaseFixture(t, { trustedProducer: true });
+  runSliceAccept(parseSliceAcceptArgs([
+    value.taskId, `--brief=${value.briefPath}`, "--operation-id=accept-authority-test",
+    `--keeper-output=release:final-sweep=${value.keeperRelative}`,
+  ]), { environment: value.environment });
+  const state = readJsonObject(taskStateFile(value.paths, value.taskId));
+
+  for (const mutate of [
+    (candidate) => { candidate.execution_authority.delivery_authority_ref = "user-message:forged"; },
+    (candidate) => { candidate.execution_authority.established_revision += 1; },
+  ]) {
+    const forged = structuredClone(state);
+    mutate(forged);
+    const admission = executionCompletionAdmission(
+      value.paths, value.taskId, forged, { environment: value.environment },
+    );
+    assert.equal(admission.passed, false);
+    assert.match(admission.reasons.join("\n"), /release delivery authority/);
+    assert.notEqual(admission.releaseDecision?.status, "certified");
+  }
 });
 
 test("non-implementation release authority cannot derive a completion decision", (t) => {
@@ -547,7 +660,7 @@ test("candidate or typed-fact drift invalidates the final sweep", (t) => {
   assert.match(drifted.reasons.join("\n"), /changed after verification/);
 });
 
-test("mixed candidate receipts cannot be assembled into a release", (t) => {
+test("inline release receipts cannot bypass canonical task artifacts and events", (t) => {
   const value = releaseFixture(t);
   const state = readJsonObject(taskStateFile(value.paths, value.taskId));
   const summaries = Object.values(state.verification.required_gates);
@@ -630,5 +743,5 @@ test("mixed candidate receipts cannot be assembled into a release", (t) => {
     workType: "implementation",
   });
   assert.equal(mixed.admissible, false);
-  assert.match(mixed.reasons.join("\n"), /do not bind one identical candidate manifest/);
+  assert.match(mixed.reasons.join("\n"), /missing identity_record/);
 });

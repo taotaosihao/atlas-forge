@@ -3,12 +3,15 @@
 const fs = require("fs");
 const path = require("path");
 const { taskArtifactDir } = require("../core/paths");
+const { readAuthoritativeEvents } = require("../core/event-store");
+const { taskEventFile } = require("../core/task-mutation");
 const {
   digestCanonical,
   sha256,
   stableValue,
   validateCapturedInput,
 } = require("./identity");
+const { validateReleaseProducerProvenance } = require("./release-provenance");
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const COMPONENTS = Object.freeze([
@@ -171,6 +174,15 @@ function loadReleaseContracts(environment, paths) {
   throw new ReleaseCertificationError("canonical release certification contracts are unavailable");
 }
 
+function resolveValidatedReleaseIntent({ contractMarkdown, environment, paths, releaseBinding }) {
+  const contracts = loadReleaseContracts(environment, paths);
+  const intent = contracts.extractReleaseIntent(contractMarkdown);
+  if (!same(contracts.releasePlanBinding(intent), releaseBinding)) {
+    throw new ReleaseCertificationError("release intent no longer matches execution authority");
+  }
+  return { contracts, intent };
+}
+
 function readJsonFile(file, label) {
   let stat;
   try {
@@ -189,7 +201,6 @@ function readJsonFile(file, label) {
 }
 
 function resolveIdentityRecord(paths, taskId, receipt) {
-  if (receipt?.identity && receipt?.required_gate) return receipt;
   if (!receipt?.identity_record) throw new ReleaseCertificationError("release receipt is missing identity_record");
   const file = path.isAbsolute(receipt.identity_record)
     ? receipt.identity_record
@@ -208,6 +219,18 @@ function resolveIdentityRecord(paths, taskId, receipt) {
   const record = readJsonFile(file, "release receipt identity record");
   if (record.record_id !== receipt.record_id || record.identity_digest !== receipt.identity_digest) {
     throw new ReleaseCertificationError("release receipt summary does not match its identity record");
+  }
+  const revision = Number(receipt.verification_revision || receipt.event_revision || 0);
+  const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  const event = events.find((candidate) => (
+    candidate.revision === revision
+    && (!receipt.verification_event_id || candidate.event_id === receipt.verification_event_id)
+  ));
+  if (!event || event.kind !== "verification.recorded"
+    || event.data?.record_id !== record.record_id
+    || event.data?.identity_digest !== record.identity_digest
+    || event.data?.required_gate?.check_id !== record.required_gate?.check_id) {
+    throw new ReleaseCertificationError("release receipt is not bound to its authoritative verification event");
   }
   return record;
 }
@@ -256,12 +279,14 @@ function contentInput(inputs, ref, digest, label) {
 function deriveReleaseDecision(releaseBinding, manifestDigest, facts) {
   const results = releaseBinding.requirement_refs.map((requirementRef) => {
     const fact = facts.get(requirementRef);
-    return {
+    const body = {
       requirement_ref: requirementRef,
       fact_id: fact.fact_id,
+      submitted_outcome: fact.submitted_outcome,
       outcome: fact.outcome,
       reason_codes: [...fact.reason_codes],
     };
+    return { ...body, result_id: digestCanonical(body) };
   });
   const status = results.some((result) => result.outcome === "failed")
     ? "denied"
@@ -323,16 +348,15 @@ function evaluateReleaseSweep({
   const reasons = [];
   const summaries = [];
   try {
-    const contracts = loadReleaseContracts(environment, paths);
+    const resolved = resolveValidatedReleaseIntent({
+      contractMarkdown, environment, paths, releaseBinding,
+    });
+    const { contracts, intent } = resolved;
     const contractWorkType = contracts.extractContractWorkType(contractMarkdown);
     if (workType !== "implementation" || contractWorkType !== workType) {
       throw new ReleaseCertificationError(
         "release certification requires hash-bound work_type implementation",
       );
-    }
-    const intent = contracts.extractReleaseIntent(contractMarkdown);
-    if (!same(contracts.releasePlanBinding(intent), releaseBinding)) {
-      throw new ReleaseCertificationError("release intent no longer matches execution authority");
     }
     const profile = contracts.loadBundledProfile(releaseBinding.profile_ref);
     if (contracts.profileBinding(profile).profile_sha256 !== releaseBinding.profile_sha256) {
@@ -371,7 +395,8 @@ function evaluateReleaseSweep({
       if (!expectedRefs.has(requirementRef) || facts.has(requirementRef)) {
         throw new ReleaseCertificationError(`release receipt requirement is missing, duplicate, or unexpected: ${requirementRef || "unknown"}`);
       }
-      if (record.identity?.repo_root_realpath !== repo || record.identity?.head_commit !== snapshot.head_sha) {
+      if (record.identity?.repo_root_realpath !== repo || record.identity?.head_commit !== snapshot.head_sha
+        || record.identity?.worktree?.tree_oid !== snapshot.tree_oid) {
         throw new ReleaseCertificationError(`release receipt was not executed against the final candidate: ${requirementRef}`);
       }
       const inputs = validatedInputs(record);
@@ -430,13 +455,35 @@ function evaluateReleaseSweep({
       for (const evidence of fact.evidence_refs) {
         contentInput(inputs, evidence.ref, evidence.sha256, `typed fact evidence ${evidence.ref}`);
       }
-      facts.set(requirementRef, fact);
+      let effectiveFact = { ...fact, submitted_outcome: fact.outcome };
+      if (fact.outcome === "passed") {
+        const provenance = record.result?.producer_provenance;
+        const provenanceErrors = validateReleaseProducerProvenance(provenance, {
+          candidateManifestDigest: manifest.manifest_digest,
+          identity: record.identity,
+          requirementRef,
+          sourceEntry: sourceInputs[0].entry,
+        });
+        if (provenanceErrors.length > 0) {
+          effectiveFact = {
+            ...effectiveFact,
+            outcome: "cannot_verify",
+            reason_codes: [provenance
+              ? "TRUSTED_PRODUCER_PROVENANCE_INVALID"
+              : "TRUSTED_PRODUCER_PROVENANCE_MISSING"],
+            summary: "The submitted fact is structurally consistent, but no trusted workflow producer proves the underlying observation.",
+          };
+        }
+      }
+      facts.set(requirementRef, effectiveFact);
       summaries.push({
         check_id: gate.check_id,
         requirement_ref: requirementRef,
         record_id: record.record_id,
         fact_id: fact.fact_id,
-        outcome: fact.outcome,
+        submitted_outcome: fact.outcome,
+        outcome: effectiveFact.outcome,
+        reason_codes: [...effectiveFact.reason_codes],
         candidate_manifest_digest: manifest.manifest_digest,
         identity_record: summary.identity_record || "",
       });
@@ -462,5 +509,6 @@ module.exports = {
   buildCandidateManifest,
   deriveReleaseDecision,
   evaluateReleaseSweep,
+  resolveValidatedReleaseIntent,
   validateCandidateManifest,
 };

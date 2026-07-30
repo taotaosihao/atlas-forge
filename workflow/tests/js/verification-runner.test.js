@@ -143,6 +143,7 @@ test("runs a passing argv command and records independent verification metadata"
   assert.match(identity.record_id, /^sha256:[a-f0-9]{64}$/);
   assert.match(identity.identity_digest, /^sha256:[a-f0-9]{64}$/);
   assert.equal(identity.identity.environment.secrets_persisted, false);
+  assert.equal(Object.hasOwn(identity.result, "producer_provenance"), false);
   assert.deepEqual(identity.identity.inputs.map((entry) => entry.requested), [inputFile]);
 
   const file = taskFile(paths.tasksDir, taskId);
@@ -240,6 +241,7 @@ test("captures repository-wide untracked and nested lockfile identity from a sub
     "packages/app/package-lock.json",
   ]);
   assert.match(captured.identity.worktree.untracked_manifest_sha256, /^sha256:[a-f0-9]{64}$/);
+  assert.match(captured.identity.worktree.tree_oid, /^[a-f0-9]{40}$/);
   fs.writeFileSync(path.join(repo, "root-tracked.txt"), "changed outside cwd\n");
   const changed = captureVerificationIdentity({
     argv: [process.execPath, "--version"],
@@ -250,6 +252,7 @@ test("captures repository-wide untracked and nested lockfile identity from a sub
     changed.identity.worktree.tracked_diff_sha256,
     captured.identity.worktree.tracked_diff_sha256,
   );
+  assert.notEqual(changed.identity.worktree.tree_oid, captured.identity.worktree.tree_oid);
 });
 
 test("marks an exit-zero verification unstable when the command changes its snapshot", (t) => {

@@ -164,11 +164,11 @@ function ownedPathMatcher(pattern) {
   return new RegExp(`^${expression}$`);
 }
 
-function actualSliceSize(brief, startSnapshot) {
+function actualSliceSize(brief, startSnapshot, candidateSnapshot = null) {
   if (!startSnapshot?.tree_oid) {
     throw new CommandError("slice acceptance is missing its start worktree snapshot");
   }
-  const current = captureWorktreeSnapshot(brief.repo);
+  const current = candidateSnapshot || captureWorktreeSnapshot(brief.repo);
   const changedFiles = git(brief.repo, [
     "diff-tree", "--no-commit-id", "-r", "--name-only", "-z",
     startSnapshot.tree_oid, current.tree_oid,
@@ -213,6 +213,18 @@ function validateActualSliceSize(brief, actual) {
   }
 }
 
+function treeFileDigest(repo, treeOid, relative) {
+  const result = childProcess.spawnSync(
+    "git", ["-C", repo, "show", `${treeOid}:${relative}`], { encoding: null },
+  );
+  if (result.error || result.status !== 0) {
+    throw new CommandError(
+      `keeper output is absent from the verified candidate tree: ${relative}`,
+    );
+  }
+  return sha256(result.stdout);
+}
+
 function readBriefForKeeperBindings(parsed) {
   let brief;
   try {
@@ -252,6 +264,8 @@ function pauseAfterDependencyValidation(environment) {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw new CommandError(`invalid slice acceptance test pause: ${raw}`);
   }
+  const marker = environment.CODEX_WORKFLOW_TEST_SLICE_ACCEPT_PAUSE_MARKER;
+  if (marker) fs.writeFileSync(marker, "dependency-validation-complete\n", "utf8");
   sleepMilliseconds(milliseconds);
 }
 
@@ -346,7 +360,15 @@ function runSliceAccept(parsed, options = {}) {
           validateCurrentIdentity: false,
         });
         pauseAfterDependencyValidation(environment);
-        const actualSize = actualSliceSize(brief, team.admission.slice_start_snapshot);
+        const candidateSnapshot = captureWorktreeSnapshot(repo);
+        if (!gates.candidateTreeOid || candidateSnapshot.tree_oid !== gates.candidateTreeOid) {
+          throw new CommandError(
+            "slice candidate changed after required verification; rerun every required gate",
+          );
+        }
+        const actualSize = actualSliceSize(
+          brief, team.admission.slice_start_snapshot, candidateSnapshot,
+        );
         validateActualSliceSize(brief, actualSize);
         const matchers = (brief.owned_paths || []).map(ownedPathMatcher);
         for (const keeper of keepers) {
@@ -355,6 +377,9 @@ function runSliceAccept(parsed, options = {}) {
           }
           if (!actualSize.changed_paths.includes(keeper.path)) {
             throw new CommandError(`keeper output was not produced by the current slice: ${keeper.path}`);
+          }
+          if (treeFileDigest(repo, candidateSnapshot.tree_oid, keeper.path) !== keeper.content_digest) {
+            throw new CommandError(`keeper output does not match the verified candidate tree: ${keeper.path}`);
           }
         }
         const verificationRecords = gates.verificationRecords.map((record) => {
