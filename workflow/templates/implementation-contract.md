@@ -3,7 +3,7 @@
 task_id: {{TASK_ID}}
 title: {{TITLE}}
 created: {{CREATED}}
-contract_semantics_version: 3
+contract_semantics_version: 4
 finding_scope_admission: controller_current_required_only
 safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>
 work_type: implementation | planning | review | audit | docs-only
@@ -11,6 +11,33 @@ first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
 product_ui_gate: required | not_applicable
 product_ui_not_applicable_reason:
+
+## Release Intent
+
+Choose exactly one `target_delivery_class` branch from `release-intent.schema.json`. The example below is the supported v1 product-release branch; exploration and non-product must use their own strict fields.
+
+```atlas-release-intent+json
+{
+  "schema_version": 1,
+  "target_delivery_class": "product_release",
+  "target_delivery_authority_ref": "goal:<requirement-ref>",
+  "release_stage": "mvp",
+  "surface_inventory": {
+    "ref": "<acceptance-ref>",
+    "sha256": "sha256:<64-lowercase-hex>"
+  },
+  "surface_kinds": ["web_ui"],
+  "release_profile_refs": [
+    {
+      "profile_ref": "web-ui-v1",
+      "profile_sha256": "sha256:<bundled-profile-digest>"
+    }
+  ],
+  "release_claim_refs": ["<acceptance-ref>"],
+  "audience_refs": ["<acceptance-ref>"],
+  "critical_outcome_refs": ["<acceptance-ref>"]
+}
+```
 
 ## Execution Plan
 
@@ -98,6 +125,7 @@ product_ui_not_applicable_reason:
 - Evidence purpose boundary: the non-evidence list applies to UI/product acceptance evidence. Correctly labeled headless/network evidence may still satisfy safety gates.
 - Reverse guard: served UI evidence does not replace required hard safety-gate evidence.
 - Not-applicable boundary: only genuinely headless CLI/worker/library/scanner work or tiny changes that do not alter user-visible UI behavior. A product task with no served app is not tiny solely because the slice is small.
+- Release boundary: this gate proves an early real served UI slice and never grants `certified`; product release requires the immutable Profile, same-candidate final sweep, and completion-derived release decision.
 
 ## Acceptance Criteria
 

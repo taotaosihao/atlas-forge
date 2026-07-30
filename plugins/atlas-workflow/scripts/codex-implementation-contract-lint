@@ -9,6 +9,9 @@ const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
 const { extractExecutionPlan } = require("../contracts/team-sdd/validators/execution-plan");
 const {
+  extractReleaseIntent,
+} = require("../contracts/release-certification/validators/release-intent");
+const {
   computeGoalRef,
   digestFile,
   validateControllerResolutionAgainst,
@@ -111,9 +114,9 @@ Options:
   --file <path>  Markdown implementation contract to validate.
   --strict       Require contract_semantics_version.
   --new-authoring
-                 Require strict semantics version 3 for newly authored contracts.
+                 Require strict semantics version 3 or 4 for newly authored contracts.
   --authority-slice <dir>
-                 Canonical Team SDD slice used to validate semantics-v2/v3 goal
+                 Canonical Team SDD slice used to validate semantics-v2/v3/v4 goal
                  and current-required authority. Repeat for multiple slices.
   --help         Show this help.
 
@@ -1297,6 +1300,37 @@ function validateVersionThree(content, fields, initialDiagnostics, authority, st
   return diagnostics;
 }
 
+function validateVersionFour(content, fields, initialDiagnostics, authority, strict) {
+  const diagnostics = validateVersionThree(content, fields, initialDiagnostics, authority, strict);
+  let intent;
+  try {
+    intent = extractReleaseIntent(content);
+  } catch (error) {
+    diagnostics.push(makeDiagnostic(
+      "ERROR",
+      "RELEASE_INTENT_INVALID",
+      "atlas-release-intent+json",
+      0,
+      error.message,
+    ));
+    return diagnostics;
+  }
+  const workType = fields.get("work_type");
+  const productUiGate = fields.get("product_ui_gate");
+  if (intent.target_delivery_class === "product_release"
+    && workType?.value === "implementation"
+    && productUiGate?.value !== "required") {
+    diagnostics.push(makeDiagnostic(
+      "ERROR",
+      "PRODUCT_RELEASE_UI_GATE_REQUIRED",
+      productUiGate?.key || "product_ui_gate",
+      productUiGate?.line || 0,
+      "pure web_ui product-release implementation requires the served Product/UI first-slice gate",
+    ));
+  }
+  return diagnostics;
+}
+
 function sortDiagnostics(diagnostics) {
   return diagnostics.sort((left, right) => (
     left.line - right.line
@@ -1340,10 +1374,10 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
         "NEW_AUTHORING_REQUIRES_V3",
         "contract_semantics_version",
         0,
-        "newly authored contracts must use contract_semantics_version: 3",
+        "newly authored contracts must use contract_semantics_version: 3 or 4",
       );
     } else if (strict) {
-      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1, 2, or 3");
+      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1, 2, 3, or 4");
     } else {
       diagnostic = makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
     }
@@ -1354,28 +1388,36 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
     return ok ? 0 : 1;
   }
 
-  if (!["1", "2", "3"].includes(version.value)) {
+  if (!["1", "2", "3", "4"].includes(version.value)) {
     const diagnostics = sortDiagnostics([
       ...parsed.diagnostics,
-      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1, 2, or 3 is supported"),
+      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1, 2, 3, or 4 is supported"),
     ]);
     diagnostics.forEach((item) => printDiagnostic(item, absolute));
     printSummary(false, absolute, strict, newAuthoring, version.value || "invalid", diagnostics);
     return 1;
   }
 
-  const versionDiagnostics = newAuthoring && version.value !== "3"
+  const versionDiagnostics = newAuthoring && !["3", "4"].includes(version.value)
     ? [makeDiagnostic(
       "ERROR",
       "NEW_AUTHORING_REQUIRES_V3",
       version.key,
       version.line,
-      "newly authored contracts must use contract_semantics_version: 3",
+      "newly authored contracts must use contract_semantics_version: 3 or 4",
     )]
     : [];
   const diagnostics = sortDiagnostics([
     ...versionDiagnostics,
-    ...(version.value === "3"
+    ...(version.value === "4"
+      ? validateVersionFour(
+        content,
+        parsed.fields,
+        parsed.diagnostics,
+        authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+        strict,
+      )
+      : version.value === "3"
       ? validateVersionThree(
         content,
         parsed.fields,

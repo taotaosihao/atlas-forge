@@ -70,6 +70,19 @@ run_v3_new_authoring_valid() {
   pass "$label"
 }
 
+run_v4_new_authoring_valid() {
+  local label="$1" file="$2" authority_slice="$3"
+  case_paths
+  if ! "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+    show_failure "$label"
+  fi
+  grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^semantics_version: 4$' "$CASE_STDOUT" || show_failure "$label"
+  [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
+  pass "$label"
+}
+
 run_old_new_authoring_invalid() {
   local label="$1" file="$2" status
   case_paths
@@ -91,7 +104,7 @@ run_unversioned_new_authoring_invalid() {
   set -e
   [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
   grep -q '^ERROR NEW_AUTHORING_REQUIRES_V3 ' "$CASE_STDERR" || show_failure "$label"
-  grep -q 'contract_semantics_version: 3' "$CASE_STDERR" || show_failure "$label"
+  grep -q 'contract_semantics_version: 3 or 4' "$CASE_STDERR" || show_failure "$label"
   grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
   ! grep -q 'contract_semantics_version: 1, 2, or 3' "$CASE_STDERR" || show_failure "$label"
   pass "$label"
@@ -326,6 +339,32 @@ run_v3_new_authoring_valid \
   'new authoring accepts a v3 goal-only authority slice' \
   "$FIXTURE_ROOT/valid/scope-admission-v3.md" \
   "$GOAL_ONLY_SLICE"
+release_v4_contract="$TMP_ROOT/scope-admission-v4.md"
+node - "$FIXTURE_ROOT/valid/scope-admission-v3.md" "$release_v4_contract" <<'NODE'
+const fs = require("fs");
+const [source, target] = process.argv.slice(2);
+const intent = `## Release Intent
+
+\`\`\`atlas-release-intent+json
+{
+  "schema_version": 1,
+  "target_delivery_class": "non_product",
+  "target_delivery_authority_ref": "goal:REQ-1",
+  "deliverable_kind": "contract_fixture",
+  "not_applicable_reason": "This planning fixture validates contract authoring; no user-facing candidate or runtime behavior is produced."
+}
+\`\`\`
+
+`;
+const contract = fs.readFileSync(source, "utf8")
+  .replace("contract_semantics_version: 3", "contract_semantics_version: 4")
+  .replace("## Execution Plan\n", `${intent}## Execution Plan\n`);
+fs.writeFileSync(target, contract);
+NODE
+run_v4_new_authoring_valid \
+  'new authoring accepts a v4 goal-only authority slice' \
+  "$release_v4_contract" \
+  "$GOAL_ONLY_SLICE"
 run_old_new_authoring_invalid \
   'new authoring rejects semantics v2 compatibility contracts' \
   "$goal_only_contract"
@@ -394,7 +433,7 @@ run_v1_valid 'current authoritative implementation contract passes strict lint' 
 run_old_new_authoring_invalid 'new authoring rejects semantics v1' "$CURRENT_AUTHORITY"
 run_legacy_valid 'unversioned historical contract passes non-strict with warning' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 run_semantic_invalid 'unversioned historical contract fails strict mode' "$FIXTURE_ROOT/valid/legacy-unversioned.md" SEMANTICS_VERSION_REQUIRED
-run_unversioned_new_authoring_invalid 'new authoring gives a v3-only diagnostic for unversioned contracts' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
+run_unversioned_new_authoring_invalid 'new authoring gives a current-version diagnostic for unversioned contracts' "$FIXTURE_ROOT/valid/legacy-unversioned.md"
 
 run_semantic_invalid 'template enum placeholders are rejected' "$FIXTURE_ROOT/invalid/template-enums.md" WORK_TYPE_INVALID FIRST_CODE_GUARD_INVALID PRODUCT_UI_GATE_INVALID
 run_semantic_invalid 'missing first-code owner verification stop and gate plan are rejected' "$FIXTURE_ROOT/invalid/missing-first-code-fields.md" \
@@ -692,7 +731,8 @@ run_usage_invalid 'duplicate new authoring is a usage error' CLI_USAGE --strict 
 
 for template in implementation-contract.md implementation-contract.final.md; do
   file="$ATLAS_FORGE_ROOT/workflow/templates/$template"
-  grep -q '^contract_semantics_version: 3$' "$file"
+  grep -q '^contract_semantics_version: 4$' "$file"
+  grep -q '^```atlas-release-intent+json$' "$file"
   grep -q '^```atlas-execution-plan+json$' "$file"
   grep -q '^finding_scope_admission: controller_current_required_only$' "$file"
   grep -q '^safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>$' "$file"
