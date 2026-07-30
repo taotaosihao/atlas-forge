@@ -435,6 +435,7 @@ function completeTask(
         verification_record_ids: verification.recordIds || (
           verification.recordId ? [verification.recordId] : []
         ),
+        release_decision: verification.releaseDecision || null,
         team_run_id: activeTeam.team_run_id || "",
         team_generation: activeTeam.generation || 0,
         closed_at: closedAt,

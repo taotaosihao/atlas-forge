@@ -168,6 +168,9 @@ function setTaskStateFields(paths, taskId, updates, clock = () => new Date()) {
   const stateFile = taskStateFile(paths, taskId);
   const state = readJsonObject(stateFile);
   for (const [key, rawValue] of Object.entries(updates)) {
+    if (key === "completion.release_decision" || key.startsWith("completion.release_decision.")) {
+      throw new Error("completion.release_decision is derived and cannot be written directly");
+    }
     const parts = key.split(".");
     let cursor = state;
     for (const part of parts.slice(0, -1)) {
@@ -198,6 +201,9 @@ function replaceActiveTeam(paths, taskId, activeTeam, clock = () => new Date()) 
 function writeTaskCompletion(paths, taskId, completion, clock = () => new Date()) {
   if (!completion || typeof completion !== "object" || Array.isArray(completion)) {
     throw new TypeError("completion must be an object");
+  }
+  if (Object.hasOwn(completion, "release_decision")) {
+    throw new TypeError("completion.release_decision is derived and cannot be written directly");
   }
   const stateFile = taskStateFile(paths, taskId);
   const state = readJsonObject(stateFile);
@@ -279,7 +285,7 @@ function resolveCodeHomeReference(paths, reference) {
 function successfulVerificationAdmission(paths, taskId, options = {}) {
   const state = readJsonObject(taskStateFile(paths, taskId));
   try {
-    const execution = executionCompletionAdmission(paths, taskId, state);
+    const execution = executionCompletionAdmission(paths, taskId, state, options);
     if (execution) return execution;
     const required = requiredGateAdmission(paths, taskId, state, options);
     if (required) return required;

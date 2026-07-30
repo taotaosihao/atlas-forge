@@ -12,6 +12,7 @@ const {
   identityInputPaths,
   sha256,
 } = require("./identity");
+const { evaluateReleaseSweep } = require("./release-certification");
 
 const PERMANENT_FRESH_GATE_CLASSES = new Set([
   "auth", "permission", "security", "data-consistency", "migration", "backup",
@@ -145,7 +146,7 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
   if (identity.repo && identity.repo !== repo) {
     throw new RequiredGateError("admitted Team repository identity no longer matches");
   }
-  return { admission, brief, briefSha256, file, identity, repo, team };
+  return { admission, brief, briefSha256, contractFile, file, identity, repo, team };
 }
 
 function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
@@ -193,6 +194,7 @@ function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
     gate_class: check.gate_class,
     repo_realpath: context.repo,
     slice_id: context.brief.slice_id,
+    ...(check.release_requirement ? { release_requirement: check.release_requirement } : {}),
   };
 }
 
@@ -210,6 +212,10 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
     if (gate[field] !== expected[field]) {
       reasons.push(`required verification gate ${expected.check_id} has mismatched ${field}`);
     }
+  }
+  if (digestCanonical(gate.release_requirement || null)
+    !== digestCanonical(expected.release_requirement || null)) {
+    reasons.push(`required verification gate ${expected.check_id} has mismatched release_requirement`);
   }
   if (gate.outcome !== "passed" || gate.provenance !== "fresh-executed") {
     reasons.push(`required verification gate ${expected.check_id} is not a fresh executed pass`);
@@ -236,6 +242,10 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
       if (record.required_gate?.[field] !== expected[field]) {
         reasons.push(`required verification gate ${expected.check_id} record mismatches ${field}`);
       }
+    }
+    if (digestCanonical(record.required_gate?.release_requirement || null)
+      !== digestCanonical(expected.release_requirement || null)) {
+      reasons.push(`required verification gate ${expected.check_id} record mismatches release_requirement`);
     }
     if (record.verdict !== "passed" || record.outcome !== "passed"
       || record.provenance !== "fresh-executed" || record.snapshot_stable !== true) {
@@ -307,6 +317,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     gate_class: check.gate_class,
     repo_realpath: context.repo,
     slice_id: context.brief.slice_id,
+    ...(check.release_requirement ? { release_requirement: check.release_requirement } : {}),
   }));
   for (const expected of expectedChecks) {
     const record = validateGateRecord(
@@ -322,29 +333,63 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
       reasons.push(`final-only verification gate ${expected.check_id} was not executed last`);
     }
   }
+  let releaseCertification = null;
+  if (context.brief.contract.release && reasons.length === 0) {
+    let snapshot;
+    try {
+      snapshot = captureWorktreeSnapshot(context.repo);
+      releaseCertification = evaluateReleaseSweep({
+        contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
+        environment: options.environment || process.env,
+        paths,
+        receipts: records,
+        releaseBinding: context.brief.contract.release,
+        repo: context.repo,
+        snapshot,
+        taskId,
+      });
+      if (!releaseCertification.admissible) {
+        reasons.push(...releaseCertification.reasons.map((reason) => `release final sweep: ${reason}`));
+      }
+    } catch (error) {
+      reasons.push(`unable to evaluate release final sweep: ${error.message}`);
+    }
+  }
+  const releaseByCheck = new Map(
+    (releaseCertification?.receiptSummaries || []).map((item) => [item.check_id, item]),
+  );
   return {
     identityDigest: records.length === 1 ? records[0].identity_digest : "",
     passed: reasons.length === 0,
     reasons,
     recordId: records.length === 1 ? records[0].record_id : "",
     recordIds: records.map((record) => record.record_id),
+    releaseCertification,
+    releaseDecision: releaseCertification?.decision || null,
     verificationRecords: records.map((record) => {
       const gate = gates[record.required_gate?.check_id] || {};
+      const release = releaseByCheck.get(record.required_gate?.check_id);
       return {
         ...(record.required_gate || {}),
         event_revision: gate.event_revision || 0,
         identity_digest: record.identity_digest,
+        identity_record: gate.identity_record || "",
         outcome: record.outcome,
         provenance: record.provenance,
         record_digest: record.record_id,
         record_id: record.record_id,
+        ...(release ? {
+          release_fact_id: release.fact_id,
+          release_fact_outcome: release.outcome,
+          candidate_manifest_digest: release.candidate_manifest_digest,
+        } : {}),
       };
     }),
     required: true,
   };
 }
 
-function executionCompletionAdmission(paths, taskId, state) {
+function executionCompletionAdmission(paths, taskId, state, options = {}) {
   const authority = state.execution_authority;
   if (!authority || typeof authority !== "object") return null;
   const reasons = [];
@@ -353,6 +398,7 @@ function executionCompletionAdmission(paths, taskId, state) {
   }
   let repo = "";
   let plan = null;
+  let contractMarkdown = "";
   try {
     repo = canonicalDirectory(authority.repo_realpath, "execution authority repository");
     if (repo !== authority.repo_realpath) reasons.push("execution authority repository mismatch");
@@ -364,8 +410,8 @@ function executionCompletionAdmission(paths, taskId, state) {
     if (sha256(fs.readFileSync(contractFile)) !== authority.contract_sha256) {
       reasons.push("execution authority contract sha256 no longer matches");
     }
-    const markdown = fs.readFileSync(contractFile, "utf8");
-    const matches = [...markdown.matchAll(
+    contractMarkdown = fs.readFileSync(contractFile, "utf8");
+    const matches = [...contractMarkdown.matchAll(
       /^```atlas-execution-plan\+json[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm,
     )];
     if (matches.length !== 1) throw new Error(`expected one execution plan; found ${matches.length}`);
@@ -382,6 +428,7 @@ function executionCompletionAdmission(paths, taskId, state) {
     reasons.push("execution authority required slice set does not match its plan");
   }
   const recordIds = [];
+  const releaseReceipts = [];
   const acceptedEvents = [];
   let events = [];
   try {
@@ -454,6 +501,8 @@ function executionCompletionAdmission(paths, taskId, state) {
         || record.repo_realpath !== repo
         || record.admission_head_sha !== accepted.actual_size?.start_head_sha
         || record.admission_tree_oid !== accepted.actual_size?.start_tree_oid
+        || digestCanonical(record.release_requirement || null)
+          !== digestCanonical(check.release_requirement || null)
         || record.outcome !== "passed" || record.provenance !== "fresh-executed"
         || !/^sha256:[a-f0-9]{64}$/.test(record.record_id || "")
         || record.record_digest !== record.record_id
@@ -467,6 +516,7 @@ function executionCompletionAdmission(paths, taskId, state) {
         reasons.push(`accepted slice verification event is invalid: ${slice.slice_id}/${check.check_id}`);
       } else {
         recordIds.push(record.record_id);
+        if (check.release_requirement) releaseReceipts.push(record);
       }
     }
     for (const keeper of accepted.keeper_outputs || []) {
@@ -483,6 +533,7 @@ function executionCompletionAdmission(paths, taskId, state) {
     }
   }
   let completionSnapshot = null;
+  let releaseCertification = null;
   const finalAcceptance = acceptedEvents.sort((left, right) => left.revision - right.revision).at(-1);
   if (!finalAcceptance) {
     reasons.push("missing final authoritative slice acceptance snapshot");
@@ -518,6 +569,25 @@ function executionCompletionAdmission(paths, taskId, state) {
       }
     }
   }
+  if (authority.release_binding) {
+    if (!completionSnapshot || !repo || !contractMarkdown) {
+      reasons.push("release certification requires a stable final completion snapshot");
+    } else {
+      releaseCertification = evaluateReleaseSweep({
+        contractMarkdown,
+        environment: options.environment || process.env,
+        paths,
+        receipts: releaseReceipts,
+        releaseBinding: authority.release_binding,
+        repo,
+        snapshot: completionSnapshot,
+        taskId,
+      });
+      if (!releaseCertification.admissible) {
+        reasons.push(...releaseCertification.reasons.map((reason) => `release final sweep: ${reason}`));
+      }
+    }
+  }
   return {
     completionSnapshot,
     identityDigest: "",
@@ -525,6 +595,8 @@ function executionCompletionAdmission(paths, taskId, state) {
     reasons,
     recordId: recordIds.length === 1 ? recordIds[0] : "",
     recordIds,
+    releaseCertification,
+    releaseDecision: releaseCertification?.decision || null,
     required: true,
   };
 }

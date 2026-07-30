@@ -1,0 +1,459 @@
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { taskArtifactDir } = require("../core/paths");
+const {
+  digestCanonical,
+  sha256,
+  stableValue,
+  validateCapturedInput,
+} = require("./identity");
+
+const SHA256 = /^sha256:[a-f0-9]{64}$/;
+const COMPONENTS = Object.freeze([
+  "artifact", "surface_inventory", "config", "runtime", "data",
+]);
+const MANIFEST_KEYS = [
+  "schema_version", "release_binding", "source", "components", "manifest_digest",
+];
+const RELEASE_BINDING_KEYS = [
+  "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
+  "check_definition_set_sha256", "requirement_refs",
+];
+
+class ReleaseCertificationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ReleaseCertificationError";
+  }
+}
+
+function same(left, right) {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+}
+
+function exactKeys(value, keys, label, errors) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${label} must be an object`);
+    return false;
+  }
+  for (const key of keys) {
+    if (!Object.hasOwn(value, key)) errors.push(`${label} missing required key: ${key}`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) errors.push(`${label} unknown key: ${key}`);
+  }
+  return true;
+}
+
+function manifestBody(value) {
+  const { manifest_digest: _digest, ...body } = value;
+  return body;
+}
+
+function buildCandidateManifest(body) {
+  const value = { ...stableValue(body) };
+  value.manifest_digest = digestCanonical(value);
+  return value;
+}
+
+function validateCandidateManifest(value, options = {}) {
+  const errors = [];
+  if (!exactKeys(value, MANIFEST_KEYS, "candidate manifest", errors)) return errors;
+  if (value.schema_version !== 1) errors.push("candidate manifest schema_version must equal 1");
+  if (!SHA256.test(value.manifest_digest || "")
+    || value.manifest_digest !== digestCanonical(manifestBody(value))) {
+    errors.push("candidate manifest digest does not match its canonical content");
+  }
+  if (!exactKeys(value.release_binding, RELEASE_BINDING_KEYS, "candidate manifest release_binding", errors)) {
+    return errors;
+  }
+  if (options.releaseBinding && !same(value.release_binding, options.releaseBinding)) {
+    errors.push("candidate manifest release_binding does not match execution authority");
+  }
+  if (!exactKeys(value.source, ["repo_realpath", "head_sha", "tree_oid"], "candidate manifest source", errors)) {
+    return errors;
+  }
+  if (typeof value.source.repo_realpath !== "string" || !path.isAbsolute(value.source.repo_realpath)
+    || !/^[a-f0-9]{40}$/.test(value.source.head_sha || "")
+    || !/^[a-f0-9]{40}$/.test(value.source.tree_oid || "")) {
+    errors.push("candidate manifest source identity is invalid");
+  }
+  if (options.repo && value.source.repo_realpath !== options.repo) {
+    errors.push("candidate manifest source repository does not match the admitted repository");
+  }
+  if (options.snapshot && (value.source.head_sha !== options.snapshot.head_sha
+    || value.source.tree_oid !== options.snapshot.tree_oid)) {
+    errors.push("candidate manifest source does not match the final repository snapshot");
+  }
+  if (!exactKeys(value.components, COMPONENTS, "candidate manifest components", errors)) return errors;
+  const refs = [];
+  for (const component of COMPONENTS) {
+    const item = value.components[component];
+    const keys = component === "surface_inventory"
+      ? ["authority_ref", "input_ref", "sha256"]
+      : ["input_ref", "sha256"];
+    if (!exactKeys(item, keys, `candidate manifest components.${component}`, errors)) continue;
+    if (typeof item.input_ref !== "string" || !item.input_ref.trim()) {
+      errors.push(`candidate manifest components.${component}.input_ref must be non-empty`);
+    } else {
+      refs.push(item.input_ref);
+    }
+    if (!SHA256.test(item.sha256 || "")) {
+      errors.push(`candidate manifest components.${component}.sha256 is invalid`);
+    }
+    if (component === "surface_inventory"
+      && (typeof item.authority_ref !== "string" || !item.authority_ref.trim())) {
+      errors.push("candidate manifest surface_inventory.authority_ref must be non-empty");
+    }
+  }
+  if (new Set(refs).size !== refs.length) {
+    errors.push("candidate manifest component input_ref values must be unique");
+  }
+  if (options.releaseIntent) {
+    const actual = value.components.surface_inventory;
+    const expected = options.releaseIntent.surface_inventory;
+    if (actual?.authority_ref !== expected?.ref || actual?.sha256 !== expected?.sha256) {
+      errors.push("candidate manifest surface inventory does not match the release intent");
+    }
+  }
+  return errors;
+}
+
+function pluginCandidates(environment, paths) {
+  return [
+    environment?.ATLAS_WORKFLOW_PLUGIN_ROOT,
+    paths?.codeHome && path.join(paths.codeHome, "plugins", "atlas-workflow"),
+    path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+  ].filter(Boolean);
+}
+
+function loadReleaseContracts(environment, paths) {
+  for (const root of pluginCandidates(environment, paths)) {
+    const evidence = path.join(root, "contracts/release-certification/validators/evidence.js");
+    const intent = path.join(root, "contracts/release-certification/validators/release-intent.js");
+    const profile = path.join(root, "contracts/release-certification/validators/profile.js");
+    const plan = path.join(root, "contracts/team-sdd/validators/execution-plan.js");
+    const adapters = {
+      "business-acceptance-v2@2": path.join(
+        root, "contracts/release-certification/adapters/business-acceptance-v2.js",
+      ),
+      "formal-web-ui-v1@1": path.join(
+        root, "contracts/release-certification/adapters/formal-web-ui-v1.js",
+      ),
+      "release-data-v1@1": path.join(
+        root, "contracts/release-certification/adapters/release-data-v1.js",
+      ),
+      "release-operability-v1@1": path.join(
+        root, "contracts/release-certification/adapters/release-operability-v1.js",
+      ),
+    };
+    if ([evidence, intent, profile, plan, ...Object.values(adapters)].every(fs.existsSync)) {
+      return {
+        ...require(evidence),
+        ...require(intent),
+        ...require(profile),
+        ...require(plan),
+        collectors: {
+          "business-acceptance-v2@2": require(adapters["business-acceptance-v2@2"])
+            .collectBusinessAcceptance,
+          "formal-web-ui-v1@1": require(adapters["formal-web-ui-v1@1"])
+            .collectFormalWebUi,
+          "release-data-v1@1": require(adapters["release-data-v1@1"])
+            .collectReleaseData,
+          "release-operability-v1@1": require(adapters["release-operability-v1@1"])
+            .collectReleaseOperability,
+        },
+      };
+    }
+  }
+  throw new ReleaseCertificationError("canonical release certification contracts are unavailable");
+}
+
+function readJsonFile(file, label) {
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch (error) {
+    throw new ReleaseCertificationError(`${label} is unavailable: ${error.message}`);
+  }
+  if (stat.size > 4 * 1024 * 1024) throw new ReleaseCertificationError(`${label} exceeds 4 MiB`);
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("expected an object");
+    return value;
+  } catch (error) {
+    throw new ReleaseCertificationError(`${label} is invalid JSON: ${error.message}`);
+  }
+}
+
+function resolveIdentityRecord(paths, taskId, receipt) {
+  if (receipt?.identity && receipt?.required_gate) return receipt;
+  if (!receipt?.identity_record) throw new ReleaseCertificationError("release receipt is missing identity_record");
+  const file = path.isAbsolute(receipt.identity_record)
+    ? receipt.identity_record
+    : path.resolve(paths.codeHome, receipt.identity_record);
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    throw new ReleaseCertificationError(`release receipt identity record is unavailable: ${error.message}`);
+  }
+  const verificationRoot = path.join(taskArtifactDir(paths, taskId), "verification");
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(file) !== file
+    || !inside(verificationRoot, file)) {
+    throw new ReleaseCertificationError("release receipt identity record must be a canonical task verification artifact");
+  }
+  const record = readJsonFile(file, "release receipt identity record");
+  if (record.record_id !== receipt.record_id || record.identity_digest !== receipt.identity_digest) {
+    throw new ReleaseCertificationError("release receipt summary does not match its identity record");
+  }
+  return record;
+}
+
+function validatedInputs(record) {
+  if (!Array.isArray(record.identity?.inputs)) {
+    throw new ReleaseCertificationError("release receipt identity is missing inputs");
+  }
+  const inputs = new Map();
+  for (const entry of record.identity.inputs) {
+    validateCapturedInput(entry);
+    if (inputs.has(entry.requested)) {
+      throw new ReleaseCertificationError(`release receipt contains duplicate input reference: ${entry.requested}`);
+    }
+    inputs.set(entry.requested, entry);
+  }
+  return inputs;
+}
+
+function jsonInputs(inputs) {
+  const values = [];
+  for (const entry of inputs.values()) {
+    try {
+      values.push({ entry, value: readJsonFile(entry.path, `release input ${entry.requested}`) });
+    } catch {
+      // Binary evidence and other non-JSON inputs remain valid content-addressed evidence.
+    }
+  }
+  return values;
+}
+
+function inside(directory, file) {
+  const relative = path.relative(directory, file);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function contentInput(inputs, ref, digest, label) {
+  const entry = inputs.get(ref);
+  if (!entry || entry.sha256 !== digest) {
+    throw new ReleaseCertificationError(`${label} is not bound to a matching verification input`);
+  }
+  return entry;
+}
+
+function deriveReleaseDecision(releaseBinding, manifestDigest, facts) {
+  const results = releaseBinding.requirement_refs.map((requirementRef) => {
+    const fact = facts.get(requirementRef);
+    return {
+      requirement_ref: requirementRef,
+      fact_id: fact.fact_id,
+      outcome: fact.outcome,
+      reason_codes: [...fact.reason_codes],
+    };
+  });
+  const status = results.some((result) => result.outcome === "failed")
+    ? "denied"
+    : results.some((result) => result.outcome === "cannot_verify")
+      ? "cannot_verify"
+      : "certified";
+  const body = {
+    schema_version: 1,
+    authority: "derived-from-final-release-sweep",
+    status,
+    target_delivery_class: "product_release",
+    intent_sha256: releaseBinding.intent_sha256,
+    profile_ref: releaseBinding.profile_ref,
+    profile_sha256: releaseBinding.profile_sha256,
+    candidate_manifest_digest: manifestDigest,
+    requirement_results: results,
+  };
+  return { ...body, decision_id: digestCanonical(body) };
+}
+
+function recomputeFact(contracts, input, fact, policyBindings) {
+  const policy = fact.policy_binding;
+  const collector = contracts.collectors[policy.collector_adapter_ref];
+  if (!collector) throw new ReleaseCertificationError(`unsupported collector: ${policy.collector_adapter_ref}`);
+  const options = {
+    candidateManifestDigest: fact.candidate_manifest_digest,
+    evaluatedAt: fact.evaluated_at,
+    policyBinding: policy,
+  };
+  const output = policy.collector_adapter_ref === "formal-web-ui-v1@1"
+    ? collector(input, {
+      ...options,
+      policyBindings: policyBindings.filter((item) => (
+        item.collector_adapter_ref === "formal-web-ui-v1@1"
+      )),
+    })
+    : collector(input, options);
+  const selected = Array.isArray(output)
+    ? output.find((item) => item.policy_binding.requirement_ref === policy.requirement_ref)
+    : output;
+  if (!selected || !same(selected, fact)) {
+    throw new ReleaseCertificationError(
+      `typed fact does not match the immutable collector result: ${policy.requirement_ref}`,
+    );
+  }
+}
+
+function evaluateReleaseSweep({
+  contractMarkdown,
+  environment = process.env,
+  paths,
+  receipts,
+  releaseBinding,
+  repo,
+  snapshot,
+  taskId,
+}) {
+  const reasons = [];
+  const summaries = [];
+  try {
+    const contracts = loadReleaseContracts(environment, paths);
+    const intent = contracts.extractReleaseIntent(contractMarkdown);
+    if (!same(contracts.releasePlanBinding(intent), releaseBinding)) {
+      throw new ReleaseCertificationError("release intent no longer matches execution authority");
+    }
+    const profile = contracts.loadBundledProfile(releaseBinding.profile_ref);
+    if (contracts.profileBinding(profile).profile_sha256 !== releaseBinding.profile_sha256) {
+      throw new ReleaseCertificationError("release Profile no longer matches execution authority");
+    }
+    const expectedRefs = new Set(releaseBinding.requirement_refs);
+    const selected = [];
+    for (const receipt of receipts || []) {
+      const record = resolveIdentityRecord(paths, taskId, receipt);
+      if (!record.required_gate?.release_requirement) continue;
+      selected.push({ record, summary: receipt });
+    }
+    if (selected.length !== expectedRefs.size) {
+      throw new ReleaseCertificationError("final release sweep does not contain exactly one receipt per Profile requirement");
+    }
+    const policyBindings = selected.map(({ record }) => record.required_gate.release_requirement);
+
+    const facts = new Map();
+    let sharedManifest = null;
+    let sharedManifestPath = "";
+    const releaseRoot = path.join(taskArtifactDir(paths, taskId), "release");
+    for (const { record, summary } of selected) {
+      const gate = record.required_gate;
+      const requirement = gate.release_requirement;
+      const requirementRef = requirement.requirement_ref;
+      const withoutId = { ...record };
+      delete withoutId.record_id;
+      if (record.schema_version !== 3 || record.task_id !== taskId
+        || record.record_id !== digestCanonical(withoutId)
+        || record.identity_digest !== digestCanonical(record.identity || {})
+        || record.outcome !== "passed" || record.verdict !== "passed"
+        || record.provenance !== "fresh-executed" || record.snapshot_stable !== true
+        || gate.final_only !== true || gate.cache_policy !== "fresh-executed") {
+        throw new ReleaseCertificationError(`release receipt is not a stable final pass: ${requirementRef || "unknown"}`);
+      }
+      if (!expectedRefs.has(requirementRef) || facts.has(requirementRef)) {
+        throw new ReleaseCertificationError(`release receipt requirement is missing, duplicate, or unexpected: ${requirementRef || "unknown"}`);
+      }
+      if (record.identity?.repo_root_realpath !== repo || record.identity?.head_commit !== snapshot.head_sha) {
+        throw new ReleaseCertificationError(`release receipt was not executed against the final candidate: ${requirementRef}`);
+      }
+      const inputs = validatedInputs(record);
+      const json = jsonInputs(inputs);
+      const manifests = json.filter(({ value }) => (
+        value.schema_version === 1 && value.components && value.source && value.manifest_digest
+      ));
+      const releaseFacts = json.filter(({ value }) => (
+        value.schema_version === 1 && value.policy_binding && value.fact_id
+      ));
+      if (manifests.length !== 1 || releaseFacts.length !== 1) {
+        throw new ReleaseCertificationError(`release receipt must bind exactly one candidate manifest and one typed fact: ${requirementRef}`);
+      }
+      const manifestEntry = manifests[0].entry;
+      const manifest = manifests[0].value;
+      if (!inside(releaseRoot, manifestEntry.path)) {
+        throw new ReleaseCertificationError("candidate manifest must be a canonical task release artifact");
+      }
+      const manifestErrors = validateCandidateManifest(manifest, {
+        releaseBinding, releaseIntent: intent, repo, snapshot,
+      });
+      if (manifestErrors.length > 0) throw new ReleaseCertificationError(manifestErrors.join("; "));
+      if (sharedManifest && (!same(sharedManifest, manifest) || sharedManifestPath !== manifestEntry.path)) {
+        throw new ReleaseCertificationError("release receipts do not bind one identical candidate manifest");
+      }
+      sharedManifest = manifest;
+      sharedManifestPath = manifestEntry.path;
+      for (const component of COMPONENTS) {
+        const item = manifest.components[component];
+        contentInput(inputs, item.input_ref, item.sha256, `candidate component ${component}`);
+      }
+
+      const factEntry = releaseFacts[0].entry;
+      const fact = releaseFacts[0].value;
+      if (!inside(releaseRoot, factEntry.path)
+        || !(record.result?.evidence_refs || []).includes(factEntry.requested)) {
+        throw new ReleaseCertificationError(`typed fact is not a declared task release artifact: ${requirementRef}`);
+      }
+      const factErrors = contracts.validateReleaseFact(fact, {
+        expectedPolicyBinding: requirement,
+        candidateManifestDigest: manifest.manifest_digest,
+      });
+      if (factErrors.length > 0) throw new ReleaseCertificationError(factErrors.join("; "));
+      if (fact.evaluated_at !== record.created_at) {
+        throw new ReleaseCertificationError(`typed fact timestamp does not match its receipt: ${requirementRef}`);
+      }
+      const sourceInputs = json.filter(({ entry, value }) => (
+        entry.path !== manifestEntry.path
+        && entry.path !== factEntry.path
+        && digestCanonical(value) === fact.source.sha256
+      ));
+      if (sourceInputs.length !== 1) {
+        throw new ReleaseCertificationError(`typed fact must bind exactly one raw collector input: ${requirementRef}`);
+      }
+      recomputeFact(contracts, sourceInputs[0].value, fact, policyBindings);
+      for (const evidence of fact.evidence_refs) {
+        contentInput(inputs, evidence.ref, evidence.sha256, `typed fact evidence ${evidence.ref}`);
+      }
+      facts.set(requirementRef, fact);
+      summaries.push({
+        check_id: gate.check_id,
+        requirement_ref: requirementRef,
+        record_id: record.record_id,
+        fact_id: fact.fact_id,
+        outcome: fact.outcome,
+        candidate_manifest_digest: manifest.manifest_digest,
+        identity_record: summary.identity_record || "",
+      });
+    }
+    if (!sharedManifest || facts.size !== expectedRefs.size) {
+      throw new ReleaseCertificationError("final release sweep coverage is incomplete");
+    }
+    return {
+      admissible: true,
+      decision: deriveReleaseDecision(releaseBinding, sharedManifest.manifest_digest, facts),
+      reasons: [],
+      receiptSummaries: summaries,
+    };
+  } catch (error) {
+    reasons.push(error.message || String(error));
+    return { admissible: false, decision: null, reasons, receiptSummaries: [] };
+  }
+}
+
+module.exports = {
+  COMPONENTS,
+  ReleaseCertificationError,
+  buildCandidateManifest,
+  deriveReleaseDecision,
+  evaluateReleaseSweep,
+  validateCandidateManifest,
+};

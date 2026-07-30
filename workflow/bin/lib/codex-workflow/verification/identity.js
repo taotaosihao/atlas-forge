@@ -284,6 +284,33 @@ function identityInputPaths(identity) {
   return (identity.inputs || []).map((entry) => entry.requested);
 }
 
+function validateCapturedInput(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)
+    || entry.type !== "file" || typeof entry.requested !== "string" || !entry.requested.trim()
+    || typeof entry.path !== "string" || !path.isAbsolute(entry.path)
+    || !/^sha256:[a-f0-9]{64}$/.test(entry.sha256 || "")
+    || !Number.isInteger(entry.size) || entry.size < 0) {
+    throw new VerificationIdentityError("release input identity is incomplete or is not a regular file");
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(entry.path);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new VerificationIdentityError(`release input no longer exists: ${entry.requested}`);
+    }
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(entry.path) !== entry.path) {
+    throw new VerificationIdentityError(`release input must remain a canonical regular file: ${entry.requested}`);
+  }
+  if (fileMode(stat) !== entry.mode || stat.size !== entry.size
+    || sha256(fs.readFileSync(entry.path)) !== entry.sha256) {
+    throw new VerificationIdentityError(`release input changed after verification: ${entry.requested}`);
+  }
+  return entry.path;
+}
+
 module.exports = {
   ENVIRONMENT_NAMES,
   VerificationIdentityError,
@@ -293,4 +320,5 @@ module.exports = {
   identityInputPaths,
   sha256,
   stableValue,
+  validateCapturedInput,
 };
