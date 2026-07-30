@@ -45,11 +45,21 @@ Choose exactly one `target_delivery_class` branch from `release-intent.schema.js
 
 ## Execution Plan
 
+For `product_release`, use schema version 2 and project every bound Profile requirement exactly once. Repeat the `release_requirement` check shape below for the complete immutable Profile; ordinary engineering checks may omit it. Exploration and non-product plans use schema version 1 and omit both `release` and `release_requirement`.
+
 ```atlas-execution-plan+json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "size_policy": {
     "policy_id": "atlas-slice-size-v2"
+  },
+  "release": {
+    "target_delivery_class": "product_release",
+    "intent_sha256": "sha256:<release-intent-digest>",
+    "profile_ref": "web-ui-v1",
+    "profile_sha256": "sha256:<bundled-profile-digest>",
+    "check_definition_set_sha256": "sha256:<check-definition-set-digest>",
+    "requirement_refs": ["<every-immutable-profile-requirement-ref>"]
   },
   "slices": [
     {
@@ -74,15 +84,34 @@ Choose exactly one `target_delivery_class` branch from `release-intent.schema.js
         "max_changed_files": 12,
         "max_loc": 1200,
         "max_wall_clock_minutes": 120,
-        "max_required_checks": 5
+        "max_required_checks": 12
       },
       "checks": [
         {
           "check_id": "slice-contract",
-          "gate_class": "contract",
-          "command": "replace-with-a-reproducible-command",
-          "final_only": false,
-          "cache_policy": "identity-bound"
+          "gate_class": "<profile-allowed-gate-class>",
+          "command": "replace-with-a-reproducible-collector-command",
+          "final_only": true,
+          "cache_policy": "fresh-executed",
+          "release_requirement": {
+            "profile_ref": "web-ui-v1",
+            "profile_sha256": "sha256:<bundled-profile-digest>",
+            "requirement_ref": "<profile-requirement-ref>",
+            "requirement_sha256": "sha256:<requirement-digest>",
+            "dimension": "<profile-dimension>",
+            "required": true,
+            "waiver_policy": "never",
+            "definition_ref": "<check-definition-ref>",
+            "definition_sha256": "sha256:<check-definition-digest>",
+            "collector_adapter_ref": "<collector-adapter-ref>@<version>",
+            "collector_adapter_sha256": "sha256:<collector-adapter-digest>",
+            "fact_schema_ref": "<fact-schema-ref>@<version>",
+            "fact_schema_sha256": "sha256:<fact-schema-digest>",
+            "evaluator_ref": "<evaluator-ref>@<version>",
+            "evaluator_sha256": "sha256:<evaluator-digest>",
+            "pass_rule_sha256": "sha256:<pass-rule-digest>",
+            "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"]
+          }
         }
       ]
     }

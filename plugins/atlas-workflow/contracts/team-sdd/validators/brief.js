@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const {
+  ID_PATTERN,
   requireObject,
   requireKeys,
   rejectUnknownKeys,
@@ -67,6 +68,10 @@ const V3_KEYS = [
   "output_contract",
 ];
 const CONTRACT_KEYS = ["path", "sha256", "semantics_version", "execution_plan_sha256"];
+const RELEASE_KEYS = [
+  "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
+  "check_definition_set_sha256", "requirement_refs",
+];
 const DEPENDENCY_KEYS = ["slice_id", "required_outcome", "keeper_outputs"];
 const BUDGET_KEYS = ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"];
 const SIZE_GATE_KEYS = ["decision", "policy_id", "estimate", "exception"];
@@ -98,6 +103,22 @@ function validateUniqueStrings(value, label, errors, nonEmpty = false) {
   if (new Set(value).size !== value.length) errors.push(`${label} must not contain duplicates`);
 }
 
+function validateReleaseBinding(value, label, errors) {
+  if (!validateExactObject(value, label, RELEASE_KEYS, errors)) return;
+  if (value.target_delivery_class !== "product_release") {
+    errors.push(`${label}.target_delivery_class must equal product_release`);
+  }
+  if (typeof value.profile_ref !== "string" || !ID_PATTERN.test(value.profile_ref)) {
+    errors.push(`${label}.profile_ref must be a safe identifier`);
+  }
+  for (const field of ["intent_sha256", "profile_sha256", "check_definition_set_sha256"]) {
+    if (!/^sha256:[a-f0-9]{64}$/.test(value[field] || "")) {
+      errors.push(`${label}.${field} must use sha256:<hex>`);
+    }
+  }
+  validateUniqueStrings(value.requirement_refs, `${label}.requirement_refs`, errors, true);
+}
+
 function validateV3(value, errors) {
   requireKeys(value, V3_KEYS, errors);
   rejectUnknownKeys(value, V3_KEYS, errors);
@@ -111,7 +132,10 @@ function validateV3(value, errors) {
   if (path.isAbsolute(value.requirements_path || "")) errors.push("requirements_path must be relative");
   if (path.isAbsolute(value.global_constraints_path || "")) errors.push("global_constraints_path must be relative");
 
-  if (validateExactObject(value.contract, "contract", CONTRACT_KEYS, errors)) {
+  const contractKeys = value.contract?.release === undefined
+    ? CONTRACT_KEYS
+    : [...CONTRACT_KEYS, "release"];
+  if (validateExactObject(value.contract, "contract", contractKeys, errors)) {
     if (typeof value.contract.path !== "string" || !path.isAbsolute(value.contract.path)) {
       errors.push("contract.path must be an absolute path");
     } else if (!fs.existsSync(value.contract.path) || !fs.statSync(value.contract.path).isFile()) {
@@ -120,11 +144,17 @@ function validateV3(value, errors) {
     if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.sha256 || "")) {
       errors.push("contract.sha256 must use sha256:<hex>");
     }
-    if (![1, 2, 3].includes(value.contract.semantics_version)) {
-      errors.push("contract.semantics_version must be one of: 1, 2, 3");
+    if (![1, 2, 3, 4].includes(value.contract.semantics_version)) {
+      errors.push("contract.semantics_version must be one of: 1, 2, 3, 4");
     }
     if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.execution_plan_sha256 || "")) {
       errors.push("contract.execution_plan_sha256 must use sha256:<hex>");
+    }
+    if (value.contract.release !== undefined) {
+      if (value.contract.semantics_version !== 4) {
+        errors.push("contract.release is supported only for semantics version 4");
+      }
+      validateReleaseBinding(value.contract.release, "contract.release", errors);
     }
   }
 
@@ -167,7 +197,9 @@ function validateV3(value, errors) {
   } else {
     const ids = new Set();
     value.checks.forEach((check, index) => {
-      validateCheck(check, `checks[${index}]`, errors);
+      validateCheck(check, `checks[${index}]`, errors, {
+        schemaVersion: value.contract?.release ? 2 : 1,
+      });
       if (check && ids.has(check.check_id)) errors.push(`checks[${index}].check_id must be unique`);
       if (check) ids.add(check.check_id);
     });

@@ -16,8 +16,21 @@
       "properties": {
         "path": { "type": "string" },
         "sha256": { "type": "string" },
-        "semantics_version": { "type": "integer", "enum": [1, 2, 3] },
-        "execution_plan_sha256": { "type": "string" }
+        "semantics_version": { "type": "integer", "enum": [1, 2, 3, 4] },
+        "execution_plan_sha256": { "type": "string" },
+        "release": {
+          "type": "object",
+          "required": ["target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256", "check_definition_set_sha256", "requirement_refs"],
+          "properties": {
+            "target_delivery_class": { "type": "string", "enum": ["product_release"] },
+            "intent_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "profile_ref": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+            "profile_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "check_definition_set_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "requirement_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

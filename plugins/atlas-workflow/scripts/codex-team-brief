@@ -14,6 +14,9 @@ const {
   repositoryBroadPath,
   sha256Value,
 } = require("../contracts/team-sdd/validators/execution-plan");
+const {
+  extractReleaseIntent,
+} = require("../contracts/release-certification/validators/release-intent");
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -22,13 +25,13 @@ function usage() {
   codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
     --objective <text> --acceptance <ref> --owned <path> --check <command> [options]
   codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
-    --contract <semantics-v3-contract>
+    --contract <semantics-v3-or-v4-contract>
   codex-team-brief --task <task-id> --all-slices --repo <absolute-path> --base <rev> \\
-    --contract <semantics-v3-contract>
+    --contract <semantics-v3-or-v4-contract>
 
 options:
   --contract <file>           Sprint Contract markdown to compile into evidence-manifest.json
-  --all-slices                Compile every slice in a semantics-v3 execution plan
+  --all-slices                Compile every slice in a semantics-v3/v4 execution plan
   --forbidden <path>           repeatable, comma-separated allowed
   --commit-policy <policy>     logical_outcome|changes_allowed_no_commit|no_change_allowed`);
 }
@@ -160,7 +163,7 @@ function contractSemanticsVersion(text) {
   const match = /^contract_semantics_version:\s*([^\s]+)\s*$/m.exec(text);
   if (!match) return 1;
   const version = Number(match[1]);
-  if (![1, 2, 3].includes(version)) {
+  if (![1, 2, 3, 4].includes(version)) {
     throw new Error(`unsupported contract_semantics_version: ${match[1]}`);
   }
   return version;
@@ -374,6 +377,7 @@ function v3Brief(options, baseSha, contract, plan, slice) {
       sha256: `sha256:${contract.sha256}`,
       semantics_version: contract.semanticsVersion,
       execution_plan_sha256: `sha256:${sha256Value(plan)}`,
+      ...(plan.release ? { release: plan.release } : {}),
     },
     dependencies: slice.depends_on.map((sliceId) => ({
       slice_id: sliceId,
@@ -444,7 +448,7 @@ function writeBrief(options) {
     );
     return;
   }
-  if (contract.semanticsVersion !== 3) {
+  if (![3, 4].includes(contract.semanticsVersion)) {
     requireLegacyOptions(options);
     const plan = compatibilityPlan(options);
     writeBriefFiles(
@@ -458,8 +462,9 @@ function writeBrief(options) {
   if (!options.allSlices && !options.slice) throw new Error("--slice or --all-slices is required");
   if (options.objective || options.acceptance.length || options.owned.length
     || options.forbidden.length || options.checks.length) {
-    throw new Error("semantics-v3 contracts derive objective, acceptance, owned paths, and checks from the execution plan");
+    throw new Error("semantics-v3/v4 contracts derive objective, acceptance, owned paths, and checks from the execution plan");
   }
+  if (contract.semanticsVersion === 4) extractReleaseIntent(contract.text);
   const plan = extractExecutionPlan(contract.text);
   const selected = options.allSlices
     ? plan.slices

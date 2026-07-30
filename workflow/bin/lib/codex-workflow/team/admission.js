@@ -22,6 +22,28 @@ const PERMANENT_GATES = new Set([
 ]);
 const SIZE_POLICY_ID = "atlas-slice-size-v2";
 
+function pluginCandidates(environment, paths) {
+  return [
+    environment.ATLAS_WORKFLOW_PLUGIN_ROOT,
+    paths.codeHome && path.join(paths.codeHome, "plugins", "atlas-workflow"),
+    path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+  ].filter(Boolean);
+}
+
+function loadCanonicalExecutionContracts(environment, paths) {
+  for (const root of pluginCandidates(environment, paths)) {
+    const planFile = path.join(root, "contracts/team-sdd/validators/execution-plan.js");
+    const intentFile = path.join(root, "contracts/release-certification/validators/release-intent.js");
+    if (fs.existsSync(planFile) && fs.existsSync(intentFile)) {
+      return {
+        ...require(planFile),
+        ...require(intentFile),
+      };
+    }
+  }
+  return null;
+}
+
 function pathPrefix(raw) {
   if (typeof raw !== "string" || !raw.trim() || raw.startsWith("/") || raw.includes("\\")) return "";
   const normalized = raw.replace(/^\.\//, "").replace(/\/+/g, "/");
@@ -208,8 +230,8 @@ function requireBriefShape(brief, taskId) {
       }
     }
   }
-  if (!brief.contract || brief.contract.semantics_version !== 3) {
-    throw new CommandError("execute Team start requires a semantics-v3 contract binding");
+  if (!brief.contract || ![3, 4].includes(brief.contract.semantics_version)) {
+    throw new CommandError("execute Team start requires a semantics-v3 or semantics-v4 contract binding");
   }
 }
 
@@ -240,7 +262,7 @@ function validateRepository(brief, cwd) {
   return repo;
 }
 
-function validateContractBinding(brief, repo) {
+function validateContractBinding(brief, repo, environment, paths) {
   const contractFile = canonicalFile(brief.contract.path, "brief contract");
   const relative = path.relative(repo, contractFile);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
@@ -252,10 +274,37 @@ function validateContractBinding(brief, repo) {
     throw new CommandError("brief contract sha256 does not match the contract file");
   }
   const markdown = fs.readFileSync(contractFile, "utf8");
-  if (!/^contract_semantics_version:\s*3\s*$/m.test(markdown)) {
-    throw new CommandError("brief contract file is not semantics version 3");
+  const semanticsMatch = /^contract_semantics_version:\s*(\d+)\s*$/m.exec(markdown);
+  const semanticsVersion = semanticsMatch ? Number(semanticsMatch[1]) : 1;
+  if (semanticsVersion !== brief.contract.semantics_version || ![3, 4].includes(semanticsVersion)) {
+    throw new CommandError("brief contract semantics version does not match a supported execution contract");
   }
-  const plan = executionPlan(markdown);
+  let plan;
+  if (semanticsVersion === 4) {
+    const contracts = loadCanonicalExecutionContracts(environment, paths);
+    if (!contracts) throw new CommandError("canonical release execution validators are unavailable");
+    let intent;
+    try {
+      intent = contracts.extractReleaseIntent(markdown);
+      plan = contracts.extractExecutionPlan(markdown);
+    } catch (error) {
+      throw new CommandError(`semantics-v4 release contract is invalid: ${error.message}`);
+    }
+    const expectedRelease = intent.target_delivery_class === "product_release"
+      ? contracts.releasePlanBinding(intent)
+      : null;
+    if (!same(plan.release || null, expectedRelease)) {
+      throw new CommandError("contract release plan does not match the immutable release intent/Profile binding");
+    }
+    if (!same(brief.contract.release || null, expectedRelease)) {
+      throw new CommandError("brief release binding does not match the contract release plan");
+    }
+  } else {
+    plan = executionPlan(markdown);
+    if (brief.contract.release !== undefined) {
+      throw new CommandError("semantics-v3 brief cannot carry a release binding");
+    }
+  }
   const expectedPlan = SHA256.exec(brief.contract.execution_plan_sha256 || "");
   const planDigest = digestValue(plan);
   if (!expectedPlan || expectedPlan[1] !== planDigest) {
@@ -604,7 +653,7 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
   const expected = path.join(taskArtifactDir(paths, taskId), "team", "sdd", "slices", brief.slice_id, "brief.json");
   if (file !== expected) throw new CommandError(`Team brief is not at its canonical task path: ${expected}`);
   const repo = validateRepository(brief, cwd);
-  const binding = validateContractBinding(brief, repo);
+  const binding = validateContractBinding(brief, repo, environment, paths);
   validateSizeGate(brief, clock);
   validateDependencies(paths, brief, {
     captureIdentity,
@@ -621,6 +670,7 @@ function admitTeamStart({ briefPath, captureIdentity, clock, cwd, environment, m
       contract_path: binding.contractFile,
       contract_sha256: `sha256:${binding.contractDigest}`,
       execution_plan_sha256: `sha256:${binding.planDigest}`,
+      ...(binding.plan.release ? { release: binding.plan.release } : {}),
       base_sha: brief.base_sha,
       repo,
     },
@@ -659,6 +709,7 @@ function bindExecutionAuthority(state, admission, revision) {
     execution_plan_sha256: admission.brief.execution_plan_sha256,
     repo_realpath: admission.brief.repo,
     required_slices: [...admission.required_slices],
+    ...(admission.brief.release ? { release_binding: admission.brief.release } : {}),
   };
   const existing = state.execution_authority;
   if (existing) {
@@ -674,6 +725,11 @@ function bindExecutionAuthority(state, admission, revision) {
           "task execution authority is already bound to another contract; explicit replan is required",
         );
       }
+    }
+    if (!same(existing.release_binding || null, requested.release_binding || null)) {
+      throw new CommandError(
+        "task execution authority release binding changed; explicit replan is required",
+      );
     }
     if (!same(existing.required_slices, requested.required_slices)) {
       throw new CommandError(

@@ -5,6 +5,15 @@ const {
   ID_PATTERN,
   isObject,
 } = require("./common");
+const {
+  digestValue,
+  loadBundledProfile,
+  profileBinding,
+} = require("../../release-certification/validators/profile");
+const {
+  extractReleaseIntent,
+  validateReleaseIntent,
+} = require("../../release-certification/validators/release-intent");
 
 const POLICY_ID = "atlas-slice-size-v2";
 const RISK_CLASSES = new Set(["low", "medium", "high", "critical"]);
@@ -22,7 +31,8 @@ const PERMANENT_GATE_CLASSES = new Set([
   "restore", "served-ui", "browser-flow", "install", "postflight",
   "release-identity", "collision", "downgrade", "symlink", "exact-layout",
 ]);
-const TOP_LEVEL_KEYS = ["schema_version", "size_policy", "slices"];
+const V1_TOP_LEVEL_KEYS = ["schema_version", "size_policy", "slices"];
+const V2_TOP_LEVEL_KEYS = [...V1_TOP_LEVEL_KEYS, "release"];
 const SIZE_POLICY_KEYS = ["policy_id"];
 const SLICE_KEYS = [
   "slice_id", "objective", "depends_on", "keeper_outputs", "owned_paths",
@@ -38,7 +48,19 @@ const ESTIMATE_KEYS = [
   "serial_dependency_depth", "independent_vertical_count",
 ];
 const CHECK_KEYS = ["check_id", "gate_class", "command", "final_only", "cache_policy"];
+const RELEASE_KEYS = [
+  "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
+  "check_definition_set_sha256", "requirement_refs",
+];
+const RELEASE_REQUIREMENT_KEYS = [
+  "profile_ref", "profile_sha256", "requirement_ref", "requirement_sha256",
+  "dimension", "required", "waiver_policy", "definition_ref", "definition_sha256",
+  "collector_adapter_ref", "collector_adapter_sha256", "fact_schema_ref",
+  "fact_schema_sha256", "evaluator_ref", "evaluator_sha256", "pass_rule_sha256",
+  "required_candidate_components",
+];
 const EXCEPTION_KEYS = ["authority_ref", "expires_at", "reason", "compensating_controls"];
+const SHA256 = /^sha256:[a-f0-9]{64}$/;
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -148,12 +170,13 @@ function validateException(value, location, errors) {
   }
 }
 
-function validateCheck(value, location, errors) {
+function validateCheck(value, location, errors, { schemaVersion = 1 } = {}) {
   if (!isObject(value)) {
     push(errors, location, "must be an object");
     return;
   }
-  exactKeys(value, CHECK_KEYS, CHECK_KEYS, location, errors);
+  const allowedKeys = schemaVersion === 2 ? [...CHECK_KEYS, "release_requirement"] : CHECK_KEYS;
+  exactKeys(value, CHECK_KEYS, allowedKeys, location, errors);
   safeId(value.check_id, `${location}.check_id`, errors);
   nonEmptyString(value.command, `${location}.command`, errors);
   if (!GATE_CLASSES.has(value.gate_class)) {
@@ -166,9 +189,12 @@ function validateCheck(value, location, errors) {
   if (PERMANENT_GATE_CLASSES.has(value.gate_class) && value.cache_policy !== "fresh-executed") {
     push(errors, `${location}.cache_policy`, `permanent gate ${value.gate_class} must be fresh-executed`);
   }
+  if (value.release_requirement !== undefined && !isObject(value.release_requirement)) {
+    push(errors, `${location}.release_requirement`, "must be an object");
+  }
 }
 
-function validateSlice(slice, index, errors) {
+function validateSlice(slice, index, errors, schemaVersion) {
   const location = `slices[${index}]`;
   if (!isObject(slice)) {
     push(errors, location, "must be an object");
@@ -216,7 +242,12 @@ function validateSlice(slice, index, errors) {
   if (!Array.isArray(slice.checks) || slice.checks.length === 0) {
     push(errors, `${location}.checks`, "must be a non-empty array");
   } else {
-    slice.checks.forEach((check, checkIndex) => validateCheck(check, `${location}.checks[${checkIndex}]`, errors));
+    slice.checks.forEach((check, checkIndex) => validateCheck(
+      check,
+      `${location}.checks[${checkIndex}]`,
+      errors,
+      { schemaVersion },
+    ));
   }
   if (slice.size_exception !== undefined) validateException(slice.size_exception, `${location}.size_exception`, errors);
   if (isObject(slice.estimate) && isObject(slice.budget)
@@ -236,6 +267,143 @@ function validateSlice(slice, index, errors) {
       if (pathsOverlap(owned, forbidden)) {
         push(errors, location, `owned path overlaps forbidden path: ${owned} <> ${forbidden}`);
       }
+    }
+  }
+}
+
+function releaseRequirementProjection(profile, binding, requirement) {
+  const definition = binding.requirements[requirement.requirement_id];
+  return {
+    profile_ref: binding.profile_ref,
+    profile_sha256: binding.profile_sha256,
+    requirement_ref: requirement.requirement_id,
+    requirement_sha256: digestValue(requirement),
+    dimension: requirement.dimension,
+    required: requirement.required,
+    waiver_policy: requirement.waiver_policy,
+    definition_ref: definition.definition_ref,
+    definition_sha256: definition.definition_sha256,
+    collector_adapter_ref: definition.collector_adapter_ref,
+    collector_adapter_sha256: definition.collector_adapter_sha256,
+    fact_schema_ref: definition.fact_schema_ref,
+    fact_schema_sha256: definition.fact_schema_sha256,
+    evaluator_ref: definition.evaluator_ref,
+    evaluator_sha256: definition.evaluator_sha256,
+    pass_rule_sha256: definition.pass_rule_sha256,
+    required_candidate_components: [...requirement.check_definition.required_candidate_components],
+  };
+}
+
+function releasePlanBinding(intent) {
+  const intentErrors = validateReleaseIntent(intent);
+  if (intentErrors.length > 0) throw new Error(`invalid release intent: ${intentErrors.join("; ")}`);
+  if (intent.target_delivery_class !== "product_release") {
+    throw new Error("release plan binding requires a product_release intent");
+  }
+  const profileRef = intent.release_profile_refs?.[0]?.profile_ref;
+  const profile = loadBundledProfile(profileRef);
+  const binding = profileBinding(profile);
+  if (intent.release_profile_refs[0].profile_sha256 !== binding.profile_sha256) {
+    throw new Error("release intent profile digest does not match the immutable bundled profile");
+  }
+  return {
+    target_delivery_class: "product_release",
+    intent_sha256: digestValue(intent),
+    profile_ref: binding.profile_ref,
+    profile_sha256: binding.profile_sha256,
+    check_definition_set_sha256: binding.check_definition_set_sha256,
+    requirement_refs: profile.requirements.map((requirement) => requirement.requirement_id),
+  };
+}
+
+function validateReleasePlan(plan, intent, errors) {
+  if (!isObject(plan.release)) {
+    push(errors, "release", "schema version 2 requires a release binding object");
+    return;
+  }
+  exactKeys(plan.release, RELEASE_KEYS, RELEASE_KEYS, "release", errors);
+  if (plan.release.target_delivery_class !== "product_release") {
+    push(errors, "release.target_delivery_class", "must equal product_release");
+  }
+  for (const field of ["intent_sha256", "profile_sha256", "check_definition_set_sha256"]) {
+    if (typeof plan.release[field] !== "string" || !SHA256.test(plan.release[field])) {
+      push(errors, `release.${field}`, "must be a sha256:<64 lowercase hex> digest");
+    }
+  }
+  safeId(plan.release.profile_ref, "release.profile_ref", errors);
+  uniqueStrings(plan.release.requirement_refs, "release.requirement_refs", errors, { nonEmpty: true });
+
+  let profile;
+  let binding;
+  try {
+    profile = loadBundledProfile(plan.release.profile_ref);
+    binding = profileBinding(profile);
+  } catch (error) {
+    push(errors, "release.profile_ref", error.message);
+    return;
+  }
+  let expectedRelease;
+  try {
+    expectedRelease = intent ? releasePlanBinding(intent) : {
+      ...plan.release,
+      target_delivery_class: "product_release",
+      profile_ref: binding.profile_ref,
+      profile_sha256: binding.profile_sha256,
+      check_definition_set_sha256: binding.check_definition_set_sha256,
+      requirement_refs: profile.requirements.map((requirement) => requirement.requirement_id),
+    };
+  } catch (error) {
+    push(errors, "release", error.message);
+    return;
+  }
+  for (const field of RELEASE_KEYS) {
+    if (canonicalJson(plan.release[field]) !== canonicalJson(expectedRelease[field])) {
+      push(errors, `release.${field}`, "does not match the immutable release intent/Profile binding");
+    }
+  }
+
+  const requirements = new Map(profile.requirements.map((requirement) => [requirement.requirement_id, requirement]));
+  const projected = new Set();
+  plan.slices.forEach((slice, sliceIndex) => {
+    for (const [checkIndex, check] of (slice.checks || []).entries()) {
+      if (!isObject(check) || check.release_requirement === undefined) continue;
+      const location = `slices[${sliceIndex}].checks[${checkIndex}].release_requirement`;
+      if (!isObject(check.release_requirement)) continue;
+      exactKeys(
+        check.release_requirement,
+        RELEASE_REQUIREMENT_KEYS,
+        RELEASE_REQUIREMENT_KEYS,
+        location,
+        errors,
+      );
+      const requirementRef = check.release_requirement.requirement_ref;
+      const requirement = requirements.get(requirementRef);
+      if (!requirement) {
+        push(errors, `${location}.requirement_ref`, "is not required by the bound Profile");
+        continue;
+      }
+      if (projected.has(requirementRef)) {
+        push(errors, `${location}.requirement_ref`, `duplicate release requirement projection: ${requirementRef}`);
+      }
+      projected.add(requirementRef);
+      const expected = releaseRequirementProjection(profile, binding, requirement);
+      for (const field of RELEASE_REQUIREMENT_KEYS) {
+        if (canonicalJson(check.release_requirement[field]) !== canonicalJson(expected[field])) {
+          push(errors, `${location}.${field}`, "does not match the immutable Profile Check Definition");
+        }
+      }
+      if (check.final_only !== true) push(errors, `${location}.requirement_ref`, "release checks must be final_only");
+      if (check.cache_policy !== "fresh-executed") {
+        push(errors, `${location}.requirement_ref`, "release checks must be fresh-executed");
+      }
+      if (!requirement.check_definition.allowed_gate_classes.includes(check.gate_class)) {
+        push(errors, `${location}.requirement_ref`, `gate_class ${check.gate_class} is not allowed by the Check Definition`);
+      }
+    }
+  });
+  for (const requirementRef of requirements.keys()) {
+    if (!projected.has(requirementRef)) {
+      push(errors, "slices", `missing release requirement projection: ${requirementRef}`);
     }
   }
 }
@@ -313,11 +481,21 @@ function validateGraph(slices, errors) {
   });
 }
 
-function validateExecutionPlan(value) {
+function validateExecutionPlan(value, { contractSemanticsVersion = null, releaseIntent = null } = {}) {
   const errors = [];
   if (!isObject(value)) return ["value: must be an object"];
-  exactKeys(value, TOP_LEVEL_KEYS, TOP_LEVEL_KEYS, "value", errors);
-  if (value.schema_version !== 1) push(errors, "schema_version", "must equal 1");
+  const topLevelKeys = value.schema_version === 2 ? V2_TOP_LEVEL_KEYS : V1_TOP_LEVEL_KEYS;
+  exactKeys(value, topLevelKeys, topLevelKeys, "value", errors);
+  if (![1, 2].includes(value.schema_version)) push(errors, "schema_version", "must equal 1 or 2");
+  if (contractSemanticsVersion === 3 && value.schema_version !== 1) {
+    push(errors, "schema_version", "semantics-v3 contracts require execution-plan schema version 1");
+  }
+  if (releaseIntent?.target_delivery_class === "product_release" && value.schema_version !== 2) {
+    push(errors, "schema_version", "product_release intent requires execution-plan schema version 2");
+  }
+  if (releaseIntent && releaseIntent.target_delivery_class !== "product_release" && value.schema_version !== 1) {
+    push(errors, "schema_version", "exploration and non_product intents require execution-plan schema version 1");
+  }
   if (!isObject(value.size_policy)) {
     push(errors, "size_policy", "must be an object");
   } else {
@@ -328,8 +506,9 @@ function validateExecutionPlan(value) {
     push(errors, "slices", "must be a non-empty array");
     return errors;
   }
-  value.slices.forEach((slice, index) => validateSlice(slice, index, errors));
+  value.slices.forEach((slice, index) => validateSlice(slice, index, errors, value.schema_version));
   validateGraph(value.slices, errors);
+  if (value.schema_version === 2) validateReleasePlan(value, releaseIntent, errors);
   return errors;
 }
 
@@ -345,7 +524,17 @@ function extractExecutionPlan(markdown) {
   } catch (error) {
     throw new Error(`invalid execution plan JSON: ${error.message}`);
   }
-  const errors = validateExecutionPlan(plan);
+  const semanticsMatch = /^contract_semantics_version:\s*(\d+)\s*$/m.exec(String(markdown));
+  const contractSemanticsVersion = semanticsMatch ? Number(semanticsMatch[1]) : null;
+  let releaseIntent = null;
+  if (contractSemanticsVersion === 4) {
+    try {
+      releaseIntent = extractReleaseIntent(markdown);
+    } catch {
+      // Release-intent diagnostics are owned by the contract envelope validator.
+    }
+  }
+  const errors = validateExecutionPlan(plan, { contractSemanticsVersion, releaseIntent });
   if (errors.length > 0) throw new Error(errors.join("; "));
   return plan;
 }
@@ -359,6 +548,8 @@ module.exports = {
   estimateOverBudget,
   extractExecutionPlan,
   pathsOverlap,
+  releasePlanBinding,
+  releaseRequirementProjection,
   repositoryBroadPath,
   sha256Value,
   validateCheck,
