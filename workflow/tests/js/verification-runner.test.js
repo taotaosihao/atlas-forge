@@ -14,7 +14,7 @@ const RECORD_CLI = path.join(
   "bin/lib/codex-workflow/verification/record-cli.js",
 );
 const TEMPLATE_DIR = path.join(WORKFLOW_ROOT, "templates");
-const { resolvePaths } = require(path.join(
+const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
 ));
@@ -34,7 +34,12 @@ const { outputPreview } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/record.js",
 ));
-const { captureVerificationIdentity } = require(path.join(
+const {
+  captureVerificationIdentity,
+  digestCanonical,
+  resolveVerificationOutputs,
+  validateCapturedOutput,
+} = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/identity.js",
 ));
@@ -176,6 +181,104 @@ test("runs a passing argv command and records independent verification metadata"
     detail: `${formatCommand(parsed.command)} => passed`,
     created_at: "2026-07-10T09:15:00Z",
   });
+});
+
+test("binds authoritative time and controller-owned outputs into the verification record", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  environment.ATLAS_VERIFICATION_CREATED_AT = "forged";
+  environment.ATLAS_VERIFICATION_OUTPUTS_JSON = JSON.stringify(["/tmp/forged"]);
+  const taskId = createFixtureTask(environment, "Controller outputs");
+  const outputRoot = path.join(taskArtifactDir(paths, taskId), "generated");
+  fs.mkdirSync(outputRoot);
+  const first = path.join(outputRoot, "first.json");
+  const second = path.join(outputRoot, "second.txt");
+  const child = [
+    "const fs=require('fs');",
+    "const outputs=JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON);",
+    "fs.writeFileSync(outputs[0], JSON.stringify({createdAt:process.env.ATLAS_VERIFICATION_CREATED_AT}));",
+    "fs.writeFileSync(outputs[1], 'second output\\n');",
+  ].join("");
+  const result = runVerification(parseVerifyArgs([
+    taskId, "--output", first, `--output=${second}`,
+    "--", process.execPath, "-e", child,
+  ]), {
+    clock: fixedClock,
+    environment,
+    recordToken: "20260710T091500000000010",
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(first, "utf8")), {
+    createdAt: "2026-07-10T09:15:00Z",
+  });
+  const record = JSON.parse(fs.readFileSync(result.identityFile, "utf8"));
+  assert.equal(record.created_at, "2026-07-10T09:15:00Z");
+  assert.deepEqual(record.result.outputs.map((entry) => entry.path), [first, second]);
+  assert.ok(record.result.outputs.every((entry) => (
+    entry.type === "file" && /^0[0-7]{3}$/.test(entry.mode)
+    && Number.isInteger(entry.size) && /^sha256:[a-f0-9]{64}$/.test(entry.sha256)
+  )));
+  const withoutId = { ...record };
+  delete withoutId.record_id;
+  assert.equal(record.record_id, digestCanonical(withoutId));
+  fs.appendFileSync(second, "drift");
+  assert.throws(() => validateCapturedOutput(record.result.outputs[1]), /changed after capture/);
+
+  assert.throws(
+    () => resolveVerificationOutputs([first, first], home, taskArtifactDir(paths, taskId)),
+    /already exists|duplicate/,
+  );
+  assert.throws(
+    () => resolveVerificationOutputs([path.join(home, "outside")], home, taskArtifactDir(paths, taskId)),
+    /inside the task artifact root/,
+  );
+  const duplicate = path.join(outputRoot, "duplicate");
+  assert.throws(
+    () => resolveVerificationOutputs([duplicate, duplicate], home, taskArtifactDir(paths, taskId)),
+    /duplicate verification output/,
+  );
+  const realParent = path.join(taskArtifactDir(paths, taskId), "real-parent");
+  const linkedParent = path.join(taskArtifactDir(paths, taskId), "linked-parent");
+  fs.mkdirSync(realParent);
+  fs.symlinkSync(realParent, linkedParent);
+  assert.throws(
+    () => resolveVerificationOutputs([path.join(linkedParent, "output")], home,
+      taskArtifactDir(paths, taskId)),
+    /parent must be canonical/,
+  );
+});
+
+test("fails closed when a successful child omits or substitutes a declared output", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Invalid outputs");
+  const outputRoot = path.join(taskArtifactDir(paths, taskId), "invalid");
+  fs.mkdirSync(outputRoot);
+  const missing = path.join(outputRoot, "missing");
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, "--output", missing, "--", process.execPath, "-e", "process.exit(0)",
+  ]), { clock: fixedClock, environment }), /was not created/);
+
+  const directory = path.join(outputRoot, "directory");
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, "--output", directory, "--", process.execPath, "-e",
+    "require('fs').mkdirSync(JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON)[0])",
+  ]), { clock: fixedClock, environment }), /canonical regular file/);
+
+  const symlink = path.join(outputRoot, "symlink");
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId, "--output", symlink, "--", process.execPath, "-e",
+    "require('fs').symlinkSync(process.execPath,JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON)[0])",
+  ]), { clock: fixedClock, environment }), /canonical regular file/);
+
+  const cleanEnvironment = {
+    ...environment,
+    ATLAS_VERIFICATION_OUTPUTS_JSON: JSON.stringify(["/tmp/forged"]),
+  };
+  const clean = runVerification(parseVerifyArgs([
+    taskId, "--", process.execPath, "-e",
+    "process.exit(Object.hasOwn(process.env,'ATLAS_VERIFICATION_OUTPUTS_JSON')?3:0)",
+  ]), { clock: fixedClock, environment: cleanEnvironment });
+  assert.equal(clean.exitCode, 0);
 });
 
 test("returns a failed command exit code after writing every projection", (t) => {

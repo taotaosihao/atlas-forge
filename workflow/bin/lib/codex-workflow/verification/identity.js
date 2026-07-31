@@ -235,6 +235,119 @@ function inputIdentity(inputPaths, cwd) {
   });
 }
 
+function inside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`)
+    && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function resolveVerificationOutputs(outputPaths, cwd, artifactRoot) {
+  const root = fs.realpathSync(artifactRoot);
+  const seen = new Set();
+  return (outputPaths || []).map((requested) => {
+    if (typeof requested !== "string" || !requested.trim()) {
+      throw new VerificationIdentityError("verification output must be a non-empty path");
+    }
+    const absolute = path.isAbsolute(requested) ? path.resolve(requested) : path.resolve(cwd, requested);
+    const parent = path.dirname(absolute);
+    let canonicalParent;
+    try {
+      canonicalParent = fs.realpathSync(parent);
+    } catch (error) {
+      throw new VerificationIdentityError(`verification output parent is unavailable: ${requested}: ${error.message}`);
+    }
+    if (canonicalParent !== parent || !inside(root, canonicalParent)) {
+      throw new VerificationIdentityError(
+        `verification output parent must be canonical and inside the task artifact root: ${requested}`,
+      );
+    }
+    const target = path.join(canonicalParent, path.basename(absolute));
+    if (seen.has(target)) {
+      throw new VerificationIdentityError(`duplicate verification output: ${requested}`);
+    }
+    seen.add(target);
+    try {
+      fs.lstatSync(target);
+      throw new VerificationIdentityError(`verification output already exists: ${requested}`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    return { requested, path: target };
+  });
+}
+
+function captureVerificationOutput(declared) {
+  let stat;
+  try {
+    stat = fs.lstatSync(declared.path);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new VerificationIdentityError(`verification output was not created: ${declared.requested}`);
+    }
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(declared.path) !== declared.path) {
+    throw new VerificationIdentityError(
+      `verification output must be a canonical regular file: ${declared.requested}`,
+    );
+  }
+  return {
+    requested: declared.requested,
+    path: declared.path,
+    type: "file",
+    mode: fileMode(stat),
+    size: stat.size,
+    sha256: sha256(fs.readFileSync(declared.path)),
+  };
+}
+
+function validateCapturedOutput(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)
+    || entry.type !== "file" || typeof entry.requested !== "string" || !entry.requested.trim()
+    || typeof entry.path !== "string" || !path.isAbsolute(entry.path)
+    || !/^sha256:[a-f0-9]{64}$/.test(entry.sha256 || "")
+    || !Number.isInteger(entry.size) || entry.size < 0) {
+    throw new VerificationIdentityError("verification output identity is incomplete or is not a regular file");
+  }
+  readCapturedFile(entry, "verification output");
+  return entry.path;
+}
+
+function readCapturedFile(entry, label = "captured file") {
+  if (!entry || entry.type !== "file" || typeof entry.requested !== "string"
+    || typeof entry.path !== "string" || !path.isAbsolute(entry.path)
+    || !/^sha256:[a-f0-9]{64}$/.test(entry.sha256 || "")
+    || !Number.isInteger(entry.size) || entry.size < 0 || typeof entry.mode !== "string") {
+    throw new VerificationIdentityError(`${label} identity is incomplete`);
+  }
+  let before;
+  let descriptor;
+  try {
+    before = fs.lstatSync(entry.path);
+    if (!before.isFile() || before.isSymbolicLink() || fs.realpathSync(entry.path) !== entry.path) {
+      throw new Error("path is not a canonical regular file");
+    }
+    descriptor = fs.openSync(entry.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const opened = fs.fstatSync(descriptor);
+    if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino
+      || fileMode(opened) !== entry.mode || opened.size !== entry.size) {
+      throw new Error("opened file identity does not match the captured path");
+    }
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.lstatSync(entry.path);
+    if (after.dev !== opened.dev || after.ino !== opened.ino
+      || fileMode(after) !== entry.mode || after.size !== entry.size
+      || sha256(bytes) !== entry.sha256) {
+      throw new Error("path or content changed during capture");
+    }
+    return { path: entry.path, bytes };
+  } catch (error) {
+    throw new VerificationIdentityError(`${label} changed after capture: ${entry.requested}: ${error.message}`);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 function captureVerificationIdentity({
   argv,
   cwd = process.cwd(),
@@ -295,22 +408,7 @@ function validateCapturedInput(entry) {
     || !Number.isInteger(entry.size) || entry.size < 0) {
     throw new VerificationIdentityError("release input identity is incomplete or is not a regular file");
   }
-  let stat;
-  try {
-    stat = fs.lstatSync(entry.path);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new VerificationIdentityError(`release input no longer exists: ${entry.requested}`);
-    }
-    throw error;
-  }
-  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(entry.path) !== entry.path) {
-    throw new VerificationIdentityError(`release input must remain a canonical regular file: ${entry.requested}`);
-  }
-  if (fileMode(stat) !== entry.mode || stat.size !== entry.size
-    || sha256(fs.readFileSync(entry.path)) !== entry.sha256) {
-    throw new VerificationIdentityError(`release input changed after verification: ${entry.requested}`);
-  }
+  readCapturedFile(entry, "release input");
   return entry.path;
 }
 
@@ -321,7 +419,11 @@ module.exports = {
   captureVerificationIdentity,
   digestCanonical,
   identityInputPaths,
+  readCapturedFile,
+  resolveVerificationOutputs,
   sha256,
   stableValue,
+  captureVerificationOutput,
   validateCapturedInput,
+  validateCapturedOutput,
 };

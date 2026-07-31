@@ -333,6 +333,10 @@ function validateDeliveryAuthority(events, authority, targetAuthorityRef, reason
   }
 }
 
+function releaseSweepRequired(checks) {
+  return (checks || []).some((check) => Boolean(check?.release_requirement));
+}
+
 function requiredGateAdmission(paths, taskId, state, options = {}) {
   const context = admittedExecutionBrief(paths, taskId, state);
   if (!context) return null;
@@ -401,11 +405,13 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     }
   }
   let releaseCertification = null;
-  if (context.brief.contract.release && reasons.length === 0) {
+  const hasReleaseRequirements = releaseSweepRequired(expectedChecks);
+  if (context.brief.contract.release && hasReleaseRequirements && reasons.length === 0) {
     let snapshot;
     try {
       snapshot = captureWorktreeSnapshot(context.repo);
-      releaseCertification = evaluateReleaseSweep({
+      const evaluateSweep = options.evaluateReleaseSweep || evaluateReleaseSweep;
+      releaseCertification = evaluateSweep({
         contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
         environment: options.environment || process.env,
         paths,
@@ -434,7 +440,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     recordId: records.length === 1 ? records[0].record_id : "",
     recordIds: records.map((record) => record.record_id),
     releaseCertification,
-    releaseDecision: releaseCertification?.decision || null,
+    ...(releaseCertification ? { releaseDecision: releaseCertification.decision || null } : {}),
     verificationRecords: records.map((record) => {
       const gate = gates[record.required_gate?.check_id] || {};
       const release = releaseByCheck.get(record.required_gate?.check_id);
@@ -695,5 +701,6 @@ module.exports = {
   bindRequiredCheck,
   executionCompletionAdmission,
   requiredGateAdmission,
+  releaseSweepRequired,
   validateGateRecord,
 };

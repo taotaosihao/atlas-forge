@@ -9,7 +9,7 @@ const {
   digestCanonical,
   sha256,
   stableValue,
-  validateCapturedInput,
+  readCapturedFile,
 } = require("./identity");
 const { validateReleaseProducerProvenance } = require("./release-provenance");
 
@@ -380,20 +380,44 @@ function validatedInputs(record) {
   }
   const inputs = new Map();
   for (const entry of record.identity.inputs) {
-    validateCapturedInput(entry);
+    const snapshot = readCapturedFile(entry, "release input");
     if (inputs.has(entry.requested)) {
       throw new ReleaseCertificationError(`release receipt contains duplicate input reference: ${entry.requested}`);
     }
-    inputs.set(entry.requested, entry);
+    inputs.set(entry.requested, { ...entry, bytes: snapshot.bytes });
   }
   return inputs;
+}
+
+function validatedOutputs(record) {
+  if (!Array.isArray(record.result?.outputs)) {
+    throw new ReleaseCertificationError("release receipt outputs are missing");
+  }
+  const requested = new Set();
+  const paths = new Set();
+  return record.result.outputs.map((entry) => {
+    const snapshot = readCapturedFile(entry, "verification output");
+    if (requested.has(entry.requested) || paths.has(entry.path)) {
+      throw new ReleaseCertificationError("release receipt contains duplicate output identity");
+    }
+    requested.add(entry.requested);
+    paths.add(entry.path);
+    return { ...entry, bytes: snapshot.bytes };
+  });
+}
+
+function capturedJson(entry, label) {
+  if (entry.bytes.length > 4 * 1024 * 1024) throw new Error(`${label} exceeds 4 MiB`);
+  const value = JSON.parse(entry.bytes.toString("utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("expected object");
+  return value;
 }
 
 function jsonInputs(inputs) {
   const values = [];
   for (const entry of inputs.values()) {
     try {
-      values.push({ entry, value: readJsonFile(entry.path, `release input ${entry.requested}`) });
+      values.push({ entry, value: capturedJson(entry, `release input ${entry.requested}`) });
     } catch {
       // Binary evidence and other non-JSON inputs remain valid content-addressed evidence.
     }
@@ -580,15 +604,20 @@ function evaluateReleaseSweep({
         throw new ReleaseCertificationError(`release receipt was not executed against the final candidate: ${requirementRef}`);
       }
       const inputs = validatedInputs(record);
-      const json = jsonInputs(inputs);
-      const manifests = json.filter(({ value }) => (
+      const outputs = validatedOutputs(record);
+      const inputJson = jsonInputs(inputs);
+      const outputJson = jsonInputs(outputs);
+      const manifests = inputJson.filter(({ value }) => (
         [1, 2].includes(value.schema_version)
         && value.components && value.source && value.manifest_digest
       ));
-      const releaseFacts = json.filter(({ value }) => (
+      const inputFacts = inputJson.filter(({ value }) => (
         value.schema_version === 1 && value.policy_binding && value.fact_id
       ));
-      if (manifests.length !== 1 || releaseFacts.length !== 1) {
+      const releaseFacts = outputJson.filter(({ value }) => (
+        value.schema_version === 1 && value.policy_binding && value.fact_id
+      ));
+      if (manifests.length !== 1 || inputFacts.length !== 0 || releaseFacts.length !== 1) {
         throw new ReleaseCertificationError(`release receipt must bind exactly one candidate manifest and one typed fact: ${requirementRef}`);
       }
       const manifestEntry = manifests[0].entry;
@@ -620,10 +649,7 @@ function evaluateReleaseSweep({
           manifest.deployment_attestation.sha256,
           "candidate deployment attestation",
         );
-        const attestationValue = readJsonFile(
-          attestationEntry.path,
-          "candidate deployment attestation",
-        );
+        const attestationValue = capturedJson(attestationEntry, "candidate deployment attestation");
         if (!same(attestationValue, {
           deployment_id: manifest.deployment_attestation.deployment_id,
           environment_class: manifest.deployment_attestation.environment_class,
@@ -639,7 +665,7 @@ function evaluateReleaseSweep({
           manifest.performance_budget.sha256,
           "candidate performance budget",
         );
-        const budgetValue = readJsonFile(budgetEntry.path, "candidate performance budget");
+        const budgetValue = capturedJson(budgetEntry, "candidate performance budget");
         if (budgetValue.load_profile !== manifest.performance_budget.load_profile) {
           throw new ReleaseCertificationError(
             "performance budget content does not match the candidate load profile",
@@ -649,8 +675,7 @@ function evaluateReleaseSweep({
 
       const factEntry = releaseFacts[0].entry;
       const fact = releaseFacts[0].value;
-      if (!inside(releaseRoot, factEntry.path)
-        || !(record.result?.evidence_refs || []).includes(factEntry.requested)) {
+      if (!inside(releaseRoot, factEntry.path)) {
         throw new ReleaseCertificationError(`typed fact is not a declared task release artifact: ${requirementRef}`);
       }
       const factErrors = contracts.validateReleaseFact(fact, {
@@ -661,9 +686,8 @@ function evaluateReleaseSweep({
       if (fact.evaluated_at !== record.created_at) {
         throw new ReleaseCertificationError(`typed fact timestamp does not match its receipt: ${requirementRef}`);
       }
-      const sourceInputs = json.filter(({ entry, value }) => (
+      const sourceInputs = inputJson.filter(({ entry, value }) => (
         entry.path !== manifestEntry.path
-        && entry.path !== factEntry.path
         && digestCanonical(value) === fact.source.sha256
       ));
       if (sourceInputs.length !== 1) {
@@ -675,7 +699,7 @@ function evaluateReleaseSweep({
       )) {
         const sourceEntry = sourceInputs[0].entry;
         const sourceIdentity = {
-          path: fs.realpathSync(sourceEntry.path),
+          path: sourceEntry.path,
           sha256: sourceEntry.sha256,
           canonical_source_sha256: fact.source.sha256,
           review_id: rawInput.review_id,
@@ -715,7 +739,7 @@ function evaluateReleaseSweep({
         );
         if (evidence.kind === "integrated_control_evidence") {
           const embedded = contracts.integratedEvidenceRecordForRef(rawInput, evidence.ref);
-          if (!embedded || !same(readJsonFile(entry.path, `integrated evidence ${evidence.ref}`), embedded)) {
+          if (!embedded || !same(capturedJson(entry, `integrated evidence ${evidence.ref}`), embedded)) {
             throw new ReleaseCertificationError(
               `integrated evidence content does not match its typed collector record: ${evidence.ref}`,
             );

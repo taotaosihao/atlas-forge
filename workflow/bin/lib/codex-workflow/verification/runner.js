@@ -25,7 +25,12 @@ const {
   taskStateFile,
   timestampSeconds,
 } = require("../task/runtime");
-const { captureVerificationIdentity, sha256 } = require("./identity");
+const {
+  captureVerificationIdentity,
+  captureVerificationOutput,
+  resolveVerificationOutputs,
+  sha256,
+} = require("./identity");
 const { validateReleaseProducerProvenance } = require("./release-provenance");
 const {
   buildVerificationIdentityRecord,
@@ -34,7 +39,7 @@ const {
 const { bindRequiredCheck } = require("./required-gates");
 
 const VERIFY_USAGE =
-  "usage: codex-workflow verify <task-id> [--brief <brief.json> --slice-id <id> --check-id <id>] [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... -- <command...>";
+  "usage: codex-workflow verify <task-id> [--brief <brief.json> --slice-id <id> --check-id <id>] [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... [--output <file>]... -- <command...>";
 const VALID_OUTCOMES = new Set(["", "passed", "failed", "blocked", "skipped"]);
 const VALID_TRAJECTORIES = new Set([
   "",
@@ -78,6 +83,7 @@ function parseVerifyArgs(argv) {
     gateClassProvided: false,
     inputPaths: [],
     outcome: "",
+    outputPaths: [],
     sliceId: "",
     taskId: argv[0],
     trajectory: "",
@@ -115,6 +121,11 @@ function parseVerifyArgs(argv) {
         throw new CommandError(VERIFY_USAGE);
       }
       result.inputPaths.push(argv[++index]);
+    } else if (argument === "--output") {
+      if (index + 1 >= argv.length) {
+        throw new CommandError(VERIFY_USAGE);
+      }
+      result.outputPaths.push(argv[++index]);
     } else if (argument.startsWith("--brief=")) {
       result.briefPath = argument.slice("--brief=".length);
     } else if (argument.startsWith("--check-id=")) {
@@ -134,6 +145,8 @@ function parseVerifyArgs(argv) {
       result.evidenceRefs.push(argument.slice("--evidence=".length));
     } else if (argument.startsWith("--input=")) {
       result.inputPaths.push(argument.slice("--input=".length));
+    } else if (argument.startsWith("--output=")) {
+      result.outputPaths.push(argument.slice("--output=".length));
     } else if (argument.startsWith("--slice-id=")) {
       result.sliceId = argument.slice("--slice-id=".length);
     } else {
@@ -263,6 +276,20 @@ function runVerification(parsed, options = {}) {
   });
   const gateClass = requiredGate?.gate_class || parsed.gateClass || "general";
   const captureIdentity = options.captureIdentity || captureVerificationIdentity;
+  const declaredOutputs = resolveVerificationOutputs(
+    parsed.outputPaths,
+    cwd,
+    taskArtifactDir(paths, parsed.taskId),
+  );
+  const createdAt = timestampSeconds(clock);
+  const childEnvironment = { ...environment, ATLAS_VERIFICATION_CREATED_AT: createdAt };
+  if (declaredOutputs.length > 0) {
+    childEnvironment.ATLAS_VERIFICATION_OUTPUTS_JSON = JSON.stringify(
+      declaredOutputs.map((entry) => entry.path),
+    );
+  } else {
+    delete childEnvironment.ATLAS_VERIFICATION_OUTPUTS_JSON;
+  }
   const before = captureIdentity({
     argv: parsed.command,
     cwd,
@@ -284,7 +311,7 @@ function runVerification(parsed, options = {}) {
     try {
       child = spawnSync(parsed.command[0], parsed.command.slice(1), {
         cwd,
-        env: environment,
+        env: childEnvironment,
         stdio: ["inherit", stdoutDescriptor, stderrDescriptor],
       });
     } finally {
@@ -298,7 +325,6 @@ function runVerification(parsed, options = {}) {
     const evaluator = parsed.evaluator || "local-command";
     const renderedCommandText = `${commandText} `;
     const token = options.recordToken || timestampToken(clock);
-    const createdAt = timestampSeconds(clock);
     const recordFile = path.join(
       taskArtifactDir(paths, parsed.taskId),
       "verification",
@@ -316,6 +342,9 @@ function runVerification(parsed, options = {}) {
       inputPaths: parsed.inputPaths || [],
     });
     const snapshotStable = before.identityDigest === after.identityDigest;
+    const outputs = exitCode === 0
+      ? declaredOutputs.map(captureVerificationOutput)
+      : [];
     const completedRequiredGate = requiredGate ? {
       ...requiredGate,
       candidate_tree_oid: after.identity.worktree.tree_oid,
@@ -360,6 +389,7 @@ function runVerification(parsed, options = {}) {
         stdout_sha256: sha256(fs.readFileSync(stdoutFile)),
         stderr_sha256: sha256(fs.readFileSync(stderrFile)),
         evidence_refs: [...parsed.evidenceRefs],
+        outputs,
         ...(producerProvenance ? { producer_provenance: producerProvenance } : {}),
       },
     });

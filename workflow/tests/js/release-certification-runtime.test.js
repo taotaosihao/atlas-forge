@@ -394,6 +394,7 @@ function buildFacts(profile, policies, raw, candidateDigest) {
 }
 
 function releaseFixture(t, {
+  briefMode = "full",
   deploymentAttestationMismatch = false,
   formalOwnerStatus = "accepted",
   integratedCandidateMetadataMismatch = false,
@@ -401,6 +402,7 @@ function releaseFixture(t, {
   profileRef = "web-ui-v1",
   promotedExecution = false,
   splitIntegratedSources = false,
+  typedFactCase = "valid",
   trustedProducer = false,
 } = {}) {
   const { environment, paths, root } = temporaryWorkflow(t);
@@ -435,7 +437,13 @@ function releaseFixture(t, {
     critical_outcome_refs: ["AC-OUTCOME"],
   };
   const releaseBinding = releasePlanBinding(intent);
-  const command = [process.execPath, "-e", "process.exit(0)"];
+  const command = [process.execPath, "-e", [
+    "const fs=require('fs');",
+    "const [output]=JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON);",
+    "const fact=JSON.parse(process.env.ATLAS_TEST_RELEASE_FACT_JSON);",
+    "if(fact.evaluated_at&&fact.evaluated_at!==process.env.ATLAS_VERIFICATION_CREATED_AT)process.exit(2);",
+    "for(const output of JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON))fs.writeFileSync(output,JSON.stringify(fact));",
+  ].join("")];
   const checks = profile.requirements.map((requirement) => ({
     check_id: `release-${requirement.dimension}`,
     gate_class: requirement.check_definition.allowed_gate_classes[0],
@@ -444,30 +452,46 @@ function releaseFixture(t, {
     cache_policy: "fresh-executed",
     release_requirement: policies.get(requirement.requirement_id),
   }));
+  const releaseSliceChecks = briefMode === "non-release"
+      ? [{ ...checks[0], check_id: "harness-unit", release_requirement: undefined }]
+      : checks;
+  if (briefMode === "non-release") delete releaseSliceChecks[0].release_requirement;
+  const releaseSlice = {
+    slice_id: "release-slice",
+    objective: "Run the currently admitted release workflow slice.",
+    depends_on: [],
+    keeper_outputs: ["release:final-sweep"],
+    owned_paths: ["release/output/**"],
+    forbidden_paths: ["plugins/multica-sdlc/**"],
+    acceptance_refs: ["AC-RELEASE"],
+    risk_class: "critical",
+    failure_domain: "release-certification",
+    rollback_boundary: "one release evidence commit",
+    estimate: {
+      estimated_changed_files: 64, estimated_net_loc: 100, target_p90_minutes: 90,
+      serial_dependency_depth: 0, independent_vertical_count: 1,
+    },
+    budget: {
+      max_changed_files: 80, max_loc: 400, max_wall_clock_minutes: 120,
+      max_required_checks: releaseSliceChecks.length,
+    },
+    checks: releaseSliceChecks,
+  };
   const plan = {
     schema_version: 2,
     size_policy: { policy_id: "atlas-slice-size-v2" },
     release: releaseBinding,
-    slices: [{
-      slice_id: "release-slice",
-      objective: "Run one terminal same-candidate release sweep.",
-      depends_on: [],
-      keeper_outputs: ["release:final-sweep"],
-      owned_paths: ["release/output/**"],
-      forbidden_paths: ["plugins/multica-sdlc/**"],
-      acceptance_refs: ["AC-RELEASE"],
-      risk_class: "critical",
-      failure_domain: "release-certification",
-      rollback_boundary: "one release evidence commit",
-      estimate: {
-        estimated_changed_files: 64, estimated_net_loc: 100, target_p90_minutes: 90,
-        serial_dependency_depth: 0, independent_vertical_count: 1,
-      },
-      budget: {
-        max_changed_files: 80, max_loc: 400, max_wall_clock_minutes: 120,
-        max_required_checks: profile.requirements.length,
-      },
+    slices: briefMode === "full" ? [releaseSlice] : [releaseSlice, {
+      ...releaseSlice,
+      slice_id: "terminal-slice",
+      objective: "Complete the remaining full Profile sweep.",
+      depends_on: ["release-slice"],
+      keeper_outputs: ["release:terminal-sweep"],
+      owned_paths: ["release/terminal/**"],
+      acceptance_refs: ["AC-TERMINAL-RELEASE"],
+      estimate: { ...releaseSlice.estimate, serial_dependency_depth: 1 },
       checks,
+      budget: { ...releaseSlice.budget, max_required_checks: checks.length },
     }],
   };
   const contract = write(path.join(repo, "implementation-contract.final.md"), [
@@ -672,35 +696,53 @@ function releaseFixture(t, {
     const evidencePath = raw.integrated.evidence_records[0].content_ref.ref;
     write(evidencePath, { forged: "arbitrary proof does not match the typed record" });
   }
-  const factPaths = new Map([...facts].map(([requirementRef, fact]) => [
-    requirementRef,
-    write(path.join(releaseRoot, `facts/${requirementRef}.json`), fact),
+  const factsRoot = path.join(releaseRoot, "facts");
+  fs.mkdirSync(factsRoot, { recursive: true });
+  const factPaths = new Map([...facts].map(([requirementRef]) => [
+    requirementRef, path.join(factsRoot, `${requirementRef}.json`),
   ]));
   for (const [index, requirement] of profile.requirements.entries()) {
+    if (briefMode !== "full" && index > 0) continue;
     const policy = policies.get(requirement.requirement_id);
     const fact = facts.get(requirement.requirement_id);
     const factPath = factPaths.get(requirement.requirement_id);
+    const outputPaths = typedFactCase === "multiple"
+      ? [factPath, path.join(factsRoot, `${requirement.requirement_id}.second.json`)]
+      : typedFactCase === "outside"
+        ? [write(path.join(taskArtifactDir(paths, taskId), "outside", ".parent"), "parent\n")
+          && path.join(taskArtifactDir(paths, taskId), "outside", `${requirement.requirement_id}.json`)]
+        : [factPath];
+    const inputFactPath = typedFactCase === "stable-input"
+      ? write(path.join(releaseRoot, "raw", `${requirement.requirement_id}.input-fact.json`), fact)
+      : null;
     const rawPath = collectorRawPathByRequirement.get(requirement.requirement_id)
       || rawPaths[policy.collector_adapter_ref];
     const inputs = [...new Set([
       candidatePath,
-      factPath,
       rawPath,
+      inputFactPath,
       ...Object.values(components).map((item) => item.input_ref),
       ...Object.values(releaseUnits || {}).map((item) => item.input_ref),
       ...[candidate.deployment_attestation, candidate.performance_budget]
         .filter(Boolean).map((item) => item.input_ref),
       ...fact.evidence_refs.map((item) => item.ref),
-    ])];
+    ].filter(Boolean))];
     runVerification(parseVerifyArgs([
       taskId, `--brief=${briefPath}`, "--slice-id=release-slice",
-      `--check-id=release-${requirement.dimension}`, `--evidence=${factPath}`,
+      `--check-id=${briefMode === "non-release" ? "harness-unit" : `release-${requirement.dimension}`}`,
+      `--evidence=${factPath}`,
+      ...outputPaths.flatMap((output) => ["--output", output]),
       ...inputs.flatMap((input) => ["--input", input]),
       "--", ...command,
     ]), {
       clock,
       cwd: evidenceDir,
-      environment,
+      environment: {
+        ...environment,
+        ATLAS_TEST_RELEASE_FACT_JSON: JSON.stringify(
+          typedFactCase === "zero" ? { schema_version: 1, not_a_typed_fact: true } : fact,
+        ),
+      },
       operationId: `verify-${requirement.dimension}`,
       recordToken: `20260730T08000000000000${index}`,
       ...(trustedProducer ? {
@@ -768,6 +810,83 @@ test("self-attested release JSON plus an exit-zero command cannot certify a prod
       .releaseDecision.status,
     "cannot_verify",
   );
+});
+
+test("required gate admission layers a non-release slice before a fail-closed partial sweep", (t) => {
+  const harness = releaseFixture(t, { briefMode: "non-release" });
+  const harnessAdmission = requiredGateAdmission(
+    harness.paths,
+    harness.taskId,
+    readJsonObject(taskStateFile(harness.paths, harness.taskId)),
+    { environment: harness.environment },
+  );
+  assert.equal(harnessAdmission.passed, true, harnessAdmission.reasons.join("\n"));
+  assert.equal(Object.hasOwn(harnessAdmission, "releaseDecision"), false);
+  assert.equal(harnessAdmission.verificationRecords.length, 1);
+
+  const partial = releaseFixture(t);
+  const partialState = readJsonObject(taskStateFile(partial.paths, partial.taskId));
+  const brief = JSON.parse(fs.readFileSync(partial.briefPath, "utf8"));
+  brief.checks = [brief.checks[0]];
+  write(partial.briefPath, brief);
+  const briefSha256 = sha256(fs.readFileSync(partial.briefPath));
+  partialState.active_team.admission.brief.sha256 = briefSha256;
+  const gate = Object.values(partialState.verification.required_gates)[0];
+  const identityFile = path.resolve(partial.paths.codeHome, gate.identity_record);
+  const identityRecord = JSON.parse(fs.readFileSync(identityFile, "utf8"));
+  identityRecord.required_gate.brief_sha256 = briefSha256;
+  delete identityRecord.record_id;
+  identityRecord.record_id = digestCanonical(identityRecord);
+  write(identityFile, identityRecord);
+  Object.assign(gate, {
+    brief_sha256: briefSha256,
+    record_id: identityRecord.record_id,
+    record_digest: identityRecord.record_id,
+  });
+  partialState.verification.required_gates = { [gate.check_id]: gate };
+  let sweepCalled = false;
+  const partialAdmission = requiredGateAdmission(
+    partial.paths,
+    partial.taskId,
+    partialState,
+    {
+      environment: partial.environment,
+      evaluateReleaseSweep: ({ receipts, releaseBinding }) => {
+        sweepCalled = true;
+        assert.equal(receipts.length, 1);
+        assert.ok(releaseBinding.requirement_refs.length > receipts.length);
+        return {
+          admissible: false,
+          decision: null,
+          reasons: ["final release sweep coverage is incomplete"],
+          receiptSummaries: [],
+        };
+      },
+    },
+  );
+  assert.equal(sweepCalled, true);
+  assert.equal(partialAdmission.passed, false);
+  assert.equal(Object.hasOwn(partialAdmission, "releaseDecision"), true);
+  assert.match(partialAdmission.reasons.join("\n"), /final release sweep coverage is incomplete/);
+});
+
+test("release evaluator rejects every invalid typed-fact input/output layer", (t) => {
+  for (const [typedFactCase, expected] of [
+    ["stable-input", /exactly one candidate manifest and one typed fact/],
+    ["zero", /exactly one candidate manifest and one typed fact/],
+    ["multiple", /exactly one candidate manifest and one typed fact/],
+    ["outside", /typed fact is not a declared task release artifact/],
+  ]) {
+    const value = releaseFixture(t, { typedFactCase });
+    const admission = requiredGateAdmission(
+      value.paths,
+      value.taskId,
+      readJsonObject(taskStateFile(value.paths, value.taskId)),
+      { environment: value.environment },
+    );
+    assert.equal(admission.passed, false, typedFactCase);
+    assert.match(admission.reasons.join("\n"), expected, typedFactCase);
+  }
 });
 
 test("promoted execution with event-bound producer provenance can certify", (t) => {
@@ -1071,7 +1190,37 @@ test("candidate or typed-fact drift invalidates the final sweep", (t) => {
     workType: "implementation",
   });
   assert.equal(drifted.admissible, false);
-  assert.match(drifted.reasons.join("\n"), /changed after verification/);
+  assert.match(drifted.reasons.join("\n"), /verification output changed after capture/);
+});
+
+test("release consumption rejects a deterministic path swap after opening verified bytes", (t) => {
+  const value = releaseFixture(t);
+  const summaries = Object.values(
+    readJsonObject(taskStateFile(value.paths, value.taskId)).verification.required_gates,
+  );
+  const factPath = value.factPaths.values().next().value, factInode = fs.statSync(factPath).ino;
+  const originalRead = fs.readFileSync;
+  let swapped = false, result;
+  fs.readFileSync = function readWithSwap(file, ...args) {
+    if (!swapped && Number.isInteger(file) && fs.fstatSync(file).ino === factInode) {
+      fs.renameSync(factPath, `${factPath}.opened`);
+      fs.writeFileSync(factPath, "{}\n");
+      swapped = true;
+    }
+    return originalRead.call(fs, file, ...args);
+  };
+  try {
+    result = evaluateReleaseSweep({
+      contractMarkdown: originalRead.call(fs, value.contract, "utf8"),
+      environment: value.environment, paths: value.paths, receipts: summaries,
+      releaseBinding: value.releaseBinding, repo: value.repo, snapshot: value.snapshot,
+      taskId: value.taskId, workType: "implementation",
+    });
+  } finally {
+    fs.readFileSync = originalRead;
+  }
+  assert.equal(swapped, true); assert.equal(result.admissible, false);
+  assert.match(result.reasons.join("\n"), /path or content changed during capture/);
 });
 
 test("inline release receipts cannot bypass canonical task artifacts and events", (t) => {
