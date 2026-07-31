@@ -1,6 +1,6 @@
 "use strict";
 
-const { loadBundledProfile, profileBinding } = require("./profile");
+const { loadBundledProfile, profileBinding, profileSurfaceKinds } = require("./profile");
 
 const TARGET_DELIVERY_CLASSES = new Set(["exploration", "product_release", "non_product"]);
 const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
@@ -65,8 +65,10 @@ function validateContentRef(value, location, errors) {
   }
 }
 
-function validateCommon(value, errors) {
-  if (value.schema_version !== 1) errors.push("release_intent.schema_version: must equal 1");
+function validateCommon(value, errors, supportedVersions = [1]) {
+  if (!supportedVersions.includes(value.schema_version)) {
+    errors.push(`release_intent.schema_version: must equal ${supportedVersions.join(" or ")}`);
+  }
   if (!TARGET_DELIVERY_CLASSES.has(value.target_delivery_class)) {
     errors.push("release_intent.target_delivery_class: unsupported target delivery class");
   }
@@ -83,17 +85,17 @@ function validateProductRelease(value, errors) {
     "audience_refs", "critical_outcome_refs",
   ];
   if (!exactKeys(value, keys, keys, "release_intent", errors)) return;
-  validateCommon(value, errors);
+  validateCommon(value, errors, [1, 2]);
   if (!RELEASE_STAGES.has(value.release_stage)) {
     errors.push("release_intent.release_stage: unsupported release stage metadata");
   }
   validateContentRef(value.surface_inventory, "release_intent.surface_inventory", errors);
   const surfaces = uniqueStrings(value.surface_kinds, "release_intent.surface_kinds", errors);
-  if (surfaces.length !== 1 || surfaces[0] !== "web_ui") {
+  if (value.schema_version === 1 && (surfaces.length !== 1 || surfaces[0] !== "web_ui")) {
     errors.push("release_intent.surface_kinds: v1 supports exactly one pure web_ui surface");
   }
   if (!Array.isArray(value.release_profile_refs) || value.release_profile_refs.length !== 1) {
-    errors.push("release_intent.release_profile_refs: v1 requires exactly one profile reference");
+    errors.push("release_intent.release_profile_refs: product release requires exactly one profile reference");
   } else {
     const ref = value.release_profile_refs[0];
     if (exactKeys(ref, ["profile_ref", "profile_sha256"], ["profile_ref", "profile_sha256"], "release_intent.release_profile_refs[0]", errors)) {
@@ -104,8 +106,16 @@ function validateProductRelease(value, errors) {
       try {
         const profile = loadBundledProfile(ref.profile_ref);
         const binding = profileBinding(profile);
-        if (profile.surface_kind !== "web_ui") {
-          errors.push("release_intent.release_profile_refs[0]: profile is not applicable to web_ui");
+        const expectedSurfaces = profileSurfaceKinds(profile);
+        if (value.schema_version === 1 && profile.schema_version !== 1) {
+          errors.push("release_intent.release_profile_refs[0]: v1 requires the pure web_ui Profile");
+        }
+        if (value.schema_version === 2 && profile.schema_version !== 2) {
+          errors.push("release_intent.release_profile_refs[0]: v2 requires a mixed-surface Profile");
+        }
+        if (surfaces.length !== expectedSurfaces.length
+          || surfaces.some((surface, index) => surface !== expectedSurfaces[index])) {
+          errors.push("release_intent.release_profile_refs[0]: Profile surface kinds do not exactly match the declared surfaces");
         }
         if (ref.profile_sha256 !== binding.profile_sha256) {
           errors.push("release_intent.release_profile_refs[0].profile_sha256: does not match bundled immutable profile");

@@ -134,10 +134,15 @@ required gate. Any snapshot change after verification requires a new verificatio
 
 ### Product release verification
 
-For a valid pure Web UI `product_release`, contract semantics v4 binds the
-immutable `web-ui-v1` Profile, execution-plan schema version 2 projects every
-Profile requirement into one terminal certification slice, and brief schema
-version 3 carries the exact policy identities into Team execution-v3.
+For a valid `product_release`, contract semantics v4 binds either the immutable
+pure-Web `web-ui-v1` Profile or, for strict authoring and admission, the
+immutable exact mixed-surface `integrated-app-v1` Profile. Execution-plan
+schema version 2 projects every bound Profile requirement into one terminal
+certification slice, and brief schema version 3 carries the exact policy
+identities into Team execution-v3. The public CLI in this release does not
+register a trusted producer for `integrated-app-v1`; without a separately
+delivered workflow-bound host producer, structurally passing mixed-surface
+facts are recomputed but downgraded to `cannot_verify`.
 
 Release evidence lives under the canonical task artifact directory:
 
@@ -168,14 +173,14 @@ completion both require `work_type=implementation`; otherwise no release
 decision can be derived.
 
 Direct Task work may finish a contributing implementation but cannot close a
-`product_release` goal. Unsupported API, CLI, worker, mixed, and unknown
-surfaces fail before release admission and have a release-readiness assessment
-of `cannot_verify`, not a fabricated completion record. The same assessment
-applies to direct or inadmissible work with no decision unless a separately
-established current failed fact proves the candidate is not release-ready. Even
-`certified` means source-level release-ready only; installation, push,
-deployment, publication, and actual release require separate authority and
-evidence.
+`product_release` goal. API-only, worker-only, CLI, mixed combinations other
+than the exact `integrated-app-v1` surface set, and unknown surfaces fail before
+release admission and have a release-readiness assessment of `cannot_verify`,
+not a fabricated completion record. The same assessment applies to direct or
+inadmissible work with no decision unless a separately established current
+failed fact proves the candidate is not release-ready. Even `certified` means
+source-level release-ready only; installation, push, deployment, publication,
+and actual release require separate authority and evidence.
 
 Install Codex Bash hooks for workflow evidence capture:
 

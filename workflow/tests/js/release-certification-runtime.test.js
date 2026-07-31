@@ -17,6 +17,15 @@ const { collectBusinessAcceptance } = require(path.join(
 const { collectFormalWebUi } = require(path.join(
   PLUGIN_ROOT, "contracts/release-certification/adapters/formal-web-ui-v1",
 ));
+const {
+  CONTROL_SPECS,
+  DIMENSIONS: INTEGRATED_DIMENSIONS,
+  DIMENSION_COMPONENTS,
+  DIMENSION_CONTROLS,
+  collectIntegratedApp,
+} = require(path.join(
+  PLUGIN_ROOT, "contracts/release-certification/adapters/integrated-app-v1",
+));
 const { collectReleaseData } = require(path.join(
   PLUGIN_ROOT, "contracts/release-certification/adapters/release-data-v1",
 ));
@@ -115,8 +124,8 @@ function temporaryWorkflow(t) {
   return { environment, paths: resolvePaths(environment), root };
 }
 
-function policyContext() {
-  const profile = loadBundledProfile("web-ui-v1");
+function policyContext(profileRef = "web-ui-v1") {
+  const profile = loadBundledProfile(profileRef);
   const binding = profileBinding(profile);
   const policies = new Map(profile.requirements.map((requirement) => [
     requirement.requirement_id,
@@ -125,7 +134,54 @@ function policyContext() {
   return { binding, policies, profile };
 }
 
-function rawInputs(candidateDigest, files, surfaceRef) {
+function passingObservations(dimension, control, candidate) {
+  const observations = Object.fromEntries(Object.entries(CONTROL_SPECS[dimension][control].fields)
+    .map(([field, type]) => {
+      if (type === "bool") return [field, field !== "unbounded_growth"];
+      if (type === "integer") return [field, 0];
+      if (type === "positive_integer") return [field, field === "epochs_observed" ? 2 : 1];
+      if (type === "digest") return [field, `sha256:${"a".repeat(64)}`];
+      if (["flow_id", "command_flow_id"].includes(field)) {
+        return [field, "integrated-primary-flow"];
+      }
+      return [field, `${dimension}-${control}-${field}`];
+    }));
+  if (dimension === "data-integrity" && control === "schema_migration") {
+    observations.migration_bundle_sha256 = candidate.release_units?.database
+      ?.migration_bundle_sha256 || observations.migration_bundle_sha256;
+  }
+  if (dimension === "data-integrity" && control === "backup_restore") {
+    observations.restored_schema_head = candidate.release_units?.database
+      ?.schema_head || observations.restored_schema_head;
+  }
+  if (dimension === "external-integration" && control === "contract_binding") {
+    observations.contract_version = candidate.release_units?.external_integration
+      ?.contract_version || observations.contract_version;
+    observations.config_sha256 = candidate.release_units?.external_integration
+      ?.config_sha256 || observations.config_sha256;
+  }
+  if (dimension === "external-integration"
+    && control === "identity_credentials_rotation_revocation") {
+    observations.credential_identity = candidate.release_units?.external_integration
+      ?.credential_identity || observations.credential_identity;
+  }
+  if (dimension === "api-contract" && control === "shared_contract") {
+    observations.contract_version = candidate.release_units?.api
+      ?.contract_version || observations.contract_version;
+    observations.api_artifact_digest = candidate.release_units?.api
+      ?.artifact_digest || observations.api_artifact_digest;
+  }
+  if (dimension === "performance-resilience") {
+    observations.load_profile = candidate.performance_budget?.load_profile || observations.load_profile;
+    observations.thresholds_sha256 = candidate.performance_budget?.sha256
+      || observations.thresholds_sha256;
+  }
+  assert.equal(CONTROL_SPECS[dimension][control].passes(observations), true);
+  return observations;
+}
+
+function rawInputs(candidate, files, surfaceRef, evidenceDir) {
+  const candidateDigest = candidate.manifest_digest;
   const business = {
     schema_version: 1,
     candidate_manifest_digest: candidateDigest,
@@ -220,7 +276,82 @@ function rawInputs(candidateDigest, files, surfaceRef) {
       )),
     ],
   };
-  return { business, data, formal, operability };
+  const candidateComponents = Object.fromEntries([
+    "web_ui", "api", "worker", "database", "external_integration",
+  ].map((unit, index) => [
+    unit,
+    candidate.release_units?.[unit]?.sha256 || `sha256:${String(index + 1).repeat(64)}`,
+  ]));
+  const evidenceRecords = [];
+  const integratedDimensions = Object.fromEntries(INTEGRATED_DIMENSIONS.map((dimension) => [dimension, {
+    status: "passed",
+    summary: `${dimension} passed every required control against the final integrated candidate.`,
+    controls: Object.fromEntries(DIMENSION_CONTROLS[dimension].map((control) => {
+      const file = path.join(evidenceDir, `${dimension}-${control}-proof.json`);
+      const ref = file;
+      const record = {
+        schema_version: 1,
+        evidence_id: ref,
+        candidate_manifest_digest: candidateDigest,
+        deployment_id: candidate.deployment?.deployment_id || "unused-web-deployment",
+        observed_unit_set_sha256: candidate.deployment?.unit_set_sha256
+          || `sha256:${"c".repeat(64)}`,
+        evidence_set_id: "integrated-evidence-set-1",
+        run_id: "integrated-run-1",
+        dimension,
+        control_id: control,
+        component_identities: Object.fromEntries(DIMENSION_COMPONENTS[dimension].map((unit) => [
+          unit, candidateComponents[unit],
+        ])),
+        check_identity: {
+          producer: "atlas-test-integrated-observer@1",
+          check_id: `${dimension}.${control}`,
+          gate_class: "integration",
+          command_sha256: `sha256:${"b".repeat(64)}`,
+        },
+        executed_at: NOW,
+        observations: passingObservations(dimension, control, candidate),
+      };
+      write(file, record);
+      files.set(ref, file);
+      evidenceRecords.push({
+        content_ref: contentRef(ref, file, "integrated_control_evidence"),
+        record,
+      });
+      return [control, {
+        status: "passed",
+        summary: `${control} passed with candidate-bound evidence from the final integrated runtime.`,
+        evidence_ref: ref,
+      }];
+    })),
+    finding_codes: [],
+  }]));
+  const integrated = {
+    schema_version: 2,
+    review_id: "integrated-app-release-review",
+    candidate_manifest_digest: candidateDigest,
+    deployment_id: candidate.deployment?.deployment_id || "unused-web-deployment",
+    candidate_components: candidateComponents,
+    observed_unit_set_sha256: candidate.deployment?.unit_set_sha256
+      || `sha256:${"c".repeat(64)}`,
+    evidence_set_id: "integrated-evidence-set-1",
+    run_id: "integrated-run-1",
+    observation_window: {
+      started_at: "2026-07-30T07:00:00.000Z",
+      ended_at: NOW,
+    },
+    owner_decision: {
+      owner: "integrated-service-owner",
+      status: "accepted",
+      evidence_ref: "integrated-owner-proof",
+    },
+    owner_evidence: contentRef(
+      "integrated-owner-proof", files.get("integrated-owner-proof"), "human_decision",
+    ),
+    dimensions: integratedDimensions,
+    evidence_records: evidenceRecords,
+  };
+  return { business, data, formal, integrated, operability };
 }
 
 function buildFacts(profile, policies, raw, candidateDigest) {
@@ -228,8 +359,8 @@ function buildFacts(profile, policies, raw, candidateDigest) {
     policy.collector_adapter_ref === "formal-web-ui-v1@1"
   ));
   const facts = new Map();
-  facts.set("web-ui-v1.critical-journey", collectBusinessAcceptance(raw.business, {
-    policyBinding: policies.get("web-ui-v1.critical-journey"),
+  facts.set(`${profile.profile_id}.critical-journey`, collectBusinessAcceptance(raw.business, {
+    policyBinding: policies.get(`${profile.profile_id}.critical-journey`),
     candidateManifestDigest: candidateDigest,
     evaluatedAt: NOW,
   }));
@@ -238,23 +369,38 @@ function buildFacts(profile, policies, raw, candidateDigest) {
     candidateManifestDigest: candidateDigest,
     evaluatedAt: NOW,
   })) facts.set(fact.policy_binding.requirement_ref, fact);
-  facts.set("web-ui-v1.production-data", collectReleaseData(raw.data, {
-    policyBinding: policies.get("web-ui-v1.production-data"),
+  facts.set(`${profile.profile_id}.production-data`, collectReleaseData(raw.data, {
+    policyBinding: policies.get(`${profile.profile_id}.production-data`),
     candidateManifestDigest: candidateDigest,
     evaluatedAt: NOW,
   }));
-  facts.set("web-ui-v1.security-operability", collectReleaseOperability(raw.operability, {
-    policyBinding: policies.get("web-ui-v1.security-operability"),
+  facts.set(`${profile.profile_id}.security-operability`, collectReleaseOperability(raw.operability, {
+    policyBinding: policies.get(`${profile.profile_id}.security-operability`),
     candidateManifestDigest: candidateDigest,
     evaluatedAt: NOW,
   }));
+  const integratedPolicies = [...policies.values()].filter((policy) => (
+    policy.collector_adapter_ref === "integrated-app-v1@1"
+  ));
+  if (integratedPolicies.length > 0) {
+    for (const fact of collectIntegratedApp(raw.integrated, {
+      policyBindings: integratedPolicies,
+      candidateManifestDigest: candidateDigest,
+      evaluatedAt: NOW,
+    })) facts.set(fact.policy_binding.requirement_ref, fact);
+  }
   assert.deepEqual([...facts.keys()].sort(), profile.requirements.map((item) => item.requirement_id).sort());
   return facts;
 }
 
 function releaseFixture(t, {
+  deploymentAttestationMismatch = false,
   formalOwnerStatus = "accepted",
+  integratedCandidateMetadataMismatch = false,
+  integratedEvidenceMismatch = false,
+  profileRef = "web-ui-v1",
   promotedExecution = false,
+  splitIntegratedSources = false,
   trustedProducer = false,
 } = {}) {
   const { environment, paths, root } = temporaryWorkflow(t);
@@ -275,14 +421,14 @@ function releaseFixture(t, {
     ["runtime", "production-equivalent runtime manifest"],
     ["data", "production data lifecycle manifest"],
   ].map(([name, content]) => [name, write(path.join(materials, `${name}.txt`), `${content}\n`)]));
-  const { binding, policies, profile } = policyContext();
+  const { binding, policies, profile } = policyContext(profileRef);
   const intent = {
-    schema_version: 1,
+    schema_version: profile.schema_version,
     target_delivery_class: "product_release",
     target_delivery_authority_ref: "user-message:release",
     release_stage: "mvp",
     surface_inventory: { ref: "surface-inventory", sha256: sha256(fs.readFileSync(surfaceFile)) },
-    surface_kinds: ["web_ui"],
+    surface_kinds: profile.schema_version === 1 ? [profile.surface_kind] : [...profile.surface_kinds],
     release_profile_refs: [{ profile_ref: profile.profile_id, profile_sha256: binding.profile_sha256 }],
     release_claim_refs: ["AC-CLAIM"],
     audience_refs: ["AC-AUDIENCE"],
@@ -314,12 +460,12 @@ function releaseFixture(t, {
       failure_domain: "release-certification",
       rollback_boundary: "one release evidence commit",
       estimate: {
-        estimated_changed_files: 24, estimated_net_loc: 100, target_p90_minutes: 90,
+        estimated_changed_files: 64, estimated_net_loc: 100, target_p90_minutes: 90,
         serial_dependency_depth: 0, independent_vertical_count: 1,
       },
       budget: {
-        max_changed_files: 32, max_loc: 400, max_wall_clock_minutes: 120,
-        max_required_checks: 7,
+        max_changed_files: 80, max_loc: 400, max_wall_clock_minutes: 120,
+        max_required_checks: profile.requirements.length,
       },
       checks,
     }],
@@ -368,6 +514,7 @@ function releaseFixture(t, {
     "capability-truth-proof", "surface-states-proof", "formal-content-ia-proof",
     "accessibility-quality-proof", "data-proof", "ops-owner-proof",
     ...CONTROLS.map((control) => `${control}-proof`),
+    "integrated-owner-proof",
   ]) evidenceFiles.set(name, write(path.join(evidenceDir, name), `${name} content\n`));
   const keeperRelative = "release/output/final-sweep.txt";
   write(path.join(repo, keeperRelative), "final release sweep\n");
@@ -383,23 +530,148 @@ function releaseFixture(t, {
     runtime: { input_ref: componentFiles.runtime, sha256: sha256(fs.readFileSync(componentFiles.runtime)) },
     data: { input_ref: componentFiles.data, sha256: sha256(fs.readFileSync(componentFiles.data)) },
   };
-  const candidate = buildCandidateManifest({
-    schema_version: 1,
+  const releaseUnitFiles = profile.schema_version === 2
+    ? Object.fromEntries([
+      "web_ui", "api", "worker", "database", "external_integration",
+    ].map((unit) => [
+      unit, write(path.join(materials, `${unit}.json`), { unit, release: "mes-p1" }),
+    ]))
+    : {};
+  const releaseUnits = profile.schema_version === 2 ? {
+    web_ui: {
+      input_ref: releaseUnitFiles.web_ui,
+      sha256: sha256(fs.readFileSync(releaseUnitFiles.web_ui)),
+      artifact_digest: sha256(fs.readFileSync(releaseUnitFiles.web_ui)),
+      build_id: "mes-web-build-1",
+    },
+    api: {
+      input_ref: releaseUnitFiles.api,
+      sha256: sha256(fs.readFileSync(releaseUnitFiles.api)),
+      artifact_digest: sha256(fs.readFileSync(releaseUnitFiles.api)),
+      image_or_package_id: "mes-api-image-1",
+      contract_version: "mes-api-v1",
+    },
+    worker: {
+      input_ref: releaseUnitFiles.worker,
+      sha256: sha256(fs.readFileSync(releaseUnitFiles.worker)),
+      artifact_digest: sha256(fs.readFileSync(releaseUnitFiles.worker)),
+      image_or_package_id: "mes-worker-image-1",
+    },
+    database: {
+      input_ref: releaseUnitFiles.database,
+      sha256: sha256(fs.readFileSync(releaseUnitFiles.database)),
+      migration_bundle_sha256: sha256(fs.readFileSync(releaseUnitFiles.database)),
+      schema_head: "mes-schema-v1",
+      compatibility_window: "one-version-backward",
+    },
+    external_integration: {
+      input_ref: releaseUnitFiles.external_integration,
+      sha256: sha256(fs.readFileSync(releaseUnitFiles.external_integration)),
+      contract_version: "hive-v1",
+      config_sha256: sha256(fs.readFileSync(releaseUnitFiles.external_integration)),
+      credential_identity: "hive-tenant-device",
+    },
+  } : null;
+  const candidateBody = {
+    schema_version: profile.schema_version,
     release_binding: releaseBinding,
     source: { repo_realpath: repo, head_sha: snapshot.head_sha, tree_oid: snapshot.tree_oid },
     components,
-  });
+  };
+  if (releaseUnits) {
+    const unitSetSha256 = digestCanonical(releaseUnits);
+    const deploymentAttestationFile = write(
+      path.join(materials, "deployment-attestation.json"),
+      {
+        deployment_id: "mes-p1-deployment",
+        environment_class: "production-equivalent",
+        observed_unit_set_sha256: deploymentAttestationMismatch
+          ? `sha256:${"0".repeat(64)}`
+          : unitSetSha256,
+      },
+    );
+    const performanceBudgetFile = write(
+      path.join(materials, "performance-budget.json"),
+      {
+        load_profile: "mes-p1-300-devices-1hz-50-users-20-terminals",
+        p95_event_to_ui_ms: 3000,
+      },
+    );
+    candidateBody.release_units = releaseUnits;
+    candidateBody.deployment = {
+      deployment_id: "mes-p1-deployment",
+      environment_class: "production-equivalent",
+      unit_set_sha256: unitSetSha256,
+    };
+    candidateBody.deployment_attestation = {
+      input_ref: deploymentAttestationFile,
+      sha256: sha256(fs.readFileSync(deploymentAttestationFile)),
+      deployment_id: "mes-p1-deployment",
+      environment_class: "production-equivalent",
+      observed_unit_set_sha256: unitSetSha256,
+    };
+    candidateBody.performance_budget = {
+      input_ref: performanceBudgetFile,
+      sha256: sha256(fs.readFileSync(performanceBudgetFile)),
+      load_profile: "mes-p1-300-devices-1hz-50-users-20-terminals",
+    };
+  }
+  const candidate = buildCandidateManifest(candidateBody);
   const candidatePath = write(path.join(releaseRoot, "candidate-manifest.json"), candidate);
   const surfaceRef = { ref: surfaceFile, sha256: intent.surface_inventory.sha256, kind: "surface_inventory" };
-  const raw = rawInputs(candidate.manifest_digest, evidenceFiles, surfaceRef);
+  const raw = rawInputs(
+    candidate,
+    evidenceFiles,
+    surfaceRef,
+    path.join(releaseRoot, "evidence"),
+  );
   raw.formal.owner_decision.status = formalOwnerStatus;
+  if (integratedCandidateMetadataMismatch) {
+    const evidence = raw.integrated.evidence_records.find((item) => (
+      item.record.dimension === "external-integration"
+      && item.record.control_id === "contract_binding"
+    ));
+    evidence.record.observations.contract_version = "forged-contract-version";
+    write(evidence.content_ref.ref, evidence.record);
+    evidence.content_ref.sha256 = sha256(fs.readFileSync(evidence.content_ref.ref));
+  }
   const rawPaths = {
     "business-acceptance-v2@2": write(path.join(releaseRoot, "raw/business.json"), raw.business),
     "formal-web-ui-v1@1": write(path.join(releaseRoot, "raw/formal.json"), raw.formal),
     "release-data-v1@1": write(path.join(releaseRoot, "raw/data.json"), raw.data),
     "release-operability-v1@1": write(path.join(releaseRoot, "raw/operability.json"), raw.operability),
+    "integrated-app-v1@1": write(path.join(releaseRoot, "raw/integrated.json"), raw.integrated),
   };
   const facts = buildFacts(profile, policies, raw, candidate.manifest_digest);
+  const collectorRawPathByRequirement = new Map();
+  if (splitIntegratedSources) {
+    const integratedPolicies = [...policies.values()].filter((policy) => (
+      policy.collector_adapter_ref === "integrated-app-v1@1"
+    ));
+    for (const policy of integratedPolicies) {
+      const split = structuredClone(raw.integrated);
+      split.review_id = `split-review-${policy.dimension}`;
+      for (const dimension of INTEGRATED_DIMENSIONS) {
+        if (dimension !== policy.dimension) split.dimensions[dimension].status = "failed";
+      }
+      const splitPath = write(
+        path.join(releaseRoot, `raw/integrated-${policy.dimension}.json`),
+        split,
+      );
+      const selected = collectIntegratedApp(split, {
+        policyBindings: integratedPolicies,
+        candidateManifestDigest: candidate.manifest_digest,
+        evaluatedAt: NOW,
+      }).find((fact) => fact.policy_binding.requirement_ref === policy.requirement_ref);
+      assert.equal(selected.outcome, "passed");
+      facts.set(policy.requirement_ref, selected);
+      collectorRawPathByRequirement.set(policy.requirement_ref, splitPath);
+    }
+  }
+  if (integratedEvidenceMismatch) {
+    const evidencePath = raw.integrated.evidence_records[0].content_ref.ref;
+    write(evidencePath, { forged: "arbitrary proof does not match the typed record" });
+  }
   const factPaths = new Map([...facts].map(([requirementRef, fact]) => [
     requirementRef,
     write(path.join(releaseRoot, `facts/${requirementRef}.json`), fact),
@@ -408,11 +680,16 @@ function releaseFixture(t, {
     const policy = policies.get(requirement.requirement_id);
     const fact = facts.get(requirement.requirement_id);
     const factPath = factPaths.get(requirement.requirement_id);
+    const rawPath = collectorRawPathByRequirement.get(requirement.requirement_id)
+      || rawPaths[policy.collector_adapter_ref];
     const inputs = [...new Set([
       candidatePath,
       factPath,
-      rawPaths[policy.collector_adapter_ref],
+      rawPath,
       ...Object.values(components).map((item) => item.input_ref),
+      ...Object.values(releaseUnits || {}).map((item) => item.input_ref),
+      ...[candidate.deployment_attestation, candidate.performance_budget]
+        .filter(Boolean).map((item) => item.input_ref),
       ...fact.evidence_refs.map((item) => item.ref),
     ])];
     runVerification(parseVerifyArgs([
@@ -431,8 +708,8 @@ function releaseFixture(t, {
           schema_version: 1,
           producer_ref: "atlas-test-release-producer@1",
           producer_sha256: identity.toolchain.find((item) => item.sha256)?.sha256,
-          source_ref: rawPaths[policy.collector_adapter_ref],
-          source_sha256: sha256(fs.readFileSync(rawPaths[policy.collector_adapter_ref])),
+          source_ref: rawPath,
+          source_sha256: sha256(fs.readFileSync(rawPath)),
           candidate_manifest_digest: candidate.manifest_digest,
           requirement_refs: [requiredGate.release_requirement.requirement_ref],
         }),
@@ -442,7 +719,7 @@ function releaseFixture(t, {
   return {
     briefPath, candidatePath, command, contract, environment, evidenceDir, factPaths,
     keeperRelative, paths, policies, profile, raw, releaseBinding, releaseRoot,
-    repo, snapshot, taskId,
+    releaseUnits, repo, snapshot, taskId,
   };
 }
 
@@ -533,6 +810,143 @@ test("promoted execution with event-bound producer provenance can certify", (t) 
     readJsonObject(taskStateFile(value.paths, value.taskId)).completion.release_decision.status,
     "certified",
   );
+});
+
+test("host-injected trusted producer can certify a structurally valid integrated candidate", (t) => {
+  const value = releaseFixture(t, {
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+    trustedProducer: true,
+  });
+  const state = readJsonObject(taskStateFile(value.paths, value.taskId));
+  const gates = requiredGateAdmission(value.paths, value.taskId, state, {
+    environment: value.environment,
+  });
+  assert.equal(gates.passed, true, gates.reasons.join("\n"));
+  assert.equal(gates.releaseDecision.status, "certified");
+  assert.equal(gates.verificationRecords.filter((item) => item.release_fact_id).length, 12);
+  assert.ok(INTEGRATED_DIMENSIONS.every((dimension) => (
+    gates.verificationRecords.some((item) => (
+      item.release_requirement.requirement_ref === `integrated-app-v1.${dimension}`
+      && item.release_fact_outcome === "passed"
+    ))
+  )));
+});
+
+test("public-path integrated admission remains cannot_verify without a trusted producer", (t) => {
+  const value = releaseFixture(t, {
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+  });
+  const gates = requiredGateAdmission(
+    value.paths,
+    value.taskId,
+    readJsonObject(taskStateFile(value.paths, value.taskId)),
+    { environment: value.environment },
+  );
+  assert.equal(gates.passed, true, gates.reasons.join("\n"));
+  assert.equal(gates.releaseDecision.status, "cannot_verify");
+  assert.equal(gates.verificationRecords.filter((item) => item.release_fact_id).length, 12);
+  assert.ok(gates.verificationRecords.every((item) => (
+    item.release_fact_outcome === "cannot_verify"
+  )));
+
+  const candidate = JSON.parse(fs.readFileSync(value.candidatePath, "utf8"));
+  const missingUnit = structuredClone(candidate);
+  delete missingUnit.manifest_digest;
+  delete missingUnit.release_units.database;
+  assert.match(
+    validateCandidateManifest(buildCandidateManifest(missingUnit)).join("\n"),
+    /release_units missing required key: database/,
+  );
+
+  const wrongUnitSet = structuredClone(candidate);
+  delete wrongUnitSet.manifest_digest;
+  wrongUnitSet.deployment.unit_set_sha256 = `sha256:${"0".repeat(64)}`;
+  assert.match(
+    validateCandidateManifest(buildCandidateManifest(wrongUnitSet)).join("\n"),
+    /unit_set_sha256 does not match release_units/,
+  );
+
+  const missingSchemaIdentity = structuredClone(candidate);
+  delete missingSchemaIdentity.manifest_digest;
+  missingSchemaIdentity.release_units.database.schema_head = "";
+  assert.match(
+    validateCandidateManifest(buildCandidateManifest(missingSchemaIdentity)).join("\n"),
+    /database.schema_head must be non-empty/,
+  );
+});
+
+test("integrated admission rejects evidence content that differs from its typed record", (t) => {
+  const value = releaseFixture(t, {
+    integratedEvidenceMismatch: true,
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+    trustedProducer: true,
+  });
+  const gates = requiredGateAdmission(
+    value.paths,
+    value.taskId,
+    readJsonObject(taskStateFile(value.paths, value.taskId)),
+    { environment: value.environment },
+  );
+  assert.equal(gates.passed, false);
+  assert.equal(gates.releaseDecision, null);
+  assert.match(gates.reasons.join("\n"), /typed fact evidence|integrated evidence content/);
+});
+
+test("integrated admission rejects typed evidence that disagrees with candidate metadata", (t) => {
+  const value = releaseFixture(t, {
+    integratedCandidateMetadataMismatch: true,
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+    trustedProducer: true,
+  });
+  const gates = requiredGateAdmission(
+    value.paths,
+    value.taskId,
+    readJsonObject(taskStateFile(value.paths, value.taskId)),
+    { environment: value.environment },
+  );
+  assert.equal(gates.passed, false);
+  assert.equal(gates.releaseDecision, null);
+  assert.match(gates.reasons.join("\n"), /does not match the candidate contract or config identity/);
+});
+
+test("integrated final sweep rejects facts cherry-picked from different raw reviews", (t) => {
+  const value = releaseFixture(t, {
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+    splitIntegratedSources: true,
+    trustedProducer: true,
+  });
+  const gates = requiredGateAdmission(
+    value.paths,
+    value.taskId,
+    readJsonObject(taskStateFile(value.paths, value.taskId)),
+    { environment: value.environment },
+  );
+  assert.equal(gates.passed, false);
+  assert.equal(gates.releaseDecision, null);
+  assert.match(gates.reasons.join("\n"), /must bind one atomic raw review/);
+});
+
+test("integrated final sweep validates deployment attestation content", (t) => {
+  const value = releaseFixture(t, {
+    deploymentAttestationMismatch: true,
+    profileRef: "integrated-app-v1",
+    promotedExecution: true,
+    trustedProducer: true,
+  });
+  const gates = requiredGateAdmission(
+    value.paths,
+    value.taskId,
+    readJsonObject(taskStateFile(value.paths, value.taskId)),
+    { environment: value.environment },
+  );
+  assert.equal(gates.passed, false);
+  assert.equal(gates.releaseDecision, null);
+  assert.match(gates.reasons.join("\n"), /attestation content does not match/);
 });
 
 test("release completion rejects a missing or mismatched controller authority event", (t) => {

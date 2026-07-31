@@ -1,28 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://atlas-forge.local/schemas/release-certification/profile-v1.json",
-  "title": "Atlas Release Certification Profile v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "profile_id",
-    "surface_kind",
-    "target_delivery_class",
-    "requirements"
+  "title": "Atlas Release Certification Profile",
+  "oneOf": [
+    { "$ref": "#/$defs/webUiProfileV1" },
+    { "$ref": "#/$defs/integratedAppProfileV2" }
   ],
-  "properties": {
-    "schema_version": { "const": 1 },
-    "profile_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-    "surface_kind": { "const": "web_ui" },
-    "target_delivery_class": { "const": "product_release" },
-    "requirements": {
-      "type": "array",
-      "minItems": 7,
-      "maxItems": 7,
-      "items": { "$ref": "#/$defs/requirement" }
-    }
-  },
   "$defs": {
     "versionedRef": {
       "type": "object",
@@ -57,7 +40,11 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "enum": ["source", "artifact", "surface_inventory", "config", "runtime", "data"]
+            "enum": [
+              "source", "artifact", "surface_inventory", "config", "runtime", "data",
+              "web_ui", "api", "worker", "database", "external_integration",
+              "deployment_attestation", "performance_budget"
+            ]
           }
         },
         "allowed_gate_classes": {
@@ -75,7 +62,7 @@
         }
       }
     },
-    "requirement": {
+    "requirementBase": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -88,21 +75,137 @@
       ],
       "properties": {
         "requirement_id": { "type": "string", "minLength": 1 },
-        "dimension": {
-          "enum": [
-            "capability-truth",
-            "critical-journey",
-            "surface-states",
-            "formal-content-ia",
-            "production-data",
-            "accessibility-quality",
-            "security-operability"
-          ]
-        },
+        "dimension": { "type": "string" },
         "assertion": { "type": "string", "minLength": 1 },
         "required": { "const": true },
         "waiver_policy": { "const": "never" },
         "check_definition": { "$ref": "#/$defs/checkDefinition" }
+      }
+    },
+    "webUiRequirement": {
+      "allOf": [
+        { "$ref": "#/$defs/requirementBase" },
+        {
+          "properties": {
+            "dimension": {
+              "enum": [
+                "capability-truth",
+                "critical-journey",
+                "surface-states",
+                "formal-content-ia",
+                "production-data",
+                "accessibility-quality",
+                "security-operability"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "integratedRequirement": {
+      "allOf": [
+        { "$ref": "#/$defs/requirementBase" },
+        {
+          "properties": {
+            "dimension": {
+              "enum": [
+                "capability-truth",
+                "critical-journey",
+                "surface-states",
+                "formal-content-ia",
+                "production-data",
+                "accessibility-quality",
+                "security-operability",
+                "api-contract",
+                "worker-reliability",
+                "data-integrity",
+                "external-integration",
+                "performance-resilience"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "webUiProfileV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "profile_id",
+        "surface_kind",
+        "target_delivery_class",
+        "requirements"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "profile_id": { "const": "web-ui-v1" },
+        "surface_kind": { "const": "web_ui" },
+        "target_delivery_class": { "const": "product_release" },
+        "requirements": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "prefixItems": [
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.capability-truth" }, "dimension": { "const": "capability-truth" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.capability-truth.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.critical-journey" }, "dimension": { "const": "critical-journey" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.critical-journey.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.surface-states" }, "dimension": { "const": "surface-states" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.surface-states.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.formal-content-ia" }, "dimension": { "const": "formal-content-ia" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.formal-content-ia.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.production-data" }, "dimension": { "const": "production-data" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.production-data.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.accessibility-quality" }, "dimension": { "const": "accessibility-quality" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.accessibility-quality.v1" } } } } },
+            { "$ref": "#/$defs/webUiRequirement", "properties": { "requirement_id": { "const": "web-ui-v1.security-operability" }, "dimension": { "const": "security-operability" }, "check_definition": { "properties": { "definition_id": { "const": "web-ui-v1.security-operability.v1" } } } } }
+          ],
+          "items": false
+        }
+      }
+    },
+    "integratedAppProfileV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "profile_id",
+        "surface_kinds",
+        "target_delivery_class",
+        "requirements"
+      ],
+      "properties": {
+        "schema_version": { "const": 2 },
+        "profile_id": { "const": "integrated-app-v1" },
+        "surface_kinds": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "web_ui" },
+            { "const": "api" },
+            { "const": "worker" },
+            { "const": "database" },
+            { "const": "external_integration" }
+          ],
+          "items": false,
+          "minItems": 5,
+          "maxItems": 5
+        },
+        "target_delivery_class": { "const": "product_release" },
+        "requirements": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "prefixItems": [
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.capability-truth" }, "dimension": { "const": "capability-truth" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.capability-truth.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.critical-journey" }, "dimension": { "const": "critical-journey" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.critical-journey.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.surface-states" }, "dimension": { "const": "surface-states" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.surface-states.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.formal-content-ia" }, "dimension": { "const": "formal-content-ia" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.formal-content-ia.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.production-data" }, "dimension": { "const": "production-data" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.production-data.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.accessibility-quality" }, "dimension": { "const": "accessibility-quality" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.accessibility-quality.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.security-operability" }, "dimension": { "const": "security-operability" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.security-operability.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.api-contract" }, "dimension": { "const": "api-contract" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.api-contract.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.worker-reliability" }, "dimension": { "const": "worker-reliability" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.worker-reliability.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.data-integrity" }, "dimension": { "const": "data-integrity" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.data-integrity.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.external-integration" }, "dimension": { "const": "external-integration" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.external-integration.v1" } } } } },
+            { "$ref": "#/$defs/integratedRequirement", "properties": { "requirement_id": { "const": "integrated-app-v1.performance-resilience" }, "dimension": { "const": "performance-resilience" }, "check_definition": { "properties": { "definition_id": { "const": "integrated-app-v1.performance-resilience.v1" } } } } }
+          ],
+          "items": false
+        }
       }
     }
   }

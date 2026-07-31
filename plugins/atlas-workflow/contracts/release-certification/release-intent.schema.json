@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://atlas-forge.local/schemas/release-certification/release-intent-v1.json",
-  "title": "Atlas Release Intent v1",
+  "title": "Atlas Release Intent",
   "oneOf": [
-    { "$ref": "#/$defs/productRelease" },
+    { "$ref": "#/$defs/productReleaseV1" },
+    { "$ref": "#/$defs/productReleaseV2" },
     { "$ref": "#/$defs/exploration" },
     { "$ref": "#/$defs/nonProduct" }
   ],
@@ -18,7 +19,7 @@
         "sha256": { "$ref": "#/$defs/digest" }
       }
     },
-    "profileRef": {
+    "webUiProfileRef": {
       "type": "object",
       "additionalProperties": false,
       "required": ["profile_ref", "profile_sha256"],
@@ -27,7 +28,42 @@
         "profile_sha256": { "$ref": "#/$defs/digest" }
       }
     },
-    "productRelease": {
+    "integratedAppProfileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_ref", "profile_sha256"],
+      "properties": {
+        "profile_ref": { "const": "integrated-app-v1" },
+        "profile_sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "productReleaseProperties": {
+      "target_delivery_class": { "const": "product_release" },
+      "target_delivery_authority_ref": { "type": "string", "minLength": 1 },
+      "release_stage": {
+        "enum": ["mvp", "beta", "limited_release", "general_availability", "scaled"]
+      },
+      "surface_inventory": { "$ref": "#/$defs/contentRef" },
+      "release_claim_refs": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "audience_refs": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "critical_outcome_refs": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1 }
+      }
+    },
+    "productReleaseV1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -59,29 +95,62 @@
         },
         "release_profile_refs": {
           "type": "array",
-          "prefixItems": [{ "$ref": "#/$defs/profileRef" }],
+          "prefixItems": [{ "$ref": "#/$defs/webUiProfileRef" }],
           "items": false,
           "minItems": 1,
           "maxItems": 1
         },
-        "release_claim_refs": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+        "release_claim_refs": { "$ref": "#/$defs/productReleaseProperties/release_claim_refs" },
+        "audience_refs": { "$ref": "#/$defs/productReleaseProperties/audience_refs" },
+        "critical_outcome_refs": { "$ref": "#/$defs/productReleaseProperties/critical_outcome_refs" }
+      }
+    },
+    "productReleaseV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "target_delivery_class",
+        "target_delivery_authority_ref",
+        "release_stage",
+        "surface_inventory",
+        "surface_kinds",
+        "release_profile_refs",
+        "release_claim_refs",
+        "audience_refs",
+        "critical_outcome_refs"
+      ],
+      "properties": {
+        "schema_version": { "const": 2 },
+        "target_delivery_class": { "const": "product_release" },
+        "target_delivery_authority_ref": { "type": "string", "minLength": 1 },
+        "release_stage": {
+          "enum": ["mvp", "beta", "limited_release", "general_availability", "scaled"]
         },
-        "audience_refs": {
+        "surface_inventory": { "$ref": "#/$defs/contentRef" },
+        "surface_kinds": {
           "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "prefixItems": [
+            { "const": "web_ui" },
+            { "const": "api" },
+            { "const": "worker" },
+            { "const": "database" },
+            { "const": "external_integration" }
+          ],
+          "items": false,
+          "minItems": 5,
+          "maxItems": 5
         },
-        "critical_outcome_refs": {
+        "release_profile_refs": {
           "type": "array",
+          "prefixItems": [{ "$ref": "#/$defs/integratedAppProfileRef" }],
+          "items": false,
           "minItems": 1,
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
-        }
+          "maxItems": 1
+        },
+        "release_claim_refs": { "$ref": "#/$defs/productReleaseProperties/release_claim_refs" },
+        "audience_refs": { "$ref": "#/$defs/productReleaseProperties/audience_refs" },
+        "critical_outcome_refs": { "$ref": "#/$defs/productReleaseProperties/critical_outcome_refs" }
       }
     },
     "exploration": {

@@ -45,6 +45,21 @@
     }
   },
   {
+    "case_id": "planning-integrated-application-mvp",
+    "scenario_input": {
+      "request": "Plan the strict release contract for a named externally usable application MVP spanning Web UI, API, worker, database, and external integration; do not implement or certify it yet.",
+      "activity": "planning",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui", "api", "worker", "database", "external_integration"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": [] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_release", "expected_profile": "integrated-app-v1", "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "cannot_verify", "expected_release_decision": null,
+      "must_not_pass_reason": "Strict mixed-surface authoring may bind integrated-app-v1, but planning has no candidate evidence or completion-derived decision."
+    }
+  },
+  {
     "case_id": "unsupported-api-product",
     "scenario_input": {
       "request": "Ship the named API product as an MVP and report whether it is release-ready under the available Atlas profiles.",

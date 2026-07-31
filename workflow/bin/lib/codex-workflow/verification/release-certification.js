@@ -17,13 +17,33 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const COMPONENTS = Object.freeze([
   "artifact", "surface_inventory", "config", "runtime", "data",
 ]);
-const MANIFEST_KEYS = [
+const INTEGRATED_RELEASE_UNITS = Object.freeze([
+  "web_ui", "api", "worker", "database", "external_integration",
+]);
+const MANIFEST_V1_KEYS = [
   "schema_version", "release_binding", "source", "components", "manifest_digest",
+];
+const MANIFEST_V2_KEYS = [
+  "schema_version", "release_binding", "source", "components", "release_units",
+  "deployment", "deployment_attestation", "performance_budget", "manifest_digest",
 ];
 const RELEASE_BINDING_KEYS = [
   "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
   "check_definition_set_sha256", "requirement_refs",
 ];
+const RELEASE_UNIT_KEYS = Object.freeze({
+  web_ui: Object.freeze(["input_ref", "sha256", "artifact_digest", "build_id"]),
+  api: Object.freeze([
+    "input_ref", "sha256", "artifact_digest", "image_or_package_id", "contract_version",
+  ]),
+  worker: Object.freeze(["input_ref", "sha256", "artifact_digest", "image_or_package_id"]),
+  database: Object.freeze([
+    "input_ref", "sha256", "migration_bundle_sha256", "schema_head", "compatibility_window",
+  ]),
+  external_integration: Object.freeze([
+    "input_ref", "sha256", "contract_version", "config_sha256", "credential_identity",
+  ]),
+});
 
 class ReleaseCertificationError extends Error {
   constructor(message) {
@@ -63,8 +83,12 @@ function buildCandidateManifest(body) {
 
 function validateCandidateManifest(value, options = {}) {
   const errors = [];
-  if (!exactKeys(value, MANIFEST_KEYS, "candidate manifest", errors)) return errors;
-  if (value.schema_version !== 1) errors.push("candidate manifest schema_version must equal 1");
+  const schemaVersion = value?.schema_version;
+  const manifestKeys = schemaVersion === 2 ? MANIFEST_V2_KEYS : MANIFEST_V1_KEYS;
+  if (!exactKeys(value, manifestKeys, "candidate manifest", errors)) return errors;
+  if (![1, 2].includes(schemaVersion)) {
+    errors.push("candidate manifest schema_version must equal 1 or 2");
+  }
   if (!SHA256.test(value.manifest_digest || "")
     || value.manifest_digest !== digestCanonical(manifestBody(value))) {
     errors.push("candidate manifest digest does not match its canonical content");
@@ -74,6 +98,13 @@ function validateCandidateManifest(value, options = {}) {
   }
   if (options.releaseBinding && !same(value.release_binding, options.releaseBinding)) {
     errors.push("candidate manifest release_binding does not match execution authority");
+  }
+  const profileRef = value.release_binding?.profile_ref;
+  if (schemaVersion === 1 && profileRef && profileRef !== "web-ui-v1") {
+    errors.push("candidate manifest schema_version 1 requires release profile web-ui-v1");
+  }
+  if (schemaVersion === 2 && profileRef !== "integrated-app-v1") {
+    errors.push("candidate manifest schema_version 2 requires release profile integrated-app-v1");
   }
   if (!exactKeys(value.source, ["repo_realpath", "head_sha", "tree_oid"], "candidate manifest source", errors)) {
     return errors;
@@ -114,6 +145,107 @@ function validateCandidateManifest(value, options = {}) {
   if (new Set(refs).size !== refs.length) {
     errors.push("candidate manifest component input_ref values must be unique");
   }
+  if (schemaVersion === 2) {
+    if (exactKeys(
+      value.release_units,
+      INTEGRATED_RELEASE_UNITS,
+      "candidate manifest release_units",
+      errors,
+    )) {
+      for (const unit of INTEGRATED_RELEASE_UNITS) {
+        const item = value.release_units[unit];
+        const keys = RELEASE_UNIT_KEYS[unit];
+        if (!exactKeys(item, keys, `candidate manifest release_units.${unit}`, errors)) continue;
+        if (typeof item.input_ref !== "string" || !item.input_ref.trim()) {
+          errors.push(`candidate manifest release_units.${unit}.input_ref must be non-empty`);
+        } else {
+          refs.push(item.input_ref);
+        }
+        if (!SHA256.test(item.sha256 || "")) {
+          errors.push(`candidate manifest release_units.${unit}.sha256 is invalid`);
+        }
+        for (const digestKey of keys.filter((key) => key.endsWith("_digest") || key.endsWith("_sha256"))) {
+          if (!SHA256.test(item[digestKey] || "")) {
+            errors.push(`candidate manifest release_units.${unit}.${digestKey} is invalid`);
+          }
+        }
+        for (const identityKey of keys.filter((key) => ![
+          "input_ref", "sha256", "artifact_digest", "migration_bundle_sha256", "config_sha256",
+        ].includes(key))) {
+          if (typeof item[identityKey] !== "string" || !item[identityKey].trim()) {
+            errors.push(`candidate manifest release_units.${unit}.${identityKey} must be non-empty`);
+          }
+        }
+      }
+    }
+    if (new Set(refs).size !== refs.length) {
+      errors.push("candidate manifest component and release-unit input_ref values must be unique");
+    }
+    if (exactKeys(
+      value.deployment,
+      ["deployment_id", "environment_class", "unit_set_sha256"],
+      "candidate manifest deployment",
+      errors,
+    )) {
+      for (const field of ["deployment_id", "environment_class"]) {
+        if (typeof value.deployment[field] !== "string" || !value.deployment[field].trim()) {
+          errors.push(`candidate manifest deployment.${field} must be non-empty`);
+        }
+      }
+      if (!SHA256.test(value.deployment.unit_set_sha256 || "")
+        || value.deployment.unit_set_sha256 !== digestCanonical(value.release_units)) {
+        errors.push("candidate manifest deployment.unit_set_sha256 does not match release_units");
+      }
+    }
+    if (exactKeys(
+      value.deployment_attestation,
+      [
+        "input_ref", "sha256", "deployment_id", "environment_class",
+        "observed_unit_set_sha256",
+      ],
+      "candidate manifest deployment_attestation",
+      errors,
+    )) {
+      const attestation = value.deployment_attestation;
+      if (typeof attestation.input_ref !== "string" || !attestation.input_ref.trim()) {
+        errors.push("candidate manifest deployment_attestation.input_ref must be non-empty");
+      } else {
+        refs.push(attestation.input_ref);
+      }
+      for (const field of ["sha256", "observed_unit_set_sha256"]) {
+        if (!SHA256.test(attestation[field] || "")) {
+          errors.push(`candidate manifest deployment_attestation.${field} is invalid`);
+        }
+      }
+      if (attestation.deployment_id !== value.deployment?.deployment_id
+        || attestation.environment_class !== value.deployment?.environment_class
+        || attestation.observed_unit_set_sha256 !== value.deployment?.unit_set_sha256) {
+        errors.push("candidate manifest deployment_attestation does not match deployment identity");
+      }
+    }
+    if (exactKeys(
+      value.performance_budget,
+      ["input_ref", "sha256", "load_profile"],
+      "candidate manifest performance_budget",
+      errors,
+    )) {
+      const budget = value.performance_budget;
+      if (typeof budget.input_ref !== "string" || !budget.input_ref.trim()) {
+        errors.push("candidate manifest performance_budget.input_ref must be non-empty");
+      } else {
+        refs.push(budget.input_ref);
+      }
+      if (!SHA256.test(budget.sha256 || "")) {
+        errors.push("candidate manifest performance_budget.sha256 is invalid");
+      }
+      if (typeof budget.load_profile !== "string" || !budget.load_profile.trim()) {
+        errors.push("candidate manifest performance_budget.load_profile must be non-empty");
+      }
+    }
+    if (new Set(refs).size !== refs.length) {
+      errors.push("candidate manifest component, release-unit, and semantic input_ref values must be unique");
+    }
+  }
   if (options.releaseIntent) {
     const actual = value.components.surface_inventory;
     const expected = options.releaseIntent.surface_inventory;
@@ -145,6 +277,9 @@ function loadReleaseContracts(environment, paths) {
       "formal-web-ui-v1@1": path.join(
         root, "contracts/release-certification/adapters/formal-web-ui-v1.js",
       ),
+      "integrated-app-v1@1": path.join(
+        root, "contracts/release-certification/adapters/integrated-app-v1.js",
+      ),
       "release-data-v1@1": path.join(
         root, "contracts/release-certification/adapters/release-data-v1.js",
       ),
@@ -153,6 +288,7 @@ function loadReleaseContracts(environment, paths) {
       ),
     };
     if ([evidence, intent, profile, plan, ...Object.values(adapters)].every(fs.existsSync)) {
+      const integratedAdapter = require(adapters["integrated-app-v1@1"]);
       return {
         ...require(evidence),
         ...require(intent),
@@ -163,11 +299,14 @@ function loadReleaseContracts(environment, paths) {
             .collectBusinessAcceptance,
           "formal-web-ui-v1@1": require(adapters["formal-web-ui-v1@1"])
             .collectFormalWebUi,
+          "integrated-app-v1@1": require(adapters["integrated-app-v1@1"])
+            .collectIntegratedApp,
           "release-data-v1@1": require(adapters["release-data-v1@1"])
             .collectReleaseData,
           "release-operability-v1@1": require(adapters["release-operability-v1@1"])
             .collectReleaseOperability,
         },
+        integratedEvidenceRecordForRef: integratedAdapter.evidenceRecordForRef,
       };
     }
   }
@@ -316,11 +455,12 @@ function recomputeFact(contracts, input, fact, policyBindings) {
     evaluatedAt: fact.evaluated_at,
     policyBinding: policy,
   };
-  const output = policy.collector_adapter_ref === "formal-web-ui-v1@1"
+  const multiFactCollectors = new Set(["formal-web-ui-v1@1", "integrated-app-v1@1"]);
+  const output = multiFactCollectors.has(policy.collector_adapter_ref)
     ? collector(input, {
       ...options,
       policyBindings: policyBindings.filter((item) => (
-        item.collector_adapter_ref === "formal-web-ui-v1@1"
+        item.collector_adapter_ref === policy.collector_adapter_ref
       )),
     })
     : collector(input, options);
@@ -332,6 +472,45 @@ function recomputeFact(contracts, input, fact, policyBindings) {
       `typed fact does not match the immutable collector result: ${policy.requirement_ref}`,
     );
   }
+}
+
+function integratedCandidateEvidenceErrors(input, manifest) {
+  const errors = [];
+  const record = (dimension, control) => input.evidence_records?.find((item) => (
+    item?.record?.dimension === dimension && item?.record?.control_id === control
+  ))?.record;
+  const migration = record("data-integrity", "schema_migration")?.observations;
+  if (migration?.migration_bundle_sha256
+    !== manifest.release_units.database.migration_bundle_sha256) {
+    errors.push("schema migration evidence does not match the candidate migration bundle");
+  }
+  const restore = record("data-integrity", "backup_restore")?.observations;
+  if (restore?.restored_schema_head !== manifest.release_units.database.schema_head) {
+    errors.push("backup restore evidence does not match the candidate schema head");
+  }
+  const sharedContract = record("api-contract", "shared_contract")?.observations;
+  if (sharedContract?.contract_version !== manifest.release_units.api.contract_version
+    || sharedContract?.api_artifact_digest !== manifest.release_units.api.artifact_digest) {
+    errors.push("API contract evidence does not match the candidate API release unit");
+  }
+  const contract = record("external-integration", "contract_binding")?.observations;
+  if (contract?.contract_version !== manifest.release_units.external_integration.contract_version
+    || contract?.config_sha256 !== manifest.release_units.external_integration.config_sha256) {
+    errors.push("external contract evidence does not match the candidate contract or config identity");
+  }
+  const identity = record(
+    "external-integration", "identity_credentials_rotation_revocation",
+  )?.observations;
+  if (identity?.credential_identity
+    !== manifest.release_units.external_integration.credential_identity) {
+    errors.push("external credential evidence does not match the candidate credential identity");
+  }
+  const declaredBudget = record("performance-resilience", "declared_budget")?.observations;
+  if (declaredBudget?.thresholds_sha256 !== manifest.performance_budget.sha256
+    || declaredBudget?.load_profile !== manifest.performance_budget.load_profile) {
+    errors.push("performance evidence does not match the candidate performance budget");
+  }
+  return errors;
 }
 
 function evaluateReleaseSweep({
@@ -375,6 +554,7 @@ function evaluateReleaseSweep({
     const policyBindings = selected.map(({ record }) => record.required_gate.release_requirement);
 
     const facts = new Map();
+    const atomicCollectorSources = new Map();
     let sharedManifest = null;
     let sharedManifestPath = "";
     const releaseRoot = path.join(taskArtifactDir(paths, taskId), "release");
@@ -402,7 +582,8 @@ function evaluateReleaseSweep({
       const inputs = validatedInputs(record);
       const json = jsonInputs(inputs);
       const manifests = json.filter(({ value }) => (
-        value.schema_version === 1 && value.components && value.source && value.manifest_digest
+        [1, 2].includes(value.schema_version)
+        && value.components && value.source && value.manifest_digest
       ));
       const releaseFacts = json.filter(({ value }) => (
         value.schema_version === 1 && value.policy_binding && value.fact_id
@@ -428,6 +609,43 @@ function evaluateReleaseSweep({
         const item = manifest.components[component];
         contentInput(inputs, item.input_ref, item.sha256, `candidate component ${component}`);
       }
+      if (manifest.schema_version === 2) {
+        for (const unit of INTEGRATED_RELEASE_UNITS) {
+          const item = manifest.release_units[unit];
+          contentInput(inputs, item.input_ref, item.sha256, `candidate release unit ${unit}`);
+        }
+        const attestationEntry = contentInput(
+          inputs,
+          manifest.deployment_attestation.input_ref,
+          manifest.deployment_attestation.sha256,
+          "candidate deployment attestation",
+        );
+        const attestationValue = readJsonFile(
+          attestationEntry.path,
+          "candidate deployment attestation",
+        );
+        if (!same(attestationValue, {
+          deployment_id: manifest.deployment_attestation.deployment_id,
+          environment_class: manifest.deployment_attestation.environment_class,
+          observed_unit_set_sha256: manifest.deployment_attestation.observed_unit_set_sha256,
+        })) {
+          throw new ReleaseCertificationError(
+            "deployment attestation content does not match the candidate deployment identity",
+          );
+        }
+        const budgetEntry = contentInput(
+          inputs,
+          manifest.performance_budget.input_ref,
+          manifest.performance_budget.sha256,
+          "candidate performance budget",
+        );
+        const budgetValue = readJsonFile(budgetEntry.path, "candidate performance budget");
+        if (budgetValue.load_profile !== manifest.performance_budget.load_profile) {
+          throw new ReleaseCertificationError(
+            "performance budget content does not match the candidate load profile",
+          );
+        }
+      }
 
       const factEntry = releaseFacts[0].entry;
       const fact = releaseFacts[0].value;
@@ -451,9 +669,58 @@ function evaluateReleaseSweep({
       if (sourceInputs.length !== 1) {
         throw new ReleaseCertificationError(`typed fact must bind exactly one raw collector input: ${requirementRef}`);
       }
-      recomputeFact(contracts, sourceInputs[0].value, fact, policyBindings);
+      const rawInput = sourceInputs[0].value;
+      if (["formal-web-ui-v1@1", "integrated-app-v1@1"].includes(
+        requirement.collector_adapter_ref,
+      )) {
+        const sourceEntry = sourceInputs[0].entry;
+        const sourceIdentity = {
+          path: fs.realpathSync(sourceEntry.path),
+          sha256: sourceEntry.sha256,
+          canonical_source_sha256: fact.source.sha256,
+          review_id: rawInput.review_id,
+          evidence_set_id: rawInput.evidence_set_id || null,
+          run_id: rawInput.run_id || null,
+        };
+        const previous = atomicCollectorSources.get(requirement.collector_adapter_ref);
+        if (previous && !same(previous, sourceIdentity)) {
+          throw new ReleaseCertificationError(
+            `multi-fact collector receipts must bind one atomic raw review: ${requirement.collector_adapter_ref}`,
+          );
+        }
+        atomicCollectorSources.set(requirement.collector_adapter_ref, sourceIdentity);
+      }
+      if (requirement.collector_adapter_ref === "integrated-app-v1@1") {
+        const expectedComponents = Object.fromEntries(INTEGRATED_RELEASE_UNITS.map((unit) => [
+          unit, manifest.release_units?.[unit]?.sha256,
+        ]));
+        if (manifest.schema_version !== 2
+          || rawInput.deployment_id !== manifest.deployment?.deployment_id
+          || rawInput.observed_unit_set_sha256
+            !== manifest.deployment_attestation?.observed_unit_set_sha256
+          || !same(rawInput.candidate_components, expectedComponents)) {
+          throw new ReleaseCertificationError(
+            `integrated collector input does not bind the candidate release units: ${requirementRef}`,
+          );
+        }
+        const candidateEvidenceErrors = integratedCandidateEvidenceErrors(rawInput, manifest);
+        if (candidateEvidenceErrors.length > 0) {
+          throw new ReleaseCertificationError(candidateEvidenceErrors.join("; "));
+        }
+      }
+      recomputeFact(contracts, rawInput, fact, policyBindings);
       for (const evidence of fact.evidence_refs) {
-        contentInput(inputs, evidence.ref, evidence.sha256, `typed fact evidence ${evidence.ref}`);
+        const entry = contentInput(
+          inputs, evidence.ref, evidence.sha256, `typed fact evidence ${evidence.ref}`,
+        );
+        if (evidence.kind === "integrated_control_evidence") {
+          const embedded = contracts.integratedEvidenceRecordForRef(rawInput, evidence.ref);
+          if (!embedded || !same(readJsonFile(entry.path, `integrated evidence ${evidence.ref}`), embedded)) {
+            throw new ReleaseCertificationError(
+              `integrated evidence content does not match its typed collector record: ${evidence.ref}`,
+            );
+          }
+        }
       }
       let effectiveFact = { ...fact, submitted_outcome: fact.outcome };
       if (fact.outcome === "passed") {
@@ -505,6 +772,7 @@ function evaluateReleaseSweep({
 
 module.exports = {
   COMPONENTS,
+  INTEGRATED_RELEASE_UNITS,
   ReleaseCertificationError,
   buildCandidateManifest,
   deriveReleaseDecision,

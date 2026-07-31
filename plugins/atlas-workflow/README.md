@@ -157,11 +157,18 @@ analysis, document, or review that governs no candidate may use `non_product`
 with a substantive reason.
 
 `MVP`, `Beta`, limited release, GA, and scaled operation change scope or
-maturity, not the formal-quality floor. Release certification v1 supports only
-a pure Web UI through the immutable `web-ui-v1` Profile. API, CLI, worker,
-mixed, and unknown product surfaces fail authoring/admission until a dedicated
-Profile exists; report their release-readiness assessment as `cannot_verify`
-without inventing a completion decision or relabeling the product.
+maturity, not the formal-quality floor. Release certification supports a pure
+Web UI through immutable Profile `web-ui-v1`. Strict contract authoring,
+admission, and structural recomputation support the exact
+`web_ui` + `api` + `worker` + `database` + `external_integration` combination
+through immutable Profile `integrated-app-v1`. The public CLI does not register
+a trusted producer for that Profile in this release, so structurally passing
+mixed-surface facts remain `cannot_verify` unless a separately delivered,
+workflow-bound trusted producer is supplied by the host. API-only, worker-only,
+CLI, different mixed combinations, and unknown product surfaces fail
+authoring/admission until an exact dedicated Profile exists; report their
+release-readiness assessment as `cannot_verify` without inventing a completion
+decision or relabeling the product.
 
 A newly authored `product_release` uses contract semantics v4, execution-plan
 schema version 2, brief schema version 3, and Team execution-v3. Every Profile

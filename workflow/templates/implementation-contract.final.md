@@ -18,9 +18,11 @@ product_ui_not_applicable_reason:
 
 ## Release Intent
 
-Choose exactly one `target_delivery_class` branch from `release-intent.schema.json`. The example below is the supported v1 product-release branch; exploration and non-product must use their own strict fields.
+Choose exactly one `target_delivery_class` branch from `release-intent.schema.json`. The example below is the established v1 pure-Web product-release branch; exploration and non-product must use their own strict fields.
 
-For a product release that will enter execution, bind the exact controller-recordable `user-message:` or `operator-input:` authorization that will be supplied to Team start. `goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority in v1.
+For a product release that will enter execution, bind the exact controller-recordable `user-message:` or `operator-input:` authorization that will be supplied to Team start. `goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority for either Profile.
+
+For strict mixed-surface authoring/admission, use schema version 2, Profile `integrated-app-v1`, and the exact ordered surface set `web_ui`, `api`, `worker`, `database`, `external_integration`. Obtain `profile_sha256` from the bundled Profile through `loadBundledProfile()` plus `profileBinding()` and project all 12 immutable requirements exactly once. The public CLI does not register this Profile's trusted producer in this release, so a structurally passing final sweep remains `cannot_verify` unless the host separately supplies a workflow-bound trusted producer.
 
 ```atlas-release-intent+json
 {

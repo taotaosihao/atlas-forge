@@ -44,8 +44,27 @@ function productIntent() {
   };
 }
 
+function integratedProductIntent() {
+  const profile = loadBundledProfile("integrated-app-v1");
+  return {
+    schema_version: 2,
+    target_delivery_class: "product_release",
+    target_delivery_authority_ref: "goal:REL-INTEGRATED-PRODUCT",
+    release_stage: "mvp",
+    surface_inventory: { ref: "AC-INTEGRATED-SURFACE", sha256: digest("c") },
+    surface_kinds: ["web_ui", "api", "worker", "database", "external_integration"],
+    release_profile_refs: [{
+      profile_ref: "integrated-app-v1",
+      profile_sha256: profileBinding(profile).profile_sha256,
+    }],
+    release_claim_refs: ["AC-INTEGRATED-CLAIM"],
+    audience_refs: ["AC-INTEGRATED-AUDIENCE"],
+    critical_outcome_refs: ["AC-INTEGRATED-OUTCOME"],
+  };
+}
+
 function planningContract(intent, planIntent = intent) {
-  const profile = loadBundledProfile("web-ui-v1");
+  const profile = loadBundledProfile(intent.release_profile_refs[0].profile_ref);
   const binding = profileBinding(profile);
   const plan = {
     schema_version: 2,
@@ -73,7 +92,7 @@ function planningContract(intent, planIntent = intent) {
         max_changed_files: 12,
         max_loc: 1200,
         max_wall_clock_minutes: 120,
-        max_required_checks: 7,
+        max_required_checks: profile.requirements.length,
       },
       checks: profile.requirements.map((requirement) => ({
         check_id: `release-${requirement.dimension}`,
@@ -149,6 +168,26 @@ test("semantics v4 linter consumes release intent while preserving planning acti
     invalid.surface_kinds = ["worker"];
     const invalidFile = path.join(temp, "invalid.md");
     fs.writeFileSync(invalidFile, planningContract(invalid, productIntent()));
+    const rejected = childProcess.spawnSync("node", [LINTER, "--file", invalidFile], { encoding: "utf8" });
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /RELEASE_INTENT_INVALID/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("semantics v4 linter admits the exact integrated application Profile", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-integrated-release-contract-"));
+  try {
+    const validFile = path.join(temp, "valid.md");
+    fs.writeFileSync(validFile, planningContract(integratedProductIntent()));
+    const valid = childProcess.spawnSync("node", [LINTER, "--file", validFile], { encoding: "utf8" });
+    assert.equal(valid.status, 0, `${valid.stdout}\n${valid.stderr}`);
+
+    const missingDatabase = integratedProductIntent();
+    missingDatabase.surface_kinds.splice(3, 1);
+    const invalidFile = path.join(temp, "invalid.md");
+    fs.writeFileSync(invalidFile, planningContract(missingDatabase, integratedProductIntent()));
     const rejected = childProcess.spawnSync("node", [LINTER, "--file", invalidFile], { encoding: "utf8" });
     assert.equal(rejected.status, 1);
     assert.match(rejected.stderr, /RELEASE_INTENT_INVALID/);

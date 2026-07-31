@@ -14,13 +14,32 @@ const PROFILE_DIMENSIONS = Object.freeze([
   "security-operability",
 ]);
 
+const INTEGRATED_PROFILE_DIMENSIONS = Object.freeze([
+  ...PROFILE_DIMENSIONS,
+  "api-contract",
+  "worker-reliability",
+  "data-integrity",
+  "external-integration",
+  "performance-resilience",
+]);
+
+const INTEGRATED_SURFACE_KINDS = Object.freeze([
+  "web_ui",
+  "api",
+  "worker",
+  "database",
+  "external_integration",
+]);
+
 const BUNDLED_PROFILE_DIGESTS = Object.freeze({
   "web-ui-v1": "sha256:b63388d9e375eb8311d51845645b051a06600ee0a584ce35e029d78e1ac1fda6",
+  "integrated-app-v1": "sha256:80adb0c08ef783662ac6409e7c9b9b3c320e95c4a2b4c009ed06e9b090e1a52f",
 });
 
 const BUNDLED_COMPONENT_FILES = Object.freeze({
   "collector_adapter:business-acceptance-v2@2": path.join(__dirname, "..", "adapters", "business-acceptance-v2.js"),
   "collector_adapter:formal-web-ui-v1@1": path.join(__dirname, "..", "adapters", "formal-web-ui-v1.js"),
+  "collector_adapter:integrated-app-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
   "collector_adapter:release-data-v1@1": path.join(__dirname, "..", "adapters", "release-data-v1.js"),
   "collector_adapter:release-operability-v1@1": path.join(__dirname, "..", "adapters", "release-operability-v1.js"),
   "fact_schema:release-fact-v1@1": path.join(__dirname, "evidence.js"),
@@ -31,6 +50,11 @@ const BUNDLED_COMPONENT_FILES = Object.freeze({
   "evaluator:production-data-v1@1": path.join(__dirname, "evidence.js"),
   "evaluator:accessibility-quality-v1@1": path.join(__dirname, "evidence.js"),
   "evaluator:security-operability-v1@1": path.join(__dirname, "evidence.js"),
+  "evaluator:api-contract-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
+  "evaluator:worker-reliability-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
+  "evaluator:data-integrity-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
+  "evaluator:external-integration-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
+  "evaluator:performance-resilience-v1@1": path.join(__dirname, "..", "adapters", "integrated-app-v1.js"),
 });
 
 const CANDIDATE_COMPONENTS = new Set([
@@ -40,6 +64,13 @@ const CANDIDATE_COMPONENTS = new Set([
   "config",
   "runtime",
   "data",
+  "web_ui",
+  "api",
+  "worker",
+  "database",
+  "external_integration",
+  "deployment_attestation",
+  "performance_budget",
 ]);
 
 const ALLOWED_GATE_CLASSES = new Set([
@@ -137,13 +168,32 @@ function validateCheckDefinition(value, location, errors) {
 
 function validateProfile(value) {
   const errors = [];
-  const keys = ["schema_version", "profile_id", "surface_kind", "target_delivery_class", "requirements"];
+  const integrated = value?.schema_version === 2;
+  const keys = integrated
+    ? ["schema_version", "profile_id", "surface_kinds", "target_delivery_class", "requirements"]
+    : ["schema_version", "profile_id", "surface_kind", "target_delivery_class", "requirements"];
   if (!exactKeys(value, keys, keys, "profile", errors)) return errors;
-  if (value.schema_version !== 1) errors.push("profile.schema_version: must equal 1");
+  if (![1, 2].includes(value.schema_version)) errors.push("profile.schema_version: must equal 1 or 2");
   if (typeof value.profile_id !== "string" || !SAFE_ID.test(value.profile_id)) {
     errors.push("profile.profile_id: must be a safe identifier");
   }
-  if (value.surface_kind !== "web_ui") errors.push("profile.surface_kind: must equal web_ui");
+  if (integrated) {
+    if (value.profile_id !== "integrated-app-v1") {
+      errors.push("profile.profile_id: schema version 2 must equal integrated-app-v1");
+    }
+    if (!Array.isArray(value.surface_kinds)
+      || value.surface_kinds.length !== INTEGRATED_SURFACE_KINDS.length
+      || value.surface_kinds.some((surface, index) => surface !== INTEGRATED_SURFACE_KINDS[index])) {
+      errors.push(`profile.surface_kinds: must equal ${INTEGRATED_SURFACE_KINDS.join(", ")}`);
+    }
+  } else {
+    if (value.profile_id !== "web-ui-v1") {
+      errors.push("profile.profile_id: schema version 1 must equal web-ui-v1");
+    }
+    if (value.surface_kind !== "web_ui") {
+      errors.push("profile.surface_kind: must equal web_ui");
+    }
+  }
   if (value.target_delivery_class !== "product_release") {
     errors.push("profile.target_delivery_class: must equal product_release");
   }
@@ -151,8 +201,9 @@ function validateProfile(value) {
     errors.push("profile.requirements: must be an array");
     return errors;
   }
-  if (value.requirements.length !== PROFILE_DIMENSIONS.length) {
-    errors.push(`profile.requirements: must contain exactly ${PROFILE_DIMENSIONS.length} requirements`);
+  const expectedDimensions = integrated ? INTEGRATED_PROFILE_DIMENSIONS : PROFILE_DIMENSIONS;
+  if (value.requirements.length !== expectedDimensions.length) {
+    errors.push(`profile.requirements: must contain exactly ${expectedDimensions.length} requirements`);
   }
   const dimensions = new Set();
   const requirementIds = new Set();
@@ -164,10 +215,13 @@ function validateProfile(value) {
     ];
     if (!exactKeys(requirement, requirementKeys, requirementKeys, location, errors)) return;
     nonEmptyString(requirement.requirement_id, `${location}.requirement_id`, errors);
-    if (!PROFILE_DIMENSIONS.includes(requirement.dimension)) {
+    if (!expectedDimensions.includes(requirement.dimension)) {
       errors.push(`${location}.dimension: unsupported dimension: ${String(requirement.dimension)}`);
     } else if (dimensions.has(requirement.dimension)) {
       errors.push(`${location}.dimension: duplicate dimension: ${requirement.dimension}`);
+    }
+    if (requirement.dimension !== expectedDimensions[index]) {
+      errors.push(`${location}.dimension: must equal ${String(expectedDimensions[index])}`);
     }
     dimensions.add(requirement.dimension);
     const expectedId = `${value.profile_id}.${requirement.dimension}`;
@@ -184,16 +238,26 @@ function validateProfile(value) {
     validateCheckDefinition(requirement.check_definition, `${location}.check_definition`, errors);
     const definitionId = requirement.check_definition?.definition_id;
     if (typeof definitionId === "string") {
+      const expectedDefinitionId = `${value.profile_id}.${requirement.dimension}.v1`;
+      if (definitionId !== expectedDefinitionId) {
+        errors.push(`${location}.check_definition.definition_id: must equal ${expectedDefinitionId}`);
+      }
       if (definitionIds.has(definitionId)) {
         errors.push(`${location}.check_definition.definition_id: duplicate definition id: ${definitionId}`);
       }
       definitionIds.add(definitionId);
     }
   });
-  for (const dimension of PROFILE_DIMENSIONS) {
+  for (const dimension of expectedDimensions) {
     if (!dimensions.has(dimension)) errors.push(`profile.requirements: missing dimension: ${dimension}`);
   }
   return errors;
+}
+
+function profileSurfaceKinds(profile) {
+  const errors = validateProfile(profile);
+  if (errors.length > 0) throw new Error(`invalid release profile: ${errors.join("; ")}`);
+  return profile.schema_version === 1 ? [profile.surface_kind] : [...profile.surface_kinds];
 }
 
 function bundledProfilePath(profileRef) {
@@ -283,6 +347,8 @@ module.exports = {
   BUNDLED_COMPONENT_FILES,
   BUNDLED_PROFILE_DIGESTS,
   CANDIDATE_COMPONENTS,
+  INTEGRATED_PROFILE_DIMENSIONS,
+  INTEGRATED_SURFACE_KINDS,
   PROFILE_DIMENSIONS,
   assertBundledComponentIntegrity,
   assertBundledProfileIntegrity,
@@ -290,6 +356,7 @@ module.exports = {
   digestValue,
   loadBundledProfile,
   profileBinding,
+  profileSurfaceKinds,
   stableValue,
   validateProfile,
 };

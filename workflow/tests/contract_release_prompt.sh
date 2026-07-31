@@ -37,7 +37,9 @@ for (const name of ["task", "clarify", "design", "team"]) {
 for (const name of ["task", "clarify", "team"]) {
   assert.match(text[name], /MVP.*Beta/s, `${name} must preserve the stage-quality floor`);
   assert.match(text[name], /pure Web UI/, `${name} must state the v1 surface boundary`);
-  assert.match(text[name], /API, CLI, worker, mixed, and unknown/, `${name} must reject unsupported product surfaces`);
+  assert.match(text[name], /exact `web_ui` \+ `api` \+ `worker` \+ `database` \+ `external_integration` combination/, `${name} must state the exact integrated authoring boundary`);
+  assert.match(text[name], /public CLI does not register its trusted producer/, `${name} must preserve the integrated producer dependency`);
+  assert.match(text[name], /API-only, worker-only, CLI, different mixed combinations, and unknown/, `${name} must reject unsupported product surfaces`);
   assert.match(text[name], /fail (?:authoring\/admission|before release admission)/, `${name} must keep unsupported surfaces out of release admission`);
   assert.match(text[name], /without inventing a completion `release_decision`/, `${name} must not fabricate an unsupported-surface decision record`);
 }
@@ -74,7 +76,9 @@ assert.match(text.sdd, /Each passing fact requires workflow-bound producer prove
 
 for (const template of implementationTemplates) {
   assert.match(template, /"target_delivery_authority_ref": "user-message:<message-id>"/);
-  assert.match(template, /`goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority in v1/);
+  assert.match(template, /`goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority for either Profile/);
+  assert.match(template, /schema version 2, Profile `integrated-app-v1`/);
+  assert.match(template, /project all 12 immutable requirements exactly once/);
 }
 
 const profileDimensions = [
@@ -95,7 +99,7 @@ for (const name of ["task", "clarify", "team"]) {
 }
 
 const anchors = JSON.parse(read("test", "fixtures", "implementation-contract", "release-certification", "anchors.json"));
-assert.equal(anchors.length, 12);
+assert.equal(anchors.length, 13);
 assert.equal(new Set(anchors.map(({ case_id }) => case_id)).size, anchors.length);
 
 for (const anchor of anchors) {
@@ -112,6 +116,13 @@ for (const anchor of anchors) {
 
 assert.ok(anchors.some(({ scenario_input, oracle }) => (
   scenario_input.activity === "planning" && oracle.target_delivery_class === "product_release"
+)));
+assert.ok(anchors.some(({ scenario_input, oracle }) => (
+  scenario_input.activity === "planning"
+  && oracle.expected_profile === "integrated-app-v1"
+  && scenario_input.target_facts.surface_kinds.join(",")
+    === "web_ui,api,worker,database,external_integration"
+  && oracle.expected_release_decision === null
 )));
 assert.ok(anchors.some(({ scenario_input, oracle }) => (
   scenario_input.activity === "review" && oracle.target_delivery_class === "product_release"
