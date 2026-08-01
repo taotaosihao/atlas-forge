@@ -15,7 +15,20 @@ This is the execution clarification layer:
 
 - Use `$atlas-workflow:office-hours` when product value, user, or scope is still unsettled.
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the solution shape still needs options and tradeoffs.
-- Use `$atlas-workflow:clarify` when the direction is chosen and the task needs explicit non-goals, decision boundaries, acceptance criteria, and verification before execution.
+- Use `$atlas-workflow:product-design` when the direction is chosen for a user-visible feature but no current executable Design Handoff exists.
+- Use `$atlas-workflow:clarify` when the direction and user-visible flow have current approval and the task needs explicit non-goals, decision boundaries, acceptance criteria, and verification before execution.
+
+## Product Design admission
+
+For a user-visible feature, accept `E-design-handoff.md` only from the same task
+and fail closed before clarification. Recompute current A `context_identity`, C
+`content_identity`, and D flow identity using the Product Design adapter. Require
+E to match all three, require D to store all three approved identities, require
+current C and D approval references, and require no blocker. A `product_release`
+also requires explicit current-user Flow Approval. If any check fails, route to
+`$atlas-workflow:product-design`; do not copy A, C, or D into Clarify. Pure
+backend, migration, CLI, no-interaction, and tiny precise work does not require a
+Design Handoff.
 
 ## Release Intent
 

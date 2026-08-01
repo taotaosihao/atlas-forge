@@ -15,7 +15,8 @@ This is the design exploration layer:
 
 - Use `$atlas-workflow:office-hours` first when the core question is whether the idea is worth doing.
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the feature shape, UX, architecture, or scope is not settled.
-- Use `$atlas-workflow:clarify` next when a direction is chosen and needs execution-ready boundaries.
+- Use `$atlas-workflow:product-design` next when a user-visible direction is chosen but its primary scenario or surface flow is not approved.
+- Use `$atlas-workflow:clarify` only when a current Design Handoff exists and execution-ready boundaries remain.
 
 Follow this loop:
 
@@ -56,9 +57,10 @@ Follow this loop:
    - recommendation
    - rejected alternatives and why
    - open decisions
-11. If the user approves the direction, either:
-   - write `workflow/artifacts/<task-id>/spec.md` directly when the scope is simple and the facts are stable, or
-   - switch to `$atlas-workflow:clarify` when explicit non-goals, decision boundaries, and acceptance criteria still need to be locked.
+11. If the user approves the direction, route by the remaining gap:
+   - switch to `$atlas-workflow:product-design` when a user-visible primary scenario or flow-and-surface is not yet approved;
+   - write `workflow/artifacts/<task-id>/spec.md` directly when the scope is simple, facts are stable, and no user-visible flow design is missing; or
+   - switch to `$atlas-workflow:clarify` when a current Design Handoff exists but explicit non-goals, decision boundaries, and acceptance criteria still need to be locked.
 12. When the discussion has become actionable enough for clarify, team, task, or Multica handoff, also write a concise project doc:
     - prefer an existing project docs location; otherwise create `docs/atlas-workflow/` under the target project root.
     - create or reuse one workflow docs bundle for the same workflow: `docs/atlas-workflow/<workflow-id>-<short-topic>/`.
@@ -87,3 +89,4 @@ Hard rules:
 - Keep confirmed facts separate from inferences and assumptions.
 - Do not make routing evidence a ceremony for tiny explicit fixes; route only when a planning layer choice was meaningful.
 - Keep exploratory or unstable notes in `workflow/artifacts/<task-id>/`; once a solution is actionable, mirror the durable handoff into the workflow docs bundle described above.
+- Keep pure backend, migration, CLI, and tiny precise changes in Task or Clarify rather than Product Design.

@@ -15,7 +15,8 @@ This is the upstream product judgment layer:
 
 - Use `$atlas-workflow:office-hours` when the user is still deciding whether an idea is worth doing, who it serves, what problem it solves, or how broad the scope should be.
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring and the main question is what shape the solution should take.
-- Use `$atlas-workflow:clarify` when the solution direction is chosen and needs execution-ready boundaries.
+- Use `$atlas-workflow:product-design` when the direction is chosen for a user-visible feature but its primary scenario or user-operable flow is not approved.
+- Use `$atlas-workflow:clarify` when a current Design Handoff exists and only execution-ready boundaries are missing.
 
 Follow this loop:
 
@@ -55,7 +56,8 @@ Follow this loop:
 11. Stop at a decision checkpoint. Do not implement code from this skill.
 12. If the idea should proceed, recommend the next Atlas entry:
    - `$atlas-workflow:brainstorm` for solution shape and design options
-   - `$atlas-workflow:clarify` only when the direction is already clear enough for execution boundaries
+   - `$atlas-workflow:product-design` when the direction is chosen but the user-visible scenario or flow is not approved
+   - `$atlas-workflow:clarify` only when a current Design Handoff already defines the user-visible scenario and flow and execution boundaries remain
    - `$atlas-workflow:task` for a very small, already-scoped fix
 13. Run `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,decision` only if you are claiming the product decision artifacts are ready for the next execution-planning layer. For a pure early checkpoint, state that readiness was not claimed.
 14. In the final reply, include the task id, artifact paths, the strongest product judgment, readiness result if run, open questions, and the recommended next Atlas skill.
@@ -67,3 +69,4 @@ Hard rules:
 - Keep confirmed facts separate from assumptions.
 - Do not run `route-decision` for a tiny precise fix that should have gone straight to `$atlas-workflow:task`.
 - Keep artifacts in `workflow/artifacts/<task-id>/` unless the user explicitly asks for repo docs.
+- Keep pure backend, migration, CLI, and tiny precise changes out of Product Design; route them to Task or Clarify.

@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/bmad-code-org/bmad-method-wds-expansion",
+  "commit": "cc16f09fcfab26d35635af1491f36a38a8431c8d",
+  "version": "0.4.3",
+  "license": {
+    "path": "LICENSE",
+    "byte_size": 1366,
+    "sha256": "6f4fea8494bfb466af2605ae428e8544510135240f3502da24f6f62c5b5cdf24"
+  },
+  "files": [
+    {
+      "group": "simplified-brief",
+      "upstream_path": "src/workflows/wds-1-project-brief/steps-c/step-00-simplified-brief.md",
+      "vendored_path": "files/src/workflows/wds-1-project-brief/steps-c/step-00-simplified-brief.md.source",
+      "byte_size": 5629,
+      "sha256": "59c9a1d4915146da9eb1015bd240540e64e6d4f0084af6f4c94c2de2428368db"
+    },
+    {
+      "group": "simplified-brief",
+      "upstream_path": "src/workflows/wds-1-project-brief/templates/simplified-brief.template.md",
+      "vendored_path": "files/src/workflows/wds-1-project-brief/templates/simplified-brief.template.md.source",
+      "byte_size": 664,
+      "sha256": "5ee5784db28943bf0ca5536f04e7e72e35c7d1ce395d5c7375b6d7080c37a38f"
+    },
+    {
+      "group": "trigger-mapping",
+      "upstream_path": "src/workflows/wds-2-trigger-mapping/steps-c/step-00a-documentation-synthesis.md",
+      "vendored_path": "files/src/workflows/wds-2-trigger-mapping/steps-c/step-00a-documentation-synthesis.md.source",
+      "byte_size": 5791,
+      "sha256": "0b3c757799b8b7f8a5a8aaad2e01af37ee9175b33ebf585dffd3281501bd30b4"
+    },
+    {
+      "group": "trigger-mapping",
+      "upstream_path": "src/workflows/wds-2-trigger-mapping/steps-c/step-00b-business-goals-extract.md",
+      "vendored_path": "files/src/workflows/wds-2-trigger-mapping/steps-c/step-00b-business-goals-extract.md.source",
+      "byte_size": 5827,
+      "sha256": "d1f38fc337de4e315c90e034f63e8968eef9f58f3aa66f98962d49f63a5201fa"
+    },
+    {
+      "group": "trigger-mapping",
+      "upstream_path": "src/workflows/wds-2-trigger-mapping/steps-c/step-00c-target-groups-extract.md",
+      "vendored_path": "files/src/workflows/wds-2-trigger-mapping/steps-c/step-00c-target-groups-extract.md.source",
+      "byte_size": 6160,
+      "sha256": "cd49f020f1ad46bd8303729c0da967efb461bd972f4923a57c3ccb4cae4190f5"
+    },
+    {
+      "group": "trigger-mapping",
+      "upstream_path": "src/workflows/wds-2-trigger-mapping/steps-c/step-00d-driving-forces-extract.md",
+      "vendored_path": "files/src/workflows/wds-2-trigger-mapping/steps-c/step-00d-driving-forces-extract.md.source",
+      "byte_size": 6129,
+      "sha256": "cb2bc2c4a8bede93e4cdabcaddbbcb878feaab8d1cdc20523621f4c38f3f757f"
+    },
+    {
+      "group": "trigger-mapping",
+      "upstream_path": "src/workflows/wds-2-trigger-mapping/templates/trigger-map.template.md",
+      "vendored_path": "files/src/workflows/wds-2-trigger-mapping/templates/trigger-map.template.md.source",
+      "byte_size": 4136,
+      "sha256": "e1e0423713f5ba9e801fa8ba82c257b262d2a4f3c298751fdca097edf677221d"
+    },
+    {
+      "group": "ux-scenario",
+      "upstream_path": "src/workflows/wds-3-scenarios/steps-c/step-05-outline-scenario.md",
+      "vendored_path": "files/src/workflows/wds-3-scenarios/steps-c/step-05-outline-scenario.md.source",
+      "byte_size": 13920,
+      "sha256": "557f1caf8ede41402782d2fb05c066fafdd2b76cc70dd955f77107001d46726f"
+    },
+    {
+      "group": "ux-scenario",
+      "upstream_path": "src/workflows/wds-3-scenarios/data/scenario-outline-template.md",
+      "vendored_path": "files/src/workflows/wds-3-scenarios/data/scenario-outline-template.md.source",
+      "byte_size": 3354,
+      "sha256": "4450a716646a625898b149c3b9828ae51b3e81c8ad80258b99bb251648e36313"
+    },
+    {
+      "group": "ux-scenario",
+      "upstream_path": "src/workflows/wds-3-scenarios/data/quality-checklist.md",
+      "vendored_path": "files/src/workflows/wds-3-scenarios/data/quality-checklist.md.source",
+      "byte_size": 5580,
+      "sha256": "3d44a3b2dd7b99f7876554a05ac89cfb5273d3a073dd54319c64ca7454c5c96c"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/workflow-dream.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/workflow-dream.md.source",
+      "byte_size": 5982,
+      "sha256": "e65084c9806698b2b7921440cd5fc88df92172d4c9170e84e3519c08ac14cf96"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/steps-p/step-05-interactions.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/steps-p/step-05-interactions.md.source",
+      "byte_size": 4156,
+      "sha256": "461e6b2936833e94c7d153293efbfb1f28d986d36b1c842b5a0850a15837655e"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/steps-p/step-06-states.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/steps-p/step-06-states.md.source",
+      "byte_size": 4585,
+      "sha256": "5978d21ddfb06ba29608b55fc5d545956fdc1733d3fea7ea7f104d0cf5148fe2"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/templates/page-specification.template.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/templates/page-specification.template.md.source",
+      "byte_size": 9146,
+      "sha256": "7c485f66bc310397d6e22c42b3f1744f657cf0d58a8b06e1a434a79cdd573f5d"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/data/specification-audit-workflow.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/data/specification-audit-workflow.md.source",
+      "byte_size": 19771,
+      "sha256": "9ccb851d7679c27e4080e283987d5eeca056a31955c94c5a923a97e55f312111"
+    },
+    {
+      "group": "ux-design",
+      "upstream_path": "src/workflows/wds-4-ux-design/data/page-creation-flows/flow-c-ascii.md",
+      "vendored_path": "files/src/workflows/wds-4-ux-design/data/page-creation-flows/flow-c-ascii.md.source",
+      "byte_size": 2696,
+      "sha256": "a2a0e544d0fdf655b710baf55bdd82abb222248d3726ee620b277c18b6f7fdca"
+    }
+  ]
+}

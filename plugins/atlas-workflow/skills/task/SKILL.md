@@ -14,10 +14,11 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 1. Run `~/.codex/workflow/bin/codex-workflow list` and reuse a relevant `doing` task; create/start one only when none exists.
 2. Execute clear, low-risk, verifiable work directly. Multiple files or a behavior change do not by themselves require Team, a worktree, or a new documentation bundle.
 3. Use `$atlas-workflow:intake` only when unresolved intent, scope, stakeholder, safety, permission, data, deployment, or ownership decisions block safe progress.
-4. Use `$atlas-workflow:clarify` when a chosen direction still needs explicit boundaries and acceptance before implementation.
-5. Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Do not infer Team from task complexity, file count, or a default process.
-6. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
-7. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision`; tiny or already-documented work needs no duplicate routing artifact.
+4. Use `$atlas-workflow:product-design` when a direction is chosen for a user-visible feature but the primary scenario or user-operable flow lacks current approval. Keep pure backend, migration, CLI, no-interaction, and tiny precise work in Task or Clarify.
+5. Use `$atlas-workflow:clarify` when a current Design Handoff exists but still needs explicit execution boundaries and acceptance before implementation.
+6. Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Do not infer Team from task complexity, file count, or a default process.
+7. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
+8. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision`; tiny or already-documented work needs no duplicate routing artifact.
 
 ## Release Target Routing
 

@@ -126,6 +126,7 @@ Use the upstream entries as separate layers, not one merged process:
 
 - `$atlas-workflow:office-hours`: pressure-test product value, target user, timing, and scope before deciding to invest.
 - `$atlas-workflow:brainstorm`: explore solution shape, UX, architecture, and tradeoffs after the idea is worth exploring.
+- `$atlas-workflow:product-design`: turn a chosen user-visible direction into an approved critical scenario and minimal flow-and-surface Design Handoff.
 - `$atlas-workflow:clarify`: lock a chosen direction into execution boundaries, acceptance criteria, and verification.
 
 They share the same task artifact directory:
@@ -133,6 +134,17 @@ They share the same task artifact directory:
 - `context.md`: facts, current state, source-of-truth files, assumptions, and risks
 - `decision.md`: product/design options, tradeoffs, recommendation, and rejected alternatives
 - `spec.md`: goal, non-goals, decision boundaries, acceptance criteria, and verification plan
+
+Product Design is the narrow layer between direction selection and execution
+clarification for user-visible features. It produces A/C/D/E artifacts covering
+one critical scenario, capability truth, surface responsibilities, necessary
+states, formal content/data behavior, three primary-flow accessibility baselines,
+and one conditional viewport rule. It is not a complete visual designer, Design
+System, WCAG certification, or responsive matrix. Route “critical scenario”,
+“user flow”, “screen flow”, “flow-and-surface”, and “Design Handoff” requests
+here when direction is already chosen; keep pure backend, migration, CLI, and
+tiny no-interaction changes in Task or Clarify. Design approval, passing checks,
+and a handoff do not certify, install, deploy, publish, or release a product.
 
 ## Lightweight Implementation Contracts
 
