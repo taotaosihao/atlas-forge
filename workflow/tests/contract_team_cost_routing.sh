@@ -40,12 +40,12 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['default-sol-medium-implementer', 'implicit-saving-model'],
-  'routine-review-verify': ['default-sol-max-reviewer-or-sol-high-verifier', 'implicit-saving-model'],
-  'hard-to-reverse-direction': ['explicit-sol-max-planner', 'sol-for-mechanical-or-env-failure'],
-  'completed-phase-extra-judgment': ['explicit-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
-  'browser-heavy': ['default-sol-high-browser-verifier', 'implicit-saving-model'],
-  'saving-mode-explicit': ['luna-implementer-browser-explorer; terra-reviewer-verifier', 'implicit-or-automatic-saving'],
+  'routine-implementation': ['default-luna-max-implementer', 'implicit-quality-model'],
+  'routine-review-verify': ['default-terra-high-reviewer-or-verifier', 'implicit-quality-model'],
+  'hard-to-reverse-direction': ['default-sol-medium-planner', 'automatic-quality-upgrade'],
+  'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
+  'browser-heavy': ['default-luna-high-browser-verifier', 'implicit-quality-model'],
+  'quality-mode-explicit': ['all-sol-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
   'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
   'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
   'metadata-invisible': ['disclose-unverified; no-billing-proof-required', 'claim-billing-model-verified'],
@@ -71,25 +71,25 @@ assert_has "$TEAM" 'Before the first native fan-out' 'native routing preflight i
 assert_has "$TEAM" 'agent_type.*model.*reasoning_effort.*fork_turns' 'preflight checks all exact-routing fields'
 assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'
 
-assert_has "$TEAM" 'Default Quality Mode' 'quality mode is visibly the default'
-assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'routine implementation defaults to Sol medium'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*max.*none' 'routine review defaults to Sol max'
-assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*high.*none' 'verification defaults to Sol high'
-assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*max.*none' 'planner explicitly routes to Sol max'
+assert_has "$TEAM" 'Default Saving Mode' 'saving mode is visibly the default'
+assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'routine review defaults to Terra high'
+assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
+assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*medium.*none' 'planning defaults to Sol medium'
 
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
 assert_has "$TEAM" 'mechanical or environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
-assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-sol.*high.*none' 'browser-heavy work defaults to Sol high'
-assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-sol.*medium.*none' 'exploration defaults to Sol medium'
-assert_has "$TEAM" 'Explicit Saving Mode' 'saving mode is separately defined'
-assert_has "$TEAM" 'explicitly requests.*saving mode' 'saving mode requires an explicit user request'
-assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `medium` \| `none` \|' 'saving planning retains Sol medium'
-assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'saving implementation retains Luna max'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'saving review routes to Terra high'
-assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'saving verification routes to Terra high'
-assert_has "$TEAM" 'never automatically enable saving mode' 'saving mode is never activated automatically'
+assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*high.*none' 'browser-heavy work defaults to Luna high'
+assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*medium.*none' 'exploration defaults to Luna medium'
+assert_has "$TEAM" 'Explicit Quality Mode' 'quality mode is separately defined'
+assert_has "$TEAM" 'explicitly requests.*quality mode' 'quality mode requires an explicit user request'
+assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'
+assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'quality implementation routes to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*max.*none' 'quality review routes to Sol max'
+assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*high.*none' 'quality verification routes to Sol high'
+assert_has "$TEAM" 'never automatically enable quality mode' 'quality mode is never activated automatically'
 assert_has "$AGENTS/atlas-sdd-browser-verifier.toml" 'would benefit from extra judgment, recommend routing' 'final Sol browser review remains conditional'
 assert_lacks "$AGENTS/atlas-sdd-browser-verifier.toml" 'require the controller to route' 'browser evidence cannot force Sol review'
 
