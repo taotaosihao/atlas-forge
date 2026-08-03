@@ -32,13 +32,42 @@ Design Handoff.
 
 ## Release Intent
 
-- Classify the target candidate separately from the current work type. An externally usable product candidate at any stage is `product_release`; an explicitly isolated spike/prototype/demo is `exploration`; only a standalone analysis, documentation, or review deliverable whose contract governs no release candidate is `non_product` with a substantive reason. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` without becoming candidate evidence or certification itself.
-- `MVP`, `Beta`, limited release, GA, and scaled operation share the same formal-quality floor. Stage labels narrow audience, scope, or maturity; they never authorize demo-quality product output.
+- Classify the target separately from the current work type. Use `product_release` only when the request explicitly asks for formal release certification, `release-ready`, `certified`, or an equivalent source-level release conclusion. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only with that explicit intent; otherwise it routes to `product_increment`.
+- Use `product_increment` for an MVP, Beta, internal test/dogfood, or small-scope public beta when formal certification or release-ready intent was not requested. It is a routing/reporting term only: it does not add a release-intent schema branch, create a `release_decision`, bind an immutable Profile, or support a `certified`/release-ready claim. `MVP`, `Beta`, limited release, GA, and scaled operation describe scope or maturity; they do not by themselves select `product_release` or authorize demo-quality output.
+- An explicitly isolated spike/prototype/demo is `exploration`; only a standalone analysis, documentation, or review deliverable whose contract governs no release candidate is `non_product` with a substantive reason.
 - Release certification supports a pure Web UI with immutable Profile `web-ui-v1`. Strict contract authoring, admission, and structural recomputation support the exact `web_ui` + `api` + `worker` + `database` + `external_integration` combination with immutable Profile `integrated-app-v1`; the public CLI does not register its trusted producer in this release, so structurally passing mixed-surface facts remain `cannot_verify` unless a separately delivered workflow-bound host producer is present. API-only, worker-only, CLI, different mixed combinations, and unknown product surfaces must fail authoring/admission until an exact dedicated Profile exists; report their requested release conclusion as `cannot_verify` without inventing a completion `release_decision` or relabeling them as non-product.
 
 Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
 
 For release-bearing execution, `target_delivery_authority_ref` must exactly match a current controller-recordable `user-message:` or `operator-input:` authorization; unresolved workflow references fail closed. Reports, raw files, hashes, stdout, and exit-zero commands remain claims until a workflow-bound producer supplies canonical provenance, otherwise the fact is `cannot_verify`.
+
+For `product_increment`, use the main Codex or the lightest applicable Task flow
+unless independent collaboration or review materially helps. The minimum real
+acceptance is a product start, the most important end-to-end user flow, related
+checks that actually ran and passed, no observed feature/data/permission/security
+blocker, and no unauthorized deployment, publication, shared-environment write,
+or irreversible operation. A small public beta additionally makes access,
+isolation, credential, rollback/close, and one real-entrypoint smoke explicit.
+If those real checks pass but recorder/evidence collection fails, report
+`证据采集：降级` with the reason; a failed, unrun, or unknown real check still
+blocks. This path never creates release evidence for, or weakens the fail-closed
+`product_release` path.
+
+Keep `staffing_mode` (`main` or `team`), `model_policy` (current host,
+default-saving, or explicitly requested quality), and `release_mode`
+(`product_increment` or `product_release`) as independent decisions. Do not
+create Team just to obtain Saving Mode; Team does not imply quality mode; the
+main Codex's root host model is not rewritten; and saving/quality choices do not
+persist as workflow state. The Claude-family manual exact-model gate remains.
+
+Choose path lease from write-conflict risk, not Team membership: main-only single
+writers and read-only/review/verifier work need no lease; one isolated
+`product_increment` Team writer without fallback, takeover, or external writer
+does not require one by default; concurrent writers, fallback/takeover, uncertain
+quiescence, or shared-workspace writers require non-overlapping ownership plus
+the existing lease/quiescence boundary, and uncertainty stops new writers. Strict
+`product_release` execution-v3 lease and admission rules remain unchanged; do not
+build a general lease runtime for the quick path.
 
 ## Short Request Clarification
 
@@ -62,7 +91,11 @@ the current artifact cites them and fills missing acceptance, verification, risk
 and stop-condition gaps. If tiny classification is uncertain, ask one short
 question before coding.
 
-Follow this loop:
+Follow this loop only when durable tracking, recovery, handoff, audit, or an
+existing relevant task materially serves the request. For the default
+`product_increment` path, use direct/light clarification and do not create a
+workflow task, recorder-backed completion, or route-decision solely to obtain
+ceremony. If durable state is justified or an existing task is already relevant:
 
 1. Run `~/.codex/workflow/bin/codex-workflow list`.
 2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.

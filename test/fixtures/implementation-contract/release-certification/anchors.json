@@ -45,6 +45,36 @@
     }
   },
   {
+    "case_id": "internal-mvp-product-increment",
+    "scenario_input": {
+      "request": "Complete an internally testable Web UI MVP through the main Codex; do not request formal release certification or claim release-ready status.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": false, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": ["passed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_increment", "expected_profile": null, "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "not_applicable", "expected_release_decision": null,
+      "must_not_pass_reason": "An internal MVP without formal release intent uses the quick product path and cannot claim a release certificate."
+    }
+  },
+  {
+    "case_id": "small-beta-product-increment",
+    "scenario_input": {
+      "request": "Complete a small-scope public Beta of the named Web UI candidate through the main Codex; do not request formal release certification or claim release-ready status.",
+      "activity": "implementation",
+      "evaluation_actor": "reporting_role",
+      "target_facts": { "named_external_candidate": true, "explicit_exploration_only": false, "standalone_non_product_deliverable": false, "surface_kinds": ["web_ui"] },
+      "execution_facts": { "authority": "none", "final_sweep": "not_run", "final_sweep_fact_outcomes": [], "observed_fact_outcomes": ["passed"] }
+    },
+    "oracle": {
+      "target_delivery_class": "product_increment", "expected_profile": null, "team_route": "not_required_for_current_work",
+      "release_readiness_assessment": "not_applicable", "expected_release_decision": null,
+      "must_not_pass_reason": "A small public Beta without formal release intent remains a product increment even when it names an externally usable candidate."
+    }
+  },
+  {
     "case_id": "planning-integrated-application-mvp",
     "scenario_input": {
       "request": "Plan the strict release contract for a named externally usable application MVP spanning Web UI, API, worker, database, and external integration; do not implement or certify it yet.",

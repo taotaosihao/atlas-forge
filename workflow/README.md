@@ -132,6 +132,38 @@ non-secret environment policy, toolchain, lockfiles, submodules, and explicit
 inputs. General verification remains supplemental and cannot satisfy a declared
 required gate. Any snapshot change after verification requires a new verification.
 
+### Product increment versus product release
+
+Use `product_increment` for an MVP, Beta, internal test/dogfood, or small-scope
+public beta when the request does not explicitly ask for formal release
+certification, `release-ready`, or `certified`. It is a routing/reporting term,
+not a release-intent schema branch: ordinary semantics-v3/lightweight contracts
+must omit release intent, immutable Profile binding, terminal certification
+slices, release receipts, and release decisions. Direct Task or the main Codex is
+the default; Team is chosen only for an independent collaboration or review
+need. Reclassify to explicit `product_release` intent before using release
+controls.
+
+The minimum real acceptance is startup, the most important end-to-end user flow,
+related checks that actually ran and passed, no observed feature/data/permission/
+security blocker, and no unauthorized deployment, publication, shared-environment
+write, or irreversible operation. A small public beta also makes its access,
+data/sensitive-information, credential, rollback/close, and real-entrypoint smoke
+boundaries explicit. Report exact commands, exit results, and key conclusions.
+If real checks passed but recorder/evidence collection failed, report
+`证据采集：降级` and the reason; failed, unrun, or unknown real checks still
+block. This result does not create `release_decision`, `certified`, or
+release-ready evidence and cannot substitute for the strict path below.
+
+Choose staffing (`main`/`team`), model policy (host/default-saving/explicit
+quality), path lease, and release mode independently. Main-only single writers
+and read-only/review/verifier work do not need a lease. One isolated
+product-increment Team writer without fallback, takeover, or external concurrency
+does not require one by default. Concurrent writers, fallback/takeover, uncertain
+quiescence, or external shared writers require non-overlapping ownership plus the
+existing lease/quiescence boundary. Strict `product_release` execution-v3 lease
+and admission remain unchanged; no general lease runtime is added here.
+
 ### Product release verification
 
 For a valid `product_release`, contract semantics v4 binds either the immutable

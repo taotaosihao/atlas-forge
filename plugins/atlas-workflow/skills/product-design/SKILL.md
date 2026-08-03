@@ -30,7 +30,11 @@ audit, or a responsive matrix.
   `$atlas-workflow:task`.
 - Send an implemented served UI to `$atlas-workflow:design-review` for fidelity
   evidence. Use `$atlas-workflow:team` only when the user requests collaboration
-  or authorized product-release execution/certification requires it.
+  or an authorized `product_release` execution/certification requires it. A
+  `product_increment` may use Team only for an independent collaboration or
+  review need; it must omit release-intent, v4, immutable Profile, release
+  receipt, and release-decision machinery. Reclassify to explicit
+  `product_release` intent before using those release controls.
 - Keep pure backend, migration, CLI, and changes with no user interaction in
   Task or Clarify.
 
@@ -54,9 +58,12 @@ audit, or a responsive matrix.
 
 ## Build A and C
 
-1. Set `designed_feature_target` to `exploration` or `product_release`. Make
-   `allowed_claims` finite and observable; never use an unbounded claim such as
-   “fully productized”.
+1. Set `designed_feature_target` to `exploration`, `product_increment`, or
+   `product_release`. An MVP, Beta, internal test/dogfood, or small-scope public
+   beta without explicit formal certification or `release-ready` intent is
+   `product_increment`; only the explicit formal intent selects
+   `product_release`. Make `allowed_claims` finite and observable; never use an
+   unbounded claim such as “fully productized”.
 2. Fill A from existing evidence. Preserve only minimal summaries and relative
    references; omit credentials, tokens, PII, customer names, proprietary bulk
    content, and internal absolute paths.
@@ -85,10 +92,14 @@ audit, or a responsive matrix.
    not perform a repository-wide collision audit by default.
 5. Clear flow-changing open questions, derive the D identity, and request Flow
    Approval. For `product_release`, require an explicit current-user approval of
-   the current D. On approval, bind all three current identities in D.
+   the current D. A `product_increment` may use the ordinary current approval
+   path, but that approval is not release certification. On approval, bind all
+   three current identities in D.
 6. Treat `exploration` as isolated and non-production. It may remain draft or
    receive an explicit approval, but it never supports a product-completion or
-   release-readiness claim.
+   release-readiness claim. A `product_increment` is a usable product-stage
+   handoff with finite claims and real checks, but it still never supports a
+   `certified` or release-ready claim.
 
 ## Create and validate E
 
@@ -100,7 +111,10 @@ audit, or a responsive matrix.
 3. Record only finite claims, mandatory behavior, non-goals, visible acceptance,
    data mode, browser entrypoint, blockers, and the reason for the next route.
 4. Route remaining implementation risk to Task, Clarify, Team, or Design Review.
-   Design approval and passing tests do not certify or release a product.
+   Design approval and passing tests do not certify or release a product. For a
+   `product_increment`, report real checks and any `证据采集：降级` recorder
+   limitation separately; a recorder failure after passing real checks may be a
+   degraded evidence result, while failed, unrun, or unknown real checks block.
 
 ## Reopen only the affected layer
 

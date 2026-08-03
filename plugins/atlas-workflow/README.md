@@ -61,14 +61,17 @@ task still lacks `agent_type`, `model`, `reasoning_effort`, or `fork_turns`,
 Team fails closed to main-only instead of spawning an inherited or generic
 child. Host configuration and restart require explicit user authority.
 
-Native Team model routing has two modes. Quality mode is the default and
-explicitly routes every admitted Atlas role to Sol with the role's configured
-reasoning effort. Saving mode is a non-persistent, per-Team or per-lane choice
-that activates only when the user explicitly requests it; it routes
-implementation, browser verification, and exploration to Luna, routine review
-and verification to Terra, and retains Sol for planning and phase judgment.
-Both modes use explicit spawn fields and `fork_turns="none"`; neither relies on
-a global default subagent model.
+Native Team model routing is downstream of staffing, not a reason to create
+staffing. A small clear task stays on the main Codex; after a Team or subagent
+lane is independently justified, Saving mode is the non-persistent default and
+routes implementation, browser verification, and exploration to Luna, routine
+review and verification to Terra, and planning/phase judgment to Sol. Quality
+mode is a separate per-Team or per-lane choice that activates only when the user
+explicitly requests it and routes admitted roles to Sol with their configured
+reasoning effort. Neither mode rewrites the root host model, persists saving or
+quality into workflow state, or changes the lane's goal, paths, authority, or
+acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
+relies on a global default subagent model.
 
 When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.
@@ -161,15 +164,51 @@ requirements.
 ## Product Release Certification
 
 Atlas classifies the target governed by a contract separately from the current
-work type. A named externally usable candidate remains `product_release` even
-when the current activity is planning or review. An explicit spike, prototype,
-or demo is `exploration` and must remain isolated from production identity,
-data, runtime, distribution, and release-readiness claims. A standalone
-analysis, document, or review that governs no candidate may use `non_product`
-with a substantive reason.
+work type. A request explicitly asking for formal release certification,
+`release-ready`, or `certified` is `product_release`; without that formal intent,
+an MVP, Beta, internal test/dogfood, or small-scope public beta is
+`product_increment`. Planning or review that directly authors or gates a named
+externally usable candidate retains `product_release` only with that explicit
+intent. An explicit spike, prototype, or demo is `exploration` and must remain
+isolated from production identity, data, runtime, distribution, and
+release-readiness claims. A standalone analysis, document, or review that
+governs no candidate may use `non_product` with a substantive reason.
 
-`MVP`, `Beta`, limited release, GA, and scaled operation change scope or
-maturity, not the formal-quality floor. Release certification supports a pure
+### Product Increment (快速产品通道)
+
+`product_increment` is a routing and reporting term, not a fourth release-intent
+schema branch. It normally uses the main Codex or the lightest applicable Task
+flow. Team may be selected only for an independent collaboration or review need;
+the increment must omit release-intent, v4, immutable Profile, release receipt,
+and release-decision machinery. Reclassify to explicit `product_release` intent
+before using those release controls. Validate the product with real
+startup, its most important end-to-end user flow, related checks that actually
+ran and passed, and an explicit review for feature, data, permission, and
+security blockers. Do not perform unauthorized deployment, publication,
+shared-environment writes, or irreversible operations.
+
+For a small public beta, also make access control/anonymous boundaries, data and
+sensitive-information isolation, credential handling, rollback or close path,
+and one real-entrypoint smoke explicit. Report the exact commands, exits, and
+key conclusions. If real checks passed but recorder/evidence collection failed,
+the product increment may complete with `证据采集：降级` and the reason. Failed,
+unrun, or unknown real checks still block. A product increment never creates a
+`release_decision`, and its evidence cannot be called `certified` or
+release-ready or substituted for the fail-closed release path.
+
+Staffing, Team, path lease, model choice, and release mode are independent
+decisions. A
+main-only single writer and read-only/review/verifier work do not need a path
+lease; one isolated product-increment Team writer without fallback, takeover, or
+external concurrency does not require one by default. Concurrent writers,
+fallback/takeover, uncertain quiescence, or an external shared writer require
+non-overlapping ownership plus the existing lease/quiescence boundary. Strict
+`product_release` execution-v3 lease and admission remain unchanged; Atlas does
+not build a general lease runtime for the quick path.
+
+When formal release intent is explicit, `MVP`, `Beta`, limited release, GA, and
+scaled operation change scope or maturity, not the formal-quality floor; those
+labels alone select `product_increment`. Release certification supports a pure
 Web UI through immutable Profile `web-ui-v1`. Strict contract authoring,
 admission, and structural recomputation support the exact
 `web_ui` + `api` + `worker` + `database` + `external_integration` combination

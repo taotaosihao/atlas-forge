@@ -3,7 +3,44 @@ name: team
 description: Use the Atlas team flow with Codex native collaboration by default and Paseo only when it is explicitly selected for a Team, lane, or dispatch.
 ---
 
-Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves.
+Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
+
+## Independent Staffing, Model, Release, And Lease Decisions
+
+Keep three decisions independent:
+
+- `staffing_mode` is `main` or `team` and answers whether extra agents are
+  useful.
+- `model_policy` is the current host model, default saving routing after a
+  useful lane has been admitted, or an explicitly requested quality route.
+- `release_mode` is `product_increment` or `product_release` and answers the
+  acceptance level; only explicit formal certification, `release-ready`, or
+  `certified` intent selects `product_release`.
+
+Do not create Team just to obtain Saving Mode. Team does not imply quality mode,
+and quality mode does not require Team. The main Codex keeps the current host
+model; Atlas does not rewrite the root host model. Saving/quality selection is a
+per-task or per-lane dispatch choice and is not persisted as workflow state. A
+lane may choose its own model within the admitted policy, but cannot change the
+goal, authority, paths, or acceptance. The Claude-family manual exact-model gate
+remains unchanged.
+
+Choose a path lease from actual write-conflict risk, separately from staffing:
+
+- Main-only single writers, read-only analysis, discussion, review, and
+  verification have no lease requirement.
+- A `product_increment` Team with one isolated writer and no fallback, takeover,
+  or external concurrent writer does not require a lease by default.
+- That quick-path single writer does not enter execution-v3 or acquire a durable
+  writable-attempt solely because Team is available; keep strict execution-v3
+  admission for `product_release` unchanged.
+- Two or more possible writers require non-overlapping path ownership; use the
+  existing lease/quiescence boundary when available. Fallback, takeover,
+  uncertain old-writer quiescence, or a shared-workspace external writer must
+  retain that boundary, and uncertainty stops new writers.
+- Formal `product_release` execution continues to use the existing execution-v3
+  lease and admission rules. Do not create a general Team-independent lease
+  runtime in the quick path.
 
 ## Language
 
@@ -166,12 +203,25 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 - Execute start and promotion require canonical brief schema v3 binding an admitted contract semantics v3 or v4; Team revalidates its contract/plan digests, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock.
 - Discuss starts and non-execute promotions do not require the reference.
 
+### Product Increment Evidence
+
+When `release_mode=product_increment`, use the actual product behavior as the
+truth: startup, one critical end-to-end user flow, related checks that ran and
+passed, no observed feature/data/permission/security blocker, and no
+unauthorized deployment, publication, shared-environment write, or irreversible
+operation. A small public beta also records its applicable access, data,
+credential, rollback/close, and real-entrypoint smoke boundaries. If those real
+checks pass but recorder/evidence capture fails, report `证据采集：降级` and the
+reason; failed, unrun, or unknown real checks still block. This path never writes
+or implies `release_decision`, `certified`, or source-level release-ready, and it
+never substitutes for the strict release path below.
+
 ## Release Certification
 
 Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
 
-- Classify target delivery independently from work type. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` but cannot certify it; only standalone work whose contract governs no release candidate may be `non_product` with a substantive reason. Explicit demo/prototype/spike work is `exploration`, remains isolated, and cannot make product-stage or release-readiness claims.
-- A newly authored `product_release` uses contract semantics v4, execution-plan schema version 2, brief schema version 3, and the exact immutable Profile binding. Planning/review briefs may retain `product_release` and enter `discuss-v3`, but release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`. `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor.
+- Classify target delivery independently from work type. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only when the request explicitly asks for formal certification, `release-ready`, or `certified`; without that intent it is `product_increment`. Neither completion can certify by prose alone. Only standalone work whose contract governs no release candidate may be `non_product` with a substantive reason. Explicit demo/prototype/spike work is `exploration`, remains isolated, and cannot make product-stage or release-readiness claims.
+- A newly authored explicit `product_release` uses contract semantics v4, execution-plan schema version 2, brief schema version 3, and the exact immutable Profile binding. Planning/review briefs may retain `product_release` and enter `discuss-v3`, but release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`. When formal release intent is explicit, `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor; those labels alone route to `product_increment`.
 - Its `target_delivery_authority_ref` must exactly equal the current controller-recordable `user-message:` or `operator-input:` execution authorization. Unresolved `goal:` and `current-required:` references cannot enter release certification.
 - Every Profile check belongs to one terminal release-certification slice that transitively depends on all other executable slices. Its fresh receipts must bind the same final source, artifact, surface inventory, config, runtime, data, intent, policy, and final worktree candidate.
 - The release collector reloads the digest-pinned official adapters, recomputes typed facts from raw inputs, and compares them before completion derives the decision. Adapter consistency, self-authored raw data, content hashes, stdout, and arbitrary passing commands are not producer authority; missing workflow-bound producer provenance makes the fact `cannot_verify`. Agents, reviewers, verifiers, and controller-authored prose cannot create or overwrite `release_decision`.

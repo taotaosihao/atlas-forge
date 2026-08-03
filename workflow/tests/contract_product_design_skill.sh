@@ -78,10 +78,15 @@ rg -q 'approved_scenario_identity' "$adapter"
 rg -q 'approved_flow_identity' "$adapter"
 rg -q 'draft/non-executable' "$adapter"
 rg -q 'exploration.*product_release' "$adapter"
+rg -q 'product_increment' "$adapter"
+rg -q 'never creates release evidence' "$adapter"
 rg -q 'Agent judgment, tests, silence' "$adapter"
 rg -q 'implementation-bug' "$adapter"
 rg -q 'spec-gap.*acceptance-gap.*prd-conflict' "$adapter"
 rg -q 'scope-change' "$adapter"
+rg -q 'product_increment' "$skill_root/SKILL.md"
+rg -q 'must omit release-intent, v4, immutable Profile, release' "$skill_root/SKILL.md"
+rg -q '证据采集：降级' "$skill_root/SKILL.md"
 
 /usr/bin/python3 - "$adapter" "$a_template" "$c_template" "$d_template" "$e_template" <<'PY'
 import copy

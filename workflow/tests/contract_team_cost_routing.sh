@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEAM="$ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
+README="$ROOT/plugins/atlas-workflow/README.md"
 AGENTS="$ROOT/.codex/agents"
 
 assert_has() {
@@ -72,6 +73,7 @@ assert_has "$TEAM" 'agent_type.*model.*reasoning_effort.*fork_turns' 'preflight 
 assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'
 
 assert_has "$TEAM" 'Default Saving Mode' 'saving mode is visibly the default'
+assert_has "$TEAM" 'only after staffing has established that the lane is useful' 'saving mode follows staffing rather than creating Team'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'routine review defaults to Terra high'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
@@ -90,6 +92,19 @@ assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'quality 
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*max.*none' 'quality review routes to Sol max'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*high.*none' 'quality verification routes to Sol high'
 assert_has "$TEAM" 'never automatically enable quality mode' 'quality mode is never activated automatically'
+assert_has "$TEAM" 'staffing_mode' 'staffing is an independent decision'
+assert_has "$TEAM" 'model_policy' 'model policy is an independent decision'
+assert_has "$TEAM" 'release_mode' 'release mode is an independent decision'
+assert_has "$TEAM" 'Do not create Team just to obtain Saving Mode' 'saving mode does not create Team'
+assert_has "$TEAM" 'Team does not imply quality mode' 'Team does not imply quality mode'
+assert_has "$TEAM" 'does not rewrite the root host model' 'Atlas does not rewrite the host model'
+assert_has "$TEAM" 'Saving/quality selection' 'saving and quality are not persisted'
+assert_has "$TEAM" 'Main-only single writers' 'single writers do not require a lease'
+assert_has "$TEAM" 'does not require a lease by default' 'isolated product increment writer has no default lease'
+assert_has "$TEAM" 'does not enter execution-v3 or acquire a durable' 'quick writer avoids durable execution-v3 attempt'
+assert_has "$TEAM" 'Formal `product_release` execution continues to use the existing execution-v3' 'strict release lease remains'
+assert_has "$README" 'Staffing, Team, path lease, model choice, and release mode are independent' 'README keeps decisions orthogonal'
+assert_has "$README" 'root host model' 'README protects host model'
 assert_has "$AGENTS/atlas-sdd-browser-verifier.toml" 'would benefit from extra judgment, recommend routing' 'final Sol browser review remains conditional'
 assert_lacks "$AGENTS/atlas-sdd-browser-verifier.toml" 'require the controller to route' 'browser evidence cannot force Sol review'
 

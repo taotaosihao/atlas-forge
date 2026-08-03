@@ -44,6 +44,23 @@ for (const name of ["task", "clarify", "team"]) {
   assert.match(text[name], /without inventing a completion `release_decision`/, `${name} must not fabricate an unsupported-surface decision record`);
 }
 
+for (const name of ["task", "clarify", "team"]) {
+  assert.match(text[name], /product_increment/, `${name} must expose the quick product route`);
+  assert.match(text[name], /formal (?:release )?certification|release-ready|certified/, `${name} must require explicit formal intent for product_release`);
+}
+assert.match(text.task, /证据采集：降级/);
+assert.match(text.task, /failed, was not run, or has an unknown result still blocks/);
+assert.match(text.task, /staffing_mode/);
+assert.match(text.task, /path lease from actual write-conflict risk/);
+assert.match(text.task, /must omit release-intent, v4, immutable Profile/);
+assert.match(text.task, /do not initialize workflow merely to log it/);
+assert.match(text.task, /promotion to a usable product increment requires fresh `product_increment` authoring/);
+assert.match(text.clarify, /Team just to obtain Saving Mode/);
+assert.match(text.clarify, /For the default[\s\S]*`product_increment` path[\s\S]*do not create a[\s\S]*workflow task/);
+assert.match(text.team, /does not enter execution-v3 or acquire a durable/);
+assert.match(text.team, /Main-only single writers.*no lease requirement/s);
+assert.match(text.team, /release_mode=product_increment/);
+
 assert.match(text.task, /route its execution and certification through Team execution-v3/);
 assert.match(text.task, /Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal/);
 assert.match(text.task, /When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`/);
@@ -99,7 +116,7 @@ for (const name of ["task", "clarify", "team"]) {
 }
 
 const anchors = JSON.parse(read("test", "fixtures", "implementation-contract", "release-certification", "anchors.json"));
-assert.equal(anchors.length, 13);
+assert.equal(anchors.length, 15);
 assert.equal(new Set(anchors.map(({ case_id }) => case_id)).size, anchors.length);
 
 for (const anchor of anchors) {
@@ -124,6 +141,18 @@ assert.ok(anchors.some(({ scenario_input, oracle }) => (
     === "web_ui,api,worker,database,external_integration"
   && oracle.expected_release_decision === null
 )));
+for (const [caseId, namedExternal] of [
+  ["internal-mvp-product-increment", false],
+  ["small-beta-product-increment", true],
+]) {
+  const anchor = anchors.find(({ case_id }) => case_id === caseId);
+  assert.ok(anchor, `${caseId} positive quick-path anchor is required`);
+  assert.equal(anchor.oracle.target_delivery_class, "product_increment");
+  assert.equal(anchor.oracle.expected_release_decision, null);
+  assert.equal(anchor.oracle.team_route, "not_required_for_current_work");
+  assert.equal(anchor.scenario_input.target_facts.named_external_candidate, namedExternal);
+  assert.match(anchor.scenario_input.request, /MVP|Beta/);
+}
 assert.ok(anchors.some(({ scenario_input, oracle }) => (
   scenario_input.activity === "review" && oracle.target_delivery_class === "product_release"
 )));

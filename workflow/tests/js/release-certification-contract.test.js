@@ -277,7 +277,7 @@ test("contract work type is singular and normalized for release authority bindin
 
 test("anchor corpus stays small, explicit, and fail-closed", () => {
   const cases = JSON.parse(fs.readFileSync(ANCHORS, "utf8"));
-  assert.ok(cases.length >= 8 && cases.length <= 13);
+  assert.ok(cases.length >= 8 && cases.length <= 15);
   assert.equal(new Set(cases.map((item) => item.case_id)).size, cases.length);
   assert.ok(cases.every((item) => (
     item.scenario_input
@@ -293,4 +293,15 @@ test("anchor corpus stays small, explicit, and fail-closed", () => {
   assert.ok(cases.some((item) => item.oracle.expected_release_decision === "certified"));
   assert.ok(cases.some((item) => item.oracle.target_delivery_class === "exploration"));
   assert.ok(cases.some((item) => item.oracle.target_delivery_class === "non_product"));
+  for (const [caseId, namedExternal] of [
+    ["internal-mvp-product-increment", false],
+    ["small-beta-product-increment", true],
+  ]) {
+    const anchor = cases.find((item) => item.case_id === caseId);
+    assert.ok(anchor);
+    assert.equal(anchor.oracle.target_delivery_class, "product_increment");
+    assert.equal(anchor.oracle.expected_release_decision, null);
+    assert.equal(anchor.oracle.team_route, "not_required_for_current_work");
+    assert.equal(anchor.scenario_input.target_facts.named_external_candidate, namedExternal);
+  }
 });

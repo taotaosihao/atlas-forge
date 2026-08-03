@@ -34,6 +34,13 @@ Derive A `context_identity` from exactly:
 {"designed_feature_target":"...","allowed_claims":[],"critical_object":"...","data_profile":"..."}
 ```
 
+`designed_feature_target` may be `exploration`, `product_increment`, or
+`product_release`. Use `product_increment` for an MVP, Beta, internal
+test/dogfood, or small-scope public beta without explicit formal certification
+or `release-ready` intent. It accepts the same finite-claim and approval
+integrity checks, but it never creates release evidence or a
+completion-derived `release_decision`.
+
 Derive C `content_identity` from the semantic Markdown body only. Normalize line
 endings to LF, remove trailing spaces on each line plus leading/trailing blank
 lines, append exactly one LF, and hash those UTF-8 bytes. Exclude YAML
@@ -61,7 +68,9 @@ D identities. At approval, write all three into D:
 
 For `product_release`, Gate 2 must be an explicit approval by the current user.
 Agent judgment, tests, silence, historical similarity, and generic permission to
-continue do not qualify.
+continue do not qualify. A `product_increment` may use the ordinary current
+approval path, but its handoff remains a product-stage conclusion and never a
+release certificate.
 
 Treat E as executable only after recomputing all three identities and confirming
 every condition:
@@ -90,8 +99,12 @@ status says `approved`. Never infer, repair, or carry forward approval.
 | Information hierarchy, copy, state, recovery, viewport, data label, or accessibility baseline | Keep | Invalidate |
 | Correct design with implementation deviation | Keep | Keep design approval; route implementation repair and Design Review |
 
-The transition `exploration` to `product_release` changes A identity and always
-invalidates Gate 2 and E. Never promote an exploration approval.
+The transition from `exploration` to `product_increment` or `product_release`
+changes A identity and always invalidates Gate 2 and E. Never promote an
+exploration approval. A `product_increment` to `product_release`
+promotion likewise requires fresh explicit formal release intent and new
+release-bound approval; no increment handoff or degraded evidence can be
+promoted into certification.
 
 ## C compactness and D minimums
 
@@ -128,8 +141,11 @@ Reopen the lowest layer that can truthfully absorb feedback. A scenario change
 reopens C; any approval-scope or flow-and-surface change reopens D/Gate 2;
 implementation divergence routes to repair and Design Review. After a valid E,
 choose Task for bounded low-risk work, Clarify for missing execution boundaries,
-Team for explicitly collaborative or authorized product-release execution, and
-Design Review for an implemented served UI.
+Team only for explicitly collaborative work or authorized `product_release`
+execution, and Design Review for an implemented served UI. For
+`product_increment`, real checks remain the product truth; a recorder failure
+after passing checks is reported as `证据采集：降级`, while failed, unrun, or
+unknown real checks still block.
 
 ## Dogfood classification
 

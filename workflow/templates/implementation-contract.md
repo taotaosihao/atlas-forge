@@ -14,7 +14,16 @@ product_ui_not_applicable_reason:
 
 ## Release Intent
 
-Choose exactly one `target_delivery_class` branch from `release-intent.schema.json`. The example below is the established v1 pure-Web product-release branch; exploration and non-product must use their own strict fields.
+Choose the target deliberately. A `product_increment` (MVP, Beta, internal
+test/dogfood, or small-scope public beta without explicit formal certification)
+uses ordinary semantics-v3: set `contract_semantics_version: 3` and omit this
+entire `atlas-release-intent+json` section, every Profile/release binding, and
+the terminal release-certification slice. Do not create a `release_decision`.
+
+Only an explicit formal certification, `release-ready`, or `certified` request
+uses the strict `product_release` branch below with semantics v4. Exploration
+and non-product use their own strict fields. Do not add a fourth release-intent
+schema branch for `product_increment`.
 
 For a product release that will enter execution, bind the exact controller-recordable `user-message:` or `operator-input:` authorization that will be supplied to Team start. `goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority for either Profile.
 
@@ -45,7 +54,13 @@ For strict mixed-surface authoring/admission, use schema version 2, Profile `int
 
 ## Execution Plan
 
-For `product_release`, use schema version 2 and project every bound Profile requirement exactly once. Repeat the `release_requirement` check shape below for the complete immutable Profile; ordinary engineering checks may omit it. Exploration and non-product plans use schema version 1 and omit both `release` and `release_requirement`.
+For `product_increment`, use an ordinary semantics-v3 plan: schema version 1,
+no `release` object, and no `release_requirement` checks. The increment plan
+must omit the release-intent block, Profile binding, and terminal
+release-certification slice. For `product_release`, use schema version 2 and
+project every bound Profile requirement exactly once. Repeat the
+`release_requirement` check shape below for the complete immutable Profile;
+ordinary engineering checks may omit it. Exploration and non-product plans use schema version 1 and omit both `release` and `release_requirement`.
 
 ```atlas-execution-plan+json
 {

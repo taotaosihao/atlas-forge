@@ -18,16 +18,17 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 5. Use `$atlas-workflow:clarify` when a current Design Handoff exists but still needs explicit execution boundaries and acceptance before implementation.
 6. Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Do not infer Team from task complexity, file count, or a default process.
 7. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
-8. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision`; tiny or already-documented work needs no duplicate routing artifact.
+8. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision` in an existing durable task when one exists; otherwise record the rationale once in the current canonical document or final report and do not initialize workflow merely to log it. Tiny or already-documented work needs no duplicate routing artifact.
 
 ## Release Target Routing
 
 Classify the requested target deliverable independently from the current work type:
 
-- Use `product_release` when the target is an externally usable product candidate at any product stage. `MVP`, `Beta`, limited release, GA, and scaled operation change scope or maturity, never the formal-quality floor.
-- Use `exploration` only for an explicit spike, prototype, or demo. Keep it isolated from production identity, data, runtime, distribution, and release claims; promotion requires fresh product-release authoring and verification.
+- Use `product_release` only when the request explicitly asks for formal release certification, `release-ready`, `certified`, or an equivalent source-level release conclusion. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only when that explicit formal intent is present; otherwise it routes to `product_increment`.
+- Use `product_increment` for an MVP, Beta, internal test/dogfood, or small-scope public beta when formal certification or release-ready intent was not requested. This is a routing and reporting term only: it does not enter release-intent schema, create a `release_decision`, bind an immutable Profile, require Team execution-v3, or support a `certified`/release-ready claim.
+- Use `exploration` only for an explicit spike, prototype, or demo. Keep it isolated from production identity, data, runtime, distribution, and release claims; promotion to a usable product increment requires fresh `product_increment` authoring and verification, while formal certification requires fresh `product_release` authoring and verification.
 - Use `non_product` only for a standalone deliverable such as analysis, documentation, or review whose current contract governs no release candidate, and record a substantive reason. Do not relabel an unsupported or incomplete product as non-product.
-- Work type and delivery target are orthogonal: planning or review that directly authors or gates a named externally usable candidate retains `product_release`, but its own completion is not candidate evidence or certification. Merely mentioning a product without governing a release candidate remains `non_product`.
+- Work type and delivery target are orthogonal: planning or review that directly authors or gates a named externally usable candidate retains `product_release` only when the request explicitly asks for formal certification, `release-ready`, or `certified`; otherwise it is `product_increment`. Merely mentioning a product without governing a release candidate remains `non_product`.
 - Release certification supports a pure Web UI through immutable Profile `web-ui-v1`. Strict contract authoring, admission, and structural recomputation support the exact `web_ui` + `api` + `worker` + `database` + `external_integration` combination through immutable Profile `integrated-app-v1`; the public CLI does not register its trusted producer in this release, so structurally passing mixed-surface facts remain `cannot_verify` unless a separately delivered workflow-bound host producer is present. API-only, worker-only, CLI, different mixed combinations, and unknown product surfaces fail authoring/admission; report the requested release conclusion as `cannot_verify` without inventing a completion `release_decision`, forcing them through a non-applicable Profile, or relabeling them.
 
 Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
@@ -35,6 +36,55 @@ Release-readiness invariant: only a Team execution-v3 product_release whose immu
 When the authorized target is a `product_release`, route its execution and certification through Team execution-v3. Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal. In the final reply, report an existing completion-derived `release_decision.status` exactly. When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`; only a separately established current failed fact supports saying the candidate is not release-ready.
 
 Release-bearing execution requires `target_delivery_authority_ref` to equal the current controller-recordable `user-message:` or `operator-input:` authorization exactly; unresolved `goal:` and `current-required:` references fail closed. A self-authored report, raw file, content hash, stdout, or exit-zero command is not a trusted producer; without workflow-bound producer provenance, the corresponding release fact is `cannot_verify`.
+
+## Product Increment Acceptance
+
+For `product_increment`, use the main Codex or the lightest applicable Task flow by
+default. Team is permitted only when an independent collaboration or review need
+warrants it. The increment must omit release-intent, v4, immutable Profile,
+release receipt, and release-decision machinery; if those are needed, reclassify
+the request as explicit `product_release` intent. The minimum real acceptance is:
+
+1. The product starts in the intended environment.
+2. The most important user flow for this increment completes end to end.
+3. Checks directly related to the change run and pass.
+4. No observed feature, data, permission, or security blocker remains.
+5. No unauthorized deployment, publication, shared-environment write, or
+   irreversible operation occurred.
+
+For a small public beta, also make the applicable access boundary, data/sensitive
+information isolation, credential handling, rollback/close path, and one real
+entrypoint smoke explicit. Report the actual commands, exit results, and key
+conclusions. If real checks passed but the recorder or evidence collector failed,
+the increment may complete with `证据采集：降级` and the reason recorded. A real
+check that failed, was not run, or has an unknown result still blocks. Never turn
+this degraded evidence into `certified` or `release-ready`, and never use it to
+weaken the fail-closed `product_release` path.
+
+## Independent Staffing, Lease, And Model Choices
+
+Keep three decisions separate: `staffing_mode` (`main` or `team`) answers whether
+extra agents are useful; `model_policy` answers which current host/default-saving
+or explicitly requested quality route to use; `release_mode` answers
+`product_increment` versus `product_release`. Saving Mode does not justify
+creating a Team, Team does not imply quality mode, and none of these choices
+changes the target, authority, paths, or acceptance. The main Codex uses the
+current host model; Atlas does not rewrite the root host model. Saving/quality
+selection is per task or lane and is not persisted as workflow state. The
+Claude-family manual exact-model gate remains unchanged.
+
+Choose a path lease from actual write-conflict risk, independently of Team:
+
+- Main-only single writer, read-only analysis, discussion, review, and verifier
+  work do not need a lease.
+- A `product_increment` Team with one isolated writer and no fallback, takeover,
+  or external concurrent writer does not require a lease by default.
+- Two or more possible writers require non-overlapping ownership; use the
+  existing lease/quiescence boundary when available. Fallback, takeover, an
+  uncertain old writer, or an external shared-workspace writer requires that
+  boundary, and uncertainty stops new writers.
+- Formal `product_release` execution keeps all existing execution-v3 lease and
+  admission rules. Do not build a general lease runtime in the quick path.
 
 ## Execution Authority
 
