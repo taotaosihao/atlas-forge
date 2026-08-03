@@ -17,5 +17,14 @@
     "atlas-sdd-verifier": { "capability": "balanced", "reasoning_effort": "high" },
     "atlas-sdd-browser-verifier": { "capability": "fast", "reasoning_effort": "high" },
     "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "medium" }
+  },
+  "equivalent_roles": {
+    "atlas-sdd-explorer-deepseek": {
+      "equivalent_to": "atlas-sdd-explorer",
+      "model": "deepseek/deepseek-v4-flash",
+      "reasoning_effort": "medium",
+      "model_provider": "zenmux",
+      "sandbox_mode": "read-only"
+    }
   }
 }

@@ -1,0 +1,34 @@
+name = "atlas-sdd-explorer-deepseek"
+description = "Atlas SDD explorer for read-only slice context discovery through DeepSeek Flash on ZenMux; equivalent to atlas-sdd-explorer."
+model_provider = "zenmux"
+model = "deepseek/deepseek-v4-flash"
+model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+nickname_candidates = ["DeepSeek Explorer", "ZenMux Explorer", "Cross-check Scout"]
+
+developer_instructions = """
+You are the Atlas SDD explorer for narrow, read-only context gathering.
+
+Answer only the specific question assigned by the controller. Prefer code paths, tests, contracts, and command evidence over broad speculation.
+
+Rules:
+- Read only. Do not modify files.
+- Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
+- Keep findings separated into Evidence, Inference, Unknown, and Recommendation when the controller asks for a team-lane style response.
+- Call out uncertainty and missing evidence directly.
+"""
+
+[model_providers.zenmux]
+name = "ZenMux"
+base_url = "https://zenmux.ai/api/v1"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 1
+stream_idle_timeout_ms = 300000
+supports_websockets = false
+
+[model_providers.zenmux.auth]
+command = "atlas-zenmux-bearer-token"
+timeout_ms = 5000
+refresh_interval_ms = 300000

@@ -115,6 +115,7 @@ Before the first native fan-out, inspect the model-visible `spawn_agent` schema 
 - `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
 - Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
 - A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
+- A local `model_catalog_json` can describe a custom model to Codex, but it cannot bypass the host/model allowlist or add missing fields to the model-visible `spawn_agent` schema. Treat a host rejection as unavailable exact routing, not as a catalog problem that Atlas can override.
 
 Before the first exact Atlas dispatch, run:
 
@@ -137,8 +138,21 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
 | Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
 | Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
+| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek/deepseek-v4-flash` | `medium` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
+
+#### Luna And DeepSeek Flash Exploration
+
+`atlas-sdd-explorer` and `atlas-sdd-explorer-deepseek` are alternative implementations of the same logical read-only exploration role. They receive the same lane goal, authority, forbidden paths, acceptance input, verification request, stop condition, and expected evidence shape. Their profiles preserve the same read-only sandbox and developer-instruction semantics; provider or model choice never changes mutation authority.
+
+- For a single exploration dispatch, honor an exact user-selected candidate when it is currently available. Otherwise use Luna by default; choose DeepSeek Flash only when a current availability preflight passed and the lane explicitly values a non-OpenAI perspective. Do not use catalog order, price, an inferred slug, or a prior successful text reply as the selector.
+- DeepSeek Flash is currently available only when the live ZenMux `/models` response contains the exact non-deprecated ID `deepseek/deepseek-v4-flash`, the Codex catalog loads that exact ID, the custom profile is discovered, and the current host admits the exact provider/model route. A plain completion proves inference only; claim full agent/tool-loop availability only after the assigned agent completes at least one tool call under the expected role and authority.
+- Luna availability likewise requires profile discovery and host admission of the exact `atlas-sdd-explorer` / `gpt-5.6-luna` / `medium` route. Do not infer availability solely from the parent model or catalog presence.
+- Dispatch both candidates only when the user explicitly requests both perspectives or independent cross-validation materially reduces a concrete risk. This is a per-lane decision, never a default fan-out. Start both from the same self-contained packet and keep their results independent until both first-round reports are complete.
+- The main Codex compares evidence, identifies agreement and material disagreement, verifies disputed facts when feasible, and makes the final synthesis. Do not decide by majority, silently merge incompatible claims, or let one agent broaden the other's authority.
+- If one candidate fails before producing useful evidence because its provider, model, auth, catalog, schema, quota, or tool loop is unavailable, disclose the failed layer. A single-candidate lane may retry the same packet once on the other currently available candidate; a requested dual-perspective lane reports the lost perspective rather than pretending fallback preserved independent cross-validation. Useful but conflicting output is not an availability failure and must be synthesized as disagreement.
+- If neither exact route is available, continue main-only and disclose the missing perspective. Never spawn a generic or inherited child as a substitute.
 
 Use the Sol phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the ordinary reviewer/verifier path. Browser evidence reaches the phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with the reviewer/verifier selected by the current mode.
 
@@ -172,6 +186,8 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | `hard-to-reverse-direction` | `default-sol-medium-planner` | `automatic-quality-upgrade` |
 | `completed-phase-extra-judgment` | `default-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
 | `browser-heavy` | `default-luna-high-browser-verifier` | `implicit-quality-model` |
+| `exploration-single` | `luna-or-deepseek-by-live-availability-and-explicit-route` | `default-dual-fanout` |
+| `exploration-cross-check` | `same-input-dual-dispatch-when-risk-reduced-or-explicit` | `different-authority-or-implicit-fanout` |
 | `quality-mode-explicit` | `all-sol-with-role-specific-reasoning` | `implicit-or-automatic-quality` |
 | `schema-restricted` | `main-only; disclose-routing-unavailable` | `generic-inherited-fanout` |
 | `profile-mismatch` | `block-spawn; reconcile-policy-profile` | `spawn-with-mismatched-model` |

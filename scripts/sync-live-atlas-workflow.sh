@@ -21,7 +21,7 @@ usage() {
 Usage:
   scripts/sync-live-atlas-workflow.sh [--dry-run]
 
-Sync only Atlas workflow helpers, the seven native Atlas agents, and Atlas
+Sync only Atlas workflow helpers, the managed native Atlas agents, and Atlas
 command shims. Writes are limited to CODEX_WORKFLOW_ROOT,
 CODEX_HOME_ROOT/agents, and LOCAL_BIN_ROOT. All assets are staged and verified
 before managed targets change. This helper never writes AGENTS_HOME or
@@ -73,6 +73,7 @@ done
 ATLAS_AGENT_NAMES=(
   atlas-sdd-browser-verifier.toml
   atlas-sdd-explorer.toml
+  atlas-sdd-explorer-deepseek.toml
   atlas-sdd-implementer.toml
   atlas-sdd-phase-reviewer.toml
   atlas-sdd-planner.toml
@@ -82,6 +83,7 @@ ATLAS_AGENT_NAMES=(
 )
 ATLAS_COMMAND_NAMES=(
   atlas-plugin-integrity
+  atlas-zenmux-bearer-token
   codex-design-review
   codex-refresh-local-plugin
   codex-web-acceptance

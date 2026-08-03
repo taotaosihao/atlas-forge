@@ -73,6 +73,22 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
+For read-heavy exploration, `deepseek/deepseek-v4-flash` through the user's
+isolated ZenMux provider is an availability-gated alternative to Luna with the
+same read-only role contract. Atlas keeps Luna as the ordinary single-dispatch
+default, selects DeepSeek only for an explicit non-OpenAI perspective after a
+live route preflight, and dispatches both only when independent cross-checking
+materially lowers a named risk or the user explicitly requests it. Dual
+dispatch is never a fixed fan-out; the main Codex reconciles evidence and
+discloses any lost provider perspective.
+
+The DeepSeek profile keeps provider metadata in the managed custom-agent file
+but obtains authentication through `atlas-zenmux-bearer-token`, which reads the
+existing `~/.codex/zenmux-deepseek.config.toml` only when `CODEX_HOME` has mode
+700 and that profile has mode 600. The agent file and model catalog contain no
+credential. Catalog discovery describes the model but never bypasses the
+host/model allowlist.
+
 When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.
 Provider mode IDs are not portable and must not be hardcoded or copied across

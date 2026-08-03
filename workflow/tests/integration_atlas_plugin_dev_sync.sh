@@ -97,7 +97,7 @@ assert_allowed_codex_tree() {
     case "$relative" in
       .agents|.agents/plugins|.agents/plugins/marketplace.json) ;;
       .tmp|.tmp/marketplaces|.tmp/marketplaces/atlas-forge|.tmp/marketplaces/atlas-forge/*) ;;
-      agents|agents/atlas-sdd-browser-verifier.toml|agents/atlas-sdd-explorer.toml|agents/atlas-sdd-implementer.toml|agents/atlas-sdd-phase-reviewer.toml|agents/atlas-sdd-planner.toml|agents/atlas-sdd-reviewer.toml|agents/atlas-sdd-verifier.toml|agents/model-policy.json|agents/unrelated.toml) ;;
+      agents|agents/atlas-sdd-browser-verifier.toml|agents/atlas-sdd-explorer.toml|agents/atlas-sdd-explorer-deepseek.toml|agents/atlas-sdd-implementer.toml|agents/atlas-sdd-phase-reviewer.toml|agents/atlas-sdd-planner.toml|agents/atlas-sdd-reviewer.toml|agents/atlas-sdd-verifier.toml|agents/model-policy.json|agents/unrelated.toml) ;;
       plugins|plugins/atlas-workflow|plugins/atlas-workflow/*) ;;
       plugins/cache|plugins/cache/atlas-forge|plugins/cache/atlas-forge/*) ;;
       plugins/cache/local-atlas|plugins/cache/local-atlas/atlas-workflow|plugins/cache/local-atlas/atlas-workflow/local|plugins/cache/local-atlas/atlas-workflow/local/*) ;;
@@ -171,6 +171,7 @@ run_success_case() {
   for agent_name in \
     atlas-sdd-browser-verifier.toml \
     atlas-sdd-explorer.toml \
+    atlas-sdd-explorer-deepseek.toml \
     atlas-sdd-implementer.toml \
     atlas-sdd-phase-reviewer.toml \
     atlas-sdd-planner.toml \
@@ -180,7 +181,7 @@ run_success_case() {
     cmp -s "$ATLAS_FORGE_ROOT/.codex/agents/$agent_name" "$codex_home_root/agents/$agent_name"
   done
   grep -q 'UNRELATED-AGENT-SENTINEL' "$codex_home_root/agents/unrelated.toml"
-  for command_name in atlas-plugin-integrity codex-design-review codex-refresh-local-plugin codex-workflow; do
+  for command_name in atlas-plugin-integrity atlas-zenmux-bearer-token codex-design-review codex-refresh-local-plugin codex-workflow; do
     [[ -x "$local_bin/$command_name" ]]
     grep -Fq "$workflow_root/bin/$command_name" "$local_bin/$command_name"
   done

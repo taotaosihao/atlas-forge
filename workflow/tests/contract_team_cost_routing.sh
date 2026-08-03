@@ -46,6 +46,8 @@ const expected = {
   'hard-to-reverse-direction': ['default-sol-medium-planner', 'automatic-quality-upgrade'],
   'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
   'browser-heavy': ['default-luna-high-browser-verifier', 'implicit-quality-model'],
+  'exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout'],
+  'exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
   'quality-mode-explicit': ['all-sol-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
   'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
   'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
@@ -85,6 +87,16 @@ assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade 
 
 assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*high.*none' 'browser-heavy work defaults to Luna high'
 assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*medium.*none' 'exploration defaults to Luna medium'
+assert_has "$TEAM" 'atlas-sdd-explorer-deepseek.*deepseek/deepseek-v4-flash.*medium.*none' 'DeepSeek Flash is the exact exploration alternative'
+assert_has "$TEAM" 'same logical read-only exploration role' 'Luna and DeepSeek preserve one logical responsibility'
+assert_has "$TEAM" 'per-lane decision, never a default fan-out' 'dual cross-check is conditional'
+assert_has "$TEAM" 'same self-contained packet' 'dual cross-check uses identical acceptance input'
+assert_has "$TEAM" 'main Codex compares evidence' 'controller synthesizes model disagreement'
+assert_has "$TEAM" 'cannot bypass the host/model allowlist' 'catalog cannot bypass host admission'
+assert_has "$AGENTS/atlas-sdd-explorer.toml" 'sandbox_mode = "read-only"' 'Luna explorer has an explicit read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek explorer has an explicit read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek agent reuses isolated credential helper'
+assert_lacks "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek agent does not copy credentials'
 assert_has "$TEAM" 'Explicit Quality Mode' 'quality mode is separately defined'
 assert_has "$TEAM" 'explicitly requests.*quality mode' 'quality mode requires an explicit user request'
 assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'

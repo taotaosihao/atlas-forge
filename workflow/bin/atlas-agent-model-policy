@@ -80,7 +80,17 @@ function readAgent(file) {
   const source = fs.readFileSync(file, 'utf8');
   const model = source.match(/^model\s*=\s*"([^"]+)"/m)?.[1];
   const effort = source.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1];
-  return { model, model_reasoning_effort: effort, source };
+  const modelProvider = source.match(/^model_provider\s*=\s*"([^"]+)"/m)?.[1];
+  const sandboxMode = source.match(/^sandbox_mode\s*=\s*"([^"]+)"/m)?.[1];
+  const instructions = source.match(/^developer_instructions\s*=\s*"""([\s\S]*?)"""/m)?.[1];
+  return {
+    model,
+    model_reasoning_effort: effort,
+    model_provider: modelProvider,
+    sandbox_mode: sandboxMode,
+    developer_instructions: instructions,
+    source,
+  };
 }
 
 function modelAlias(model) {
@@ -106,7 +116,8 @@ const managedAgentsDir = fs.existsSync(path.join(repoRoot, '.codex', 'agents'))
 const catalogFile = path.resolve(args.catalog || path.join(os.homedir(), '.codex', 'models_cache.json'));
 const policyFile = path.resolve(args.policy || path.join(managedAgentsDir, 'model-policy.json'));
 const agentsDir = path.resolve(args.agents_dir || managedAgentsDir);
-const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), readJson(policyFile, 'policy'));
+const policy = readJson(policyFile, 'policy');
+const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy);
 
 if (args.command === 'resolve') {
   const { capabilities: _capabilities, ...publicResolved } = resolved;
@@ -131,4 +142,36 @@ for (const [role, expected] of Object.entries(resolved.roles)) {
   }
 }
 
-process.stdout.write(`atlas-agent-model-policy: ok family=${resolved.family} roles=${Object.keys(resolved.roles).length}\n`);
+const equivalentRoles = policy.equivalent_roles || {};
+for (const [role, expected] of Object.entries(equivalentRoles)) {
+  const baselineExpected = resolved.roles[expected.equivalent_to];
+  if (!baselineExpected) fail(`${role} references unknown equivalent role ${expected.equivalent_to}`);
+
+  let actual;
+  let baseline;
+  try {
+    actual = readAgent(path.join(agentsDir, `${role}.toml`));
+    baseline = readAgent(path.join(agentsDir, `${expected.equivalent_to}.toml`));
+  } catch (error) {
+    fail(`cannot read equivalent agent ${role}: ${error.message}`);
+  }
+
+  const mismatches = [
+    ['model', actual.model, expected.model],
+    ['model_reasoning_effort', actual.model_reasoning_effort, expected.reasoning_effort],
+    ['model_provider', actual.model_provider, expected.model_provider],
+    ['sandbox_mode', actual.sandbox_mode, expected.sandbox_mode],
+  ].filter(([, found, wanted]) => found !== wanted);
+  if (mismatches.length > 0) {
+    fail(`${role} equivalent profile mismatch: ${mismatches.map(([key, found, wanted]) => `${key} expected ${wanted}, found ${found || 'missing'}`).join('; ')}`);
+  }
+  if (baseline.sandbox_mode !== expected.sandbox_mode) {
+    fail(`${expected.equivalent_to} sandbox mismatch: expected ${expected.sandbox_mode}, found ${baseline.sandbox_mode || 'missing'}`);
+  }
+  if (!actual.developer_instructions || actual.developer_instructions !== baseline.developer_instructions) {
+    fail(`${role} must preserve the exact developer_instructions of ${expected.equivalent_to}`);
+  }
+}
+
+const roleCount = Object.keys(resolved.roles).length + Object.keys(equivalentRoles).length;
+process.stdout.write(`atlas-agent-model-policy: ok family=${resolved.family} roles=${roleCount}\n`);

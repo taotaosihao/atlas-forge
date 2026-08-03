@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+import os
+import stat
+import sys
+import tomllib
+from pathlib import Path
+
+
+def fail(message):
+    print(f"atlas-zenmux-bearer-token: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+profile = codex_home / "zenmux-deepseek.config.toml"
+
+try:
+    home_mode = stat.S_IMODE(codex_home.stat().st_mode)
+    profile_mode = stat.S_IMODE(profile.stat().st_mode)
+except OSError as error:
+    fail(f"cannot inspect isolated ZenMux profile: {error}")
+
+if home_mode != 0o700:
+    fail(f"CODEX_HOME must have mode 700, found {home_mode:o}")
+if profile_mode != 0o600:
+    fail(f"isolated ZenMux profile must have mode 600, found {profile_mode:o}")
+if profile.stat().st_uid != os.getuid():
+    fail("isolated ZenMux profile must be owned by the current user")
+
+try:
+    config = tomllib.loads(profile.read_text(encoding="utf-8"))
+    provider_id = config["model_provider"]
+    token = config["model_providers"][provider_id]["experimental_bearer_token"]
+except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as error:
+    fail(f"cannot load bearer token from isolated ZenMux profile: {error}")
+
+if provider_id != "zenmux" or not isinstance(token, str) or not token.strip():
+    fail("isolated ZenMux profile does not contain a usable zenmux bearer token")
+
+sys.stdout.write(token.strip())
