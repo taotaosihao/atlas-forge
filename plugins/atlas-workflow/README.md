@@ -73,6 +73,17 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
+Routine implementation keeps Luna as the default single writer and offers
+`atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
+availability-gated ZenMux alternative with the exact same implementer
+instructions, inherited sandbox semantics, owned paths, acceptance inputs, and
+report contract. Atlas never sends the same writable packet to both candidates
+or uses a shared checkout for duplicate-writer cross-validation. Concurrent
+Luna and DeepSeek implementation is allowed only for explicitly authorized,
+disjoint path ownership with an integration owner and the applicable
+lease/quiescence boundary. A writable fallback starts only after the previous
+writer is proven quiesced and its diff/untracked evidence is preserved.
+
 For read-heavy exploration, the Codex-routed alias
 `deepseek-v4-flash:deepseek` through the user's isolated ZenMux provider is an
 availability-gated alternative to Luna with the same read-only role contract.

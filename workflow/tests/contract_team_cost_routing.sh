@@ -41,7 +41,8 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['default-luna-max-implementer', 'implicit-quality-model'],
+  'routine-implementation': ['default-luna-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
+  'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
   'routine-review-verify': ['default-terra-high-reviewer-or-verifier', 'implicit-quality-model'],
   'hard-to-reverse-direction': ['default-sol-medium-planner', 'automatic-quality-upgrade'],
   'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
@@ -77,6 +78,10 @@ assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails close
 assert_has "$TEAM" 'Default Saving Mode' 'saving mode is visibly the default'
 assert_has "$TEAM" 'only after staffing has established that the lane is useful' 'saving mode follows staffing rather than creating Team'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
+assert_has "$TEAM" 'atlas-sdd-implementer-deepseek.*deepseek-v4-flash:deepseek.*high.*none' 'DeepSeek Flash is the exact implementation alternative'
+assert_has "$TEAM" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
+assert_has "$TEAM" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
+assert_has "$TEAM" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'routine review defaults to Terra high'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
 assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*medium.*none' 'planning defaults to Sol medium'
@@ -98,6 +103,10 @@ assert_has "$AGENTS/atlas-sdd-explorer.toml" 'sandbox_mode = "read-only"' 'Luna 
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek explorer has an explicit read-only sandbox'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek agent reuses isolated credential helper'
 assert_lacks "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek agent does not copy credentials'
+assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'IMPLEMENTER_REPORT_JSON' 'DeepSeek implementer preserves the implementer output contract'
+assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek implementer reuses isolated credential helper'
+assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek implementer does not copy credentials'
+assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" '^sandbox_mode\s*=' 'DeepSeek implementer does not override Luna authority inheritance'
 assert_has "$TEAM" 'Explicit Quality Mode' 'quality mode is separately defined'
 assert_has "$TEAM" 'explicitly requests.*quality mode' 'quality mode requires an explicit user request'
 assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'

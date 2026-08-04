@@ -134,6 +134,7 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | --- | --- | --- | --- | --- |
 | Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
+| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `high` | `none` |
 | Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
@@ -142,6 +143,16 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `medium` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
+
+#### Luna And DeepSeek Flash Implementation
+
+`atlas-sdd-implementer` and `atlas-sdd-implementer-deepseek` are alternative implementations of the same logical writable implementation role. Give either candidate the same goal, execution authority, owned and forbidden paths, canonical brief, acceptance criteria, required checks, commit policy, stop condition, and `IMPLEMENTER_REPORT_JSON` contract. Their profiles preserve the exact same developer instructions and inherit the same host/task sandbox semantics; provider or model choice never grants write authority.
+
+- For a single implementation dispatch, honor an exact user-selected candidate only when its current writable route is available. Otherwise use Luna by default; choose DeepSeek Flash only after the exact ZenMux alias, custom profile, host admission, assignment delivery, tool loop, and required write/check behavior have passed under the implementer role. Direct-profile inference or a standalone tool call does not prove the native writable child route.
+- Keep one writer for a tightly coupled implementation lane. Never send the same writable packet to both Luna and DeepSeek, and never use duplicate writers in one shared checkout as implementation cross-validation. Use independent read-only exploration, review, or verification to cross-check implementation evidence.
+- Run Luna and DeepSeek implementers concurrently only for explicitly authorized, genuinely independent lanes with disjoint owned paths, a named integration owner, and the applicable lease/quiescence boundary. Model diversity alone does not justify a second writer.
+- Before retrying or falling back from either implementer to the other, prove the predecessor writer is quiesced, preserve its diff and untracked evidence, and keep the same goal, authority, paths, acceptance, and checks. If writer state or ownership is uncertain, stop instead of starting the replacement.
+- If the host admits the model but omits the assignment payload, tools, or write semantics for the child, classify that exact layer as unavailable and disclose it. Do not interpret child creation, an idle response, or direct-provider success as completed implementation routing.
 
 #### Luna And DeepSeek Flash Exploration
 
@@ -182,7 +193,8 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | Scenario ID | Allowed decision | Disallowed decision |
 | --- | --- | --- |
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
-| `routine-implementation` | `default-luna-max-implementer` | `implicit-quality-model` |
+| `routine-implementation` | `default-luna-or-explicit-available-deepseek-single-writer` | `implicit-quality-model-or-default-dual-writer` |
+| `implementation-fallback` | `same-authority-takeover-after-writer-quiescence` | `overlapping-or-uncertain-writer-takeover` |
 | `routine-review-verify` | `default-terra-high-reviewer-or-verifier` | `implicit-quality-model` |
 | `hard-to-reverse-direction` | `default-sol-medium-planner` | `automatic-quality-upgrade` |
 | `completed-phase-extra-judgment` | `default-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |

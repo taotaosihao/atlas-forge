@@ -19,6 +19,12 @@
     "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "medium" }
   },
   "equivalent_roles": {
+    "atlas-sdd-implementer-deepseek": {
+      "equivalent_to": "atlas-sdd-implementer",
+      "model": "deepseek-v4-flash:deepseek",
+      "reasoning_effort": "high",
+      "model_provider": "zenmux"
+    },
     "atlas-sdd-explorer-deepseek": {
       "equivalent_to": "atlas-sdd-explorer",
       "model": "deepseek-v4-flash:deepseek",
