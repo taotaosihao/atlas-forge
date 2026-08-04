@@ -21,7 +21,7 @@
   "equivalent_roles": {
     "atlas-sdd-explorer-deepseek": {
       "equivalent_to": "atlas-sdd-explorer",
-      "model": "deepseek/deepseek-v4-flash",
+      "model": "deepseek-v4-flash:deepseek",
       "reasoning_effort": "medium",
       "model_provider": "zenmux",
       "sandbox_mode": "read-only"

@@ -73,21 +73,31 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
-For read-heavy exploration, `deepseek/deepseek-v4-flash` through the user's
-isolated ZenMux provider is an availability-gated alternative to Luna with the
-same read-only role contract. Atlas keeps Luna as the ordinary single-dispatch
-default, selects DeepSeek only for an explicit non-OpenAI perspective after a
-live route preflight, and dispatches both only when independent cross-checking
-materially lowers a named risk or the user explicitly requests it. Dual
-dispatch is never a fixed fan-out; the main Codex reconciles evidence and
-discloses any lost provider perspective.
+For read-heavy exploration, the Codex-routed alias
+`deepseek-v4-flash:deepseek` through the user's isolated ZenMux provider is an
+availability-gated alternative to Luna with the same read-only role contract.
+Its upstream ZenMux `/models` identity remains
+`deepseek/deepseek-v4-flash`; Atlas validates both boundaries and never guesses
+or interchanges the identifiers. Atlas keeps Luna as the ordinary
+single-dispatch default, selects DeepSeek only for an explicit non-OpenAI
+perspective after a live route preflight, and dispatches both only when
+independent cross-checking materially lowers a named risk or the user
+explicitly requests it. Dual dispatch is never a fixed fan-out; the main Codex
+reconciles evidence and discloses any lost provider perspective.
 
 The DeepSeek profile keeps provider metadata in the managed custom-agent file
 but obtains authentication through `atlas-zenmux-bearer-token`, which reads the
 existing `~/.codex/zenmux-deepseek.config.toml` only when `CODEX_HOME` has mode
 700 and that profile has mode 600. The agent file and model catalog contain no
-credential. Catalog discovery describes the model but never bypasses the
-host/model allowlist.
+credential. `atlas-team-model-catalog` builds a credential-free root catalog
+projection from the official cache plus the isolated DeepSeek catalog. It
+preserves every official entry, promotes the exact Luna entry to
+`multi_agent_version=v2` only while the official catalog has not done so, and
+adds `deepseek-v4-flash:deepseek` as v2. Point the user-level
+`model_catalog_json` at `~/.codex/model-catalogs/atlas-team.json`, regenerate it
+after either input catalog changes, and start a new task. This supplies normal
+catalog eligibility metadata; it does not bypass host allowlist, entitlement,
+or schema validation.
 
 When Paseo is explicitly selected, Atlas discovers provider, model, and callable
 mode capability at runtime and never reads Paseo orchestration preferences.

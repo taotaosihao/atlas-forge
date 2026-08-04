@@ -229,6 +229,23 @@ Start a legacy CLI-backed team discussion or execution round:
 ~/.codex/workflow/bin/codex-workflow team-stop <task-id>
 ```
 
+For a user-authorized host whose official model cache still marks
+`gpt-5.6-luna` as MultiAgentV1, build the credential-free Team catalog
+projection before starting a new Codex task:
+
+```bash
+atlas-team-model-catalog
+```
+
+The helper preserves the official catalog, promotes only the exact Luna entry
+to v2 when necessary, and appends the isolated ZenMux catalog entry
+`deepseek-v4-flash:deepseek` as v2. It writes
+`~/.codex/model-catalogs/atlas-team.json` atomically with mode 600 and never
+modifies `models_cache.json`. The user-level `model_catalog_json` must point to
+that output. Regenerate it whenever either input catalog changes. Catalog
+metadata remains subject to the host's model allowlist, entitlement, and tool
+schema checks.
+
 Record a Team run. The backend defaults to Codex native subagents when
 `--backend` is omitted. Any explicit Team-level backend selection, including
 Paseo or an explicit native override, requires a controller-attested user or

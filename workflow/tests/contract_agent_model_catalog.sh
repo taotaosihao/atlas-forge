@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HELPER="$ROOT/workflow/bin/atlas-team-model-catalog"
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+fail() {
+  printf 'contract_agent_model_catalog: %s\n' "$1" >&2
+  exit 1
+}
+
+cat > "$TMP_ROOT/official.json" <<'JSON'
+{
+  "models": [
+    {"slug":"gpt-5.6-sol","multi_agent_version":"v2"},
+    {"slug":"gpt-5.6-terra","multi_agent_version":"v2"},
+    {"slug":"gpt-5.6-luna","multi_agent_version":"v1"},
+    {"slug":"gpt-5.5"}
+  ],
+  "metadata": {"preserved": true}
+}
+JSON
+cat > "$TMP_ROOT/deepseek.json" <<'JSON'
+{"models":[{"slug":"deepseek-v4-flash:deepseek","display_name":"DeepSeek Flash via ZenMux"}]}
+JSON
+chmod 600 "$TMP_ROOT/official.json" "$TMP_ROOT/deepseek.json"
+
+official_before="$(sha256sum "$TMP_ROOT/official.json")"
+deepseek_before="$(sha256sum "$TMP_ROOT/deepseek.json")"
+"$HELPER" \
+  --official "$TMP_ROOT/official.json" \
+  --deepseek "$TMP_ROOT/deepseek.json" \
+  --output "$TMP_ROOT/atlas-team.json" >/dev/null
+
+[[ "$(stat -c '%a' "$TMP_ROOT/atlas-team.json")" == 600 ]] \
+  || fail 'output catalog mode is not 600'
+[[ "$official_before" == "$(sha256sum "$TMP_ROOT/official.json")" ]] \
+  || fail 'official input catalog was modified'
+[[ "$deepseek_before" == "$(sha256sum "$TMP_ROOT/deepseek.json")" ]] \
+  || fail 'DeepSeek input catalog was modified'
+jq -e '.metadata.preserved == true' "$TMP_ROOT/atlas-team.json" >/dev/null \
+  || fail 'official catalog metadata was not preserved'
+jq -e '
+  [.models[] | select(.multi_agent_version == "v2") | .slug]
+  == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-v4-flash:deepseek"]
+' "$TMP_ROOT/atlas-team.json" >/dev/null \
+  || fail 'eligible model projection is incorrect'
+
+jq 'del(.models[] | select(.slug == "gpt-5.6-luna"))' \
+  "$TMP_ROOT/official.json" > "$TMP_ROOT/no-luna.json"
+if "$HELPER" --official "$TMP_ROOT/no-luna.json" --deepseek "$TMP_ROOT/deepseek.json" --output "$TMP_ROOT/no-luna-output.json" >/dev/null 2>&1; then
+  fail 'missing Luna unexpectedly passed'
+fi
+
+sed 's/deepseek-v4-flash:deepseek/deepseek\/deepseek-v4-flash/' \
+  "$TMP_ROOT/deepseek.json" > "$TMP_ROOT/wrong-deepseek.json"
+if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/wrong-deepseek.json" --output "$TMP_ROOT/wrong-deepseek-output.json" >/dev/null 2>&1; then
+  fail 'deprecated DeepSeek slug unexpectedly passed'
+fi
+
+if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/deepseek.json" --output "$TMP_ROOT/official.json" >/dev/null 2>&1; then
+  fail 'input overwrite unexpectedly passed'
+fi
+
+printf 'contract_agent_model_catalog: ok\n'

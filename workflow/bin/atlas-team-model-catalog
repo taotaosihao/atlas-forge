@@ -1,0 +1,115 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const LUNA_MODEL = 'gpt-5.6-luna';
+const DEEPSEEK_MODEL = 'deepseek-v4-flash:deepseek';
+
+function fail(message) {
+  process.stderr.write(`atlas-team-model-catalog: ${message}\n`);
+  process.exit(1);
+}
+
+function readJson(file, label) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    fail(`cannot read ${label} ${file}: ${error.message}`);
+  }
+}
+
+function parseArgs(argv) {
+  const args = {};
+  while (argv.length) {
+    const flag = argv.shift();
+    if (!['--official', '--deepseek', '--output'].includes(flag) || !argv.length) {
+      fail(`invalid argument ${flag}`);
+    }
+    args[flag.slice(2)] = argv.shift();
+  }
+  return args;
+}
+
+function requireModels(catalog, label) {
+  if (!catalog || !Array.isArray(catalog.models)) {
+    fail(`${label} catalog must contain a models array`);
+  }
+  return catalog.models;
+}
+
+function exactlyOne(models, slug, label) {
+  const matches = models.filter((model) => model && model.slug === slug);
+  if (matches.length !== 1) {
+    fail(`${label} catalog must contain exactly one ${slug} entry; found ${matches.length}`);
+  }
+  return matches[0];
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function writeAtomic(file, value) {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = path.join(directory, `.${path.basename(file)}.tmp-${process.pid}`);
+  try {
+    const descriptor = fs.openSync(temporary, 'wx', 0o600);
+    try {
+      fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
+      fs.fsyncSync(descriptor);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    fs.renameSync(temporary, file);
+    fs.chmodSync(file, 0o600);
+  } catch (error) {
+    try {
+      fs.unlinkSync(temporary);
+    } catch (_) {
+      // The temporary file may not have been created.
+    }
+    fail(`cannot write output ${file}: ${error.message}`);
+  }
+}
+
+const args = parseArgs(process.argv.slice(2));
+const codexHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
+const officialFile = path.resolve(args.official || path.join(codexHome, 'models_cache.json'));
+const deepseekFile = path.resolve(args.deepseek || path.join(codexHome, 'model-catalogs', 'zenmux-deepseek.json'));
+const outputFile = path.resolve(args.output || path.join(codexHome, 'model-catalogs', 'atlas-team.json'));
+
+if (outputFile === officialFile || outputFile === deepseekFile) {
+  fail('output must not overwrite an input catalog');
+}
+
+const officialCatalog = readJson(officialFile, 'official');
+const officialModels = clone(requireModels(officialCatalog, 'official'));
+const luna = exactlyOne(officialModels, LUNA_MODEL, 'official');
+const officialDeepSeekMatches = officialModels.filter((model) => model && model.slug === DEEPSEEK_MODEL);
+if (officialDeepSeekMatches.length > 0) {
+  fail(`official catalog already contains ${DEEPSEEK_MODEL}; refusing a duplicate projection`);
+}
+
+const deepseekCatalog = readJson(deepseekFile, 'DeepSeek');
+const deepseekModels = requireModels(deepseekCatalog, 'DeepSeek');
+const deepseek = clone(exactlyOne(deepseekModels, DEEPSEEK_MODEL, 'DeepSeek'));
+if (deepseekModels.length !== 1) {
+  fail(`DeepSeek catalog must contain only ${DEEPSEEK_MODEL}`);
+}
+
+const promotedLuna = luna.multi_agent_version !== 'v2';
+luna.multi_agent_version = 'v2';
+deepseek.multi_agent_version = 'v2';
+
+const projection = { ...officialCatalog, models: [...officialModels, deepseek] };
+writeAtomic(outputFile, projection);
+
+const eligible = projection.models
+  .filter((model) => model && model.multi_agent_version === 'v2')
+  .map((model) => model.slug);
+process.stdout.write(
+  `atlas-team-model-catalog: ok luna=${promotedLuna ? 'promoted-v2' : 'official-v2'} deepseek=${DEEPSEEK_MODEL} eligible=${eligible.join(',')}\n`,
+);

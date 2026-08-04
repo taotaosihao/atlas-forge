@@ -83,6 +83,7 @@ ATLAS_AGENT_NAMES=(
 )
 ATLAS_COMMAND_NAMES=(
   atlas-plugin-integrity
+  atlas-team-model-catalog
   atlas-zenmux-bearer-token
   codex-design-review
   codex-refresh-local-plugin
