@@ -108,6 +108,33 @@ Claude-family models are never eligible for automatic routing or model recommend
 
 ## Native Exact Model Routing
 
+### Root Session And Child Provider Invariant
+
+The root Codex session keeps its active model, `model_provider`, authentication,
+and catalog unchanged. Atlas never changes the root provider merely to make a
+DeepSeek lane available. A DeepSeek route is child-local: only the selected
+`atlas-sdd-explorer-deepseek` or `atlas-sdd-implementer-deepseek` profile may
+bind `model_provider = "zenmux"` and `deepseek-v4-flash:deepseek`.
+
+- A `model` override is not a provider switch. Never send
+  `deepseek-v4-flash:deepseek` through the built-in `explorer` or `implementer`
+  role, or through a profile whose effective provider is not ZenMux.
+- If the host exposes model/reasoning overrides but cannot select the
+  provider-bound custom profile, classify the DeepSeek route as unavailable at
+  the provider-routing layer and fail closed to Luna or main-only according to
+  the lane's fallback rule. Do not retry the same model through the inherited
+  provider.
+- If the host rejects the selected DeepSeek profile's `max` effort, classify
+  that exact profile/effort route as host-unavailable. Do not silently lower it
+  to `high`, rewrite the Atlas default, or claim that a different effort proved
+  the configured `max` route.
+- A DeepSeek child is admitted only when fresh child metadata proves
+  `model_provider = "zenmux"` and the exact routed model is
+  `deepseek-v4-flash:deepseek`; a ChatGPT-account unsupported-model response or
+  an effective `openai` provider is a failed DeepSeek route, not successful
+  inference. Preserve the same packet and disclose the lost perspective on
+  fallback.
+
 Before the first native fan-out, inspect the model-visible `spawn_agent` schema and require `agent_type`, `model`, `reasoning_effort`, and `fork_turns`. This is a capability check, not authorization to spawn.
 
 - If any required field is absent, classify the native surface as `schema-restricted`, do not start a generic or inherited child, disclose that exact routing is unavailable, and continue main-only.

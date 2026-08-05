@@ -73,6 +73,15 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
+The root-session provider is also unchanged. DeepSeek Flash is a child-local
+ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
+custom-agent profile, not in the root session. A bare DeepSeek `model` override
+on the inherited `explorer` or `implementer` role does not switch providers and
+must fail closed when the child metadata does not prove the ZenMux route. If the
+host rejects the profile's `max` effort, Atlas preserves the configured `max`
+contract and reports that exact route unavailable; it does not silently lower
+the effort to `high`.
+
 Routine implementation keeps Luna as the default single writer and offers
 `atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
 availability-gated ZenMux alternative with the exact same implementer
