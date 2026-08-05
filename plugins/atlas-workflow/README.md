@@ -104,7 +104,9 @@ credential. `atlas-team-model-catalog` builds a credential-free root catalog
 projection from the official cache plus the isolated DeepSeek catalog. It
 preserves every official entry, promotes the exact Luna entry to
 `multi_agent_version=v2` only while the official catalog has not done so, and
-adds `deepseek-v4-flash:deepseek` as v2. Point the user-level
+adds `deepseek-v4-flash:deepseek` as v2. The isolated entry must declare the
+official `low`, `high`, and `max` efforts exactly once and use `max` as Atlas's
+default. Point the user-level
 `model_catalog_json` at `~/.codex/model-catalogs/atlas-team.json`, regenerate it
 after either input catalog changes, and start a new task. This supplies normal
 catalog eligibility metadata; it does not bypass host allowlist, entitlement,

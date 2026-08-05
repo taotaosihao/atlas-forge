@@ -3,7 +3,7 @@ description = "Atlas SDD explorer for read-only slice context discovery through 
 model_provider = "zenmux"
 model = "deepseek-v4-flash:deepseek"
 model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "max"
 sandbox_mode = "read-only"
 nickname_candidates = ["DeepSeek Explorer", "ZenMux Explorer", "Cross-check Scout"]
 

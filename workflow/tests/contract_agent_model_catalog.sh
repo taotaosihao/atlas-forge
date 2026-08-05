@@ -23,7 +23,7 @@ cat > "$TMP_ROOT/official.json" <<'JSON'
 }
 JSON
 cat > "$TMP_ROOT/deepseek.json" <<'JSON'
-{"models":[{"slug":"deepseek-v4-flash:deepseek","display_name":"DeepSeek Flash via ZenMux"}]}
+{"models":[{"slug":"deepseek-v4-flash:deepseek","display_name":"DeepSeek Flash via ZenMux","default_reasoning_level":"max","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"},{"effort":"max"}]}]}
 JSON
 chmod 600 "$TMP_ROOT/official.json" "$TMP_ROOT/deepseek.json"
 
@@ -47,6 +47,13 @@ jq -e '
   == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-v4-flash:deepseek"]
 ' "$TMP_ROOT/atlas-team.json" >/dev/null \
   || fail 'eligible model projection is incorrect'
+jq -e '
+  .models[]
+  | select(.slug == "deepseek-v4-flash:deepseek")
+  | .default_reasoning_level == "max"
+    and ([.supported_reasoning_levels[].effort] == ["low", "high", "max"])
+' "$TMP_ROOT/atlas-team.json" >/dev/null \
+  || fail 'DeepSeek max-effort catalog projection is incorrect'
 
 jq 'del(.models[] | select(.slug == "gpt-5.6-luna"))' \
   "$TMP_ROOT/official.json" > "$TMP_ROOT/no-luna.json"
@@ -58,6 +65,12 @@ sed 's/deepseek-v4-flash:deepseek/deepseek\/deepseek-v4-flash/' \
   "$TMP_ROOT/deepseek.json" > "$TMP_ROOT/wrong-deepseek.json"
 if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/wrong-deepseek.json" --output "$TMP_ROOT/wrong-deepseek-output.json" >/dev/null 2>&1; then
   fail 'deprecated DeepSeek slug unexpectedly passed'
+fi
+
+jq '(.models[0].default_reasoning_level = "high")' \
+  "$TMP_ROOT/deepseek.json" > "$TMP_ROOT/wrong-effort.json"
+if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/wrong-effort.json" --output "$TMP_ROOT/wrong-effort-output.json" >/dev/null 2>&1; then
+  fail 'non-max DeepSeek default unexpectedly passed'
 fi
 
 if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/deepseek.json" --output "$TMP_ROOT/official.json" >/dev/null 2>&1; then

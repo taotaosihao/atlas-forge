@@ -51,6 +51,18 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function validateDeepSeekEffort(model) {
+  const efforts = (model.supported_reasoning_levels || []).map((entry) => entry && entry.effort);
+  const unique = [...new Set(efforts)].sort();
+  const expected = ['high', 'low', 'max'];
+  if (efforts.length !== expected.length || JSON.stringify(unique) !== JSON.stringify(expected)) {
+    fail(`${DEEPSEEK_MODEL} must declare the official low/high/max reasoning efforts exactly once`);
+  }
+  if (model.default_reasoning_level !== 'max') {
+    fail(`${DEEPSEEK_MODEL} default_reasoning_level must be max`);
+  }
+}
+
 function writeAtomic(file, value) {
   const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -99,6 +111,7 @@ const deepseek = clone(exactlyOne(deepseekModels, DEEPSEEK_MODEL, 'DeepSeek'));
 if (deepseekModels.length !== 1) {
   fail(`DeepSeek catalog must contain only ${DEEPSEEK_MODEL}`);
 }
+validateDeepSeekEffort(deepseek);
 
 const promotedLuna = luna.multi_agent_version !== 'v2';
 luna.multi_agent_version = 'v2';

@@ -242,7 +242,9 @@ to v2 when necessary, and appends the isolated ZenMux catalog entry
 `deepseek-v4-flash:deepseek` as v2. It writes
 `~/.codex/model-catalogs/atlas-team.json` atomically with mode 600 and never
 modifies `models_cache.json`. The user-level `model_catalog_json` must point to
-that output. Regenerate it whenever either input catalog changes. Catalog
+that output. The isolated entry must declare the official `low`, `high`, and
+`max` efforts exactly once and set `default_reasoning_level` to `max`.
+Regenerate it whenever either input catalog changes. Catalog
 metadata remains subject to the host's model allowlist, entitlement, and tool
 schema checks.
 
