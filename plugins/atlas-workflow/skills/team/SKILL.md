@@ -124,10 +124,13 @@ bind `model_provider = "zenmux"` and `deepseek-v4-flash:deepseek`.
   the provider-routing layer and fail closed to Luna or main-only according to
   the lane's fallback rule. Do not retry the same model through the inherited
   provider.
-- If the host rejects the selected DeepSeek profile's `max` effort, classify
-  that exact profile/effort route as host-unavailable. Do not silently lower it
-  to `high`, rewrite the Atlas default, or claim that a different effort proved
-  the configured `max` route.
+- The native DeepSeek profiles use the exact host-admitted `high` effort. The
+  isolated ZenMux catalog may continue to advertise and default standalone
+  DeepSeek sessions to `max`, but Atlas never sends `max` through native
+  `spawn_agent` until the current model-visible host metadata advertises it.
+  This is an explicit native-route contract, not a silent effort remap. If the
+  host rejects `high`, classify that exact profile/effort route as
+  host-unavailable.
 - A DeepSeek child is admitted only when fresh child metadata proves
   `model_provider = "zenmux"` and the exact routed model is
   `deepseek-v4-flash:deepseek`; a ChatGPT-account unsupported-model response or
@@ -142,6 +145,9 @@ Before the first native fan-out, inspect the model-visible `spawn_agent` schema 
 - `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
 - Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
 - A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
+- For either native DeepSeek custom role, write that exact packet through stdin to the stable logical-role slot `atlas-native-agent-inbox put atlas_sdd_explorer` or `atlas-native-agent-inbox put atlas_sdd_implementer` before calling `spawn_agent`, and also pass the same packet as `message`. The inbox is a narrow compatibility transport for hosts that omit the task message or expose its dynamic payload only as OpenAI-encrypted content to a custom provider; it does not create or run the child and is not a Paseo fallback. The helper accepts only a packet slot matching `[a-z0-9_]+`, refuses overwrite, stores no credentials, and requires the Codex home, inbox, and packet modes to remain 700, 700, and 600 respectively.
+- The equivalent profile reads only its own stable logical-role slot, and only when the native task message is absent or has an empty visible Payload plus encrypted content. A host that delivers plaintext remains authoritative and does not use the compatibility packet. An occupied slot blocks another affected dispatch of the same logical role, so DeepSeek explorer attempts and DeepSeek implementer attempts are serialized independently until the host delivers custom-provider assignments normally; a Luna peer with a normal plaintext message may still run concurrently. After the attempt is terminal and quiesced, delete the corresponding role slot. For a follow-up turn on an affected host, first delete the old packet, put the complete follow-up packet into the same role slot, and then call `followup_task`. If packet creation, exact-slot retrieval, or cleanup cannot be proven, fail the DeepSeek route closed instead of guessing or scanning the inbox.
+- Child creation, provider metadata, or the inbox `get` alone does not prove usable routing. Admission requires the child to receive the task-specific acceptance input and complete the task's meaningful tool/check loop under the expected read-only or writable authority. Report the assignment-transport layer separately from provider/model admission.
 - A local `model_catalog_json` can describe a custom model and its normal multi-agent eligibility metadata to Codex, but it cannot bypass the host/model allowlist, entitlement checks, or add missing fields to the model-visible `spawn_agent` schema. Treat a host rejection as unavailable exact routing, not as a catalog problem that Atlas can override.
 - When the current official catalog still marks `gpt-5.6-luna` below MultiAgentV2, the user-authorized installed configuration may point its root `model_catalog_json` at the output of `atlas-team-model-catalog`. The helper preserves every official entry, promotes only the exact Luna entry to `multi_agent_version=v2` when needed, and appends the verified `deepseek-v4-flash:deepseek` entry as v2. It never edits the official cache, carries credentials, or changes host schema code. Regenerate the projection after the official model cache or DeepSeek catalog changes, then start a new task; existing tasks do not hot-reload the allowlist.
 
@@ -161,13 +167,13 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | --- | --- | --- | --- | --- |
 | Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
-| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
+| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `high` | `none` |
 | Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
 | Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
 | Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
-| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
+| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `high` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
@@ -175,7 +181,7 @@ A small clear task defaults to the main Codex. Use a subagent only when concrete
 
 `atlas-sdd-implementer` and `atlas-sdd-implementer-deepseek` are alternative implementations of the same logical writable implementation role. Give either candidate the same goal, execution authority, owned and forbidden paths, canonical brief, acceptance criteria, required checks, commit policy, stop condition, and `IMPLEMENTER_REPORT_JSON` contract. Their profiles preserve the exact same developer instructions and inherit the same host/task sandbox semantics; provider or model choice never grants write authority.
 
-The DeepSeek Flash profiles use its native `max` effort. Keep the isolated DeepSeek catalog aligned with the current official `low` / `high` / `max` capability set and `max` as the Atlas default; do not use compatibility aliases such as `medium` or `xhigh` as profile values.
+DeepSeek Flash supports the official `low` / `high` / `max` capability set, and the isolated ZenMux catalog keeps `max` as the standalone default. The Codex-native child profiles deliberately use `high`, because the current model-visible `spawn_agent` metadata admits `deepseek-v4-flash:deepseek` only at `medium` or `high`. Do not use compatibility aliases such as `medium` or `xhigh` in the Atlas profiles, do not describe `high` as `max`, and do not switch the native profiles back to `max` until a fresh host schema advertises and successfully executes that exact route.
 
 - For a single implementation dispatch, honor an exact user-selected candidate only when its current writable route is available. Otherwise use Luna by default; choose DeepSeek Flash only after the exact ZenMux alias, custom profile, host admission, assignment delivery, tool loop, and required write/check behavior have passed under the implementer role. Direct-profile inference or a standalone tool call does not prove the native writable child route.
 - Keep one writer for a tightly coupled implementation lane. Never send the same writable packet to both Luna and DeepSeek, and never use duplicate writers in one shared checkout as implementation cross-validation. Use independent read-only exploration, review, or verification to cross-check implementation evidence.

@@ -83,6 +83,7 @@ ATLAS_AGENT_NAMES=(
   model-policy.json
 )
 ATLAS_COMMAND_NAMES=(
+  atlas-native-agent-inbox
   atlas-plugin-integrity
   atlas-team-model-catalog
   atlas-zenmux-bearer-token

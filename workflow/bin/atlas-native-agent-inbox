@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+
+MAX_PACKET_BYTES = 1024 * 1024
+PACKET_SLOT = re.compile(r"^[a-z0-9_]+$")
+
+
+def fail(message: str) -> None:
+    print(f"atlas-native-agent-inbox: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def usage() -> None:
+    print(
+        "usage: atlas-native-agent-inbox put|get|delete <packet-slot>",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
+def checked_packet_slot(raw: str) -> str:
+    if not PACKET_SLOT.fullmatch(raw):
+        fail("packet slot must match [a-z0-9_]+")
+    return raw
+
+
+def checked_codex_home() -> Path:
+    home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+    if home.is_symlink():
+        fail("CODEX_HOME must not be a symlink")
+    try:
+        metadata = home.stat()
+    except OSError as error:
+        fail(f"cannot inspect CODEX_HOME: {error}")
+    if metadata.st_uid != os.getuid():
+        fail("CODEX_HOME must be owned by the current user")
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode != 0o700:
+        fail(f"CODEX_HOME must have mode 700, found {mode:o}")
+    return home
+
+
+def checked_inbox(home: Path, *, create: bool) -> Path:
+    inbox = home / "atlas-native-agent-inbox"
+    if inbox.is_symlink():
+        fail("inbox must not be a symlink")
+    if create:
+        try:
+            inbox.mkdir(mode=0o700, exist_ok=True)
+        except OSError as error:
+            fail(f"cannot create inbox: {error}")
+    if not inbox.exists():
+        fail("inbox does not exist")
+    try:
+        metadata = inbox.stat()
+    except OSError as error:
+        fail(f"cannot inspect inbox: {error}")
+    if not stat.S_ISDIR(metadata.st_mode):
+        fail("inbox is not a directory")
+    if metadata.st_uid != os.getuid():
+        fail("inbox must be owned by the current user")
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode != 0o700:
+        fail(f"inbox must have mode 700, found {mode:o}")
+    return inbox
+
+
+def validate_packet_metadata(metadata: os.stat_result) -> None:
+    if not stat.S_ISREG(metadata.st_mode):
+        fail("packet is not a regular file")
+    if metadata.st_uid != os.getuid():
+        fail("packet must be owned by the current user")
+    mode = stat.S_IMODE(metadata.st_mode)
+    if mode != 0o600:
+        fail(f"packet must have mode 600, found {mode:o}")
+
+
+def put_packet(inbox: Path, packet_slot: str) -> None:
+    payload = sys.stdin.buffer.read(MAX_PACKET_BYTES + 1)
+    if not payload:
+        fail("refusing to store an empty packet")
+    if len(payload) > MAX_PACKET_BYTES:
+        fail(f"packet exceeds {MAX_PACKET_BYTES} bytes")
+
+    packet = inbox / f"{packet_slot}.md"
+    temporary_name = ""
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".packet.", dir=inbox)
+        with os.fdopen(descriptor, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary_name, packet)
+        directory_descriptor = os.open(inbox, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except FileExistsError:
+        fail(f"packet slot is already occupied: {packet_slot}")
+    except OSError as error:
+        fail(f"cannot store packet: {error}")
+    finally:
+        if temporary_name:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                fail(f"cannot remove temporary packet: {error}")
+    print(f"stored packet in slot: {packet_slot}")
+
+
+def get_packet(inbox: Path, packet_slot: str) -> None:
+    packet = inbox / f"{packet_slot}.md"
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(packet, flags)
+    except OSError as error:
+        fail(f"cannot open packet slot {packet_slot}: {error}")
+    try:
+        validate_packet_metadata(os.fstat(descriptor))
+        chunks = []
+        remaining = MAX_PACKET_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        if len(payload) > MAX_PACKET_BYTES:
+            fail(f"packet exceeds {MAX_PACKET_BYTES} bytes")
+        sys.stdout.buffer.write(payload)
+    finally:
+        os.close(descriptor)
+
+
+def delete_packet(inbox: Path, packet_slot: str) -> None:
+    packet = inbox / f"{packet_slot}.md"
+    try:
+        metadata = packet.lstat()
+    except FileNotFoundError:
+        print(f"packet slot already absent: {packet_slot}")
+        return
+    except OSError as error:
+        fail(f"cannot inspect packet slot {packet_slot}: {error}")
+    validate_packet_metadata(metadata)
+    try:
+        packet.unlink()
+    except OSError as error:
+        fail(f"cannot delete packet slot {packet_slot}: {error}")
+    print(f"deleted packet slot: {packet_slot}")
+
+
+def main() -> None:
+    if len(sys.argv) != 3 or sys.argv[1] not in {"put", "get", "delete"}:
+        usage()
+    action = sys.argv[1]
+    packet_slot = checked_packet_slot(sys.argv[2])
+    home = checked_codex_home()
+    inbox = checked_inbox(home, create=action == "put")
+    if action == "put":
+        put_packet(inbox, packet_slot)
+    elif action == "get":
+        get_packet(inbox, packet_slot)
+    else:
+        delete_packet(inbox, packet_slot)
+
+
+if __name__ == "__main__":
+    main()

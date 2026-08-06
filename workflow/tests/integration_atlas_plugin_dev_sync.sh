@@ -182,7 +182,7 @@ run_success_case() {
     cmp -s "$ATLAS_FORGE_ROOT/.codex/agents/$agent_name" "$codex_home_root/agents/$agent_name"
   done
   grep -q 'UNRELATED-AGENT-SENTINEL' "$codex_home_root/agents/unrelated.toml"
-  for command_name in atlas-plugin-integrity atlas-team-model-catalog atlas-zenmux-bearer-token codex-design-review codex-refresh-local-plugin codex-workflow; do
+  for command_name in atlas-native-agent-inbox atlas-plugin-integrity atlas-team-model-catalog atlas-zenmux-bearer-token codex-design-review codex-refresh-local-plugin codex-workflow; do
     [[ -x "$local_bin/$command_name" ]]
     grep -Fq "$workflow_root/bin/$command_name" "$local_bin/$command_name"
   done

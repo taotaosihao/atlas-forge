@@ -77,10 +77,11 @@ The root-session provider is also unchanged. DeepSeek Flash is a child-local
 ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
 custom-agent profile, not in the root session. A bare DeepSeek `model` override
 on the inherited `explorer` or `implementer` role does not switch providers and
-must fail closed when the child metadata does not prove the ZenMux route. If the
-host rejects the profile's `max` effort, Atlas preserves the configured `max`
-contract and reports that exact route unavailable; it does not silently lower
-the effort to `high`.
+must fail closed when the child metadata does not prove the ZenMux route. The
+native DeepSeek profiles use the current host-admitted `high` effort; the
+isolated ZenMux catalog and standalone profile may keep `max` as their default.
+Atlas does not call `high` a `max` execution and does not request native `max`
+until a fresh host schema advertises and successfully executes that exact route.
 
 Routine implementation keeps Luna as the default single writer and offers
 `atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
@@ -109,7 +110,18 @@ The DeepSeek profile keeps provider metadata in the managed custom-agent file
 but obtains authentication through `atlas-zenmux-bearer-token`, which reads the
 existing `~/.codex/zenmux-deepseek.config.toml` only when `CODEX_HOME` has mode
 700 and that profile has mode 600. The agent file and model catalog contain no
-credential. `atlas-team-model-catalog` builds a credential-free root catalog
+credential. For Codex hosts that deliver a native custom-provider child an
+empty visible Payload plus OpenAI-encrypted content, Atlas writes the same
+self-contained packet to `atlas-native-agent-inbox` before the native
+`spawn_agent` call. The equivalent profiles read only the stable slot for their
+logical role when no plaintext assignment is visible; this is a 700/600
+assignment-transport compatibility path, not a child runner or Paseo fallback.
+Atlas deletes the packet only after the
+attempt is terminal and quiesced. Refuse-overwrite slots safely serialize
+affected DeepSeek attempts of the same role, while Luna and DeepSeek may still
+cross-check the same packet concurrently. Atlas still requires task-specific
+tool/check evidence before calling the route usable.
+`atlas-team-model-catalog` builds a credential-free root catalog
 projection from the official cache plus the isolated DeepSeek catalog. It
 preserves every official entry, promotes the exact Luna entry to
 `multi_agent_version=v2` only while the official catalog has not done so, and

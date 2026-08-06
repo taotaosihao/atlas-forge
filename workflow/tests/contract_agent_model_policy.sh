@@ -28,11 +28,11 @@ make_agents() {
   printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-phase-reviewer.toml"
   printf 'model = "gpt-%s-sol"\nmodel_reasoning_effort = "medium"\n' "$family" > "$dir/atlas-sdd-planner.toml"
   printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = """same writable implementer"""\n' "$family" > "$dir/atlas-sdd-implementer.toml"
-  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = """same writable implementer"""\n' > "$dir/atlas-sdd-implementer-deepseek.toml"
+  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "high"\ndeveloper_instructions = """same writable implementer"""\n' > "$dir/atlas-sdd-implementer-deepseek.toml"
   printf 'model = "gpt-%s-terra"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-verifier.toml"
   printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "high"\n' "$family" > "$dir/atlas-sdd-browser-verifier.toml"
   printf 'model = "gpt-%s-luna"\nmodel_reasoning_effort = "medium"\nsandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' "$family" > "$dir/atlas-sdd-explorer.toml"
-  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "max"\nsandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' > "$dir/atlas-sdd-explorer-deepseek.toml"
+  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "high"\nsandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' > "$dir/atlas-sdd-explorer-deepseek.toml"
 }
 
 make_catalog "$TMP_ROOT/5.6.json" 5.6
