@@ -3,7 +3,7 @@ description = "Atlas SDD implementer through DeepSeek Flash on ZenMux; equivalen
 model_provider = "zenmux"
 model = "deepseek-v4-flash:deepseek"
 model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"
-model_reasoning_effort = "high"
+model_reasoning_effort = "max"
 nickname_candidates = ["DeepSeek Implementer", "ZenMux Builder", "DeepSeek Slice Builder"]
 
 developer_instructions = """

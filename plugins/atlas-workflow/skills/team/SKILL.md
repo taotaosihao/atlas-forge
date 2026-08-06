@@ -124,13 +124,11 @@ bind `model_provider = "zenmux"` and `deepseek-v4-flash:deepseek`.
   the provider-routing layer and fail closed to Luna or main-only according to
   the lane's fallback rule. Do not retry the same model through the inherited
   provider.
-- The native DeepSeek profiles use the exact host-admitted `high` effort. The
-  isolated ZenMux catalog may continue to advertise and default standalone
-  DeepSeek sessions to `max`, but Atlas never sends `max` through native
-  `spawn_agent` until the current model-visible host metadata advertises it.
-  This is an explicit native-route contract, not a silent effort remap. If the
-  host rejects `high`, classify that exact profile/effort route as
-  host-unavailable.
+- Every Atlas DeepSeek profile and catalog route uses the exact `max` effort.
+  Never lower native `spawn_agent` dispatches to `high`, `medium`, or another
+  compatibility value. If the current host rejects `max`, classify that exact
+  profile/effort route as host-unavailable and follow the lane fallback policy
+  without rewriting the configured effort.
 - A DeepSeek child is admitted only when fresh child metadata proves
   `model_provider = "zenmux"` and the exact routed model is
   `deepseek-v4-flash:deepseek`; a ChatGPT-account unsupported-model response or
@@ -167,13 +165,13 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | --- | --- | --- | --- | --- |
 | Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
-| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `high` | `none` |
+| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
 | Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
 | Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
 | Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
-| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `high` | `none` |
+| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
@@ -181,7 +179,7 @@ A small clear task defaults to the main Codex. Use a subagent only when concrete
 
 `atlas-sdd-implementer` and `atlas-sdd-implementer-deepseek` are alternative implementations of the same logical writable implementation role. Give either candidate the same goal, execution authority, owned and forbidden paths, canonical brief, acceptance criteria, required checks, commit policy, stop condition, and `IMPLEMENTER_REPORT_JSON` contract. Their profiles preserve the exact same developer instructions and inherit the same host/task sandbox semantics; provider or model choice never grants write authority.
 
-DeepSeek Flash supports the official `low` / `high` / `max` capability set, and the isolated ZenMux catalog keeps `max` as the standalone default. The Codex-native child profiles deliberately use `high`, because the current model-visible `spawn_agent` metadata admits `deepseek-v4-flash:deepseek` only at `medium` or `high`. Do not use compatibility aliases such as `medium` or `xhigh` in the Atlas profiles, do not describe `high` as `max`, and do not switch the native profiles back to `max` until a fresh host schema advertises and successfully executes that exact route.
+DeepSeek Flash supports the official `low` / `high` / `max` capability set. Atlas always selects `max` for both the isolated ZenMux catalog and Codex-native DeepSeek child profiles. Do not use compatibility aliases such as `medium` or `xhigh`, and never downshift to `high` when the host rejects `max`; classify the exact route as unavailable instead.
 
 - For a single implementation dispatch, honor an exact user-selected candidate only when its current writable route is available. Otherwise use Luna by default; choose DeepSeek Flash only after the exact ZenMux alias, custom profile, host admission, assignment delivery, tool loop, and required write/check behavior have passed under the implementer role. Direct-profile inference or a standalone tool call does not prove the native writable child route.
 - Keep one writer for a tightly coupled implementation lane. Never send the same writable packet to both Luna and DeepSeek, and never use duplicate writers in one shared checkout as implementation cross-validation. Use independent read-only exploration, review, or verification to cross-check implementation evidence.

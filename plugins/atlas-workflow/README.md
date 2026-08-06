@@ -77,11 +77,11 @@ The root-session provider is also unchanged. DeepSeek Flash is a child-local
 ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
 custom-agent profile, not in the root session. A bare DeepSeek `model` override
 on the inherited `explorer` or `implementer` role does not switch providers and
-must fail closed when the child metadata does not prove the ZenMux route. The
-native DeepSeek profiles use the current host-admitted `high` effort; the
-isolated ZenMux catalog and standalone profile may keep `max` as their default.
-Atlas does not call `high` a `max` execution and does not request native `max`
-until a fresh host schema advertises and successfully executes that exact route.
+must fail closed when the child metadata does not prove the ZenMux route. Every
+Atlas DeepSeek profile and catalog route uses `max`; Atlas never silently lowers
+the requested effort to `high` or another compatibility value. If the current
+host rejects native `max`, the exact DeepSeek child route is unavailable and
+falls back according to the lane policy without changing its configured effort.
 
 Routine implementation keeps Luna as the default single writer and offers
 `atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
