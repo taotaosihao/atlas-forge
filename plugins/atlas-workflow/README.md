@@ -73,68 +73,56 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
-The root-session provider is also unchanged. DeepSeek Flash is a child-local
-ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
-custom-agent profile, not in the root session. A bare DeepSeek `model` override
-on the inherited `explorer` or `implementer` role does not switch providers and
-must fail closed when the child metadata does not prove the ZenMux route. Every
-Atlas DeepSeek profile and catalog route uses `max`; Atlas never silently lowers
-the requested effort to `high` or another compatibility value. If the current
-host rejects native `max`, the exact DeepSeek child route is unavailable and
-falls back according to the lane policy without changing its configured effort.
+The root-session provider is also unchanged. Atlas routes a selected DeepSeek
+Flash alternative through Paseo's direct `deepseek` provider with model
+`deepseek-v4-flash:deepseek` and thinking `max`; Team never sends that model
+through native `spawn_agent`. The checked-in native DeepSeek profiles and
+isolated Codex catalog remain manual diagnostic compatibility surfaces only.
+They do not authorize a Team dispatch or a fallback through the inherited root
+provider.
 
-Routine implementation keeps Luna as the default single writer and offers
-`atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
-availability-gated ZenMux alternative with the exact same implementer
-instructions, inherited sandbox semantics, owned paths, acceptance inputs, and
-report contract. Atlas never sends the same writable packet to both candidates
+Routine implementation keeps Luna as the default native single writer and
+offers a Paseo `deepseek/deepseek-v4-flash:deepseek` attempt as an
+availability-gated alternative with the exact same goal, authority, owned
+paths, acceptance inputs, checks, stop condition, and report contract. Atlas
+never sends the same writable packet to both candidates
 or uses a shared checkout for duplicate-writer cross-validation. Concurrent
 Luna and DeepSeek implementation is allowed only for explicitly authorized,
 disjoint path ownership with an integration owner and the applicable
 lease/quiescence boundary. A writable fallback starts only after the previous
 writer is proven quiesced and its diff/untracked evidence is preserved.
 
-For read-heavy exploration, the Codex-routed alias
-`deepseek-v4-flash:deepseek` through the user's isolated ZenMux provider is an
-availability-gated alternative to Luna with the same read-only role contract.
-Its upstream ZenMux `/models` identity remains
-`deepseek/deepseek-v4-flash`; Atlas validates both boundaries and never guesses
-or interchanges the identifiers. Atlas keeps Luna as the ordinary
+For read-heavy exploration, the same Paseo DeepSeek route is an
+availability-gated alternative to Luna with the same read-only authority,
+input, and expected evidence contract. Paseo's direct provider currently
+exposes `auto` rather than an enforced Codex read-only sandbox, so Atlas uses
+Luna whenever technical read-only isolation is required and rejects any
+mutation from a DeepSeek exploration attempt. Atlas keeps Luna as the ordinary
 single-dispatch default, selects DeepSeek only for an explicit non-OpenAI
 perspective after a live route preflight, and dispatches both only when
 independent cross-checking materially lowers a named risk or the user
 explicitly requests it. Dual dispatch is never a fixed fan-out; the main Codex
 reconciles evidence and discloses any lost provider perspective.
 
-The DeepSeek profile keeps provider metadata in the managed custom-agent file
-but obtains authentication through `atlas-zenmux-bearer-token`, which reads the
-existing `~/.codex/zenmux-deepseek.config.toml` only when `CODEX_HOME` has mode
-700 and that profile has mode 600. The agent file and model catalog contain no
-credential. For Codex hosts that deliver a native custom-provider child an
-empty visible Payload plus OpenAI-encrypted content, Atlas writes the same
-self-contained packet to `atlas-native-agent-inbox` before the native
-`spawn_agent` call. The equivalent profiles read only the stable slot for their
-logical role when no plaintext assignment is visible; this is a 700/600
-assignment-transport compatibility path, not a child runner or Paseo fallback.
-Atlas deletes the packet only after the
-attempt is terminal and quiesced. Refuse-overwrite slots safely serialize
-affected DeepSeek attempts of the same role, while Luna and DeepSeek may still
-cross-check the same packet concurrently. Atlas still requires task-specific
-tool/check evidence before calling the route usable.
-`atlas-team-model-catalog` builds a credential-free root catalog
-projection from the official cache plus the isolated DeepSeek catalog. It
-preserves every official entry, promotes the exact Luna entry to
-`multi_agent_version=v2` only while the official catalog has not done so, and
-adds `deepseek-v4-flash:deepseek` as v2. The isolated entry must declare the
-official `low`, `high`, and `max` efforts exactly once and use `max` as Atlas's
-default. Point the user-level
-`model_catalog_json` at `~/.codex/model-catalogs/atlas-team.json`, regenerate it
-after either input catalog changes, and start a new task. This supplies normal
-catalog eligibility metadata; it does not bypass host allowlist, entitlement,
-or schema validation.
+Before a DeepSeek Paseo dispatch, Atlas reads the user orchestration preferences
+and requires the Atlas-specific implementation or research key to resolve to
+`deepseek/deepseek-v4-flash:deepseek`. It then checks the live provider/model
+catalog for the direct `deepseek` provider, exact model, `max`, and a callable
+mode. Implementation uses `full-access` only after write authorization;
+exploration uses `auto` with an explicit read-only contract. Agent creation or a
+text reply is only preflight; usable routing requires task-specific tool/check
+evidence. The exact `Invalid assistant message: content or tool_calls must be
+set` failure poisons that Paseo history, so Atlas never sends a follow-up to the
+same agent and instead quiesces it before one fresh attempt or Luna/main
+fallback.
 
-When Paseo is explicitly selected, Atlas discovers provider, model, and callable
-mode capability at runtime and never reads Paseo orchestration preferences.
+`atlas-team-model-catalog` remains a credential-free native Codex catalog
+projection for Luna eligibility and manual diagnostics. It cannot authorize a
+DeepSeek Team route, bypass host allowlists, or replace Paseo capability
+discovery.
+
+When Paseo is selected, Atlas reads Paseo orchestration preferences and then
+discovers provider, model, thinking, and callable mode capability at runtime.
 Provider mode IDs are not portable and must not be hardcoded or copied across
 providers. Generic routing may recommend only models whose trusted capability
 identity is explicitly non-Claude, including providers in Atlas's controlled
