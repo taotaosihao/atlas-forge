@@ -3,12 +3,13 @@ set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BIN="$ATLAS_FORGE_ROOT/workflow/bin/codex-web-acceptance"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-web-audit.XXXXXX")"
+RAW_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-web-audit.XXXXXX")"
 
 cleanup() {
-  rm -rf -- "$TMP_ROOT"
+  rm -rf -- "$RAW_TMP_ROOT"
 }
 trap cleanup EXIT
+TMP_ROOT="$(cd "$RAW_TMP_ROOT" && pwd -P)"
 
 expect_exit() {
   local expected="$1"
@@ -78,7 +79,7 @@ if (!value.findings.every((finding, index, all) => {
     (finding.column > previous.column || (finding.column === previous.column && finding.rule_id >= previous.rule_id)))));
 })) throw new Error('findings are not stable-sorted');
 NODE
-[[ "$(wc -l < "$TMP_ROOT/command.out")" == 1 ]]
+[[ "$(wc -l < "$TMP_ROOT/command.out" | tr -d '[:space:]')" == 1 ]]
 grep -Fq 'Atlas Web UI 静态审计' "$TMP_ROOT/command.err"
 
 expect_exit 2 "$BIN" audit --project "$project" --playwright-config playwright.config.ts --format json
@@ -155,19 +156,22 @@ const crypto = require('crypto');
 const fs = require('fs');
 let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c => input += c); process.stdin.on('end', () => {
   const value = JSON.parse(input); const mode = fs.existsSync('mode') ? fs.readFileSync('mode', 'utf8').trim() : 'pass';
+  fs.appendFileSync('adapter-starts.log', `${value.run_id}:${value.attempt}\n`);
   if (mode === 'non-json') return process.stdout.write('diagnostic on stdout\n');
   if (mode === 'secret') return process.stdout.write(JSON.stringify({protocol_version:'1',phase:value.phase,facts:{token:'exposed'},evidence_refs:[],failure_facts:[]})+'\n');
   if (mode === 'mutate-config') fs.appendFileSync('project.json', ' ');
   const status = mode === 'fail-first' && value.attempt === 1 ? 'failed' : ['failed','blocked','skipped','missing'].includes(mode) ? mode : 'passed';
-  const body = mode === 'secret-evidence' ? JSON.stringify({token:'exposed'}) : JSON.stringify({observed:true,attempt:value.attempt}); let file = `evidence-${value.phase}.json`; fs.writeFileSync(`${value.artifact_root}/${file}`, body);
+  const body = mode === 'secret-evidence' ? JSON.stringify({token:'exposed'}) : fs.existsSync('mixed-mode') ? JSON.stringify({observed:true}) : JSON.stringify({observed:true,attempt:value.attempt}); let file = `evidence-${value.phase}.json`; fs.writeFileSync(`${value.artifact_root}/${file}`, body);
   if (mode === 'escape') file='../outside.json';
   if (mode === 'symlink') { fs.writeFileSync(`${value.artifact_root}/target.json`, body); fs.unlinkSync(`${value.artifact_root}/${file}`); fs.symlinkSync('target.json', `${value.artifact_root}/${file}`); }
-  const output={protocol_version:mode==='wrong-protocol'?'2':'1',phase:value.phase,facts:{observed:true},evidence_refs:[{id:'ui-proof',claim_id:mode==='non-claim'?null:'ui-claim',status,path:file,sha256:mode==='bad-digest'?'0'.repeat(64):crypto.createHash('sha256').update(body).digest('hex')}],failure_facts:[]}; if(mode==='unknown-field')output.extra=true;
+  const output={protocol_version:mode==='wrong-protocol'?'2':'1',phase:value.phase,facts:{observed:true},evidence_refs:[{id:'ui-proof',claim_id:mode==='non-claim'?null:'ui-claim',status,path:file,sha256:mode==='bad-digest'?'0'.repeat(64):crypto.createHash('sha256').update(body).digest('hex')}],failure_facts:[]};
+  if (fs.existsSync('mixed-mode')) output.evidence_refs.push({id:'context-proof',claim_id:'context-claim',status,path:file,sha256:crypto.createHash('sha256').update(body).digest('hex')});
+  if(mode==='unknown-field')output.extra=true;
   process.stdout.write(JSON.stringify(output)+'\n');
 });
 NODE
 cat > "$protocol/validator.js" <<'NODE'
-const fs=require('fs');let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>{const value=JSON.parse(input),mode=fs.existsSync('validator-mode')?fs.readFileSync('validator-mode','utf8').trim():'pass';process.stdout.write(JSON.stringify({protocol_version:'1',validator_id:mode==='wrong-id'?'other':value.validator_id,claim_id:value.claim_id,input_digest:value.input_digest,evidence_digest:value.evidence_digest,status:mode==='failed'?'failed':'passed',reason:mode==='secret'?JSON.stringify({token:'exposed'}):'deterministic fixture validation'})+'\n');});
+const fs=require('fs');let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data',c=>input+=c); process.stdin.on('end',()=>{const value=JSON.parse(input),mode=fs.existsSync('validator-mode')?fs.readFileSync('validator-mode','utf8').trim():'pass';fs.appendFileSync('validator-inputs.log',input);let inputDigest=value.input_digest,evidenceDigest=value.evidence_digest;if(mode==='stale-context'&&value.run_context&&value.run_context.attempt===1)fs.writeFileSync('stale-context.json',JSON.stringify({inputDigest,evidenceDigest}));if(mode==='stale-context'&&value.run_context&&value.run_context.attempt===2){const stale=JSON.parse(fs.readFileSync('stale-context.json'));inputDigest=stale.inputDigest;evidenceDigest=stale.evidenceDigest;}process.stdout.write(JSON.stringify({protocol_version:'1',validator_id:mode==='wrong-id'?'other':value.validator_id,claim_id:value.claim_id,input_digest:inputDigest,evidence_digest:evidenceDigest,status:mode==='failed'?'failed':'passed',reason:mode==='secret'?JSON.stringify({token:'exposed'}):'deterministic fixture validation'})+'\n');});
 NODE
 cat > "$protocol/project.json" <<JSON
 {"schema_version":1,"protocol_version":"1","task_id":"web-fixture","scenario_id":"scenario-one","project_root":".","adapter":{"argv":["node","$protocol/adapter.js"]},"phases":["execute"],"validators":[{"id":"fixture-validator","claim_id":"ui-claim","argv":["node","$protocol/validator.js"]}],"required_evidence":[{"id":"ui-proof","claim_id":"ui-claim"}]}
@@ -179,6 +183,62 @@ NODE
 expect_exit 0 "$BIN" check-run --run-root "$protocol/runs/clean-run" --format json
 node - "$TMP_ROOT/command.out" <<'NODE'
 const value=JSON.parse(require('fs').readFileSync(process.argv[2])); if(!value.ok||value.technical_status!=='passed'||'verdict' in value||'accepted' in value)process.exit(1);
+NODE
+
+# Legacy validator stdin remains an exact byte golden, including key set and digests.
+cat > "$protocol/legacy-validator-input.golden" <<'EOF'
+{"claim_id":"ui-claim","evidence_digest":"453caa3abf7b0169f0eec0942ce00be3573f1d00bbbc57f528ac5cb4709afa76","evidence_refs":[{"claim_id":"ui-claim","id":"ui-proof","path":"evidence-execute.json","sha256":"abfdeb570c7359e5651db179c3f72f4029e169cc2114bb767de6b1c2b8c5ae2f","status":"passed"}],"facts":[{"observed":true}],"input_digest":"4082012cee5ad5964150ed4e450a872785dd633e667b30b5678052ca4c209c15","protocol_version":"1","validator_id":"fixture-validator"}
+EOF
+cmp -s "$protocol/legacy-validator-input.golden" "$protocol/validator-inputs.log"
+node - "$protocol/validator-inputs.log" <<'NODE'
+const value=JSON.parse(require('fs').readFileSync(process.argv[2],'utf8'));if('run_context'in value||value.input_digest!=='4082012cee5ad5964150ed4e450a872785dd633e667b30b5678052ca4c209c15'||value.evidence_digest!=='453caa3abf7b0169f0eec0942ce00be3573f1d00bbbc57f528ac5cb4709afa76')process.exit(1);
+NODE
+
+# Per-validator run-context@1 is opt-in; legacy and contextual validators can coexist.
+node - "$protocol/project.json" "$protocol/mixed-project.json" <<'NODE'
+const fs=require('fs'),value=JSON.parse(fs.readFileSync(process.argv[2]));value.validators.push({id:'context-validator',claim_id:'context-claim',argv:value.validators[0].argv,input_context:'run-context@1'});value.required_evidence.push({id:'context-proof',claim_id:'context-claim'});fs.writeFileSync(process.argv[3],JSON.stringify(value)+'\n');
+NODE
+: > "$protocol/validator-inputs.log"
+: > "$protocol/mixed-mode"
+expect_exit 0 "$BIN" run --project-config "$protocol/mixed-project.json" --contract "$protocol/contract.md" --artifact-root "$protocol/runs" --run-id mixed-run --attempts 2 --format json
+expect_exit 0 "$BIN" check-run --run-root "$protocol/runs/mixed-run" --format json
+node - "$protocol/validator-inputs.log" "$protocol/runs/mixed-run" <<'NODE'
+const c=require('crypto'),fs=require('fs'),p=require('path'),inputs=fs.readFileSync(process.argv[2],'utf8').trim().split('\n').map(JSON.parse),root=process.argv[3],stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v,sha=v=>c.createHash('sha256').update(`${JSON.stringify(stable(v))}\n`).digest('hex');
+const legacy=inputs.filter(v=>v.validator_id==='fixture-validator'),context=inputs.filter(v=>v.validator_id==='context-validator');if(legacy.length!==2||context.length!==2||legacy.some(v=>'run_context'in v)||legacy[0].input_digest!==legacy[1].input_digest||context[0].input_digest===context[1].input_digest)process.exit(1);
+for(const [index,value] of context.entries()){const attempt=index+1,expected={run_id:'mixed-run',attempt,artifact_root:p.join(root,`attempt-${attempt}`),contract_digest:value.run_context.contract_digest};if(Object.keys(value.run_context).length!==4||value.run_context.run_id!==expected.run_id||value.run_context.attempt!==attempt||value.run_context.artifact_root!==expected.artifact_root||value.run_context.contract_digest!==expected.contract_digest||value.input_digest!==sha({facts:value.facts,run_context:expected}))process.exit(1);}
+NODE
+
+# Unknown selectors are rejected while config is frozen, before the adapter starts.
+node - "$protocol/mixed-project.json" "$protocol/unknown-context.json" <<'NODE'
+const fs=require('fs'),value=JSON.parse(fs.readFileSync(process.argv[2]));value.validators[1].input_context='run-context@2';fs.writeFileSync(process.argv[3],JSON.stringify(value)+'\n');
+NODE
+adapter_starts_before="$(wc -l < "$protocol/adapter-starts.log" | tr -d '[:space:]')"
+expect_exit 1 "$BIN" run --project-config "$protocol/unknown-context.json" --contract "$protocol/contract.md" --artifact-root "$protocol/runs" --run-id unknown-context --format json
+grep -Fq 'input_context 不支持' "$TMP_ROOT/command.err"
+[[ "$adapter_starts_before" == "$(wc -l < "$protocol/adapter-starts.log" | tr -d '[:space:]')" ]]
+
+# A contextual validator cannot reuse attempt-1 closure for attempt 2.
+printf '%s\n' stale-context > "$protocol/validator-mode"
+: > "$protocol/validator-inputs.log"
+expect_exit 2 "$BIN" run --project-config "$protocol/mixed-project.json" --contract "$protocol/contract.md" --artifact-root "$protocol/runs" --run-id stale-context-run --attempts 2 --format json
+node - "$TMP_ROOT/command.out" <<'NODE'
+const value=JSON.parse(require('fs').readFileSync(process.argv[2]));if(value.result.attempts[0].status!=='passed'||value.result.attempts[1].status!=='failed'||value.result.technical_status!=='unstable')process.exit(1);
+NODE
+expect_exit 2 "$BIN" check-run --run-root "$protocol/runs/stale-context-run" --format json
+rm "$protocol/validator-mode" "$protocol/stale-context.json"
+
+# Rewriting attempt-2 input_digest to attempt 1 and closing the outer index is still rejected.
+cp -a "$protocol/runs/mixed-run" "$protocol/runs/tampered-context-digest"
+node - "$protocol/runs/tampered-context-digest" <<'NODE'
+const c=require('crypto'),fs=require('fs'),p=require('path'),root=process.argv[2],indexFile=p.join(root,'evidence-index.json'),resultFile=p.join(root,'run-result.json'),index=JSON.parse(fs.readFileSync(indexFile)),result=JSON.parse(fs.readFileSync(resultFile)),records=index.validators.filter(v=>v.validator_id==='context-validator');records[1].input_digest=records[0].input_digest;fs.writeFileSync(indexFile,JSON.stringify(index)+'\n');result.evidence_index_digest=c.createHash('sha256').update(fs.readFileSync(indexFile)).digest('hex');fs.writeFileSync(resultFile,JSON.stringify(result)+'\n');
+NODE
+expect_exit 1 "$BIN" check-run --run-root "$protocol/runs/tampered-context-digest" --format json
+grep -Fq 'validator closure 无效: context-validator' "$TMP_ROOT/command.err"
+rm "$protocol/mixed-mode"
+
+# Structured binding identifiers are scanner-safe; capture tokens remain forbidden.
+node - "$ATLAS_FORGE_ROOT/workflow/bin/lib/codex-web-acceptance/core.js" <<'NODE'
+const {containsSecret}=require(process.argv[2]);if(containsSecret({captureBindingId:'sha256:fixture'})||!containsSecret({captureToken:'opaque'}))process.exit(1);
 NODE
 
 printf '%s\n' fail-first > "$protocol/mode"
@@ -267,6 +327,9 @@ const values={
   'evidence-index':index,
 };
 for(const [name,value] of Object.entries(values)){const schema=path.join(lib,'contracts',`${name}.schema.json`);validateSchemaFile(schema,value);for(const mutation of ['unknown','missing','version']){const bad=structuredClone(value);if(mutation==='unknown')bad.__unknown=true;else if(mutation==='missing')delete bad[JSON.parse(fs.readFileSync(schema)).required[0]];else if('protocol_version'in bad)bad.protocol_version='invalid';else if('schema_version'in bad)bad.schema_version=999;else continue;let rejected=false;try{validateSchemaFile(schema,bad)}catch{rejected=true}if(!rejected)throw new Error(`${name} accepted ${mutation} fixture`);}}
+const contextProject=read(path.join(project,'mixed-project.json'));validateSchemaFile(path.join(lib,'contracts/project-config.schema.json'),contextProject);
+const contextInput={...values['validator-input'],validator_id:'context-validator',claim_id:'context-claim',run_context:{run_id:'schema-run',attempt:1,artifact_root:path.join(root,'attempt-1'),contract_digest:'0'.repeat(64)}};validateSchemaFile(path.join(lib,'contracts/validator-input.schema.json'),contextInput);
+for(const mutate of [v=>v.run_context.extra=true,v=>delete v.run_context.attempt,v=>v.run_context.attempt=0]){const bad=structuredClone(contextInput);mutate(bad);let rejected=false;try{validateSchemaFile(path.join(lib,'contracts/validator-input.schema.json'),bad)}catch{rejected=true}if(!rejected)throw new Error('validator-input accepted invalid run_context');}
 const nested=[['project-config',values['project-config'],v=>v.adapter.extra=true],['project-config',values['project-config'],v=>v.validators[0].argv='shell string'],['adapter-envelope',values['adapter-envelope'],v=>v.evidence_refs[0].extra=true],['adapter-envelope',values['adapter-envelope'],v=>delete v.evidence_refs[0].sha256],['validator-envelope',values['validator-envelope'],v=>v.status='unknown'],['run-result',values['run-result'],v=>v.attempts[0].reason='passed reason forbidden'],['evidence-index',values['evidence-index'],v=>v.validators[0].extra=true]];
 for(const [name,source,mutate] of nested){const bad=structuredClone(source);mutate(bad);let rejected=false;try{validateSchemaFile(path.join(lib,'contracts',`${name}.schema.json`),bad)}catch{rejected=true}if(!rejected)throw new Error(`${name} accepted nested negative`);}
 NODE
@@ -528,7 +591,7 @@ cp "$TMP_ROOT/command.out" "$TMP_ROOT/repo-distribution.json"
 expect_exit 0 "$sync_home/bin/codex-web-acceptance" audit --project "$clean" --playwright-config playwright.config.ts --source-root specs --format json
 cmp -s "$TMP_ROOT/repo-distribution.json" "$TMP_ROOT/command.out"
 
-forbidden_pattern="sharp[ -]?cell|workorder|devicetask|beezer|1366x768|127\\.0\\.0\\.1:5174|desktop chrome|chromium|planner|systemadmin|operator|plc_report_only|[\\\"']/login[\\\"']"
+forbidden_pattern="sharp[ -]?cell|workorder|devicetask|beezer|1366x768|127\\.0\\.0\\.1:5174|desktop chrome|chromium|planner|systemadmin|operator|plc_report_only|[\"']/login[\"']"
 if rg -n -i "$forbidden_pattern" "$BIN" "$ATLAS_FORGE_ROOT/workflow/bin/lib/codex-web-acceptance"; then
   printf 'Core contains a project-specific value\n' >&2
   exit 1

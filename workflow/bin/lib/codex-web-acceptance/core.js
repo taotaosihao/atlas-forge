@@ -7,6 +7,7 @@ const { spawnSync } = require("child_process");
 
 const TOOL = "codex-web-acceptance";
 const PROTOCOL = "1";
+const RUN_CONTEXT_SELECTOR = "run-context@1";
 const SECRET = /(?:authorization\s*[:=]|bearer\s+[a-z0-9._~+/=-]+|(?:password|passwd|token|secret|cookie|dsn|database_url)\s*[:=]\s*[^\s,;}]+|[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@)/i;
 class ContractError extends Error {}
 
@@ -29,6 +30,7 @@ function nonempty(value, label) { if (typeof value !== "string" || !value.trim()
 function argv(value, label) { if (!Array.isArray(value) || !value.length || value.some((part) => typeof part !== "string" || !part)) throw new ContractError(`${label} 必须是非空 argv 字符串数组`); }
 function readJson(file, label) { let value; try { value = JSON.parse(fs.readFileSync(file, "utf8")); } catch (error) { throw new ContractError(`${label} 不是合法 JSON: ${file}`); } return value; }
 function writeExclusive(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, stableJson(value), { flag: "wx", mode: 0o600 }); }
+function writeBytesExclusive(file, value) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, value, { flag: "wx", mode: 0o600 }); }
 
 function containsSecret(value) { if (Array.isArray(value)) return value.some(containsSecret); if (isObject(value)) return Object.entries(value).some(([key, child]) => /(?:authorization|password|passwd|token|cookie|secret|dsn|databaseurl|apikey)/.test(key.replace(/[-_]/g, "").toLowerCase()) || containsSecret(child)); if (typeof value !== "string") return false; if (SECRET.test(value)) return true; const trimmed = value.trim(); if (/^[{[]/.test(trimmed)) { try { return containsSecret(JSON.parse(trimmed)); } catch {} } return false; }
 function validateConfig(value, file, base = path.dirname(file)) {
@@ -40,7 +42,7 @@ function validateConfig(value, file, base = path.dirname(file)) {
   if (!Array.isArray(value.validators) || !value.validators.length || !Array.isArray(value.required_evidence) || !value.required_evidence.length) throw new ContractError("validators/required_evidence 必须是非空数组");
   const validatorIds = new Set();
   const validatorClaims = new Set();
-  for (const [index, item] of value.validators.entries()) { exactKeys(item, ["id", "claim_id", "argv"], [], `validators[${index}]`); nonempty(item.id, "validator id"); nonempty(item.claim_id, "validator claim_id"); argv(item.argv, "validator argv"); if (validatorIds.has(item.id)) throw new ContractError(`重复 validator id: ${item.id}`); validatorIds.add(item.id); }
+  for (const [index, item] of value.validators.entries()) { exactKeys(item, ["id", "claim_id", "argv"], ["input_context"], `validators[${index}]`); nonempty(item.id, "validator id"); nonempty(item.claim_id, "validator claim_id"); argv(item.argv, "validator argv"); if ("input_context" in item && item.input_context !== RUN_CONTEXT_SELECTOR) throw new ContractError(`validator input_context 不支持: ${item.input_context}`); if (validatorIds.has(item.id)) throw new ContractError(`重复 validator id: ${item.id}`); validatorIds.add(item.id); }
   const evidenceIds = new Set();
   for (const [index, item] of value.required_evidence.entries()) { exactKeys(item, ["id", "claim_id"], [], `required_evidence[${index}]`); nonempty(item.id, "evidence id"); nonempty(item.claim_id, "evidence claim_id"); if (evidenceIds.has(item.id)) throw new ContractError(`重复 evidence id: ${item.id}`); evidenceIds.add(item.id); }
   for (const item of value.validators) { if (validatorClaims.has(item.claim_id)) throw new ContractError(`required claim 必须只有一个 validator: ${item.claim_id}`); validatorClaims.add(item.claim_id); if (stableJson(item.argv) === stableJson(value.adapter.argv)) throw new ContractError(`validator 必须独立于 adapter: ${item.id}`); }
@@ -102,6 +104,32 @@ function validateAdapter(value, phase, attemptRoot) {
 }
 function evidenceDigest(refs) { return digest(stableJson(refs.map((ref) => ({ id: ref.id, claim_id: ref.claim_id, status: ref.status, path: ref.path, sha256: ref.sha256 })).sort((a, b) => a.id.localeCompare(b.id)))); }
 
+function canonicalAttemptRoot(attemptRoot) {
+  const resolved = path.resolve(attemptRoot);
+  if (fs.realpathSync(resolved) !== resolved) throw new ContractError("attempt artifact root 必须是 canonical non-symlink path");
+  return resolved;
+}
+
+function validatorInput(definition, facts, refs, authority) {
+  const runContext = definition.input_context === RUN_CONTEXT_SELECTOR ? {
+    run_id: authority.run_id,
+    attempt: authority.attempt,
+    artifact_root: canonicalAttemptRoot(authority.artifact_root),
+    contract_digest: authority.contract_digest,
+  } : null;
+  const inputDigest = digest(stableJson(runContext ? { facts, run_context: runContext } : facts));
+  return {
+    protocol_version: PROTOCOL,
+    validator_id: definition.id,
+    claim_id: definition.claim_id,
+    input_digest: inputDigest,
+    evidence_digest: evidenceDigest(refs),
+    facts,
+    evidence_refs: refs,
+    ...(runContext ? { run_context: runContext } : {}),
+  };
+}
+
 function runValidator(definition, input, cwd) {
   const value = execute(definition.argv, input, cwd, `validator ${definition.id}`);
   exactKeys(value, ["protocol_version", "validator_id", "claim_id", "input_digest", "evidence_digest", "status", "reason"], [], "validator envelope");
@@ -114,6 +142,10 @@ function runValidator(definition, input, cwd) {
 function run(options) {
   const configFile = path.resolve(options.projectConfig); const contractFile = path.resolve(options.contract); const artifactBase = path.resolve(options.artifactRoot);
   const rawConfig = fs.readFileSync(configFile); const config = validateConfig(JSON.parse(rawConfig), configFile);
+  if (options.allowedPhases !== undefined) {
+    if (!Array.isArray(options.allowedPhases) || !options.allowedPhases.length || options.allowedPhases.some((phase) => typeof phase !== "string" || !phase)) throw new ContractError("allowed phases policy 必须是非空字符串数组");
+    if (stableJson(config.phases) !== stableJson(options.allowedPhases)) throw new ContractError("project config phases 不符合固定代码 policy");
+  }
   if (!fs.statSync(contractFile, { throwIfNoEntry: false })?.isFile()) throw new ContractError(`contract 不存在: ${contractFile}`);
   const runId = options.runId || `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
   if (!/^[A-Za-z0-9._-]+$/.test(runId)) throw new ContractError("run-id 只能包含字母、数字、点、下划线和连字符");
@@ -121,7 +153,7 @@ function run(options) {
   const contractDigest = fileDigest(contractFile); const configDigest = digest(rawConfig);
   const manifest = { schema_version: 1, run_id: runId, task_id: config.task_id, scenario_id: config.scenario_id, config_base: path.dirname(configFile), contract_digest: contractDigest, config_digest: configDigest };
   writeExclusive(path.join(runRoot, "manifest.json"), manifest);
-  fs.copyFileSync(configFile, path.join(runRoot, "frozen-project-config.json"), fs.constants.COPYFILE_EXCL);
+  writeBytesExclusive(path.join(runRoot, "frozen-project-config.json"), rawConfig);
   fs.copyFileSync(contractFile, path.join(runRoot, "frozen-contract"), fs.constants.COPYFILE_EXCL);
   const verifyFrozenInputs = () => { if (fileDigest(configFile) !== configDigest || fileDigest(contractFile) !== contractDigest) throw new ContractError("contract 或 project config 在 run 中发生变化"); };
   const attempts = []; const allRefs = []; const allValidators = []; const attemptCount = options.attempts || 1;
@@ -138,10 +170,10 @@ function run(options) {
       const refs = phaseOutputs.flatMap((item) => item.evidence_refs);
       const byId = new Map(); for (const ref of refs) { if (byId.has(ref.id)) throw new ContractError(`重复 evidence id: ${ref.id}`); byId.set(ref.id, ref); }
       for (const required of config.required_evidence) { const ref = byId.get(required.id); if (!ref || ref.claim_id !== required.claim_id || ref.status !== "passed") throw new ContractError(`required evidence 未通过: ${required.id}`); }
-      const inputDigest = digest(stableJson(phaseOutputs.map((item) => item.facts))); const refsDigest = evidenceDigest(refs);
       for (const definition of config.validators) {
         verifyFrozenInputs();
-        const value = runValidator(definition, { protocol_version: PROTOCOL, validator_id: definition.id, claim_id: definition.claim_id, input_digest: inputDigest, evidence_digest: refsDigest, facts: phaseOutputs.map((item) => item.facts), evidence_refs: refs }, config.project_root); verifyFrozenInputs();
+        const input = validatorInput(definition, phaseOutputs.map((item) => item.facts), refs, { run_id: runId, attempt, artifact_root: attemptRoot, contract_digest: contractDigest });
+        const value = runValidator(definition, input, config.project_root); verifyFrozenInputs();
         allValidators.push({ ...value, attempt }); if (value.status !== "passed") throw new ContractError(`required validator 未通过: ${definition.id}`);
       }
       if (failureClass) throw new ContractError(`adapter 登记 failure class: ${failureClass}`);
@@ -195,8 +227,7 @@ function checkRun(options) {
     let derivedStatus = "passed"; let derivedReason = null; let derivedClass = null;
     const failureFact = record.phases.flatMap((phase) => phase.failure_facts)[0]; if (failureFact) { derivedStatus = "failed"; derivedReason = `adapter 登记 failure class: ${failureFact.class}`; derivedClass = failureFact.class; }
     for (const required of config.required_evidence) { const ref = byId.get(required.id); if (!ref || ref.claim_id !== required.claim_id || ref.status !== "passed") { derivedStatus = "failed"; derivedReason = `required evidence 未通过: ${required.id}`; derivedClass ||= "protocol"; break; } }
-    const inputDigest = digest(stableJson(record.phases.map((phase) => phase.facts))); const refsDigest = evidenceDigest(refs);
-    for (const definition of config.validators) { const matches = index.validators.filter((item) => item.attempt === listed.attempt && item.validator_id === definition.id); if (derivedStatus === "passed" && matches.length !== 1) { derivedStatus = "failed"; derivedReason = `validator 数量无效: ${definition.id}`; derivedClass = "protocol"; break; } if (matches.length > 1) throw new ContractError(`重复 validator record: ${definition.id}`); if (matches.length) { const value = matches[0]; exactKeys(value, ["protocol_version", "validator_id", "claim_id", "input_digest", "evidence_digest", "status", "reason", "attempt"], [], "validator record"); if (value.protocol_version !== PROTOCOL || value.claim_id !== definition.claim_id || value.input_digest !== inputDigest || value.evidence_digest !== refsDigest || value.status !== "passed") { derivedStatus = "failed"; derivedReason = `validator closure 无效: ${definition.id}`; derivedClass = "protocol"; break; } } }
+    for (const definition of config.validators) { const matches = index.validators.filter((item) => item.attempt === listed.attempt && item.validator_id === definition.id); if (derivedStatus === "passed" && matches.length !== 1) { derivedStatus = "failed"; derivedReason = `validator 数量无效: ${definition.id}`; derivedClass = "protocol"; break; } if (matches.length > 1) throw new ContractError(`重复 validator record: ${definition.id}`); if (matches.length) { const value = matches[0]; const expectedInput = validatorInput(definition, record.phases.map((phase) => phase.facts), refs, { run_id: manifest.run_id, attempt: listed.attempt, artifact_root: path.dirname(attemptFile), contract_digest: manifest.contract_digest }); exactKeys(value, ["protocol_version", "validator_id", "claim_id", "input_digest", "evidence_digest", "status", "reason", "attempt"], [], "validator record"); if (value.protocol_version !== PROTOCOL || value.claim_id !== definition.claim_id || value.input_digest !== expectedInput.input_digest || value.evidence_digest !== expectedInput.evidence_digest || value.status !== "passed") { derivedStatus = "failed"; derivedReason = `validator closure 无效: ${definition.id}`; derivedClass = "protocol"; break; } } }
     if (listed.reason !== record.reason) throw new ContractError("attempt reason 与证据闭包不一致");
     if (listed.status !== derivedStatus || record.status !== derivedStatus || listed.failure_class !== record.failure_class || (derivedStatus === "passed" && listed.failure_class !== null) || (derivedClass && listed.failure_class !== derivedClass)) throw new ContractError(derivedReason || "attempt status/failure class 与证据闭包不一致");
     expectedAttempts.push(listed);
