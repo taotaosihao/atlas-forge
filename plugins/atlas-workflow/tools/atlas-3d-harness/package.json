@@ -1,0 +1,35 @@
+{
+  "name": "@atlas-workflow/atlas-3d-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reviewed-local browser 3D acceptance harness",
+  "type": "commonjs",
+  "engines": {
+    "node": "24.15.0",
+    "npm": "11.12.1"
+  },
+  "packageManager": "npm@11.12.1",
+  "bin": {
+    "atlas-3d-harness": "bin/atlas-3d-harness.cjs"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/**/*.test.cjs",
+    "test:envelope": "node --test test/integration/envelope.test.cjs",
+    "test:bridge": "node --test test/browser/bridge.test.cjs",
+    "test:browser": "node --test --test-concurrency=1 test/browser/served-thin-slice.test.cjs",
+    "test:driver": "node --test test/browser/driver.test.cjs",
+    "test:faults": "node --test test/domain/faults.test.cjs",
+    "test:compare": "node --test --test-concurrency=1 test/domain/compare.test.cjs",
+    "test:isolation": "node --test --test-concurrency=1 test/browser/isolation.test.cjs",
+    "test:launcher": "node --test --test-concurrency=1 test/integration/launcher.test.cjs",
+    "test:installer": "node --test test/integration/installer.test.cjs",
+    "test:limits": "node --test test/integration/limits.test.cjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "gl-matrix": "3.4.4",
+    "playwright-core": "1.61.1",
+    "pngjs": "7.0.0",
+    "three": "0.185.1"
+  }
+}

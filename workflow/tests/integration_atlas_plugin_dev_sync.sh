@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 UPDATE_SCRIPT="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-plugin"
 SYNC_SCRIPT="$ATLAS_FORGE_ROOT/scripts/sync-live-atlas-workflow.sh"
-TMP_ROOT="$(mktemp -d)"
+TMP_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 REAL_RSYNC="$(command -v rsync)"
+EXPECTED_PLUGIN_FILTER_ARGS=(
+  '--exclude=/tools/atlas-3d-harness/node_modules/'
+  '--exclude=/tools/atlas-3d-harness/.local/'
+  '--exclude=/tools/atlas-3d-harness/runs/'
+  '--exclude=/tools/atlas-3d-harness/artifacts/'
+  '--exclude=/tools/atlas-3d-harness/runtime-config.local.json'
+  '--exclude=/tools/atlas-3d-harness/*.log'
+)
 
 pass() {
   printf 'ok - %s\n' "$1"
@@ -33,15 +42,19 @@ fingerprint() {
 
   (
     cd "$target"
-    find . -type d -printf 'dir %p\n' | LC_ALL=C sort
+    find . -type d -print | LC_ALL=C sort | sed 's/^/dir /'
     find . -type f -print0 \
       | LC_ALL=C sort -z \
       | while IFS= read -r -d '' file; do
           printf 'file %s ' "$file"
           sha256sum "$file" | awk '{print $1}'
         done
-    find . -type l -printf 'link %p -> %l\n' | LC_ALL=C sort
-    find . -type p -printf 'fifo %p\n' | LC_ALL=C sort
+    find . -type l -print0 \
+      | LC_ALL=C sort -z \
+      | while IFS= read -r -d '' file; do
+          printf 'link %s -> %s\n' "$file" "$(readlink "$file")"
+        done
+    find . -type p -print | LC_ALL=C sort | sed 's/^/fifo /'
   ) | sha256sum | awk '{print $1}'
 }
 
@@ -53,6 +66,27 @@ assert_fingerprint() {
 
   actual="$(fingerprint "$target")"
   [[ "$actual" == "$expected" ]] || fail "$label changed: $target"
+}
+
+assert_filtered_plugin_copy() {
+  local source="$1"
+  local target="$2"
+  local label="$3"
+  local changes
+  local tool="$target/tools/atlas-3d-harness"
+
+  changes="$(rsync -ani --delete --delete-excluded \
+    "${EXPECTED_PLUGIN_FILTER_ARGS[@]}" "$source/" "$target/")"
+  [[ -z "$changes" ]] || fail "$label differs from filtered plugin source: $changes"
+  [[ ! -e "$tool/node_modules" ]]
+  [[ ! -e "$tool/.local" ]]
+  [[ ! -e "$tool/runs" ]]
+  [[ ! -e "$tool/artifacts" ]]
+  [[ ! -e "$tool/runtime-config.local.json" ]]
+  [[ ! -e "$tool/runtime-generated.log" ]]
+  if find "$target" -name '.atlas-3d-browser-cache-must-not-sync' -print -quit | grep -q .; then
+    fail "$label absorbed the repo-level Atlas 3D browser cache"
+  fi
 }
 
 write_marketplace() {
@@ -103,7 +137,7 @@ assert_allowed_codex_tree() {
       plugins/cache/local-atlas|plugins/cache/local-atlas/atlas-workflow|plugins/cache/local-atlas/atlas-workflow/local|plugins/cache/local-atlas/atlas-workflow/local/*) ;;
       *) fail "unexpected CODEX_HOME_ROOT write: $relative" ;;
     esac
-  done < <(find "$codex_home_root" -mindepth 1 -printf '%P\n' | LC_ALL=C sort)
+  done < <(cd "$codex_home_root" && find . -mindepth 1 -print | sed 's#^\./##' | LC_ALL=C sort)
 }
 
 run_success_case() {
@@ -155,9 +189,11 @@ run_success_case() {
   grep -q 'ok - atlas plugin integrity contract' "$output"
   grep -q 'refreshed local-atlas installed cache atomically' "$output"
   grep -q 'No atlas-forge marketplace snapshot or release cache was changed' "$output"
-  diff -qr "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$local_source" >/dev/null
-  diff -qr "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$local_cache" >/dev/null
-  pass 'dev refresh keeps repo source, local source, and local-atlas cache equal'
+  assert_filtered_plugin_copy "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$local_source" 'local plugin source'
+  assert_filtered_plugin_copy "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$local_cache" 'local-atlas plugin cache'
+  diff -qr "$local_source" "$local_cache" >/dev/null
+  pass 'dev refresh keeps filtered repo source, local source, and local-atlas cache equal'
+  pass 'dev refresh excludes Atlas 3D dependencies, runtime state, and browser cache'
 
   for directory_name in bin hooks templates tests; do
     diff -qr "$ATLAS_FORGE_ROOT/workflow/$directory_name" "$workflow_root/$directory_name" >/dev/null
@@ -236,8 +272,12 @@ assert_preflight_failure() {
   fi
 
   assert_fingerprint "$label CODEX_HOME_ROOT" "$codex_home_root" "$before"
-  [[ ! -e "$home" && ! -e "$codex_home" && ! -e "$workflow_root" && ! -e "$agents_home" && ! -e "$local_bin" ]] \
-    || fail "$label wrote outside the marketplace fixture"
+  if [[ -e "$home" || -e "$codex_home" || -e "$workflow_root" || -e "$agents_home" || -e "$local_bin" ]]; then
+    for unexpected in "$home" "$codex_home" "$workflow_root" "$agents_home" "$local_bin"; do
+      [[ ! -e "$unexpected" ]] || printf 'unexpected preflight path: %s\n' "$unexpected" >&2
+    done
+    fail "$label wrote outside the marketplace fixture"
+  fi
   pass "$label fails before every runtime write"
 }
 
@@ -489,18 +529,20 @@ run_updater_sync_failure_case() {
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
-    'count=0' \
-    '[[ ! -f "$RSYNC_CALL_COUNTER" ]] || count="$(<"$RSYNC_CALL_COUNTER")"' \
-    'count=$((count + 1))' \
-    'printf "%s\\n" "$count" > "$RSYNC_CALL_COUNTER"' \
-    'if [[ "$count" -eq 3 ]]; then exit 42; fi' \
+    'for argument in "$@"; do' \
+    '  if [[ "$argument" == "$WORKFLOW_SYNC_SOURCE" ]]; then' \
+    '    printf "%s\\n" injected > "$RSYNC_INJECTION_MARKER"' \
+    '    exit 42' \
+    '  fi' \
+    'done' \
     'exec "$REAL_RSYNC" "$@"' \
     > "$fake_bin/rsync"
   chmod +x "$fake_bin/rsync"
 
   if PATH="$fake_bin:$PATH" \
     REAL_RSYNC="$REAL_RSYNC" \
-    RSYNC_CALL_COUNTER="$case_root/rsync-count" \
+    WORKFLOW_SYNC_SOURCE="$ATLAS_FORGE_ROOT/workflow/bin/" \
+    RSYNC_INJECTION_MARKER="$case_root/rsync-injected" \
     HOME="$home" \
     CODEX_HOME="$codex_home" \
     CODEX_HOME_ROOT="$codex_home_root" \
@@ -511,15 +553,21 @@ run_updater_sync_failure_case() {
     fail 'updater-level sync copy failure unexpectedly passed'
   fi
 
-  [[ "$(<"$case_root/rsync-count")" == 3 ]]
+  [[ "$(<"$case_root/rsync-injected")" == injected ]]
   assert_fingerprint 'updater rollback CODEX_HOME_ROOT' "$codex_home_root" "$codex_before"
   assert_fingerprint 'updater rollback workflow roots' "$workflow_root" "$workflow_before"
   assert_fingerprint 'updater rollback Codex agents' "$codex_home_root/agents" "$agents_before"
   assert_fingerprint 'updater rollback command shims' "$local_bin" "$bin_before"
   assert_fingerprint 'updater rollback legacy agents' "$agents_home" "$legacy_before"
   assert_no_transaction_debris "$codex_home_root"
-  grep -q 'managed targets were preserved' "$output"
-  grep -q 'restored previous local plugin source and local-atlas cache' "$output"
+  grep -q 'managed targets were preserved' "$output" || {
+    sed -n '1,200p' "$output" >&2
+    fail 'updater sync failure did not preserve managed targets'
+  }
+  grep -q 'restored previous local plugin source and local-atlas cache' "$output" || {
+    sed -n '1,200p' "$output" >&2
+    fail 'updater sync failure did not roll back development plugin copies'
+  }
   pass 'updater sync failure rolls back local copies and preserves all managed runtime targets'
 }
 
@@ -667,6 +715,51 @@ run_fifo_failure_case() {
   grep -q 'unsupported entry' "$output"
   pass 'FIFO source is rejected before either existing development copy changes'
 }
+
+run_isolated_source_fixture() {
+  local source_root="$ATLAS_FORGE_ROOT"
+  local fixture_root="$TMP_ROOT/source-fixture"
+  local multica_root="$fixture_root/plugins/multica-sdlc"
+  local browser_cache="$fixture_root/.tmp/atlas-3d-harness/playwright-browsers"
+  local tool_root="$fixture_root/plugins/atlas-workflow/tools/atlas-3d-harness"
+  local multica_before browser_before
+
+  mkdir -p "$fixture_root"
+  rsync -a \
+    --exclude='/.git/' \
+    --exclude='/.tmp/' \
+    --exclude='/.agents/' \
+    --exclude='/plugins/cache/' \
+    --exclude='/cache/' \
+    --exclude='/plugins/multica-sdlc/' \
+    --exclude='/workflow/artifacts/' \
+    --exclude='node_modules/' \
+    "$source_root/" "$fixture_root/"
+
+  mkdir -p "$tool_root/node_modules" "$tool_root/.local" "$tool_root/runs" \
+    "$tool_root/artifacts" "$browser_cache" "$multica_root"
+  printf '%s\n' 'NODE-MODULES-MUST-NOT-SYNC' > "$tool_root/node_modules/.atlas-3d-node-modules-must-not-sync"
+  printf '%s\n' 'LOCAL-RUNTIME-MUST-NOT-SYNC' > "$tool_root/.local/runtime.json"
+  printf '%s\n' 'RUN-ROOT-MUST-NOT-SYNC' > "$tool_root/runs/run.json"
+  printf '%s\n' 'ARTIFACT-MUST-NOT-SYNC' > "$tool_root/artifacts/evidence.json"
+  printf '%s\n' 'LOCAL-CONFIG-MUST-NOT-SYNC' > "$tool_root/runtime-config.local.json"
+  printf '%s\n' 'LOCAL-LOG-MUST-NOT-SYNC' > "$tool_root/runtime-generated.log"
+  printf '%s\n' 'BROWSER-CACHE-MUST-NOT-SYNC' > "$browser_cache/.atlas-3d-browser-cache-must-not-sync"
+  printf '%s\n' 'MULTICA-SOURCE-MUST-NOT-CHANGE' > "$multica_root/sentinel"
+
+  multica_before="$(fingerprint "$multica_root")"
+  browser_before="$(fingerprint "$fixture_root/.tmp/atlas-3d-harness")"
+  ATLAS_DEV_SYNC_FIXTURE=1 ATLAS_FORGE_ROOT="$fixture_root" \
+    "$fixture_root/workflow/tests/integration_atlas_plugin_dev_sync.sh"
+  assert_fingerprint 'isolated Multica source sentinel' "$multica_root" "$multica_before"
+  assert_fingerprint 'isolated repo browser cache' "$fixture_root/.tmp/atlas-3d-harness" "$browser_before"
+  pass 'isolated source fixture preserves Multica and repo-level browser runtime state'
+}
+
+if [[ "${ATLAS_DEV_SYNC_FIXTURE:-0}" != 1 ]]; then
+  run_isolated_source_fixture
+  exit 0
+fi
 
 bash -n "$UPDATE_SCRIPT" "$SYNC_SCRIPT"
 run_success_case

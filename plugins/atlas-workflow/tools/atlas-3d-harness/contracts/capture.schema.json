@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-capture@1",
+  "type": "object",
+  "required": ["schema_version", "captureBindingId", "raw", "transport", "canonical", "png"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "captureBindingId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "raw": {"$ref": "atlas-3d-raw-capture@1"}, "transport": {"$ref": "atlas-3d-transport@1"}, "canonical": {"$ref": "atlas-3d-canonical-state@1"},
+    "png": {"type": "object", "required": ["path", "sha256", "width", "height", "non_empty_pixels"], "properties": {"path": {"type": "string", "pattern": "^png/vp-[1-9][0-9]{0,3}x[1-9][0-9]{0,3}-dpr-[0-9]+(?:p[0-9]+)?/view-[a-z][a-z0-9-]{0,31}/checkpoint-[a-z][a-z0-9-]{0,31}\\.png$", "maxLength": 180}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "width": {"type": "integer", "minimum": 1, "maximum": 8192}, "height": {"type": "integer", "minimum": 1, "maximum": 8192}, "non_empty_pixels": {"type": "integer", "minimum": 1}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

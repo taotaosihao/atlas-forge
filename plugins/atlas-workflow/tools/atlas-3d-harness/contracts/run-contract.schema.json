@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-run-contract@1",
+  "type": "object",
+  "required": ["schema_version", "scenario", "runtime", "resources", "provenance", "limits"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scenario": {"$ref": "atlas-3d-scenario@1"},
+    "runtime": {"$ref": "atlas-3d-runtime-config@1"},
+    "resources": {"type": "object", "required": ["index", "scene", "page_adapter", "three", "three_core"], "properties": {"index": {"$ref": "#/$defs/digest"}, "scene": {"$ref": "#/$defs/digest"}, "page_adapter": {"$ref": "#/$defs/digest"}, "three": {"$ref": "#/$defs/digest"}, "three_core": {"$ref": "#/$defs/digest"}}, "additionalProperties": false},
+    "provenance": {"$ref": "atlas-3d-provenance@1"},
+    "limits": {"type": "object", "required": ["max_pixels", "max_png_bytes", "max_raw_bytes", "max_canonical_bytes", "max_adapter_stdout_bytes", "max_response_bytes", "max_capture_count", "max_network_events", "max_console_events", "max_lifecycle_events", "max_evidence_refs", "max_temp_files", "max_temp_bytes", "max_worker_stdout_bytes", "max_worker_stderr_bytes"], "properties": {"max_pixels": {"const": 16777216}, "max_png_bytes": {"const": 16777216}, "max_raw_bytes": {"const": 4194304}, "max_canonical_bytes": {"const": 4194304}, "max_adapter_stdout_bytes": {"const": 1048576}, "max_response_bytes": {"const": 33554432}, "max_capture_count": {"const": 12}, "max_network_events": {"const": 256}, "max_console_events": {"const": 256}, "max_lifecycle_events": {"const": 256}, "max_evidence_refs": {"const": 25}, "max_temp_files": {"const": 128}, "max_temp_bytes": {"const": 134217728}, "max_worker_stdout_bytes": {"const": 1048576}, "max_worker_stderr_bytes": {"const": 1048576}}, "additionalProperties": false}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}},
+  "additionalProperties": false
+}

@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"atlas-3d-transport@1","type":"object","required":["pre","post","served","browser_version","launch_argv","actual_launch_argv","actual_launch_argv_digest","owned_browser_pid","process_audit"],
+  "properties":{
+    "pre":{"$ref":"#/$defs/geometry"},"post":{"$ref":"#/$defs/geometry"},
+    "served":{"type":"object","required":["index","scene","page_adapter","three","three_core"],"properties":{"index":{"$ref":"#/$defs/resource"},"scene":{"$ref":"#/$defs/resource"},"page_adapter":{"$ref":"#/$defs/resource"},"three":{"$ref":"#/$defs/resource"},"three_core":{"$ref":"#/$defs/resource"}},"additionalProperties":false},
+    "browser_version":{"const":"149.0.7827.55"},"launch_argv":{"const":["playwright-core@1.61.1","chromium","--headless=new"]},"actual_launch_argv":{"type":"array","minItems":10,"maxItems":100,"items":{"type":"string","minLength":1}},"actual_launch_argv_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"owned_browser_pid":{"type":"integer","minimum":1},"process_audit":{"type":"object","required":["process_count","real_user_library_refs","owned_runtime_refs"],"properties":{"process_count":{"type":"integer","minimum":1},"real_user_library_refs":{"const":0},"owned_runtime_refs":{"type":"integer","minimum":1}},"additionalProperties":false}
+  },
+  "$defs":{
+    "geometry":{"type":"object","required":["x","y","width","height","scroll_x","scroll_y","viewport_width","viewport_height","dpr","drawing_buffer_width","drawing_buffer_height"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","exclusiveMinimum":0,"maximum":4096},"height":{"type":"number","exclusiveMinimum":0,"maximum":4096},"scroll_x":{"type":"number"},"scroll_y":{"type":"number"},"viewport_width":{"type":"integer","minimum":1,"maximum":4096},"viewport_height":{"type":"integer","minimum":1,"maximum":4096},"dpr":{"type":"number","exclusiveMinimum":0,"maximum":2},"drawing_buffer_width":{"type":"integer","minimum":1,"maximum":8192},"drawing_buffer_height":{"type":"integer","minimum":1,"maximum":8192}},"additionalProperties":false},
+    "resource":{"type":"object","required":["path","sha256","bytes"],"properties":{"path":{"type":"string","pattern":"^/"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"bytes":{"type":"integer","minimum":1,"maximum":33554432}},"additionalProperties":false}
+  },"additionalProperties":false
+}

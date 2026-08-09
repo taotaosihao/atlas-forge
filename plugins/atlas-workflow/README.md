@@ -19,6 +19,7 @@ After the plugin is installed, these entrypoints are available:
 - `$atlas-workflow:design-review`
 - `$atlas-workflow:worktree`
 - `$atlas-workflow:finish`
+- `$atlas-workflow:3d-harness` (source-checkout exploration only)
 
 Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
@@ -321,6 +322,12 @@ staffing, evidence, checklist, or phase files solely to satisfy a file list.
 
 Do not treat `plugins/cache/` as the source of truth.
 
+`$atlas-workflow:3d-harness` is currently available only from this Atlas Forge
+source checkout on its frozen Apple Silicon Mac/Node profile. It reuses the
+existing `codex-web-acceptance` evidence kernel and never installs dependencies,
+downloads Chromium, refreshes cache, or makes release claims automatically. See
+[`tools/atlas-3d-harness/README.md`](tools/atlas-3d-harness/README.md).
+
 ## Refresh After Changes
 
 Refresh the installed development copy only when the task explicitly includes an
@@ -353,3 +360,5 @@ primitive used by the update command.
 - `skills/design-review/SKILL.md`: design fidelity review entry
 - `skills/worktree/SKILL.md`: isolated git worktree entry
 - `skills/finish/SKILL.md`: isolated branch completion entry
+- `skills/3d-harness/SKILL.md`: source-checkout-only reviewed-local 3D acceptance entry
+- `tools/atlas-3d-harness/README.md`: 3D runtime CLI, evidence, safety, and host limits
