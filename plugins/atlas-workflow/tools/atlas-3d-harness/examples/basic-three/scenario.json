@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "scenario_id": "basic-three",
+  "trust_profile": "reviewed-local@1",
+  "fixture": {"id": "basic-three@1"},
+  "expected": {
+    "semantics": {
+      "units": "meters-radians@1",
+      "coordinate_system": "right-handed-y-up-negative-z-forward@1",
+      "matrix_layout": "column-major@1",
+      "quaternion_layout": "xyzw@1",
+      "composition": "parent-world-times-local@1",
+      "joint_axis_frame": "joint-local@1",
+      "transform_precedence": "trs-first@1",
+      "finite_policy": "finite-only-normalize-negative-zero@1",
+      "quaternion_policy": "normalized-tolerance-1e-6@1",
+      "quantization_policy": "nearest-1e-6-half-away-from-zero@1"
+    },
+    "scene": {"nodes": [{
+      "id": "reference-cube", "parent_id": "joint-visual",
+      "translation": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1],
+      "states": [
+        {"checkpoint": "home", "parent_world_matrix": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1], "world_matrix": [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1], "aabb_min": [-1,-1,-1], "aabb_max": [1,1,1]},
+        {"checkpoint": "mid", "parent_world_matrix": [0.877582562,0,-0.479425539,0,0,1,0,0,0.479425539,0,0.877582562,0,0,0,0,1], "world_matrix": [0.877582562,0,-0.479425539,0,0,1,0,0,0.479425539,0,0.877582562,0,0,0,0,1], "aabb_min": [-1.357008101,-1,-1.357008101], "aabb_max": [1.357008101,1,1.357008101]},
+        {"checkpoint": "settled", "parent_world_matrix": [0.540302306,0,-0.841470985,0,0,1,0,0,0.841470985,0,0.540302306,0,0,0,0,1], "world_matrix": [0.540302306,0,-0.841470985,0,0,1,0,0,0.841470985,0,0.540302306,0,0,0,0,1], "aabb_min": [-1.381773291,-1,-1.381773291], "aabb_max": [1.381773291,1,1.381773291]}
+      ]
+    }]},
+    "timeline": [
+      {"name": "home", "time_ms": 0, "joint_radians": 0},
+      {"name": "mid", "time_ms": 500, "joint_radians": 0.5},
+      {"name": "settled", "time_ms": 1000, "joint_radians": 1}
+    ],
+    "views": [
+      {"name": "hero", "camera_world_inverse": [0.832050323,-0.21306625,0.512147546,0,0,0.923287094,0.38411063,0,-0.554700196,-0.31959936,0.768221259,0,0,0,-7.810249805,1], "projection_matrix": [1.608380198,0,0,0,0,2.144506931,0,0,0,0,-1.002002001,-1,0,0,-0.2002002,0], "near": 0.1, "far": 100, "visible": true, "projected_shares": [{"checkpoint":"home","value":0.121817},{"checkpoint":"mid","value":0.190336},{"checkpoint":"settled","value":0.195666}]},
+      {"name": "profile", "camera_world_inverse": [0.554700196,-0.222374797,0.801783741,0,0,0.96362412,0.267261237,0,-0.832050323,-0.148249865,0.534522474,0,0,0,-7.483314991,1], "projection_matrix": [1.608380198,0,0,0,0,2.144506931,0,0,0,0,-1.002002001,-1,0,0,-0.2002002,0], "near": 0.1, "far": 100, "visible": true, "projected_shares": [{"checkpoint":"home","value":0.120812},{"checkpoint":"mid","value":0.184607},{"checkpoint":"settled","value":0.189536}]}
+    ],
+    "render": {"min_non_empty_pixels": 1, "same_render_required": true}
+  },
+  "required_capabilities": ["scene.graph@1", "scene.transforms@1", "timeline.seek@1", "render.metrics@1"],
+  "required_profiles": [],
+  "checkpoints": [{"name":"home","time_ms":0},{"name":"mid","time_ms":500},{"name":"settled","time_ms":1000}],
+  "views": ["hero", "profile"],
+  "viewports": [{"width":640,"height":480,"device_scale_factor":1},{"width":800,"height":600,"device_scale_factor":1}],
+  "seed": 7,
+  "epoch_ms": 1785542400000
+}

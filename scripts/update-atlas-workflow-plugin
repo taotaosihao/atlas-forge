@@ -13,6 +13,17 @@ ATLAS_PLUGIN_INTEGRITY="$REPO_ROOT/workflow/bin/atlas-plugin-integrity"
 ATLAS_SYNC_HELPER="$REPO_ROOT/scripts/sync-live-atlas-workflow.sh"
 PLUGIN_CREATOR_VALIDATE_SCRIPT="${PLUGIN_CREATOR_VALIDATE_SCRIPT:-${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py}"
 
+# Development copies contain source only. Keep every runtime-only Atlas 3D path
+# here so staging and equality verification share one auditable filter contract.
+PLUGIN_SYNC_FILTER_ARGS=(
+  '--exclude=/tools/atlas-3d-harness/node_modules/'
+  '--exclude=/tools/atlas-3d-harness/.local/'
+  '--exclude=/tools/atlas-3d-harness/runs/'
+  '--exclude=/tools/atlas-3d-harness/artifacts/'
+  '--exclude=/tools/atlas-3d-harness/runtime-config.local.json'
+  '--exclude=/tools/atlas-3d-harness/*.log'
+)
+
 DRY_RUN=0
 RUN_CONTRACT=0
 SKIP_VALIDATE=0
@@ -246,18 +257,23 @@ validate_plugin() {
   fi
 }
 
-verify_tree() {
+verify_filtered_plugin_tree() {
   local source="$1"
   local target="$2"
   local label="$3"
+  local changes
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "would verify $label with diff -qr"
+    log "would verify $label with the Atlas 3D runtime exclusion contract"
     return
   fi
 
   [[ -d "$target" ]] || die "missing $label target: $target"
-  diff -qr "$source" "$target" >/dev/null
+  if ! changes="$(rsync -ani --delete --delete-excluded \
+      "${PLUGIN_SYNC_FILTER_ARGS[@]}" "$source/" "$target/")"; then
+    die "failed to verify $label"
+  fi
+  [[ -z "$changes" ]] || die "$label differs from the filtered repo plugin source"
   log "verified $label"
 }
 
@@ -279,14 +295,16 @@ refresh_development_plugin_copies() {
   local cache_stage=""
   local source_backup=""
   local cache_backup=""
+  local changes=""
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "would sync atlas-workflow source to local plugin source:"
     log "  source: $PLUGIN_SOURCE"
     log "  target: $LOCAL_PLUGIN_SOURCE"
-    log "would verify local plugin source with diff -qr"
+    log "would exclude Atlas 3D tool dependencies and runtime state"
+    log "would verify local plugin source with the same exclusion contract"
     log "would refresh installed local plugin cache atomically: $LOCAL_CACHE_ROOT"
-    log "would verify local-atlas installed plugin cache with diff -qr"
+    log "would verify local-atlas installed plugin cache with the same exclusion contract"
     return
   fi
 
@@ -296,11 +314,17 @@ refresh_development_plugin_copies() {
   source_stage="$(mktemp -d "$source_parent/.${PLUGIN_NAME}.stage.XXXXXX")"
   cache_stage="$(mktemp -d "$cache_parent/.local.stage.XXXXXX")"
 
-  if ! rsync -a --delete "$PLUGIN_SOURCE/" "$source_stage/"; then
+  if ! rsync -a --delete --delete-excluded \
+      "${PLUGIN_SYNC_FILTER_ARGS[@]}" "$PLUGIN_SOURCE/" "$source_stage/"; then
     rm -rf "$source_stage" "$cache_stage"
     die "failed to stage local plugin source; existing source and cache were preserved"
   fi
-  if ! diff -qr "$PLUGIN_SOURCE" "$source_stage" >/dev/null; then
+  if ! changes="$(rsync -ani --delete --delete-excluded \
+      "${PLUGIN_SYNC_FILTER_ARGS[@]}" "$PLUGIN_SOURCE/" "$source_stage/")"; then
+    rm -rf "$source_stage" "$cache_stage"
+    die "failed to verify staged local plugin source; existing source and cache were preserved"
+  fi
+  if [[ -n "$changes" ]]; then
     rm -rf "$source_stage" "$cache_stage"
     die "staged local plugin source failed equality verification; existing source and cache were preserved"
   fi
@@ -448,8 +472,8 @@ validate_supported_plugin_tree "$PLUGIN_SOURCE" "repo plugin source"
 run_contract
 
 refresh_development_plugin_copies
-verify_tree "$PLUGIN_SOURCE" "$LOCAL_PLUGIN_SOURCE" "local plugin source"
-verify_tree "$PLUGIN_SOURCE" "$LOCAL_CACHE_ROOT" "local-atlas installed plugin cache"
+verify_filtered_plugin_tree "$PLUGIN_SOURCE" "$LOCAL_PLUGIN_SOURCE" "local plugin source"
+verify_filtered_plugin_tree "$PLUGIN_SOURCE" "$LOCAL_CACHE_ROOT" "local-atlas installed plugin cache"
 sync_workflow_helpers
 commit_development_plugin_copies
 

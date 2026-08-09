@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-runtime-config@1",
+  "type": "object",
+  "required": ["schema_version", "trust_profile", "project_root", "origin", "host_profile", "attempts"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "trust_profile": {"const": "reviewed-local@1"},
+    "project_root": {"type": "string", "minLength": 1},
+    "origin": {"const": "http://127.0.0.1:41733"},
+    "host_profile": {"const": "current-mac-arm64@1"},
+    "attempts": {"const": 1}
+  },
+  "additionalProperties": false
+}

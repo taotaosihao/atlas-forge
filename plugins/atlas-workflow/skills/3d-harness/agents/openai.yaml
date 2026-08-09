@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atlas 3D Harness"
+  short_description: "验证本机受审查的 3D 页面并生成一套可复核验收证据"
+  default_prompt: "Use $atlas-workflow:3d-harness to validate and run a reviewed-local 3D scenario from this Atlas Forge source checkout."

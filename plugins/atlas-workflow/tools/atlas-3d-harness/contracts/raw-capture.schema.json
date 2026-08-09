@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-raw-capture@1",
+  "type": "object",
+  "required": ["protocol_version", "profile", "stateRevision", "renderedStateRevision", "renderRevision", "pending", "checkpoint", "view", "timeline", "object", "camera", "selector"],
+  "properties": {
+    "protocol_version": {"const": "atlas-3d-page@1"},
+    "profile": {"enum": ["base@1", "industrial-kinematics@1"]},
+    "stateRevision": {"type": "integer", "minimum": 1},
+    "renderedStateRevision": {"type": "integer", "minimum": 1},
+    "renderRevision": {"type": "integer", "minimum": 1},
+    "pending": {"const": 0},
+    "checkpoint": {"type": "string"},
+    "view": {"type": "string"},
+    "timeline": {"type": "object", "required": ["time_ms", "joint_radians"], "properties": {"time_ms": {"type": "integer", "minimum": 0, "maximum": 60000}, "joint_radians": {"type": "number"}}, "additionalProperties": false},
+    "selector": {"const": "canvas"},
+    "object": {
+      "type": "object",
+      "required": ["id", "parent_id", "translation", "quaternion_xyzw", "scale", "parent_world_matrix", "world_matrix", "aabb_min", "aabb_max"],
+      "properties": {
+        "id": {"const": "reference-cube"},
+        "parent_id": {"type": "string"},
+        "translation": {"$ref": "#/$defs/vec3"},
+        "quaternion_xyzw": {"$ref": "#/$defs/vec4"},
+        "scale": {"$ref": "#/$defs/vec3"},
+        "parent_world_matrix": {"$ref": "#/$defs/mat4"},
+        "world_matrix": {"$ref": "#/$defs/mat4"},
+        "aabb_min": {"$ref": "#/$defs/vec3"},
+        "aabb_max": {"$ref": "#/$defs/vec3"}
+      },
+      "additionalProperties": false
+    },
+    "camera": {
+      "type": "object",
+      "required": ["projection_matrix", "matrix_world_inverse", "near", "far"],
+      "properties": {"projection_matrix": {"$ref": "#/$defs/mat4"}, "matrix_world_inverse": {"$ref": "#/$defs/mat4"}, "near": {"type": "number", "exclusiveMinimum": 0}, "far": {"type": "number", "exclusiveMinimum": 0}},
+      "additionalProperties": false
+    },
+    "industrial": {
+      "type": "object",
+      "required": ["anchor", "joint", "socket", "attachment"],
+      "properties": {
+        "anchor": {"type": "object", "required": ["root_id", "root_world_matrix", "joint_parent_id", "visual_id", "visual_parent_id", "visual_local_matrix", "visual_world_matrix"], "properties": {"root_id": {"type": "string"}, "root_world_matrix": {"$ref": "#/$defs/mat4"}, "joint_parent_id": {"type": "string"}, "visual_id": {"type": "string"}, "visual_parent_id": {"type": "string"}, "visual_local_matrix": {"$ref": "#/$defs/mat4"}, "visual_world_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "joint": {"type": "object", "required": ["id", "origin_local", "axis_local", "position_radians", "parent_world_matrix", "world_matrix"], "properties": {"id": {"const": "pivot-joint"}, "origin_local": {"$ref": "#/$defs/vec3"}, "axis_local": {"$ref": "#/$defs/vec3"}, "position_radians": {"type": "number"}, "parent_world_matrix": {"$ref": "#/$defs/mat4"}, "world_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "socket": {"type": "object", "required": ["id", "parent_id", "local_matrix", "world_matrix"], "properties": {"id": {"const": "tool-socket"}, "parent_id": {"type": "string"}, "local_matrix": {"$ref": "#/$defs/mat4"}, "world_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "attachment": {"type": "object", "required": ["id", "parent_id", "ancestry", "local_matrix", "world_matrix", "ancestry_scales"], "properties": {"id": {"const": "attached-tool"}, "parent_id": {"type": "string"}, "ancestry": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"type": "string"}}, "local_matrix": {"$ref": "#/$defs/mat4"}, "world_matrix": {"$ref": "#/$defs/mat4"}, "ancestry_scales": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/vec3"}}}, "additionalProperties": false}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"profile": {"const": "base@1"}}, "required": ["profile"]}, "then": {"not": {"type": "object", "properties": {"industrial": {}}, "required": ["industrial"]}}, "else": {"properties": {"industrial": {}}, "required": ["industrial"]}}
+  ],
+  "$defs": {
+    "vec3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+    "vec4": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+    "mat4": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "number"}}
+  },
+  "additionalProperties": false
+}

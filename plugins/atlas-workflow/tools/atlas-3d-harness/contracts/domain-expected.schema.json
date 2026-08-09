@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-domain-expected@1",
+  "type": "object",
+  "required": ["semantics", "scene", "timeline", "views", "render"],
+  "properties": {
+    "semantics": {
+      "const": {
+        "units": "meters-radians@1",
+        "coordinate_system": "right-handed-y-up-negative-z-forward@1",
+        "matrix_layout": "column-major@1",
+        "quaternion_layout": "xyzw@1",
+        "composition": "parent-world-times-local@1",
+        "joint_axis_frame": "joint-local@1",
+        "transform_precedence": "trs-first@1",
+        "finite_policy": "finite-only-normalize-negative-zero@1",
+        "quaternion_policy": "normalized-tolerance-1e-6@1",
+        "quantization_policy": "nearest-1e-6-half-away-from-zero@1"
+      }
+    },
+    "scene": {
+      "type": "object",
+      "required": ["nodes"],
+      "properties": {
+        "nodes": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/node"}}
+      },
+      "additionalProperties": false
+    },
+    "timeline": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/timeline"}},
+    "views": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/view"}},
+    "render": {
+      "type": "object",
+      "required": ["min_non_empty_pixels", "same_render_required"],
+      "properties": {"min_non_empty_pixels": {"type": "integer", "minimum": 1}, "same_render_required": {"const": true}},
+      "additionalProperties": false
+    },
+    "industrial": {"$ref": "#/$defs/industrial"}
+  },
+  "$defs": {
+    "number": {"type": "number"},
+    "vec3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/number"}},
+    "vec4": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"$ref": "#/$defs/number"}},
+    "mat4": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"$ref": "#/$defs/number"}},
+    "node": {
+      "type": "object",
+      "required": ["id", "parent_id", "translation", "quaternion_xyzw", "scale", "states"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "parent_id": {"type": ["string", "null"]},
+        "translation": {"$ref": "#/$defs/vec3"},
+        "quaternion_xyzw": {"$ref": "#/$defs/vec4"},
+        "scale": {"$ref": "#/$defs/vec3"},
+        "states": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "object", "required": ["checkpoint", "parent_world_matrix", "world_matrix", "aabb_min", "aabb_max"], "properties": {"checkpoint": {"type": "string"}, "parent_world_matrix": {"$ref": "#/$defs/mat4"}, "world_matrix": {"$ref": "#/$defs/mat4"}, "aabb_min": {"$ref": "#/$defs/vec3"}, "aabb_max": {"$ref": "#/$defs/vec3"}}, "additionalProperties": false}}
+      },
+      "additionalProperties": false
+    },
+    "timeline": {
+      "type": "object",
+      "required": ["name", "time_ms", "joint_radians"],
+      "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}, "time_ms": {"type": "integer", "minimum": 0, "maximum": 60000}, "joint_radians": {"type": "number"}},
+      "additionalProperties": false
+    },
+    "view": {
+      "type": "object",
+      "required": ["name", "camera_world_inverse", "projection_matrix", "near", "far", "visible", "projected_shares"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+        "camera_world_inverse": {"$ref": "#/$defs/mat4"},
+        "projection_matrix": {"$ref": "#/$defs/mat4"},
+        "near": {"type": "number", "exclusiveMinimum": 0},
+        "far": {"type": "number", "exclusiveMinimum": 0},
+        "visible": {"type": "boolean"},
+        "projected_shares": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "object", "required": ["checkpoint", "value"], "properties": {"checkpoint": {"type": "string"}, "value": {"type": "number", "minimum": 0, "maximum": 1}}, "additionalProperties": false}}
+      },
+      "additionalProperties": false
+    },
+    "industrial": {
+      "type": "object",
+      "required": ["root", "visual", "joint", "socket", "attachment"],
+      "properties": {
+        "root": {"type": "object", "required": ["id", "world_matrix"], "properties": {"id": {"const": "reference-root"}, "world_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "visual": {"type": "object", "required": ["id", "parent_id", "local_matrix"], "properties": {"id": {"const": "joint-visual"}, "parent_id": {"const": "pivot-joint"}, "local_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "joint": {"type": "object", "required": ["id", "origin_local", "axis_local", "home_radians", "limits_radians", "tolerance_radians"], "properties": {"id": {"const": "pivot-joint"}, "origin_local": {"$ref": "#/$defs/vec3"}, "axis_local": {"$ref": "#/$defs/vec3"}, "home_radians": {"type": "number"}, "limits_radians": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}, "tolerance_radians": {"type": "number", "minimum": 0}}, "additionalProperties": false},
+        "socket": {"type": "object", "required": ["id", "parent_id", "local_matrix"], "properties": {"id": {"const": "tool-socket"}, "parent_id": {"const": "joint-visual"}, "local_matrix": {"$ref": "#/$defs/mat4"}}, "additionalProperties": false},
+        "attachment": {"type": "object", "required": ["id", "parent_socket_id", "ancestry", "max_step_meters", "reject_non_uniform_ancestry"], "properties": {"id": {"const": "attached-tool"}, "parent_socket_id": {"const": "tool-socket"}, "ancestry": {"const": ["reference-root", "pivot-joint", "joint-visual", "tool-socket", "attached-tool"]}, "max_step_meters": {"type": "number", "minimum": 0}, "reject_non_uniform_ancestry": {"const": true}}, "additionalProperties": false}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

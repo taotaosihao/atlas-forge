@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-capture-set@1",
+  "type": "object",
+  "required": ["schema_version", "protocol", "scenario_id", "capture_count", "captures", "replay"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "protocol": {"const": "atlas-3d-capture-set@1"},
+    "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"},
+    "capture_count": {"const": 12},
+    "captures": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"$ref": "#/$defs/capture_entry"}},
+    "replay": {"$ref": "#/$defs/replay"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "capture_entry": {
+      "type": "object",
+      "required": ["key", "checkpoint", "view", "viewport", "capture_path", "capture_sha256", "png_path", "png_sha256"],
+      "properties": {
+        "key": {"type": "string", "pattern": "^vp-[1-9][0-9]{0,3}x[1-9][0-9]{0,3}-dpr-[0-9]+(?:p[0-9]+)?--view-[a-z][a-z0-9-]{0,31}--checkpoint-[a-z][a-z0-9-]{0,31}$", "maxLength": 160},
+        "checkpoint": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+        "view": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+        "viewport": {"type": "object", "required": ["width", "height", "device_scale_factor"], "properties": {"width": {"type": "integer", "minimum": 1, "maximum": 4096}, "height": {"type": "integer", "minimum": 1, "maximum": 4096}, "device_scale_factor": {"type": "number", "exclusiveMinimum": 0, "maximum": 2}}, "additionalProperties": false},
+        "capture_path": {"type": "string", "pattern": "^captures/vp-[a-z0-9-]+--view-[a-z0-9-]+--checkpoint-[a-z0-9-]+\\.json$", "maxLength": 180},
+        "capture_sha256": {"$ref": "#/$defs/digest"},
+        "png_path": {"type": "string", "pattern": "^png/vp-[1-9][0-9]{0,3}x[1-9][0-9]{0,3}-dpr-[0-9]+(?:p[0-9]+)?/view-[a-z][a-z0-9-]{0,31}/checkpoint-[a-z][a-z0-9-]{0,31}\\.png$", "maxLength": 180},
+        "png_sha256": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    },
+    "replay": {
+      "type": "object",
+      "required": ["key", "fresh_a_digest", "same_context_b_digest", "same_context_a_digest", "second_fresh_a_digest", "converged", "absolute_seek", "first_present_increment", "idle_raf_increment"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1, "maxLength": 160},
+        "fresh_a_digest": {"$ref": "#/$defs/digest"},
+        "same_context_b_digest": {"$ref": "#/$defs/digest"},
+        "same_context_a_digest": {"$ref": "#/$defs/digest"},
+        "second_fresh_a_digest": {"$ref": "#/$defs/digest"},
+        "converged": {"const": true},
+        "absolute_seek": {"const": true},
+        "first_present_increment": {"const": 1},
+        "idle_raf_increment": {"const": 0}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

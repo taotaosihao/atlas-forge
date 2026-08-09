@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "atlas-3d-scenario@1",
+  "type": "object",
+  "required": ["schema_version", "scenario_id", "trust_profile", "fixture", "expected", "required_capabilities", "required_profiles", "checkpoints", "views", "viewports", "seed", "epoch_ms"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"},
+    "trust_profile": {"const": "reviewed-local@1"},
+    "fixture": {"type": "object", "required": ["id"], "properties": {"id": {"enum": ["basic-three@1", "industrial-three@1"]}}, "additionalProperties": false},
+    "expected": {"$ref": "atlas-3d-domain-expected@1"},
+    "required_capabilities": {"type": "array", "uniqueItems": true},
+    "required_profiles": {"type": "array", "uniqueItems": true},
+    "checkpoints": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "object", "required": ["name", "time_ms"], "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}, "time_ms": {"type": "integer", "minimum": 0, "maximum": 60000}}, "additionalProperties": false}},
+    "views": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"}},
+    "viewports": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object", "required": ["width", "height", "device_scale_factor"], "properties": {"width": {"type": "integer", "minimum": 1, "maximum": 4096}, "height": {"type": "integer", "minimum": 1, "maximum": 4096}, "device_scale_factor": {"type": "number", "exclusiveMinimum": 0, "maximum": 2}}, "additionalProperties": false}},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "epoch_ms": {"type": "integer", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"required_profiles": {"type": "array", "maxItems": 0}}, "required": ["required_profiles"]},
+      "then": {
+        "properties": {
+          "fixture": {"type": "object", "properties": {"id": {"const": "basic-three@1"}}},
+          "required_capabilities": {"const": ["scene.graph@1", "scene.transforms@1", "timeline.seek@1", "render.metrics@1"]},
+          "expected": {"type": "object", "not": {"type": "object", "properties": {"industrial": {}}, "required": ["industrial"]}}
+        }
+      },
+      "else": {
+        "properties": {
+          "fixture": {"type": "object", "properties": {"id": {"const": "industrial-three@1"}}},
+          "required_profiles": {"const": ["industrial-kinematics@1"]},
+          "required_capabilities": {"const": ["scene.graph@1", "scene.transforms@1", "timeline.seek@1", "render.metrics@1", "kinematics.joints@1", "attachments.sockets@1"]},
+          "expected": {"type": "object", "properties": {"industrial": {}}, "required": ["industrial"]}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

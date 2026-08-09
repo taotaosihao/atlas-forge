@@ -12,6 +12,7 @@
 | [项目约束](../AGENTS.md) | source of truth、开发/发布边界、Multica 禁写和最小验证矩阵 |
 | [Workflow helper README](../workflow/README.md) | `codex-workflow` 命令、artifact 和 helper 使用边界 |
 | [Atlas Workflow plugin README](../plugins/atlas-workflow/README.md) | Atlas skill 入口和合同概览；source/cache 路径以项目约束为准 |
+| [Atlas 3D Harness v0.1 接入合同](atlas-3d-harness.md) | 当前 source checkout 与冻结本机 Mac 上的 3D thin facade、输入信任、bridge、CLI、evidence、compare、安全和限制 |
 | [Atlas 快速产品通道与后续框架债务修订方案](atlas-workflow/20260803-001-atlas-rapid-product-path/implementation-plan.md) | 当前快速产品路由、path lease 与模型路由轻量解耦、严格发布兼容边界，以及延期/不做事项的权威 backlog；首批已实施并完成源码级验证，尚未安装、刷新或发布 |
 | [Atlas Clarify 与 Team 有界并行默认策略实施方案](atlas-workflow/20260809-001-atlas-clarify-team-bounded-parallel/implementation-plan.md) | 当前 Clarify 与已选择 Team 后的 controller-level bounded-parallel 默认策略、兼容边界、实施 ownership、验收与验证计划；不建立 runtime scheduler，不扩大普通 Task/CW 入口 |
 | [Atlas Team Paseo 显式启用与 Codex 连续降级实施方案](atlas-workflow/20260720-011-atlas-team-paseo-codex/implementation-plan.md) | Team 默认 Codex、Paseo 局部 opt-in、Claude model 仅人工指定、运行故障 fallback、多角色审查收敛与实施接管的当前开发目标；实现前以源码和测试的现状行为为准 |
