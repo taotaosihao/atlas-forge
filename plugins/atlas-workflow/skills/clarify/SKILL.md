@@ -62,10 +62,15 @@ that classification is unclear, treat the request as non-tiny.
   admitted lanes are ready; the soft wave cap is not a completion or stop
   condition. The Team controller's separate soft cap of `4` does not widen a
   Clarify wave.
-- Exact-route failures remain fail closed to main-only: do not substitute a
-  generic or inherited child. This bounded-parallel policy does not add a runtime
-  scheduler, ledger field, or schema; record-only compatibility remains valid
-  and `effective_backend=none` is not evidence of parallel
+- If an admitted child cannot start, times out, becomes unavailable, or returns
+  no usable output, continue main-only only when doing so remains safe; otherwise
+  stop and report the blocker. In either case, disclose which independent
+  perspective was unavailable and whether the result degraded to main-only;
+  never report the degraded result as completed multi-agent clarification or
+  independent review. Exact-route failures remain fail closed:
+  do not substitute a generic or inherited child. This bounded-parallel policy
+  does not add a runtime scheduler, ledger field, or schema; record-only
+  compatibility remains valid and `effective_backend=none` is not evidence of parallel
   completion.
 
 ## Release Intent

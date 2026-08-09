@@ -72,6 +72,13 @@ assert_has 'schema/profile' 'schema-restricted routing remains fail closed'
 assert_has 'exact-route|exact spawn[[:space:]]+schema/profile|schema/profile/model' 'profile and exact-route mismatch remain fail closed'
 assert_has 'cost anomaly|cost-anomaly|confirmed.*cost' 'confirmed cost anomaly remains fail closed'
 assert_has 'main-only|main only' 'fallback has an explicit main-only path'
+for failure_mode in 'cannot start' 'times out' 'becomes unavailable' 'no usable output'; do
+  assert_has "$failure_mode" "child failure mode is explicit: $failure_mode"
+done
+assert_has 'otherwise[[:space:]]+stop and report the blocker' 'unsafe main-only fallback stops instead of degrading silently'
+assert_has '[Dd]isclose[[:space:]]+which independent[[:space:]]+perspective was unavailable' 'main-only fallback discloses the missing perspective'
+assert_has 'result degraded to[[:space:]]+main-only' 'fallback identifies whether the result degraded to main-only'
+assert_has 'never report the degraded result as completed multi-agent[[:space:]]+clarification' 'degraded fallback cannot claim completed multi-agent clarification'
 assert_has 'product_release.*execution-v3|execution-v3.*product_release' 'release execution remains execution-v3'
 assert_has 'immutable Profile|immutable.*Profile' 'release keeps an immutable Profile'
 assert_has 'terminal.*(release|certification).*slice|final.*sweep' 'release keeps a terminal final sweep'
@@ -88,12 +95,15 @@ const prompts = manifest.interface.defaultPrompt.join('\n');
 const required = [
   [/非tiny Clarify: main\+read-only child/, 'non-tiny Clarify keeps a read-only child'],
   [/Team: bounded ready waves/, 'selected Team keeps bounded ready-frontier waves'],
-  [/Task\/CW 不进 Team/, 'Task/CW do not auto-upgrade to Team'],
+  [/Task\/CW不自动进Team/, 'Task/CW do not auto-upgrade to Team'],
   [/Saving\/model\/lease\/release 独立/, 'decision axes remain independent'],
   [/Certified 仅源码就绪，非发布/, 'certification remains source-ready rather than released'],
 ];
 for (const [pattern, label] of required) {
   if (!pattern.test(prompts)) throw new Error(`manifest prompt missing: ${label}`);
+}
+if (/Task\/CW\s*不进\s*Team/.test(prompts)) {
+  throw new Error('manifest prompt must not prohibit all Task/CW Team routing');
 }
 NODE
 
