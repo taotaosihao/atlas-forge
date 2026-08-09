@@ -52,6 +52,10 @@ const {
   validateTeamWriterAdmission,
 } = require("./admission");
 const {
+  prepareWriterLeaseControlEvent,
+  syncWriterLeaseControlAfterEvent,
+} = require("./writer-lease-control");
+const {
   ATTEMPT_USAGE,
   DISPATCH_USAGE,
   FALLBACK_USAGE,
@@ -99,6 +103,19 @@ function teamStaffingFile(paths, taskId) {
 
 function teamLockFile(taskId, environment = process.env) {
   return taskMutationLockFile(resolvePaths(environment), taskId);
+}
+
+function writerLeaseControlHooks(paths, taskId, options = {}) {
+  return {
+    beforeEventAppend(event) {
+      if (options.beforeEventAppend) options.beforeEventAppend(event);
+      prepareWriterLeaseControlEvent(paths, taskId, event);
+    },
+    afterEventAppend(event, context) {
+      if (options.afterEventAppend) options.afterEventAppend(event, context);
+      syncWriterLeaseControlAfterEvent(paths, taskId, event);
+    },
+  };
 }
 
 function requireV2Team(paths, taskId) {
@@ -175,7 +192,13 @@ function mutateV2Team(taskId, operationFn, options = {}) {
           }],
         };
       },
-      { ...options, clock, environment, expectedRevision: options.expectedRevision },
+      {
+        ...options,
+        ...writerLeaseControlHooks(paths, taskId, options),
+        clock,
+        environment,
+        expectedRevision: options.expectedRevision,
+      },
     );
   });
   if (committed.replay) output = { replay: true, result: committed.result };
@@ -320,7 +343,7 @@ function runRecordStart(parsed, options = {}) {
             }],
           };
         },
-        { ...options, clock, environment },
+        { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
       );
     } catch (error) {
       if (parsed.operationId
@@ -1012,7 +1035,7 @@ function runRecordFinalize(parsed, options = {}) {
         }],
       };
       },
-      { ...options, clock, environment },
+      { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
     );
   });
   const effectiveBackend = committed.result.effective_backend || parsed.backend;
@@ -1212,7 +1235,7 @@ function runLoopRecord(parsed, options = {}) {
         }],
       };
       },
-      { ...options, clock, environment },
+      { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
     );
   });
   return {
@@ -1394,7 +1417,7 @@ function runStop(argv, options = {}) {
         legacy: [{ kind: "team-stop", detail: "stopped" }],
       };
     },
-    { ...options, clock, environment },
+    { ...options, ...writerLeaseControlHooks(paths, argv[0], options), clock, environment },
   ));
   return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
 }
@@ -1513,7 +1536,7 @@ function runPromote(parsed, options = {}) {
             legacy: [{ kind: "team-promote", detail: parsed.target }],
           };
         },
-        { ...options, clock, environment },
+        { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
       );
     } catch (error) {
       if (parsed.operationId

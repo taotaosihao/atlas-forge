@@ -259,6 +259,9 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
         throw new TaskMutationError(`operation_id replay payload conflict: ${operationId}`);
       }
       appendMissingLegacyRows(paths, taskId, existing);
+      if (options.afterEventAppend && existing.event_id === latest.event_id) {
+        options.afterEventAppend(existing, { replay: true });
+      }
       return {
         event: existing,
         latest: existing.event_id === latest.event_id,
@@ -304,10 +307,22 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
     };
     event.projection = finalizedProjection(output.projection, event, paths, events);
     event.event_digest = authoritativeEventDigest(event);
+    if (options.beforeEventAppend) {
+      options.beforeEventAppend(event);
+    }
     if (options.failBeforeEventAppend) {
       throw new TaskMutationError("injected failure before authoritative event append");
     }
     appendAuthoritativeEvent(file, event);
+    if (options.afterEventAppend) {
+      try {
+        options.afterEventAppend(event, { replay: false });
+      } catch (error) {
+        throw new TaskMutationError(
+          `authoritative event committed but projection is inconsistent: ${error.message}`,
+        );
+      }
+    }
     if (options.failAfterEventAppend) {
       throw new TaskMutationError(
         "authoritative event committed but projection is inconsistent: injected failure",

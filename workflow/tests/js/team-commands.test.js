@@ -22,7 +22,11 @@ const { updateTaskCommand } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/command-runtime.js",
 ));
-const { authoritativeEventDigest } = require(path.join(
+const {
+  authoritativeEventDigest,
+  canonicalJson,
+  sha256: eventStoreSha256,
+} = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/event-store.js",
 ));
@@ -363,6 +367,67 @@ function commitAcceptedWorktree(repo, message) {
       encoding: "utf8",
     }).stdout.trim(),
   };
+}
+
+function withReadFileGuard(forbiddenFile, callback) {
+  const original = fs.readFileSync;
+  fs.readFileSync = function guardedReadFileSync(file, ...args) {
+    if (path.resolve(String(file)) === path.resolve(forbiddenFile)) {
+      throw new Error(`unexpected read of guarded file: ${forbiddenFile}`);
+    }
+    return original.call(this, file, ...args);
+  };
+  try {
+    return callback();
+  } finally {
+    fs.readFileSync = original;
+  }
+}
+
+function signControlRecord(value) {
+  const unsigned = { ...value };
+  delete unsigned.digest;
+  return { ...unsigned, digest: eventStoreSha256(canonicalJson(unsigned)) };
+}
+
+function readControlJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function writeControlJson(file, value) {
+  fs.writeFileSync(file, `${JSON.stringify(signControlRecord(value), null, 2)}\n`);
+}
+
+function writerControlSnapshotFile(paths) {
+  return path.join(paths.stateDir, "team-writer-leases.json");
+}
+
+function writerControlJournalFile(paths) {
+  return path.join(paths.stateDir, "team-writer-leases.recovery.json");
+}
+
+function writerControlForensicFile(paths) {
+  return path.join(paths.stateDir, "team-writer-leases.forensic.json");
+}
+
+function makeOversizedAuthoritativeEvents(paths, taskId, options = {}) {
+  const eventFile = taskEventFile(paths, taskId);
+  const latest = authoritativeEvents(paths, taskId).at(-1);
+  const stateFile = taskStateFile(paths, taskId);
+  const state = readJsonObject(stateFile);
+  if (options.mismatchState) {
+    state.last_event_id = "mismatched-event";
+    state.runtime_revision = latest.revision + 1;
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
+  const filler = `${JSON.stringify({ filler: "x".repeat(4096) })}\n`;
+  const fillerCount = 260;
+  fs.writeFileSync(
+    eventFile,
+    `${filler.repeat(fillerCount)}${JSON.stringify(latest)}\n`,
+  );
+  assert.ok(fs.statSync(eventFile).size > 1024 * 1024);
+  return eventFile;
 }
 
 test("managed SDD ledger rows survive canonical mutation and reconciliation", (t) => {
@@ -1483,10 +1548,39 @@ test("execute admission rejects global writer overlap until the lease is release
     "--authorization-ref=user-message:second-writer",
     `--brief=${secondAdmission.briefPath}`, "--operation-id=start-second-writer",
   ]);
-  assert.throws(
+  withReadFileGuard(taskEventFile(paths, firstTask), () => assert.throws(
     () => runRecordStart(secondStart, { cwd: secondAdmission.repo, environment }),
     /global writer lease conflict/,
+  ));
+  const unrelatedTask = path.join(paths.artifactsDir, "unrelated-huge-history");
+  fs.mkdirSync(unrelatedTask, { recursive: true });
+  const guardedUnrelatedEvents = path.join(unrelatedTask, "events-v2.jsonl");
+  fs.writeFileSync(guardedUnrelatedEvents, "not json and must not be read\n");
+  const disjointTask = createFixtureTask(environment, "Disjoint writer");
+  const disjointAdmission = executionBrief(paths, disjointTask, { ownedPaths: ["workflow/other-owned/**"] });
+  withReadFileGuard(guardedUnrelatedEvents, () => runRecordStart(parseRecordStartArgs([
+    disjointTask, "request disjoint writer scope", "--mode=execute",
+    "--authorization-ref=user-message:disjoint-writer",
+    `--brief=${disjointAdmission.briefPath}`, "--operation-id=start-disjoint-writer",
+  ]), { cwd: disjointAdmission.repo, environment }));
+  const controlSnapshot = path.join(paths.stateDir, "team-writer-leases.json");
+  const controlJournal = path.join(paths.stateDir, "team-writer-leases.recovery.json");
+  const goodControlSnapshot = fs.readFileSync(controlSnapshot);
+  const failClosedTask = createFixtureTask(environment, "Fail closed writer");
+  const failClosedAdmission = executionBrief(paths, failClosedTask, { ownedPaths: ["workflow/fail-closed/**"] });
+  fs.writeFileSync(controlSnapshot, "{ corrupt\n");
+  fs.rmSync(controlJournal, { force: true });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      failClosedTask,
+      "request writer while control plane is corrupt", "--mode=execute",
+      "--authorization-ref=user-message:fail-closed",
+      `--brief=${failClosedAdmission.briefPath}`,
+      "--operation-id=start-fail-closed",
+    ]), { cwd: failClosedAdmission.repo, environment }),
+    /writer lease control plane.*corrupt|writer lease control plane.*unavailable/,
   );
+  fs.writeFileSync(controlSnapshot, goodControlSnapshot);
   invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
     firstTask, "--operation-id=first-writer-terminal", "--action=terminal",
     "--attempt=first-writer-attempt", "--outcome=succeeded",
@@ -1497,8 +1591,546 @@ test("execute admission rejects global writer overlap until the lease is release
     "--attempt=first-writer-attempt",
     "--evidence-refs=team/first-writer-quiesced.json",
   ]);
-  runRecordStart(secondStart, { cwd: secondAdmission.repo, environment });
+  const releasedSecondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/test-owned/bin/**"] });
+  const releasedSecondStart = parseRecordStartArgs([
+    secondTask, "request overlapping writer scope after release", "--mode=execute",
+    "--authorization-ref=user-message:second-writer",
+    `--brief=${releasedSecondAdmission.briefPath}`, "--operation-id=start-second-writer",
+  ]);
+  runRecordStart(releasedSecondStart, { cwd: releasedSecondAdmission.repo, environment });
   assert.equal(readTeam(paths, secondTask).admission.mode, "execution-v3");
+});
+
+test("writer lease recovery journal blocks overlap before event commit and converges on retry", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(environment, "Prepared writer");
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/prepared-owned/**"] });
+  runRecordStart(parseRecordStartArgs([
+    firstTask, "hold prepared writer lease", "--mode=execute",
+    "--authorization-ref=user-message:prepared-writer",
+    `--brief=${firstAdmission.briefPath}`, "--operation-id=start-prepared-writer",
+  ]), { cwd: firstAdmission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=prepared-writer-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/prepared-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    firstTask, "--operation-id=prepared-writer-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=prepared-writer-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=prepared-writer-attempt",
+    "--launch-operation-id=launch-prepared-writer",
+    "--writable", "--paths=workflow/prepared-owned/**",
+  ], "2026-07-10T12:06:00.000Z", { failBeforeEventAppend: true }),
+  /injected failure before authoritative event append/);
+  assert.equal(
+    (readTeam(paths, firstTask).writer_leases || []).some((lease) => lease.state === "active"),
+    false,
+  );
+
+  const secondTask = createFixtureTask(environment, "Prepared overlap");
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/prepared-owned/bin/**"] });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      secondTask, "request prepared overlap", "--mode=execute",
+      "--authorization-ref=user-message:prepared-overlap",
+      `--brief=${secondAdmission.briefPath}`, "--operation-id=start-prepared-overlap",
+    ]), { cwd: secondAdmission.repo, environment }),
+    /global writer lease conflict/,
+  );
+  fs.rmSync(path.join(paths.stateDir, "team-writer-leases.json"), { force: true });
+  const journalOnlyTask = createFixtureTask(environment, "Prepared journal only overlap");
+  const journalOnlyAdmission = executionBrief(
+    paths,
+    journalOnlyTask,
+    { ownedPaths: ["workflow/prepared-owned/journal-only/**"] },
+  );
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      journalOnlyTask, "request prepared overlap from journal only", "--mode=execute",
+      "--authorization-ref=user-message:prepared-journal-only",
+      `--brief=${journalOnlyAdmission.briefPath}`, "--operation-id=start-prepared-journal-only",
+    ]), { cwd: journalOnlyAdmission.repo, environment }),
+    /global writer lease conflict/,
+  );
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=prepared-writer-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=prepared-writer-attempt",
+    "--launch-operation-id=launch-prepared-writer",
+    "--writable", "--paths=workflow/prepared-owned/**",
+  ]);
+  assert.equal(
+    readTeam(paths, firstTask).writer_leases.find(
+      (lease) => lease.owner_attempt_id === "prepared-writer-attempt",
+    ).state,
+    "active",
+  );
+  assert.equal(fs.existsSync(path.join(paths.stateDir, "team-writer-leases.recovery.json")), false);
+});
+
+test("writer lease recovery journal linkage mismatch fails closed", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(environment, "Mismatched journal writer");
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/linkage-owned/**"] });
+  runRecordStart(parseRecordStartArgs([
+    firstTask, "prepare writer lease with journal", "--mode=execute",
+    "--authorization-ref=user-message:linkage-writer",
+    `--brief=${firstAdmission.briefPath}`, "--operation-id=start-linkage-writer",
+  ]), { cwd: firstAdmission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=linkage-writer-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/linkage-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    firstTask, "--operation-id=linkage-writer-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=linkage-writer-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=linkage-writer-attempt",
+    "--launch-operation-id=launch-linkage-writer",
+    "--writable", "--paths=workflow/linkage-owned/**",
+  ], "2026-07-10T12:06:00.000Z", { failBeforeEventAppend: true }),
+  /injected failure before authoritative event append/);
+  const journal = readControlJson(path.join(paths.stateDir, "team-writer-leases.recovery.json"));
+  writeControlJson(path.join(paths.stateDir, "team-writer-leases.recovery.json"), {
+    ...journal,
+    base_snapshot_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  });
+  const secondTask = createFixtureTask(environment, "Mismatched journal overlap");
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/linkage-owned/bin/**"] });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      secondTask, "request overlap against mismatched journal", "--mode=execute",
+      "--authorization-ref=user-message:linkage-overlap",
+      `--brief=${secondAdmission.briefPath}`, "--operation-id=start-linkage-overlap",
+    ]), { cwd: secondAdmission.repo, environment }),
+    /snapshot linkage mismatch/,
+  );
+});
+
+test("overlapping execute admissions do not create writer leases before writable attempts", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(environment, "First admitted only");
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/admitted-only/**"] });
+  runRecordStart(parseRecordStartArgs([
+    firstTask, "admit without writer attempt", "--mode=execute",
+    "--authorization-ref=user-message:first-admitted-only",
+    `--brief=${firstAdmission.briefPath}`, "--operation-id=start-first-admitted-only",
+  ]), { cwd: firstAdmission.repo, environment });
+
+  const secondTask = createFixtureTask(environment, "Second admitted only");
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/admitted-only/bin/**"] });
+  runRecordStart(parseRecordStartArgs([
+    secondTask, "admit overlapping scope without writer attempt", "--mode=execute",
+    "--authorization-ref=user-message:second-admitted-only",
+    `--brief=${secondAdmission.briefPath}`, "--operation-id=start-second-admitted-only",
+  ]), { cwd: secondAdmission.repo, environment });
+
+  assert.equal(readTeam(paths, firstTask).writer_leases.length, 0);
+  assert.equal(readTeam(paths, secondTask).writer_leases.length, 0);
+});
+
+test("non-latest replay cannot roll back writer lease control snapshot", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Replay rollback writer");
+  const admission = executionBrief(paths, taskId, { ownedPaths: ["workflow/replay-owned/**"] });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute replay rollback writer", "--mode=execute",
+    "--authorization-ref=user-message:replay-writer",
+    `--brief=${admission.briefPath}`, "--operation-id=start-replay-writer",
+  ]), { cwd: admission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=replay-lane-a", "--action=open", "--lane=writer-a",
+    "--writable", "--paths=workflow/replay-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=replay-dispatch-a", "--action=open", "--lane=writer-a",
+    "--dispatch=dispatch-a",
+  ]);
+  const reserveA = [
+    taskId, "--operation-id=replay-reserve-a", "--action=reserve",
+    "--dispatch=dispatch-a", "--attempt=attempt-a",
+    "--launch-operation-id=launch-attempt-a",
+    "--writable", "--paths=workflow/replay-owned/**",
+  ];
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, reserveA);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=replay-terminal-a", "--action=terminal",
+    "--attempt=attempt-a", "--outcome=succeeded",
+  ]);
+  writeEvidence(paths, taskId, "team/replay-a-quiesced.json");
+  const releaseA = [
+    taskId, "--operation-id=replay-quiesce-a", "--action=quiesced",
+    "--attempt=attempt-a", "--evidence-refs=team/replay-a-quiesced.json",
+  ];
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, releaseA);
+  assert.equal(readControlJson(path.join(paths.stateDir, "team-writer-leases.json")).leases.length, 0);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, reserveA);
+  assert.equal(
+    readControlJson(path.join(paths.stateDir, "team-writer-leases.json")).leases.length,
+    0,
+  );
+
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=replay-lane-b", "--action=open", "--lane=writer-b",
+    "--writable", "--paths=workflow/replay-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=replay-dispatch-b", "--action=open", "--lane=writer-b",
+    "--dispatch=dispatch-b",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=replay-reserve-b", "--action=reserve",
+    "--dispatch=dispatch-b", "--attempt=attempt-b",
+    "--launch-operation-id=launch-attempt-b",
+    "--writable", "--paths=workflow/replay-owned/**",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, releaseA);
+  assert.deepEqual(
+    readControlJson(path.join(paths.stateDir, "team-writer-leases.json"))
+      .leases.map((lease) => lease.owner_attempt_id),
+    ["attempt-b"],
+  );
+});
+
+test("writer lease migration snapshot records active and no-lease task provenance", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const noLeaseTask = createFixtureTask(environment, "Migration no lease task");
+  const activeTask = createFixtureTask(environment, "Migration active writer task");
+  const activeAdmission = executionBrief(paths, activeTask, { ownedPaths: ["workflow/migration-owned/**"] });
+  runRecordStart(parseRecordStartArgs([
+    activeTask, "execute migration active writer", "--mode=execute",
+    "--authorization-ref=user-message:migration-active",
+    `--brief=${activeAdmission.briefPath}`, "--operation-id=start-migration-active",
+  ]), { cwd: activeAdmission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    activeTask, "--operation-id=migration-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/migration-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    activeTask, "--operation-id=migration-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    activeTask, "--operation-id=migration-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=migration-attempt",
+    "--launch-operation-id=launch-migration-attempt",
+    "--writable", "--paths=workflow/migration-owned/**",
+  ]);
+  fs.rmSync(writerControlSnapshotFile(paths), { force: true });
+  fs.rmSync(writerControlJournalFile(paths), { force: true });
+  fs.rmSync(writerControlForensicFile(paths), { force: true });
+
+  const overlapTask = createFixtureTask(environment, "Migration overlap task");
+  const overlapAdmission = executionBrief(paths, overlapTask, { ownedPaths: ["workflow/migration-owned/bin/**"] });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      overlapTask, "trigger fresh control-plane migration", "--mode=execute",
+      "--authorization-ref=user-message:migration-overlap",
+      `--brief=${overlapAdmission.briefPath}`, "--operation-id=start-migration-overlap",
+    ]), { cwd: overlapAdmission.repo, environment }),
+    /global writer lease conflict/,
+  );
+  const snapshot = readControlJson(writerControlSnapshotFile(paths));
+  assert.match(snapshot.digest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(snapshot.forensic_status, "legacy-compatible");
+  assert.equal(snapshot.scanned_tasks, undefined);
+  assert.match(snapshot.coverage_digest, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(snapshot.coverage_count > 0, true);
+  assert.equal(snapshot.leases.some((lease) => lease.task_id === activeTask), true);
+  const forensic = readControlJson(writerControlForensicFile(paths));
+  assert.equal(forensic.digest, snapshot.coverage_digest);
+  const scanned = new Map(forensic.scanned_tasks.map((entry) => [entry.task_id, entry]));
+  for (const taskId of [activeTask, noLeaseTask]) {
+    const entry = scanned.get(taskId);
+    assert.ok(entry, `missing scanned task metadata for ${taskId}`);
+    assert.match(entry.source_digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(Number.isInteger(entry.bounded_byte_size), true);
+    assert.equal(entry.bounded_byte_size > 0, true);
+    assert.match(entry.forensic_result, /bounded-head-verified|legacy-state-uncertain/);
+  }
+  const serialized = JSON.stringify(forensic.scanned_tasks);
+  assert.equal(serialized.includes(paths.root), false);
+  assert.equal(serialized.includes("Migration no lease task"), false);
+});
+
+test("fresh writer lease migration streams oversized unrelated events and verifies state head", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const hugeTask = createFixtureTask(environment, "Oversized no lease task");
+  const guardedHugeEvents = makeOversizedAuthoritativeEvents(paths, hugeTask);
+  fs.rmSync(writerControlSnapshotFile(paths), { force: true });
+  fs.rmSync(writerControlJournalFile(paths), { force: true });
+  fs.rmSync(writerControlForensicFile(paths), { force: true });
+
+  const candidateTask = createFixtureTask(environment, "Fresh migration candidate");
+  const candidateAdmission = executionBrief(paths, candidateTask, { ownedPaths: ["workflow/fresh-migration/**"] });
+  withReadFileGuard(guardedHugeEvents, () => runRecordStart(parseRecordStartArgs([
+    candidateTask, "trigger migration with oversized unrelated event stream", "--mode=execute",
+    "--authorization-ref=user-message:fresh-migration",
+    `--brief=${candidateAdmission.briefPath}`, "--operation-id=start-fresh-migration",
+  ]), { cwd: candidateAdmission.repo, environment }));
+  const forensic = readControlJson(writerControlForensicFile(paths));
+  const hugeMetadata = forensic.scanned_tasks.find((entry) => entry.task_id === hugeTask);
+  assert.ok(hugeMetadata);
+  assert.equal(hugeMetadata.source_kind, "authoritative-events-large");
+  assert.equal(hugeMetadata.forensic_result, "head-state-matched-history-unverified");
+  assert.match(hugeMetadata.source_digest, /^sha256:[a-f0-9]{64}$/);
+});
+
+test("fresh writer lease migration fails closed when oversized event head differs from state", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const hugeTask = createFixtureTask(environment, "Oversized mismatched task");
+  const guardedHugeEvents = makeOversizedAuthoritativeEvents(paths, hugeTask, { mismatchState: true });
+  fs.rmSync(writerControlSnapshotFile(paths), { force: true });
+  fs.rmSync(writerControlJournalFile(paths), { force: true });
+  fs.rmSync(writerControlForensicFile(paths), { force: true });
+
+  const candidateTask = createFixtureTask(environment, "Fresh migration mismatch candidate");
+  const candidateAdmission = executionBrief(paths, candidateTask, { ownedPaths: ["workflow/fresh-mismatch/**"] });
+  withReadFileGuard(guardedHugeEvents, () => assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      candidateTask, "trigger migration with mismatched oversized event stream", "--mode=execute",
+      "--authorization-ref=user-message:fresh-mismatch",
+      `--brief=${candidateAdmission.briefPath}`, "--operation-id=start-fresh-mismatch",
+    ]), { cwd: candidateAdmission.repo, environment }),
+    /bounded authoritative head does not match state/,
+  ));
+});
+
+test("fresh writer lease migration rejects oversized unterminated stale tail after active event", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const activeTask = createFixtureTask(environment, "Oversized unterminated active task");
+  const admission = executionBrief(paths, activeTask, { ownedPaths: ["workflow/unterminated-active/**"] });
+  runRecordStart(parseRecordStartArgs([
+    activeTask, "execute unterminated active writer", "--mode=execute",
+    "--authorization-ref=user-message:unterminated-active",
+    `--brief=${admission.briefPath}`, "--operation-id=start-unterminated-active",
+  ]), { cwd: admission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    activeTask, "--operation-id=unterminated-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/unterminated-active/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    activeTask, "--operation-id=unterminated-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    activeTask, "--operation-id=unterminated-reserve", "--action=reserve",
+    "--dispatch=writer-dispatch", "--attempt=unterminated-attempt",
+    "--launch-operation-id=launch-unterminated-attempt",
+    "--writable", "--paths=workflow/unterminated-active/**",
+  ]);
+  const events = authoritativeEvents(paths, activeTask);
+  const activeEvent = events.at(-1);
+  const staleNoLeaseEvent = events[0];
+  const filler = `${JSON.stringify({ filler: "x".repeat(4096) })}\n`;
+  const eventFile = taskEventFile(paths, activeTask);
+  fs.writeFileSync(
+    eventFile,
+    `${filler.repeat(260)}${JSON.stringify(activeEvent)}\n${JSON.stringify(staleNoLeaseEvent)}`,
+  );
+  assert.ok(fs.statSync(eventFile).size > 1024 * 1024);
+  fs.writeFileSync(
+    taskStateFile(paths, activeTask),
+    `${JSON.stringify(staleNoLeaseEvent.projection.state, null, 2)}\n`,
+  );
+  fs.rmSync(writerControlSnapshotFile(paths), { force: true });
+  fs.rmSync(writerControlJournalFile(paths), { force: true });
+  fs.rmSync(writerControlForensicFile(paths), { force: true });
+
+  const candidateTask = createFixtureTask(environment, "Unterminated tail candidate");
+  const candidateAdmission = executionBrief(paths, candidateTask, { ownedPaths: ["workflow/unterminated-candidate/**"] });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      candidateTask, "trigger migration with unterminated stale tail", "--mode=execute",
+      "--authorization-ref=user-message:unterminated-tail",
+      `--brief=${candidateAdmission.briefPath}`, "--operation-id=start-unterminated-tail",
+    ]), { cwd: candidateAdmission.repo, environment }),
+    /authoritative tail is not newline-terminated/,
+  );
+  assert.equal(fs.existsSync(writerControlSnapshotFile(paths)), false);
+});
+
+test("writer lease hot snapshot and journal enforce bounded size and entry limits", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Control size root");
+  const admission = executionBrief(paths, taskId, { ownedPaths: ["workflow/control-size/**"] });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "create bounded control snapshot", "--mode=execute",
+    "--authorization-ref=user-message:control-size",
+    `--brief=${admission.briefPath}`, "--operation-id=start-control-size",
+  ]), { cwd: admission.repo, environment });
+  const snapshotFile = writerControlSnapshotFile(paths);
+  fs.writeFileSync(snapshotFile, `${" ".repeat(260 * 1024)}\n`);
+  const oversizeTask = createFixtureTask(environment, "Control oversize candidate");
+  const oversizeAdmission = executionBrief(paths, oversizeTask, { ownedPaths: ["workflow/control-oversize/**"] });
+  assert.throws(() => runRecordStart(parseRecordStartArgs([
+    oversizeTask,
+    "reject oversized control snapshot", "--mode=execute",
+    "--authorization-ref=user-message:control-oversize",
+    `--brief=${oversizeAdmission.briefPath}`,
+    "--operation-id=start-control-oversize",
+  ]), { cwd: oversizeAdmission.repo, environment }), /snapshot corrupt: exceeds size limit/);
+
+  writeControlJson(snapshotFile, {
+    schema_version: 1,
+    generation: 1,
+    forensic_status: "current",
+    coverage_digest: "",
+    coverage_count: 0,
+    coverage_status: "current",
+    leases: [{
+      task_id: "oversized-path-task",
+      lease_id: "lease-oversized",
+      owner_attempt_id: "attempt-oversized",
+      state: "active",
+      paths: ["x".repeat(600)],
+    }],
+  });
+  const boundedTask = createFixtureTask(environment, "Control bounded candidate");
+  const boundedAdmission = executionBrief(paths, boundedTask, { ownedPaths: ["workflow/control-bounded/**"] });
+  assert.throws(() => runRecordStart(parseRecordStartArgs([
+    boundedTask, "reject oversized path in control snapshot", "--mode=execute",
+    "--authorization-ref=user-message:control-bounded",
+    `--brief=${boundedAdmission.briefPath}`, "--operation-id=start-control-bounded",
+  ]), { cwd: boundedAdmission.repo, environment }), /lease paths required/);
+});
+
+function controlFileLabel(paths, file) {
+  const resolved = path.resolve(String(file));
+  if (resolved === path.resolve(paths.stateDir)) return "state-dir";
+  const basename = path.basename(resolved);
+  if (basename.includes("team-writer-leases.recovery.json")) return "journal";
+  if (basename.includes("team-writer-leases.forensic.json")) return "forensic";
+  if (basename.includes("team-writer-leases.json")) return "snapshot";
+  return "";
+}
+
+function withControlFsLog(paths, callback) {
+  const originals = {
+    openSync: fs.openSync,
+    fsyncSync: fs.fsyncSync,
+    renameSync: fs.renameSync,
+    rmSync: fs.rmSync,
+  };
+  const descriptorLabels = new Map();
+  const log = [];
+  fs.openSync = function loggedOpenSync(file, ...args) {
+    const descriptor = originals.openSync.call(this, file, ...args);
+    const label = controlFileLabel(paths, file);
+    if (label) descriptorLabels.set(descriptor, label);
+    return descriptor;
+  };
+  fs.fsyncSync = function loggedFsyncSync(descriptor, ...args) {
+    const label = descriptorLabels.get(descriptor);
+    if (label) log.push(`fsync:${label}`);
+    return originals.fsyncSync.call(this, descriptor, ...args);
+  };
+  fs.renameSync = function loggedRenameSync(from, to, ...args) {
+    const label = controlFileLabel(paths, to);
+    if (label) log.push(`rename:${label}`);
+    return originals.renameSync.call(this, from, to, ...args);
+  };
+  fs.rmSync = function loggedRmSync(file, ...args) {
+    const label = controlFileLabel(paths, file);
+    if (label && !path.basename(String(file)).startsWith(".")) log.push(`rm:${label}`);
+    return originals.rmSync.call(this, file, ...args);
+  };
+  try {
+    return callback(log);
+  } finally {
+    fs.openSync = originals.openSync;
+    fs.fsyncSync = originals.fsyncSync;
+    fs.renameSync = originals.renameSync;
+    fs.rmSync = originals.rmSync;
+  }
+}
+
+test("writer lease control writes fsync before rename and fsync directory after remove", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Durable control writer");
+  const admission = executionBrief(paths, taskId, { ownedPaths: ["workflow/durable-owned/**"] });
+  runRecordStart(parseRecordStartArgs([
+    taskId, "execute durable writer", "--mode=execute",
+    "--authorization-ref=user-message:durable-writer",
+    `--brief=${admission.briefPath}`, "--operation-id=start-durable-writer",
+  ]), { cwd: admission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, "--operation-id=durable-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/durable-owned/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=durable-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+  const log = withControlFsLog(paths, (controlLog) => {
+    invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+      taskId, "--operation-id=durable-reserve", "--action=reserve",
+      "--dispatch=writer-dispatch", "--attempt=durable-attempt",
+      "--launch-operation-id=launch-durable-attempt",
+      "--writable", "--paths=workflow/durable-owned/**",
+    ]);
+    return [...controlLog];
+  });
+  assert.ok(log.indexOf("fsync:journal") < log.indexOf("rename:journal"));
+  assert.ok(log.indexOf("rename:journal") < log.lastIndexOf("rename:snapshot"));
+  assert.ok(log.lastIndexOf("rename:snapshot") < log.indexOf("rm:journal"));
+  assert.ok(log.indexOf("rm:journal") < log.lastIndexOf("fsync:state-dir"));
+});
+
+test("post-event control snapshot failure leaves recovery journal blocking overlap", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(environment, "Control failure writer");
+  const firstAdmission = executionBrief(paths, firstTask, { ownedPaths: ["workflow/control-failure/**"] });
+  runRecordStart(parseRecordStartArgs([
+    firstTask, "execute control failure writer", "--mode=execute",
+    "--authorization-ref=user-message:control-failure",
+    `--brief=${firstAdmission.briefPath}`, "--operation-id=start-control-failure",
+  ]), { cwd: firstAdmission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=control-failure-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/control-failure/**",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    firstTask, "--operation-id=control-failure-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=writer-dispatch",
+  ]);
+
+  const originalRename = fs.renameSync;
+  let snapshotRenameCount = 0;
+  fs.renameSync = function failSecondSnapshotRename(from, to, ...args) {
+    if (path.basename(String(to)) === "team-writer-leases.json") {
+      snapshotRenameCount += 1;
+      if (snapshotRenameCount === 1) {
+        throw new Error("injected snapshot durability failure");
+      }
+    }
+    return originalRename.call(this, from, to, ...args);
+  };
+  try {
+    assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+      firstTask, "--operation-id=control-failure-reserve", "--action=reserve",
+      "--dispatch=writer-dispatch", "--attempt=control-failure-attempt",
+      "--launch-operation-id=launch-control-failure-attempt",
+      "--writable", "--paths=workflow/control-failure/**",
+    ]), /authoritative event committed but projection is inconsistent: injected snapshot durability failure/);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.equal(fs.existsSync(writerControlJournalFile(paths)), true);
+  const secondTask = createFixtureTask(environment, "Control failure overlap");
+  const secondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/control-failure/bin/**"] });
+  assert.throws(
+    () => runRecordStart(parseRecordStartArgs([
+      secondTask, "request overlap after control failure", "--mode=execute",
+      "--authorization-ref=user-message:control-failure-overlap",
+      `--brief=${secondAdmission.briefPath}`, "--operation-id=start-control-failure-overlap",
+    ]), { cwd: secondAdmission.repo, environment }),
+    /global writer lease conflict/,
+  );
 });
 
 test("Team start restores a committed task completion before admission", (t) => {
@@ -1675,6 +2307,18 @@ test("discuss compatibility never grants a writable lease", (t) => {
     "--launch-operation-id=launch-discuss-writer", "--writable", "--paths=workflow/**",
   ]), /writable attempt requires execute mode/);
   assert.equal(readTeam(paths, taskId).writer_leases.length, 0);
+});
+
+test("empty writer candidates do not scan unrelated authoritative event streams", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const unrelatedTask = path.join(paths.artifactsDir, "unrelated-empty-candidate-history");
+  fs.mkdirSync(unrelatedTask, { recursive: true });
+  const guardedUnrelatedEvents = path.join(unrelatedTask, "events-v2.jsonl");
+  fs.writeFileSync(guardedUnrelatedEvents, "not json and must not be read\n");
+  const taskId = createFixtureTask(environment, "Empty candidate discuss");
+  withReadFileGuard(guardedUnrelatedEvents, () => startNativeRecord(environment, taskId));
+  assert.equal(readTeam(paths, taskId).writer_leases.length, 0);
+  assert.equal(fs.existsSync(path.join(paths.stateDir, "team-writer-leases.json")), false);
 });
 
 test("record-start rejects done and archived tasks before changing Team state", (t) => {

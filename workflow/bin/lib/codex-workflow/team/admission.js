@@ -11,6 +11,7 @@ const { taskEventFile } = require("../core/task-mutation");
 const { captureWorktreeSnapshot: captureRepositorySnapshot } = require("../core/worktree-snapshot");
 const { executionAuthorityTeam } = require("./execution-authority-event");
 const { pathsOverlap } = require("./lane-registry");
+const { activeControlPlaneLeases } = require("./writer-lease-control");
 const { sha256 } = require("../verification/identity");
 const { validateGateRecord } = require("../verification/required-gates");
 
@@ -591,36 +592,11 @@ function pathMatchesOwned(candidate, patterns) {
   });
 }
 
-function activeWriterLeases(paths, excludedTaskId = "") {
-  if (!fs.existsSync(paths.artifactsDir)) return [];
-  const leases = [];
-  for (const entry of fs.readdirSync(paths.artifactsDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name === excludedTaskId) continue;
-    const stateFile = path.join(paths.artifactsDir, entry.name, "state.json");
-    const eventFile = taskEventFile(paths, entry.name);
-    if (!fs.existsSync(eventFile) && !fs.existsSync(stateFile)) continue;
-    let state;
-    if (fs.existsSync(eventFile)) {
-      const events = readAuthoritativeEvents(eventFile, entry.name);
-      const latest = events.at(-1);
-      if (!latest) {
-        throw new CommandError(`authoritative task event stream is empty: ${entry.name}`);
-      }
-      state = latest.projection.state;
-    } else {
-      state = readJson(stateFile, `legacy task state ${entry.name}`);
-    }
-    const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
-    for (const lease of team.writer_leases || []) {
-      if (lease.state === "active") leases.push({ ...lease, task_id: entry.name });
-    }
-  }
-  return leases;
-}
-
 function assertNoGlobalWriterOverlap(paths, taskId, candidatePaths) {
-  for (const lease of activeWriterLeases(paths, taskId)) {
-    for (const requested of candidatePaths || []) {
+  const candidates = candidatePaths || [];
+  if (candidates.length === 0) return;
+  for (const lease of activeControlPlaneLeases(paths, taskId)) {
+    for (const requested of candidates) {
       for (const existing of lease.paths || []) {
         if (pathsOverlap(requested, existing)) {
           throw new CommandError(`global writer lease conflict with ${lease.task_id}: ${requested} <> ${existing}`);
