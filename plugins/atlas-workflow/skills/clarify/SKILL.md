@@ -30,6 +30,44 @@ also requires explicit current-user Flow Approval. If any check fails, route to
 backend, migration, CLI, no-interaction, and tiny precise work does not require a
 Design Handoff.
 
+## Clarify Bounded-Parallel Default
+
+Clarify uses a controller policy, not a runtime scheduler invariant. Before
+brownfield discovery, main Codex freezes the minimal Goal, non-goals, authority,
+and acceptance draft before any fan-out. Tiny means one exact goal, one owner,
+one primary evidence domain, and one verification path with no independent
+safety, data, permission, compatibility, migration, or release unknown; when
+that classification is unclear, treat the request as non-tiny.
+
+- For non-tiny Clarify, the default is `main + at least one read-only child lane`:
+  the main Codex keeps the canonical scope outline while a child gathers
+  bounded evidence. If two or more independent, ready, non-duplicate unknown
+  clusters with explicit consumers exist, dispatch them in parallel. The first
+  Clarify wave has at most three child lanes.
+- Admit a candidate lane only when it has a frozen Goal or controller-admitted
+  `current-required` reference, an explicit consumer, ready input, a read-only
+  evidence domain or explicit owned/forbidden paths, structured expected output,
+  authority and a stop condition, and a reason tied to critical-path time or a
+  named risk. Duplicate lanes are coalesced rather than fanned out; dependency-not-ready
+  lanes are deferred until ready. Outputs without a current consumer, uncertain
+  writer/lease/quiescence ownership, unavailable exact spawn
+  schema/profile/model/reasoning/backend routes, and confirmed cost anomaly
+  cases fail closed rather than creating fan-out.
+- The main Codex is the sole canonical scope/artifact writer and final synthesizer.
+  Child findings cannot expand the Goal, create workflow artifacts, or write
+  project documents; conflicts are resolved by evidence, not by vote.
+- Use the Clarify wave rule
+  `child_count = min(ready independent lanes, host available child slots, 3)`.
+  Recompute the frontier after synthesis and continue with another wave while
+  admitted lanes are ready; the soft wave cap is not a completion or stop
+  condition. The Team controller's separate soft cap of `4` does not widen a
+  Clarify wave.
+- Exact-route failures remain fail closed to main-only: do not substitute a
+  generic or inherited child. This bounded-parallel policy does not add a runtime
+  scheduler, ledger field, or schema; record-only compatibility remains valid
+  and `effective_backend=none` is not evidence of parallel
+  completion.
+
 ## Release Intent
 
 - Classify the target separately from the current work type. Use `product_release` only when the request explicitly asks for formal release certification, `release-ready`, `certified`, or an equivalent source-level release conclusion. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only with that explicit intent; otherwise it routes to `product_increment`.

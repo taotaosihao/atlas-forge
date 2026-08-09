@@ -3,7 +3,7 @@ name: team
 description: Use the Atlas team flow with Codex native collaboration by default, while routing the equivalent DeepSeek Flash implementation and exploration candidates through Paseo.
 ---
 
-Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
+Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
 
 ## Independent Staffing, Model, Release, And Lease Decisions
 
@@ -42,6 +42,43 @@ Choose a path lease from actual write-conflict risk, separately from staffing:
   lease and admission rules. Do not create a general Team-independent lease
   runtime in the quick path.
 
+## Bounded-Parallel Controller Policy
+
+Once Team is selected, the controller first freezes the admitted Goal and
+constructs dependency and ownership information, then dispatches the current
+ready frontier. At least one valid child lane runs in parallel with main
+integration work; when the frontier contains two or more admitted, independent,
+ready lanes, they run in the same bounded wave by default. This is controller
+policy, not a runtime scheduler invariant, and it does not add a ledger or schema
+field.
+
+- A lane is admitted only with a frozen Goal or controller-admitted
+  `current-required` reference, a named output consumer, ready input, a
+  read-only evidence domain or disjoint owned/forbidden paths, structured output,
+  authority and stop condition, and a reason tied to critical-path time or a
+  named risk. Duplicate lanes, dependency-not-ready lanes, outputs without a
+  current consumer, uncertain writer lease/quiescence, unavailable exact
+  spawn/profile/model/reasoning/backend routes, and confirmed cost anomalies
+  fail closed instead of creating fan-out.
+- Compute each soft wave with
+  `child_count = min(ready independent lanes, host available child slots, 4)`.
+  The `4` is an initial soft wave cap, not a completion or stop condition;
+  synthesize the current wave, recompute the frontier, and continue with another
+  wave while admitted lanes remain ready. A user-authorized wider frontier may
+  expand the wave only while routing, authority, writer, and release gates stay
+  intact.
+- The main Codex remains the integration owner, controller authority, sole
+  canonical writer for shared scope/artifacts, and final acceptance owner.
+  Parallel writers are allowed only for explicitly disjoint owned paths with an
+  integration owner and the applicable lease/quiescence boundary; tightly
+  coupled implementation remains single-writer. Child findings never broaden
+  the Goal or silently create workflow artifacts.
+- `record-only` compatibility and `effective_backend=none` remain legal
+  zero-dispatch outcomes, but neither is evidence of admitted dispatch or
+  parallel completion. A missing exact route, schema-restricted/profile-mismatch
+  surface, or cost anomaly therefore stays main-only/fail-closed; do not use a
+  generic or inherited child as a substitute.
+
 ## Language
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors when accuracy benefits.
@@ -72,7 +109,13 @@ Native collaboration is the normal Team backend. Use the smallest useful set of 
 - `collaboration.list_agents` to inspect current capacity and status.
 - `collaboration.interrupt_agent` only to stop work that is still running and should no longer continue.
 
-Start with the main Codex, but prefer parallel native agents when the authorized implementation decomposes into genuinely independent path/module ownership and parallelism materially improves latency. Do not impose a fixed role set or agent count. Tightly coupled changes keep one writable owner; multiple writers require disjoint path ownership, an integration owner, and no overlapping writer lease. Agent completion is evidence, not controller admission.
+Freeze the minimum Goal and ready frontier with the main Codex, then prefer
+parallel native agents for admitted independent lanes when parallelism materially
+improves latency or lowers risk; do not make main-first serial exploration the
+Team default. Do not impose a fixed role set or agent count beyond the bounded
+wave policy above. Tightly coupled changes keep one writable owner; multiple
+writers require disjoint path ownership, an integration owner, and no overlapping
+writer lease. Agent completion is evidence, not controller admission.
 
 ## Paseo Lanes
 
@@ -244,6 +287,11 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | `profile-mismatch` | `block-spawn; reconcile-policy-profile` | `spawn-with-mismatched-model` |
 | `metadata-invisible` | `disclose-unverified; no-billing-proof-required` | `claim-billing-model-verified` |
 | `confirmed-cost-anomaly` | `stop-new-fanout; readonly-diagnosis; main-only` | `continue-fanout-or-mutate-runtime` |
+| `single-ready-lane` | `dispatch-one-admitted-lane` | `fan-out-unadmitted-or-duplicate` |
+| `duplicate-lane` | `coalesce-duplicate-no-fanout` | `duplicate-cross-check-by-default` |
+| `dependency-not-ready` | `defer-until-dependency-ready` | `dispatch-before-dependency-ready` |
+| `ready-frontier-bounded` | `bounded-parallel-ready-frontier` | `unbounded-or-not-ready-fanout` |
+| `record-only-compatibility` | `effective_backend-none-legal-no-parallel-evidence` | `reject-zero-dispatch-finalize` |
 
 Use this table as a decision contract, not as a fixed sequence of lanes.
 
@@ -297,7 +345,7 @@ Release-readiness invariant: only a Team execution-v3 product_release whose immu
 
 ## Minimal Agent Planning
 
-1. Start with the main Codex. Spawn only a concrete bounded lane whose result materially changes latency or risk.
+1. Freeze the minimum Goal and construct the dependency/ownership ready frontier with the main Codex. In a selected Team, dispatch admitted independent lanes in bounded parallel waves by default; spawn only concrete bounded lanes whose results materially change latency or risk.
 2. Choose roles from the actual task; there is no default role set or required agent count. Do not add lanes merely to follow the model preference table.
 3. Use one writable owner for tightly coupled changes. Multiple writable agents require disjoint path/module ownership and an explicit integration owner.
 4. Reviewers and verifiers stay read-only unless a focused repair is assigned.

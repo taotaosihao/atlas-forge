@@ -8,7 +8,7 @@ AGENTS="$ROOT/.codex/agents"
 
 assert_has() {
   local file="$1" pattern="$2" label="$3"
-  rg -q -- "$pattern" "$file" || {
+  rg -Uq -- "$pattern" "$file" || {
     printf 'missing required routing behavior: %s\n' "$label" >&2
     exit 1
   }
@@ -16,7 +16,7 @@ assert_has() {
 
 assert_lacks() {
   local file="$1" pattern="$2" label="$3"
-  if rg -q -- "$pattern" "$file"; then
+  if rg -Uq -- "$pattern" "$file"; then
     printf 'found forbidden routing behavior: %s\n' "$label" >&2
     exit 1
   fi
@@ -54,6 +54,11 @@ const expected = {
   'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
   'metadata-invisible': ['disclose-unverified; no-billing-proof-required', 'claim-billing-model-verified'],
   'confirmed-cost-anomaly': ['stop-new-fanout; readonly-diagnosis; main-only', 'continue-fanout-or-mutate-runtime'],
+  'single-ready-lane': ['dispatch-one-admitted-lane', 'fan-out-unadmitted-or-duplicate'],
+  'duplicate-lane': ['coalesce-duplicate-no-fanout', 'duplicate-cross-check-by-default'],
+  'dependency-not-ready': ['defer-until-dependency-ready', 'dispatch-before-dependency-ready'],
+  'ready-frontier-bounded': ['bounded-parallel-ready-frontier', 'unbounded-or-not-ready-fanout'],
+  'record-only-compatibility': ['effective_backend-none-legal-no-parallel-evidence', 'reject-zero-dispatch-finalize'],
 };
 
 if (actual.size !== Object.keys(expected).length) {
@@ -71,6 +76,26 @@ NODE
 # Guard prose and agent prompts against contradictory shortcuts outside the table.
 assert_has "$TEAM" 'small clear task defaults to the main Codex' 'small task defaults to main agent'
 assert_has "$TEAM" 'concrete evidence.*materially lowers risk or latency' 'small task permits evidence-backed delegation'
+assert_has "$TEAM" 'bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration' 'selected Team defaults to bounded ready-frontier parallelism'
+assert_has "$TEAM" '## Bounded-Parallel Controller Policy' 'bounded-parallel controller policy is explicit'
+assert_has "$TEAM" 'two or more admitted, independent,\s+ready lanes.*same bounded wave by default' 'two ready independent lanes share a bounded wave'
+assert_has "$TEAM" 'child_count = min\(ready independent lanes, host available child slots, 4\)' 'bounded wave width is capacity- and lane-limited'
+assert_has "$TEAM" 'initial soft wave cap, not a completion or stop condition' 'wave cap is soft and not a stop condition'
+assert_has "$TEAM" 'A lane is admitted only with' 'Team lane admission is explicit'
+for lane_field in Goal 'output consumer' 'ready input' 'structured output' authority 'stop condition'; do
+  assert_has "$TEAM" "$lane_field" "Team lane admission records $lane_field"
+done
+assert_has "$TEAM" '[Dd]uplicate lanes.*dependency-not-ready lanes' 'duplicate and dependency-not-ready lanes do not fan out'
+assert_has "$TEAM" 'tightly\s+coupled implementation remains single-writer' 'tightly coupled implementation remains single-writer'
+assert_has "$TEAM" 'Parallel writers are allowed only' 'multiwriter paths require explicit admission'
+assert_has "$TEAM" 'disjoint owned paths' 'multiwriter paths require disjoint ownership'
+assert_has "$TEAM" 'integration owner' 'multiwriter paths require an integration owner'
+assert_has "$TEAM" 'lease/quiescence boundary' 'multiwriter paths require lease/quiescence'
+assert_has "$TEAM" 'controller policy, not a runtime scheduler invariant' 'bounded policy is not a runtime scheduler guarantee'
+assert_has "$TEAM" 'record-only.*effective_backend=none.*legal' 'record-only Team compatibility remains legal'
+assert_has "$TEAM" 'neither is evidence of admitted dispatch' 'record-only does not prove admitted dispatch'
+assert_has "$TEAM" 'parallel completion' 'record-only does not prove parallel completion'
+assert_lacks "$TEAM" 'Start with the main Codex, but prefer parallel native agents' 'stale main-first staffing prose is removed'
 assert_has "$TEAM" 'Before the first native fan-out' 'native routing preflight is mandatory'
 assert_has "$TEAM" 'agent_type.*model.*reasoning_effort.*fork_turns' 'preflight checks all exact-routing fields'
 assert_has "$TEAM" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'

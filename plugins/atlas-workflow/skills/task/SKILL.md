@@ -20,6 +20,17 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 7. Use `$atlas-workflow:worktree` only when isolation has concrete value. Use `$atlas-workflow:finish` for integration or cleanup decisions after isolated work.
 8. For nontrivial direct execution that deliberately bypasses a plausible higher-risk planning layer, record one concise `route-decision` in an existing durable task when one exists; otherwise record the rationale once in the current canonical document or final report and do not initialize workflow merely to log it. Tiny or already-documented work needs no duplicate routing artifact.
 
+## Parallel Routing Boundary
+
+The bounded-parallel controller policy belongs to non-tiny Clarify and to a
+Team after the request has been routed to Team. Ordinary `$atlas-workflow:task`
+and `$atlas-workflow:cw` remain bounded main/lightweight routes and do not
+automatically upgrade to Team because a task has multiple files, complexity, or
+potentially independent work. Task/CW do not create Clarify child lanes or use
+the Team `child_count` wave rule unless the request is routed to the relevant
+flow; all existing authority, model, lease, and release boundaries remain in
+force.
+
 ## Release Target Routing
 
 Classify the requested target deliverable independently from the current work type:
