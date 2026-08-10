@@ -5,17 +5,17 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { TextDecoder } = require("util");
-const { validateBrief } = require("../contracts/team-sdd/validators/brief");
-const { validateReviewVerdict } = require("../contracts/team-sdd/validators/review-verdict");
-const { extractExecutionPlan } = require("../contracts/team-sdd/validators/execution-plan");
+const {
+  NEW_AUTHORING_CONTRACT_SEMANTICS,
+  SUPPORTED_CONTRACT_SEMANTICS,
+  parseImplementationContract,
+} = require("../contracts/team-sdd/validators/implementation-contract");
 const {
   extractReleaseIntent,
 } = require("../contracts/release-certification/validators/release-intent");
 const {
-  computeGoalRef,
-  digestFile,
-  validateControllerResolutionAgainst,
-} = require("../contracts/team-sdd/validators/controller-resolution");
+  snapshotAuthoritySlices,
+} = require("../contracts/team-sdd/validators/authority-slices");
 
 const ENVELOPE_FIELDS = new Set([
   "task_id",
@@ -114,9 +114,9 @@ Options:
   --file <path>  Markdown implementation contract to validate.
   --strict       Require contract_semantics_version.
   --new-authoring
-                 Require strict semantics version 3 or 4 for newly authored contracts.
+                 Require strict semantics version 5 or 6 for newly authored contracts.
   --authority-slice <dir>
-                 Canonical Team SDD slice used to validate semantics-v2/v3/v4 goal
+                 Canonical Team SDD slice used to validate semantics-v2-v6 goal
                  and current-required authority. Repeat for multiple slices.
   --help         Show this help.
 
@@ -184,27 +184,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function canonicalRegularFile(file, label) {
-  let stat;
-  try {
-    stat = fs.lstatSync(file);
-  } catch (error) {
-    throw new Error(`${label} is missing: ${file}: ${error.message}`);
-  }
-  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(file) !== path.resolve(file)) {
-    throw new Error(`${label} must be a canonical regular non-symlink file: ${file}`);
-  }
-}
-
-function readCanonicalJson(file, label) {
-  canonicalRegularFile(file, label);
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch (error) {
-    throw new Error(`${label} is invalid JSON: ${file}: ${error.message}`);
-  }
-}
-
 function workflowRoot() {
   return path.resolve(
     process.env.CODEX_WORKFLOW_ROOT
@@ -213,105 +192,37 @@ function workflowRoot() {
   );
 }
 
-function loadAuthoritySlices(slicePaths) {
-  const diagnostics = [];
-  const goalRefs = new Set();
-  const currentRequired = new Set();
-  const findingOwners = new Map();
-  const taskIds = new Set();
-  const seenSlices = new Set();
-  const add = (code, message) => diagnostics.push(
-    makeDiagnostic("ERROR", code, "authority-slice", 0, message),
-  );
-
-  for (const rawSlice of slicePaths) {
-    const sliceDir = path.resolve(rawSlice);
-    if (seenSlices.has(sliceDir)) {
-      add("AUTHORITY_SLICE_DUPLICATE", `authority slice was provided more than once: ${sliceDir}`);
-      continue;
-    }
-    seenSlices.add(sliceDir);
-    try {
-      const stat = fs.lstatSync(sliceDir);
-      if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(sliceDir) !== sliceDir) {
-        throw new Error(`authority slice must be a canonical non-symlink directory: ${sliceDir}`);
-      }
-      const briefFile = path.join(sliceDir, "brief.json");
-      const verdictFile = path.join(sliceDir, "review-verdict.json");
-      const resolutionFile = path.join(sliceDir, "controller-resolution.json");
-      const brief = readCanonicalJson(briefFile, "brief.json");
-      const briefErrors = validateBrief(brief);
-      if (![2, 3].includes(brief.schema_version) || briefErrors.length > 0) {
-        throw new Error(`invalid brief v2/v3: ${briefErrors.join("; ")}`);
-      }
-      const expectedSliceDir = path.join(
-        workflowRoot(),
-        "artifacts",
-        brief.task_id,
-        "team",
-        "sdd",
-        "slices",
-        brief.slice_id,
-      );
-      if (sliceDir !== expectedSliceDir) {
-        throw new Error(
-          `authority slice is outside the canonical workflow artifact tree: expected ${expectedSliceDir}`,
-        );
-      }
-      const goalRef = computeGoalRef(brief, sliceDir);
-      taskIds.add(brief.task_id);
-      brief.acceptance_refs.forEach((ref) => goalRefs.add(ref));
-      const hasVerdict = fs.existsSync(verdictFile);
-      const hasResolution = fs.existsSync(resolutionFile);
-      if (hasVerdict !== hasResolution) {
-        throw new Error(
-          "review-verdict.json and controller-resolution.json must either both exist or both be absent",
-        );
-      }
-      if (!hasVerdict) continue;
-
-      const verdict = readCanonicalJson(verdictFile, "review-verdict.json");
-      const resolution = readCanonicalJson(resolutionFile, "controller-resolution.json");
-      const verdictErrors = validateReviewVerdict(verdict);
-      if (verdict.schema_version !== 2 || verdictErrors.length > 0) {
-        throw new Error(`invalid review verdict v2: ${verdictErrors.join("; ")}`);
-      }
-      const resolutionErrors = validateControllerResolutionAgainst(resolution, {
-        brief,
-        verdict,
-        verdictDigest: digestFile(verdictFile),
-        goalRef,
-        sliceDir,
-      });
-      if (resolutionErrors.length > 0) {
-        throw new Error(`invalid controller resolution: ${resolutionErrors.join("; ")}`);
-      }
-      for (const record of resolution.records) {
-        if (record.disposition !== "current-required") continue;
-        const owner = findingOwners.get(record.finding_id);
-        if (owner && owner !== sliceDir) {
-          add(
-            "CURRENT_REQUIRED_AUTHORITY_AMBIGUOUS",
-            `current-required finding appears in multiple authority slices: ${record.finding_id}`,
-          );
-          continue;
-        }
-        findingOwners.set(record.finding_id, sliceDir);
-        currentRequired.add(record.finding_id);
-      }
-    } catch (error) {
-      add("AUTHORITY_SLICE_INVALID", `${sliceDir}: ${error.message}`);
-    }
+function loadAuthoritySlices(slicePaths, { root, expectedTaskId }) {
+  try {
+    return {
+      ...snapshotAuthoritySlices(slicePaths, {
+        workflowRoot: root,
+        expectedTaskId,
+      }),
+      diagnostics: [],
+    };
+  } catch (error) {
+    const code = /^authority task_id .* does not match expected task /.test(error.message)
+      ? "AUTHORITY_TASK_MISMATCH"
+      : /authority slices span multiple tasks/.test(error.message)
+        ? "AUTHORITY_TASK_AMBIGUOUS"
+      : /duplicate canonical directories/.test(error.message)
+        ? "AUTHORITY_SLICE_DUPLICATE"
+        : "AUTHORITY_SLICE_INVALID";
+    return {
+      currentRequired: new Set(),
+      diagnostics: [makeDiagnostic(
+        "ERROR",
+        code,
+        "authority-slice",
+        0,
+        error.message,
+      )],
+      goalRefs: new Set(),
+      identities: [],
+      taskId: "",
+    };
   }
-  if (taskIds.size > 1) {
-    add("AUTHORITY_TASK_AMBIGUOUS", `authority slices span multiple tasks: ${[...taskIds].sort().join(", ")}`);
-  }
-  return {
-    currentRequired,
-    diagnostics,
-    goalRefs,
-    taskId: taskIds.size === 1 ? [...taskIds][0] : "",
-  };
 }
 
 function readUtf8File(file) {
@@ -1287,7 +1198,7 @@ function validateVersionTwo(content, fields, initialDiagnostics, authority, stri
 function validateVersionThree(content, fields, initialDiagnostics, authority, strict) {
   const diagnostics = validateVersionTwo(content, fields, initialDiagnostics, authority, strict);
   try {
-    extractExecutionPlan(content);
+    parseImplementationContract(content);
   } catch (error) {
     diagnostics.push(makeDiagnostic(
       "ERROR",
@@ -1331,6 +1242,14 @@ function validateVersionFour(content, fields, initialDiagnostics, authority, str
   return diagnostics;
 }
 
+function validateVersionFive(content, fields, initialDiagnostics, authority, strict) {
+  return validateVersionThree(content, fields, initialDiagnostics, authority, strict);
+}
+
+function validateVersionSix(content, fields, initialDiagnostics, authority, strict) {
+  return validateVersionFour(content, fields, initialDiagnostics, authority, strict);
+}
+
 function sortDiagnostics(diagnostics) {
   return diagnostics.sort((left, right) => (
     left.line - right.line
@@ -1361,60 +1280,96 @@ function printSummary(ok, file, strict, newAuthoring, version, diagnostics) {
   console.log(`warnings: ${warnings}`);
 }
 
-function lint(file, strict, newAuthoring, authoritySlices = []) {
-  const { absolute, content } = readUtf8File(file);
+function validateContractText(content, {
+  authoritySlices = [],
+  expectedTaskId = "",
+  newAuthoring = false,
+  strict = false,
+  workflowRoot: explicitWorkflowRoot = workflowRoot(),
+} = {}) {
   const parsed = parseFields(content);
   const version = parsed.fields.get("contract_semantics_version");
+  const declaredTaskId = parsed.fields.get("task_id")?.value || "";
+  const taskDiagnostics = expectedTaskId && declaredTaskId && declaredTaskId !== expectedTaskId
+    ? [makeDiagnostic(
+      "ERROR",
+      "TASK_ID_MISMATCH",
+      "task_id",
+      parsed.fields.get("task_id").line,
+      `contract task_id ${declaredTaskId} does not match expected task ${expectedTaskId}`,
+    )]
+    : [];
 
   if (!version) {
     let diagnostic;
     if (newAuthoring) {
       diagnostic = makeDiagnostic(
         "ERROR",
-        "NEW_AUTHORING_REQUIRES_V3",
+        "NEW_AUTHORING_REQUIRES_V5_OR_V6",
         "contract_semantics_version",
         0,
-        "newly authored contracts must use contract_semantics_version: 3 or 4",
+        "newly authored contracts must use contract_semantics_version: 5 or 6",
       );
     } else if (strict) {
-      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1, 2, 3, or 4");
+      diagnostic = makeDiagnostic("ERROR", "SEMANTICS_VERSION_REQUIRED", "contract_semantics_version", 0, "strict mode requires contract_semantics_version: 1, 2, 3, 4, 5, or 6");
     } else {
       diagnostic = makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
     }
-    const diagnostics = [diagnostic];
-    diagnostics.forEach((item) => printDiagnostic(item, absolute));
+    const diagnostics = sortDiagnostics([...parsed.diagnostics, ...taskDiagnostics, diagnostic]);
     const ok = !diagnostics.some((item) => item.severity === "ERROR");
-    printSummary(ok, absolute, strict, newAuthoring, "legacy", diagnostics);
-    return ok ? 0 : 1;
+    return { diagnostics, ok, version: "legacy" };
   }
 
-  if (!["1", "2", "3", "4"].includes(version.value)) {
+  if (!SUPPORTED_CONTRACT_SEMANTICS.map(String).includes(version.value)) {
     const diagnostics = sortDiagnostics([
       ...parsed.diagnostics,
-      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1, 2, 3, or 4 is supported"),
+      ...taskDiagnostics,
+      makeDiagnostic("ERROR", "SEMANTICS_VERSION_UNSUPPORTED", version.key, version.line, "only canonical contract_semantics_version: 1, 2, 3, 4, 5, or 6 is supported"),
     ]);
-    diagnostics.forEach((item) => printDiagnostic(item, absolute));
-    printSummary(false, absolute, strict, newAuthoring, version.value || "invalid", diagnostics);
-    return 1;
+    return { diagnostics, ok: false, version: version.value || "invalid" };
   }
 
-  const versionDiagnostics = newAuthoring && !["3", "4"].includes(version.value)
+  const versionDiagnostics = newAuthoring
+    && !NEW_AUTHORING_CONTRACT_SEMANTICS.map(String).includes(version.value)
     ? [makeDiagnostic(
       "ERROR",
-      "NEW_AUTHORING_REQUIRES_V3",
+      "NEW_AUTHORING_REQUIRES_V5_OR_V6",
       version.key,
       version.line,
-      "newly authored contracts must use contract_semantics_version: 3 or 4",
+      "newly authored contracts must use contract_semantics_version: 5 or 6",
     )]
     : [];
+  const authority = authoritySlices.length > 0
+    ? loadAuthoritySlices(authoritySlices, {
+      root: explicitWorkflowRoot,
+      expectedTaskId: expectedTaskId || declaredTaskId,
+    })
+    : null;
   const diagnostics = sortDiagnostics([
+    ...taskDiagnostics,
     ...versionDiagnostics,
-    ...(version.value === "4"
+    ...(version.value === "6"
+      ? validateVersionSix(
+        content,
+        parsed.fields,
+        parsed.diagnostics,
+        authority,
+        strict,
+      )
+      : version.value === "5"
+      ? validateVersionFive(
+        content,
+        parsed.fields,
+        parsed.diagnostics,
+        authority,
+        strict,
+      )
+      : version.value === "4"
       ? validateVersionFour(
         content,
         parsed.fields,
         parsed.diagnostics,
-        authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+        authority,
         strict,
       )
       : version.value === "3"
@@ -1422,7 +1377,7 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
         content,
         parsed.fields,
         parsed.diagnostics,
-        authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+        authority,
         strict,
       )
       : version.value === "2"
@@ -1430,15 +1385,38 @@ function lint(file, strict, newAuthoring, authoritySlices = []) {
           content,
           parsed.fields,
           parsed.diagnostics,
-          authoritySlices.length > 0 ? loadAuthoritySlices(authoritySlices) : null,
+          authority,
           strict,
         )
         : validateVersionOne(parsed.fields, parsed.diagnostics)),
   ]);
-  diagnostics.forEach((item) => printDiagnostic(item, absolute));
   const ok = !diagnostics.some((item) => item.severity === "ERROR");
-  printSummary(ok, absolute, strict, newAuthoring, version.value, diagnostics);
-  return ok ? 0 : 1;
+  return {
+    authorityIdentities: authority?.identities || [],
+    diagnostics,
+    ok,
+    version: version.value,
+  };
+}
+
+function lint(file, strict, newAuthoring, authoritySlices = []) {
+  const { absolute, content } = readUtf8File(file);
+  const result = validateContractText(content, {
+    authoritySlices,
+    newAuthoring,
+    strict,
+    workflowRoot: workflowRoot(),
+  });
+  result.diagnostics.forEach((item) => printDiagnostic(item, absolute));
+  printSummary(
+    result.ok,
+    absolute,
+    strict,
+    newAuthoring,
+    result.version,
+    result.diagnostics,
+  );
+  return result.ok ? 0 : 1;
 }
 
 function main() {
@@ -1450,11 +1428,15 @@ function main() {
   return lint(options.file, options.strict, options.newAuthoring, options.authoritySlices);
 }
 
-try {
-  process.exitCode = main();
-} catch (error) {
-  const code = error instanceof CliError ? "CLI_USAGE" : error instanceof InputError ? "INPUT_INVALID" : "TOOL_INTERNAL_ERROR";
-  console.error("implementation_contract_lint: false");
-  console.error(`ERROR ${code} message=${JSON.stringify(error.message)}`);
-  process.exitCode = 2;
+if (require.main === module) {
+  try {
+    process.exitCode = main();
+  } catch (error) {
+    const code = error instanceof CliError ? "CLI_USAGE" : error instanceof InputError ? "INPUT_INVALID" : "TOOL_INTERNAL_ERROR";
+    console.error("implementation_contract_lint: false");
+    console.error(`ERROR ${code} message=${JSON.stringify(error.message)}`);
+    process.exitCode = 2;
+  }
 }
+
+module.exports = { validateContractText };

@@ -10,7 +10,7 @@ const test = require("node:test");
 const WORKFLOW_ROOT = path.resolve(__dirname, "../..");
 const CLI_PATH = path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/task/cli.js");
 const TEMPLATE_PATH = path.join(WORKFLOW_ROOT, "templates/task.md");
-const { resolvePaths } = require(path.join(
+const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
 ));
@@ -26,6 +26,7 @@ const {
 const {
   appendAuthoritativeEvent,
   authoritativeEventDigest,
+  readAuthoritativeEvents,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/core/event-store.js"));
 const {
   appendReconciliationAudit,
@@ -39,7 +40,9 @@ const {
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/task/runtime.js"));
 const {
   parseVerifyArgs,
+  parseVerifyResolveArgs,
   runVerification,
+  runVerificationResolution,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/runner.js"));
 
 function clockAt(value) {
@@ -66,6 +69,16 @@ function eventRows(paths, taskId) {
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
+}
+
+function rewriteLatestEvent(paths, taskId, change) {
+  const events = eventRows(paths, taskId);
+  change(events.at(-1));
+  events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
+  fs.writeFileSync(
+    taskEventFile(paths, taskId),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  );
 }
 
 function snapshot(paths, taskId) {
@@ -107,28 +120,130 @@ test("F1: failure before authoritative append leaves every projection unchanged"
   assert.deepEqual(snapshot(paths, taskId), before);
 });
 
-test("F1: verification records also remain absent before authoritative append", (t) => {
+test("F1: verification final-append failure preserves only its durable pending claim", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const options = { clock: clockAt("2026-07-27T10:00:30Z"), environment };
   const taskId = createTask("Verification F1", "records follow the event", options);
   startTask(taskId, { ...options, operationId: "start-verification-f1" });
   const before = snapshot(paths, taskId);
   const verificationDir = path.join(paths.artifactsDir, taskId, "verification");
+  const counter = path.join(paths.root, "verification-f1-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
 
   assert.throws(
-    () => runVerification(
-      parseVerifyArgs([taskId, "--", process.execPath, "-e", "process.exit(0)"]),
-      {
-        ...options,
-        failBeforeEventAppend: true,
-        operationId: "verify-f1",
-        recordToken: "20260727T100030000000000",
-      },
-    ),
+    () => runVerification(parsed, {
+      ...options,
+      failBeforeEventAppend: true,
+      operationId: "verify-f1",
+      recordToken: "20260727T100030000000000",
+    }),
     /injected failure before authoritative event append/,
   );
-  assert.deepEqual(snapshot(paths, taskId), before);
+  const after = snapshot(paths, taskId);
+  assert.deepEqual(after.task, before.task);
+  assert.deepEqual(after.runtime, before.runtime);
+  assert.notDeepEqual(after.state, before.state);
+  assert.notDeepEqual(after.events, before.events);
+  assert.equal(eventRows(paths, taskId).at(-1).kind, "verification.claimed");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims[0].status,
+    "in_progress",
+  );
   assert.deepEqual(fs.readdirSync(verificationDir), []);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.throws(() => runVerification(parsed, {
+    ...options,
+    operationId: "verify-f1",
+    recordToken: "20260727T100030000000001",
+  }), /verification operation is already in progress/);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+});
+
+test("semantic replay rejects self-consistent verification claim and tombstone tampering", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const options = { clock: clockAt("2026-07-27T10:00:45Z"), environment };
+  const taskId = createTask("Verification semantic replay", "claims survive hash rewrites", options);
+  startTask(taskId, { ...options, operationId: "start-verification-semantic-replay" });
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    "process.exit(0)",
+  ]);
+  assert.throws(() => runVerification(parsed, {
+    ...options,
+    failBeforeEventAppend: true,
+    operationId: "verification-semantic-pending",
+    recordToken: "20260727T100045000000000",
+  }), /injected failure before authoritative event append/);
+  mutateTaskRuntime(paths, taskId, {
+    kind: "test.verification.pending-preserved",
+    operationId: "verification-semantic-pending-preserved",
+  }, ({ currentProjection }) => ({ projection: currentProjection }), options);
+
+  const eventFile = taskEventFile(paths, taskId);
+  const pendingStream = fs.readFileSync(eventFile, "utf8");
+  const expectPendingTamperRejected = (change, pattern) => {
+    fs.writeFileSync(eventFile, pendingStream);
+    rewriteLatestEvent(paths, taskId, change);
+    assert.throws(() => readAuthoritativeEvents(eventFile, taskId), pattern);
+  };
+  expectPendingTamperRejected((event) => {
+    event.projection.state.status = "archived";
+  }, /verification claim recovery requires task status doing/);
+  expectPendingTamperRejected((event) => {
+    event.projection.state.verification.operation_claims = [];
+  }, /event changed verification state it does not own/);
+  expectPendingTamperRejected((event) => {
+    event.projection.state.verification.operation_claims[0].request_digest =
+      `sha256:${"1".repeat(64)}`;
+  }, /event changed verification state it does not own/);
+  fs.writeFileSync(eventFile, pendingStream);
+
+  const evidence = path.join(
+    taskArtifactDir(paths, taskId),
+    "recovery",
+    "verification-semantic-replay.md",
+  );
+  fs.mkdirSync(path.dirname(evidence), { recursive: true });
+  fs.writeFileSync(evidence, "controller confirmed the verification result is indeterminate\n");
+  runVerificationResolution(parseVerifyResolveArgs([
+    taskId,
+    "--operation-id=verification-semantic-resolution",
+    "--pending-operation-id=verification-semantic-pending",
+    "--claim-operation-id=verification-semantic-pending-verification-claim",
+    "--authority-ref=operator-input:verification-semantic-replay",
+    "--reason=controller ended after argv execution before the terminal event",
+    "--evidence=recovery/verification-semantic-replay.md",
+  ]), options);
+  const resolvedStream = fs.readFileSync(eventFile, "utf8");
+  const expectTombstoneTamperRejected = (change) => {
+    fs.writeFileSync(eventFile, resolvedStream);
+    rewriteLatestEvent(paths, taskId, change);
+    assert.throws(
+      () => readAuthoritativeEvents(eventFile, taskId),
+      /verification resolved projection is not the canonical indeterminate transition/,
+    );
+  };
+  expectTombstoneTamperRejected((event) => {
+    delete event.projection.state.verification.operation_claims[0].tombstone;
+  });
+  expectTombstoneTamperRejected((event) => {
+    event.projection.state.verification.operation_claims[0]
+      .tombstone.execution_fingerprint = `sha256:${"2".repeat(64)}`;
+  });
+  expectTombstoneTamperRejected((event) => {
+    event.projection.state.verification.operation_claims[0]
+      .tombstone.authority_boundary.kind = "execution-grant";
+  });
+  fs.writeFileSync(eventFile, resolvedStream);
 });
 
 test("F2/F3: durable event replays projection and same operation is idempotent", (t) => {

@@ -19,10 +19,14 @@ const {
 } = require("./common");
 const {
   POLICY_ID,
+  canonicalPathPattern,
   pathsOverlap,
   validateCheck,
   validateException,
 } = require("./execution-plan");
+const {
+  canonicalAuthoritySliceIdentities,
+} = require("./authority-identity");
 
 const BASE_KEYS = [
   "schema_version",
@@ -67,7 +71,12 @@ const V3_KEYS = [
   "commit_policy",
   "output_contract",
 ];
+const V4_KEYS = V3_KEYS;
 const CONTRACT_KEYS = ["path", "sha256", "semantics_version", "execution_plan_sha256"];
+const V4_CONTRACT_KEYS = [
+  "path", "sha256", "semantics_version", "execution_plan_schema_version",
+  "execution_plan_sha256", "authority_slices",
+];
 const RELEASE_KEYS = [
   "target_delivery_class", "intent_sha256", "profile_ref", "profile_sha256",
   "check_definition_set_sha256", "requirement_refs",
@@ -120,9 +129,10 @@ function validateReleaseBinding(value, label, errors) {
   validateUniqueStrings(value.requirement_refs, `${label}.requirement_refs`, errors, true);
 }
 
-function validateV3(value, errors) {
-  requireKeys(value, V3_KEYS, errors);
-  rejectUnknownKeys(value, V3_KEYS, errors);
+function validateV3(value, errors, { next = false } = {}) {
+  const briefKeys = next ? V4_KEYS : V3_KEYS;
+  requireKeys(value, briefKeys, errors);
+  rejectUnknownKeys(value, briefKeys, errors);
   expectSafeId(value, "task_id", errors);
   expectSafeId(value, "slice_id", errors);
   expectAbsoluteExistingDir(value, "repo", errors);
@@ -132,10 +142,16 @@ function validateV3(value, errors) {
   expectString(value, "global_constraints_path", errors);
   if (path.isAbsolute(value.requirements_path || "")) errors.push("requirements_path must be relative");
   if (path.isAbsolute(value.global_constraints_path || "")) errors.push("global_constraints_path must be relative");
+  if (next && !canonicalPathPattern(value.requirements_path || "")) {
+    errors.push("requirements_path must be a canonical ASCII POSIX task-artifact-relative path");
+  }
+  if (next && !canonicalPathPattern(value.global_constraints_path || "")) {
+    errors.push("global_constraints_path must be a canonical ASCII POSIX task-artifact-relative path");
+  }
 
   const contractKeys = [
-    ...CONTRACT_KEYS,
-    ...(value.contract?.semantics_version === 4 ? ["work_type"] : []),
+    ...(next ? V4_CONTRACT_KEYS : CONTRACT_KEYS),
+    ...(new Set(next ? [6] : [4]).has(value.contract?.semantics_version) ? ["work_type"] : []),
     ...(value.contract?.release === undefined ? [] : ["release"]),
   ];
   if (validateExactObject(value.contract, "contract", contractKeys, errors)) {
@@ -147,19 +163,38 @@ function validateV3(value, errors) {
     if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.sha256 || "")) {
       errors.push("contract.sha256 must use sha256:<hex>");
     }
-    if (![1, 2, 3, 4].includes(value.contract.semantics_version)) {
-      errors.push("contract.semantics_version must be one of: 1, 2, 3, 4");
+    const semanticsVersions = next ? [5, 6] : [1, 2, 3, 4];
+    if (!semanticsVersions.includes(value.contract.semantics_version)) {
+      errors.push(`contract.semantics_version must be one of: ${semanticsVersions.join(", ")}`);
     }
-    if (value.contract.semantics_version === 4
+    if (next) {
+      const expectedPlanVersion = value.contract.semantics_version === 6 ? 4 : 3;
+      if (value.contract.execution_plan_schema_version !== expectedPlanVersion) {
+        errors.push(`contract.execution_plan_schema_version must equal ${expectedPlanVersion}`);
+      }
+      if (value.contract.semantics_version === 6 && value.contract.work_type !== "implementation") {
+        errors.push("contract.work_type must equal implementation for semantics version 6");
+      }
+    } else if (value.contract.semantics_version === 4
       && !WORK_TYPES.includes(value.contract.work_type)) {
       errors.push(`contract.work_type must be one of: ${WORK_TYPES.join(", ")}`);
     }
     if (!/^sha256:[a-f0-9]{64}$/.test(value.contract.execution_plan_sha256 || "")) {
       errors.push("contract.execution_plan_sha256 must use sha256:<hex>");
     }
+    if (next) {
+      try {
+        const identities = canonicalAuthoritySliceIdentities(value.contract.authority_slices);
+        if (identities.some((identity) => identity.task_id !== value.task_id)) {
+          errors.push("contract.authority_slices task_id must equal brief task_id");
+        }
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
     if (value.contract.release !== undefined) {
-      if (value.contract.semantics_version !== 4) {
-        errors.push("contract.release is supported only for semantics version 4");
+      if (value.contract.semantics_version !== (next ? 6 : 4)) {
+        errors.push(`contract.release is supported only for semantics version ${next ? 6 : 4}`);
       }
       validateReleaseBinding(value.contract.release, "contract.release", errors);
     }
@@ -185,6 +220,18 @@ function validateV3(value, errors) {
   validateUniqueStrings(value.owned_paths, "owned_paths", errors, true);
   validateUniqueStrings(value.forbidden_paths, "forbidden_paths", errors);
   validateUniqueStrings(value.acceptance_refs, "acceptance_refs", errors, true);
+  if (next) {
+    for (const [label, values] of [
+      ["owned_paths", value.owned_paths],
+      ["forbidden_paths", value.forbidden_paths],
+    ]) {
+      for (const [index, pattern] of (values || []).entries()) {
+        if (!canonicalPathPattern(pattern)) {
+          errors.push(`${label}[${index}] must be a canonical ASCII POSIX repository-relative path pattern`);
+        }
+      }
+    }
+  }
   for (const owned of value.owned_paths || []) {
     for (const forbidden of value.forbidden_paths || []) {
       if (pathsOverlap(owned, forbidden)) errors.push(`owned path overlaps forbidden path: ${owned} <> ${forbidden}`);
@@ -205,7 +252,7 @@ function validateV3(value, errors) {
     const ids = new Set();
     value.checks.forEach((check, index) => {
       validateCheck(check, `checks[${index}]`, errors, {
-        schemaVersion: value.contract?.release ? 2 : 1,
+        schemaVersion: value.contract?.release ? (next ? 4 : 2) : (next ? 3 : 1),
       });
       if (check && ids.has(check.check_id)) errors.push(`checks[${index}].check_id must be unique`);
       if (check) ids.add(check.check_id);
@@ -226,7 +273,7 @@ function validateV3(value, errors) {
       }
     }
     if (value.size_gate.decision === "exception") {
-      validateException(value.size_gate.exception, "size_gate.exception", errors);
+      validateException(value.size_gate.exception, "size_gate.exception", errors, { strict: next });
     } else if (value.size_gate.exception !== null) {
       errors.push("size_gate.exception must be null unless decision is exception");
     }
@@ -242,12 +289,16 @@ function validateBrief(value) {
     return errors;
   }
   expectInteger(value, "schema_version", errors);
-  if (![1, 2, 3].includes(value.schema_version)) {
-    errors.push("schema_version must be one of: 1, 2, 3");
+  if (![1, 2, 3, 4].includes(value.schema_version)) {
+    errors.push("schema_version must be one of: 1, 2, 3, 4");
     return errors;
   }
   if (value.schema_version === 3) {
     validateV3(value, errors);
+    return errors;
+  }
+  if (value.schema_version === 4) {
+    validateV3(value, errors, { next: true });
     return errors;
   }
   const keys = value.schema_version === 1 ? V1_KEYS : V2_KEYS;

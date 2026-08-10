@@ -41,7 +41,7 @@ const EXPECTED_ROUTES = {
     "scaffold-team",
     "source-snapshot",
   ],
-  "./verification/cli.js": ["gate-metric", "gate-report", "ready", "verify"],
+  "./verification/cli.js": ["gate-metric", "gate-report", "ready", "verify", "verify-resolve"],
   "./outcome/cli.js": ["outcome-mark", "outcome-report"],
   "./feedback/cli.js": [
     "feedback-cycle",
@@ -51,14 +51,17 @@ const EXPECTED_ROUTES = {
   ],
   "./team/cli.js": [
     "team-attempt-record",
+    "team-authorize",
     "team-dispatch-record",
     "team-fallback-record",
+    "team-grant",
     "team-lane-record",
     "team-loop",
     "team-loop-record",
     "team-promote",
     "team-record-finalize",
     "team-record-start",
+    "team-replan",
     "team-selection-record",
     "team-slice-accept",
     "team-slice-supersede",
@@ -104,8 +107,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 45 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 45);
+test("routes exactly 49 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 49);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)

@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/contracts/team-sdd/brief-v4.schema.json",
+  "title": "Atlas Team executable brief vNext",
+  "type": "object",
+  "required": [
+    "schema_version", "task_id", "slice_id", "repo", "base_sha", "objective",
+    "requirements_path", "global_constraints_path", "contract", "dependencies",
+    "keeper_outputs", "owned_paths", "forbidden_paths", "acceptance_refs", "risk_class",
+    "failure_domain", "rollback_boundary", "budget", "checks", "size_gate",
+    "commit_policy", "output_contract"
+  ],
+  "properties": {
+    "schema_version": { "const": 4 },
+    "task_id": { "$ref": "#/$defs/safe_id" },
+    "slice_id": { "$ref": "#/$defs/safe_id" },
+    "repo": { "type": "string", "pattern": "^/[\\x20-\\x7e]+$" },
+    "base_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "objective": { "$ref": "#/$defs/non_empty" },
+    "requirements_path": { "$ref": "#/$defs/relative_path" },
+    "global_constraints_path": { "$ref": "#/$defs/relative_path" },
+    "contract": {
+      "type": "object",
+      "required": ["path", "sha256", "semantics_version", "execution_plan_schema_version", "execution_plan_sha256", "authority_slices"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/[\\x20-\\x7e]+$" },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "semantics_version": { "type": "integer", "enum": [5, 6] },
+        "execution_plan_schema_version": { "type": "integer", "enum": [3, 4] },
+        "execution_plan_sha256": { "$ref": "#/$defs/digest" },
+        "authority_slices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/authority_slice_identity" }
+        },
+        "work_type": { "type": "string", "enum": ["implementation"] },
+        "release": { "$ref": "#/$defs/release_binding" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "semantics_version": { "const": 5 } } },
+          "then": {
+            "properties": { "execution_plan_schema_version": { "const": 3 } },
+            "not": { "anyOf": [{ "required": ["release"] }, { "required": ["work_type"] }] }
+          }
+        },
+        {
+          "if": { "properties": { "semantics_version": { "const": 6 } } },
+          "then": {
+            "required": ["release", "work_type"],
+            "properties": {
+              "execution_plan_schema_version": { "const": 4 },
+              "work_type": { "const": "implementation" }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["slice_id", "required_outcome", "keeper_outputs"],
+        "properties": {
+          "slice_id": { "$ref": "#/$defs/safe_id" },
+          "required_outcome": { "const": "succeeded" },
+          "keeper_outputs": { "$ref": "#/$defs/non_empty_strings" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "keeper_outputs": { "$ref": "#/$defs/non_empty_strings" },
+    "owned_paths": { "$ref": "#/$defs/non_empty_paths" },
+    "forbidden_paths": { "$ref": "#/$defs/paths" },
+    "acceptance_refs": { "$ref": "#/$defs/non_empty_strings" },
+    "risk_class": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "failure_domain": { "$ref": "#/$defs/non_empty" },
+    "rollback_boundary": { "$ref": "#/$defs/non_empty" },
+    "budget": {
+      "type": "object",
+      "required": ["max_changed_files", "max_loc", "max_wall_clock_minutes", "max_required_checks"],
+      "properties": {
+        "max_changed_files": { "type": "integer", "minimum": 1 },
+        "max_loc": { "type": "integer", "minimum": 1 },
+        "max_wall_clock_minutes": { "type": "integer", "minimum": 1 },
+        "max_required_checks": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "execution-plan.schema.json#/definitions/check_v1" },
+          { "$ref": "execution-plan.schema.json#/definitions/check_v2" }
+        ]
+      }
+    },
+    "size_gate": {
+      "type": "object",
+      "required": ["decision", "policy_id", "estimate", "exception"],
+      "properties": {
+        "decision": { "type": "string", "enum": ["pass", "split_required", "exception"] },
+        "policy_id": { "const": "atlas-slice-size-v2" },
+        "estimate": { "$ref": "execution-plan.schema.json#/definitions/estimate" },
+        "exception": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/size_exception" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "commit_policy": { "type": "string", "enum": ["logical_outcome", "changes_allowed_no_commit", "no_change_allowed"] },
+    "output_contract": { "const": "final_message_json_only" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "safe_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "non_empty": { "type": "string", "pattern": "^(?=.*\\S)[^\\r\\n\\t]+$" },
+    "relative_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\./)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\/$)[\\x20-\\x7e]+$"
+    },
+    "strings": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/non_empty" } },
+    "non_empty_strings": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/non_empty" } },
+    "paths": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/relative_path" } },
+    "non_empty_paths": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/relative_path" } },
+    "authority_slice_identity": {
+      "type": "object",
+      "required": [
+        "path", "task_id", "slice_id", "brief_json_sha256", "brief_md_sha256",
+        "evidence_manifest_sha256", "review_verdict_sha256",
+        "controller_resolution_sha256", "global_constraints_sha256"
+      ],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/[\\x20-\\x7e]+$" },
+        "task_id": { "$ref": "#/$defs/safe_id" },
+        "slice_id": { "$ref": "#/$defs/safe_id" },
+        "brief_json_sha256": { "$ref": "#/$defs/digest" },
+        "brief_md_sha256": { "$ref": "#/$defs/digest" },
+        "evidence_manifest_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+        "review_verdict_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+        "controller_resolution_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+        "global_constraints_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] }
+      },
+      "additionalProperties": false
+    },
+    "size_exception": {
+      "type": "object",
+      "required": ["authority_ref", "expires_at", "reason", "compensating_controls"],
+      "properties": {
+        "authority_ref": { "type": "string", "pattern": "^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+        "expires_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\dZ$"
+        },
+        "reason": { "$ref": "#/$defs/non_empty" },
+        "compensating_controls": { "$ref": "#/$defs/non_empty_strings" }
+      },
+      "additionalProperties": false
+    },
+    "release_binding": {
+      "$ref": "execution-plan.schema.json#/definitions/release_binding"
+    }
+  }
+}

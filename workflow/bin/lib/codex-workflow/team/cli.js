@@ -32,6 +32,14 @@ const {
   runSliceSupersede,
 } = require("./slice-acceptance");
 const { runLegacyTeamCommand } = require("./legacy-bridge");
+const {
+  parseAuthorizeArgs,
+  parseGrantArgs,
+  parseReplanArgs,
+  runAuthorize,
+  runGrant,
+  runReplan,
+} = require("./authority-commands");
 
 function main(argv) {
   try {
@@ -39,6 +47,12 @@ function main(argv) {
     let result;
     if (command === "team-start" || command === "team-loop") {
       result = runLegacyTeamCommand(argv);
+    } else if (command === "team-authorize") {
+      result = runAuthorize(parseAuthorizeArgs(argv.slice(1)));
+    } else if (command === "team-grant") {
+      result = runGrant(parseGrantArgs(argv.slice(1)));
+    } else if (command === "team-replan") {
+      result = runReplan(parseReplanArgs(argv.slice(1)));
     } else if (command === "team-record-start") {
       result = runRecordStart(parseRecordStartArgs(argv.slice(1)));
     } else if (command === "team-record-finalize") {
@@ -67,7 +81,7 @@ function main(argv) {
       result = runSliceSupersede(parseSliceSupersedeArgs(argv.slice(1)));
     } else {
       throw new CommandError(
-        "usage: codex-workflow {team-start|team-loop|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede}",
+        "usage: codex-workflow {team-authorize|team-grant|team-replan|team-start|team-loop|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede}",
       );
     }
     process.stdout.write(`${result.lines.join("\n")}\n`);

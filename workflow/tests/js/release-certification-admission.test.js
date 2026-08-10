@@ -29,9 +29,21 @@ const { resolvePaths, taskArtifactDir } = require(path.join(
   ROOT,
   "workflow/bin/lib/codex-workflow/core/paths",
 ));
-const { admitTeamStart, bindExecutionAuthority } = require(path.join(
+const { admitTeamStart } = require(path.join(
   ROOT,
   "workflow/bin/lib/codex-workflow/team/admission",
+));
+const { createTask, startTask } = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/task/lifecycle",
+));
+const { readJsonObject, taskStateFile } = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/task/runtime",
+));
+const { parseAuthorizeArgs, runAuthorize } = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/team/authority-commands",
 ));
 
 function digest(char) {
@@ -57,11 +69,11 @@ function productIntent(authorityRef = "user-message:release") {
   };
 }
 
-function releasePlan(intent) {
+function releasePlan(intent, schemaVersion = 4) {
   const profile = loadBundledProfile("web-ui-v1");
   const binding = profileBinding(profile);
   return {
-    schema_version: 2,
+    schema_version: schemaVersion,
     size_policy: { policy_id: "atlas-slice-size-v2" },
     release: releasePlanBinding(intent),
     slices: [{
@@ -100,13 +112,74 @@ function releasePlan(intent) {
   };
 }
 
-function contractMarkdown(intent, plan, workType = "implementation") {
+function contractMarkdown(intent, plan, taskId, workType = "implementation") {
+  const semanticsVersion = plan.schema_version === 4 ? 6 : 4;
+  const vNextAuthoring = semanticsVersion === 6 ? [
+    "finding_scope_admission: controller_current_required_only",
+    "safe_fallback_authority: none",
+    "first_code_guard: required",
+    "first_code_not_applicable_reason:",
+    "product_ui_gate: required",
+    "product_ui_not_applicable_reason:",
+    "",
+    "## First Code Slice Guard",
+    "",
+    "- first_code_slice: Implement the governed release runtime and its final-sweep behavior.",
+    "- first_code_slice_kind: product",
+    "- first_code_owner: release-runtime-owner",
+    "- first_code_verification: node --test workflow/tests/js/release-certification-admission.test.js",
+    "- allowed_contract_gate_only_until: contract authoring validation",
+    "- stop_if_no_code_by_phase: release implementation",
+    "- gate_parallelization_or_deferral_plan: Run admission checks before accepting the release execution slice.",
+    "",
+    "## Product/UI Acceptance Gate",
+    "",
+    "- first_operable_user_flow: Open the release candidate, complete its primary flow, and verify the saved result.",
+    "- browser_entrypoint: http://127.0.0.1:4173/release",
+    "- served_ui_validation_action: page.route('/api/**', route => route.fulfill({json: fixture})); never fulfill the main document or app bundle; page.goto(entrypoint); complete the primary flow and verify the saved result.",
+    "- ui_data_mode: API fixture data served behind the real application document and assets",
+    "- required_safety_gates: browser network boundary, credential isolation, and release authority checks",
+    "- allowed_headless_only_until: contract authoring validation",
+    "- stop_if_no_ui_by_phase: release implementation",
+    "",
+  ] : [];
+  const acceptanceRefs = [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))];
+  const vNextScope = semanticsVersion === 6 ? [
+    "## Acceptance Criteria",
+    "",
+    "| ID | Criterion | Required | Verification | Authority |",
+    "|----|-----------|----------|--------------|-----------|",
+    ...acceptanceRefs.map((ref) => (
+      `| ${ref} | Preserve the governed release requirement. | yes | release admission | goal:${ref} |`
+    )),
+    "",
+    "## Edge Cases",
+    "",
+    "| Case | Expected behavior | Required | Admission |",
+    "|------|-------------------|----------|-----------|",
+    "| Optional evidence note | Keep it outside executable scope. | no | optional |",
+    "",
+    "## Failure And Stop Conditions",
+    "",
+    "- Stop and ask the user when: release authority cannot be established.",
+    "- Treat the task as failed when: a required Profile validation fails.",
+    "- Required safe fallback: not_applicable",
+    "- Optional fallback notes: preserve non-required evidence as provenance.",
+    "",
+    "## Finding Provenance",
+    "",
+    "| Finding ID | Disposition | Source | Follow-up |",
+    "|------------|-------------|--------|-----------|",
+    "| release-note | informational | release fixture | none |",
+    "",
+  ] : [];
   return [
     "# Governed product release",
     "",
-    "task_id: release-task",
-    "contract_semantics_version: 4",
+    `task_id: ${taskId}`,
+    `contract_semantics_version: ${semanticsVersion}`,
     `work_type: ${workType}`,
+    ...vNextAuthoring,
     "",
     "```atlas-release-intent+json",
     JSON.stringify(intent, null, 2),
@@ -115,6 +188,19 @@ function contractMarkdown(intent, plan, workType = "implementation") {
     "```atlas-execution-plan+json",
     JSON.stringify(plan, null, 2),
     "```",
+    "",
+    ...vNextScope,
+  ].join("\n");
+}
+
+function decoyEnvelopeFor(semanticsVersion) {
+  const conflicting = semanticsVersion === 6 ? 5 : 6;
+  return [
+    "```text",
+    `contract_semantics_version: ${conflicting}`,
+    "work_type: review",
+    "```",
+    "<!-- contract_semantics_version: 4 -->",
     "",
   ].join("\n");
 }
@@ -125,7 +211,44 @@ function git(repo, args) {
   return result.stdout.trim();
 }
 
-function fixture(t, { authorityRef = "user-message:release", workType = "implementation" } = {}) {
+function writeAuthoritySlice(paths, taskId, repo, baseSha, acceptanceRefs) {
+  const sliceId = "release-authority";
+  const sliceDir = path.join(
+    taskArtifactDir(paths, taskId),
+    "team/sdd/slices",
+    sliceId,
+  );
+  fs.mkdirSync(sliceDir, { recursive: true });
+  fs.writeFileSync(path.join(sliceDir, "brief.md"), [
+    "# Release authority",
+    "",
+    ...acceptanceRefs.map((ref) => `- ${ref}`),
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(sliceDir, "brief.json"), `${JSON.stringify({
+    schema_version: 2,
+    task_id: taskId,
+    slice_id: sliceId,
+    repo,
+    base_sha: baseSha,
+    objective: "Provide canonical goal authority for release contract authoring.",
+    requirements_path: "brief.md",
+    global_constraints_path: "../../global-constraints.md",
+    owned_paths: ["product/release"],
+    forbidden_paths: ["plugins/multica-sdlc"],
+    acceptance_refs: acceptanceRefs,
+    required_checks: ["node --test workflow/tests/js/release-certification-admission.test.js"],
+    commit_policy: "logical_outcome",
+    output_contract: "final_message_json_only",
+  }, null, 2)}\n`);
+  return sliceDir;
+}
+
+function fixture(t, {
+  authorityRef = "user-message:release",
+  decoyEnvelope = false,
+  workType = "implementation",
+} = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-release-admission."));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const environment = {
@@ -135,40 +258,88 @@ function fixture(t, { authorityRef = "user-message:release", workType = "impleme
     CODEX_WORKFLOW_ROOT: path.join(home, "workflow"),
   };
   const paths = resolvePaths(environment);
+  const lifecycleOptions = { clock: () => new Date("2026-07-30T00:00:00Z"), environment };
+  const taskId = createTask("Release admission", "governed release admission", lifecycleOptions);
+  startTask(taskId, lifecycleOptions);
   const repo = path.join(home, "repo");
   fs.mkdirSync(repo, { recursive: true });
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "atlas@example.test"]);
   git(repo, ["config", "user.name", "Atlas Test"]);
   const intent = productIntent(authorityRef);
-  const plan = releasePlan(intent);
-  const contract = path.join(repo, "implementation-contract.final.md");
-  fs.writeFileSync(contract, contractMarkdown(intent, plan, workType));
-  git(repo, ["add", "implementation-contract.final.md"]);
+  const vNext = workType === "implementation";
+  const plan = releasePlan(intent, vNext ? 4 : 2);
+  const contractName = `implementation-contract.${taskId}.final.md`;
+  const contract = path.join(repo, contractName);
+  const contractText = contractMarkdown(intent, plan, taskId, workType);
+  fs.writeFileSync(
+    contract,
+    decoyEnvelope
+      ? `${decoyEnvelopeFor(plan.schema_version === 4 ? 6 : 4)}${contractText}`
+      : contractText,
+  );
+  git(repo, ["add", contractName]);
   git(repo, ["commit", "-qm", "test: add release contract"]);
   const base = git(repo, ["rev-parse", "HEAD"]);
+  const authoritySlice = vNext
+    ? writeAuthoritySlice(
+      paths,
+      taskId,
+      repo,
+      base,
+      [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))],
+    )
+    : null;
   const compile = spawnSync("node", [
     BRIEF_BIN,
-    "--task", "release-task",
+    "--task", taskId,
     "--slice", "release-slice",
     "--repo", repo,
     "--base", base,
     "--contract", contract,
+    ...(authoritySlice ? ["--authority-slice", authoritySlice] : []),
   ], { cwd: repo, env: environment, encoding: "utf8" });
   assert.equal(compile.status, 0, compile.stderr);
   const briefPath = path.join(
-    taskArtifactDir(paths, "release-task"),
+    taskArtifactDir(paths, taskId),
     "team/sdd/slices/release-slice/brief.json",
   );
-  return { base, briefPath, contract, environment, intent, paths, plan, repo, workType };
+  let grant = null;
+  if (vNext && /^(?:user-message|operator-input):/.test(authorityRef)) {
+    const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
+    runAuthorize(parseAuthorizeArgs([
+      taskId,
+      brief.objective,
+      `--authorization-ref=${authorityRef}`,
+      `--brief=${briefPath}`,
+      "--grant-id=release-grant",
+      "--operation-id=authorize-release",
+    ]), { cwd: repo, environment });
+    const state = readJsonObject(taskStateFile(paths, taskId));
+    grant = state.execution_authority.grants[0];
+  }
+  return {
+    base,
+    briefPath,
+    contract,
+    currentState: readJsonObject(taskStateFile(paths, taskId)),
+    environment,
+    grant,
+    intent,
+    paths,
+    plan,
+    repo,
+    taskId,
+    workType,
+  };
 }
 
-test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy", (t) => {
-  const value = fixture(t);
+test("brief v4 and Team execution-vnext bind an exact semantics-v6 release policy", (t) => {
+  const value = fixture(t, { decoyEnvelope: true });
   const brief = JSON.parse(fs.readFileSync(value.briefPath, "utf8"));
   assert.deepEqual(validateBrief(brief), []);
-  assert.equal(brief.schema_version, 3);
-  assert.equal(brief.contract.semantics_version, 4);
+  assert.equal(brief.schema_version, 4);
+  assert.equal(brief.contract.semantics_version, 6);
   assert.equal(brief.contract.work_type, "implementation");
   assert.deepEqual(brief.contract.release, value.plan.release);
   const missingWorkType = structuredClone(brief);
@@ -181,17 +352,29 @@ test("brief v3 and Team execution-v3 bind an exact semantics-v4 release policy",
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
     environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
     mode: "execute",
+    objective: brief.objective,
     paths: value.paths,
-    taskId: "release-task",
+    taskId: value.taskId,
   });
-  assert.equal(admission.mode, "execution-v3");
+  assert.equal(admission.mode, "execution-vnext");
   assert.equal(admission.brief.work_type, "implementation");
-  assert.deepEqual(admission.brief.release, value.plan.release);
-  const state = {};
-  const authority = bindExecutionAuthority(state, admission, 1);
-  assert.equal(authority.work_type, "implementation");
-  assert.deepEqual(authority.release_binding, value.plan.release);
+  assert.deepEqual(admission.brief.release, {
+    ...value.plan.release,
+    requirement_refs: [...value.plan.release.requirement_refs].sort(),
+  });
+  assert.equal(value.currentState.execution_authority.schema_version, 2);
+  assert.deepEqual(value.grant.scope.release_binding, {
+    ...value.plan.release,
+    requirement_refs: [...value.plan.release.requirement_refs].sort(),
+  });
+  assert.equal(
+    value.currentState.execution_authority.delivery_authority.ref,
+    "user-message:release",
+  );
 });
 
 test("planning and review keep product_release classification but cannot enter certification execution", (t) => {
@@ -209,20 +392,26 @@ test("planning and review keep product_release classification but cannot enter c
       environment: value.environment,
       mode: "discuss",
       paths: value.paths,
-      taskId: "release-task",
+      taskId: value.taskId,
     });
     assert.equal(discussed.mode, "discuss-v3");
     assert.equal(discussed.brief.work_type, workType);
-    assert.throws(() => admitTeamStart({
-      authorizationRef: "user-message:release",
-      briefPath: value.briefPath,
-      clock: () => new Date("2026-07-30T00:00:00Z"),
-      cwd: value.repo,
-      environment: value.environment,
-      mode: "execute",
-      paths: value.paths,
-      taskId: "release-task",
-    }), /product_release Team execution requires work_type implementation/);
+    const eventsBefore = fs.readFileSync(
+      path.join(taskArtifactDir(value.paths, value.taskId), "events-v2.jsonl"),
+      "utf8",
+    );
+    assert.throws(() => runAuthorize(parseAuthorizeArgs([
+      value.taskId,
+      brief.objective,
+      "--authorization-ref=user-message:release",
+      `--brief=${value.briefPath}`,
+      `--grant-id=${workType}-grant`,
+      `--operation-id=authorize-${workType}`,
+    ]), { cwd: value.repo, environment: value.environment }), /schema_version 4|legacy 1\/2\/3/);
+    assert.equal(
+      fs.readFileSync(path.join(taskArtifactDir(value.paths, value.taskId), "events-v2.jsonl"), "utf8"),
+      eventsBefore,
+    );
   }
 });
 
@@ -239,10 +428,14 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
     environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
     mode: "execute",
+    objective: original.objective,
     paths: value.paths,
-    taskId: "release-task",
-  }), /brief release binding does not match/);
+    taskId: value.taskId,
+  }), /invalid|does not match/);
 
   const replaced = structuredClone(original);
   replaced.contract.release.profile_sha256 = digest("b");
@@ -253,10 +446,14 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
     environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
     mode: "execute",
+    objective: original.objective,
     paths: value.paths,
-    taskId: "release-task",
-  }), /brief release binding does not match/);
+    taskId: value.taskId,
+  }), /invalid|does not match/);
 
   const replacedWorkType = structuredClone(original);
   replacedWorkType.contract.work_type = "review";
@@ -267,10 +464,14 @@ test("Team admission rejects missing or replaceable Profile identity", (t) => {
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
     environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
     mode: "execute",
+    objective: original.objective,
     paths: value.paths,
-    taskId: "release-task",
-  }), /brief work_type does not match/);
+    taskId: value.taskId,
+  }), /invalid|does not match/);
 });
 
 test("product_release execution requires the exact controller-recordable delivery authority", (t) => {
@@ -281,26 +482,32 @@ test("product_release execution requires the exact controller-recordable deliver
     clock: () => new Date("2026-07-30T00:00:00Z"),
     cwd: value.repo,
     environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
     mode: "execute",
+    objective: JSON.parse(fs.readFileSync(value.briefPath, "utf8")).objective,
     paths: value.paths,
-    taskId: "release-task",
+    taskId: value.taskId,
   });
   assert.equal(admit("user-message:release").brief.delivery_authority_ref, "user-message:release");
-  assert.throws(() => admit("user-message:other"), /exact user-message or operator-input authority/);
-  assert.throws(() => admit(""), /exact user-message or operator-input authority/);
+  assert.throws(() => admit("user-message:other"), /does not match the current active grant/);
+  assert.equal(admit("").brief.delivery_authority_ref, "user-message:release");
 
   for (const unresolved of ["goal:REL-PRODUCT", "current-required:REL-PRODUCT"]) {
     const unresolvedFixture = fixture(t, { authorityRef: unresolved });
-    assert.throws(() => admitTeamStart({
-      authorizationRef: unresolved,
-      briefPath: unresolvedFixture.briefPath,
-      clock: () => new Date("2026-07-30T00:00:00Z"),
+    const brief = JSON.parse(fs.readFileSync(unresolvedFixture.briefPath, "utf8"));
+    assert.throws(() => runAuthorize(parseAuthorizeArgs([
+      unresolvedFixture.taskId,
+      brief.objective,
+      `--authorization-ref=${unresolved}`,
+      `--brief=${unresolvedFixture.briefPath}`,
+      "--grant-id=unresolved-grant",
+      "--operation-id=authorize-unresolved",
+    ]), {
       cwd: unresolvedFixture.repo,
       environment: unresolvedFixture.environment,
-      mode: "execute",
-      paths: unresolvedFixture.paths,
-      taskId: "release-task",
-    }), /exact user-message or operator-input authority/);
+    }), /controller-recordable user-message: or operator-input: ref/);
   }
 });
 
@@ -309,7 +516,18 @@ test("brief compiler rejects an author-replaced evaluator", (t) => {
   const replacedPlan = structuredClone(value.plan);
   replacedPlan.slices[0].checks[0].release_requirement.evaluator_ref = "author-evaluator@1";
   const replacedContract = path.join(value.repo, "replaced-contract.md");
-  fs.writeFileSync(replacedContract, contractMarkdown(value.intent, replacedPlan));
+  fs.writeFileSync(replacedContract, contractMarkdown(
+    value.intent,
+    replacedPlan,
+    "replaced-task",
+  ));
+  const authoritySlice = writeAuthoritySlice(
+    value.paths,
+    "replaced-task",
+    value.repo,
+    value.base,
+    [...new Set(replacedPlan.slices.flatMap((slice) => slice.acceptance_refs))],
+  );
   const compile = spawnSync("node", [
     BRIEF_BIN,
     "--task", "replaced-task",
@@ -317,6 +535,7 @@ test("brief compiler rejects an author-replaced evaluator", (t) => {
     "--repo", value.repo,
     "--base", value.base,
     "--contract", replacedContract,
+    "--authority-slice", authoritySlice,
   ], { cwd: value.repo, env: value.environment, encoding: "utf8" });
   assert.equal(compile.status, 1);
   assert.match(compile.stderr, /immutable Profile Check Definition/);

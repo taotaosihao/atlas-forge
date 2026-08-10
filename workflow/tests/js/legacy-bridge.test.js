@@ -148,7 +148,12 @@ fs.appendFileSync(
   );
   assert.equal(result.exitCode, 0);
   const state = readJsonObject(taskStateFile(paths, taskId));
-  assert.deepEqual(state.active_team, { backend: "legacy", status: "complete" });
+  assert.deepEqual(state.active_team, {
+    backend: "legacy",
+    decision: "",
+    mode: "discuss",
+    status: "complete",
+  });
   assert.equal(
     fs.readFileSync(path.join(paths.artifactsDir, taskId, "team", "decision.md"), "utf8"),
     "isolated decision\n",

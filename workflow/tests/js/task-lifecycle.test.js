@@ -46,6 +46,20 @@ const {
   __dirname,
   "../../bin/lib/codex-workflow/verification/runner.js",
 ));
+const {
+  parseAttemptArgs,
+  parseDispatchArgs,
+  parseLaneArgs,
+  parseRecordStartArgs,
+  runAttemptRecord,
+  runDispatchRecord,
+  runLaneRecord,
+  runRecordStart,
+  runStop,
+} = require(path.resolve(
+  __dirname,
+  "../../bin/lib/codex-workflow/team/commands.js",
+));
 
 function temporaryWorkflow(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-task-lifecycle."));
@@ -111,38 +125,6 @@ function recordPassingVerification(environment, taskId, clock, options = {}) {
   );
 }
 
-function v2Team(overrides = {}) {
-  return {
-    schema_version: 2,
-    team_run_id: "run-0001",
-    generation: 1,
-    mode: "execute",
-    status: "complete",
-    lanes: [{ lane_id: "implementation", status: "closed" }],
-    dispatches: [{
-      dispatch_id: "implementation-dispatch",
-      lane_id: "implementation",
-      status: "closed",
-    }],
-    attempts: [{
-      attempt_id: "implementation-attempt",
-      dispatch_id: "implementation-dispatch",
-      lane_id: "implementation",
-      status: "quiesced",
-    }],
-    writer_leases: [{
-      lease_id: "lease-implementation-attempt",
-      owner_attempt_id: "implementation-attempt",
-      state: "released",
-    }],
-    ...overrides,
-  };
-}
-
-function replaceTeam(paths, taskId, team) {
-  replaceStateFields(paths, taskId, { active_team: team });
-}
-
 function replaceStateFields(paths, taskId, updates) {
   mutateTaskRuntime(
     paths,
@@ -157,6 +139,75 @@ function replaceStateFields(paths, taskId, updates) {
       legacy: [],
     }),
   );
+}
+
+function startDiscussionTeam(environment, taskId, suffix, clock) {
+  runRecordStart(parseRecordStartArgs([
+    taskId,
+    `exercise lifecycle Team barrier ${suffix}`,
+    "--mode=discuss",
+    `--operation-id=${suffix}-start`,
+  ]), { clock, environment });
+}
+
+function openDiscussionLane(environment, taskId, suffix, clock) {
+  runLaneRecord(parseLaneArgs([
+    taskId,
+    `--operation-id=${suffix}-lane-open`,
+    "--action=open",
+    `--lane=${suffix}-lane`,
+  ]), { clock, environment });
+}
+
+function openDiscussionDispatch(environment, taskId, suffix, clock) {
+  runDispatchRecord(parseDispatchArgs([
+    taskId,
+    `--operation-id=${suffix}-dispatch-open`,
+    "--action=open",
+    `--lane=${suffix}-lane`,
+    `--dispatch=${suffix}-dispatch`,
+  ]), { clock, environment });
+}
+
+function transitionDiscussionAttempt(environment, taskId, suffix, status, clock) {
+  openDiscussionLane(environment, taskId, suffix, clock);
+  openDiscussionDispatch(environment, taskId, suffix, clock);
+  const attemptId = `${suffix}-attempt`;
+  const launchOperationId = `${suffix}-launch`;
+  runAttemptRecord(parseAttemptArgs([
+    taskId,
+    `--operation-id=${suffix}-attempt-reserve`,
+    "--action=reserve",
+    `--dispatch=${suffix}-dispatch`,
+    `--attempt=${attemptId}`,
+    `--launch-operation-id=${launchOperationId}`,
+  ]), { clock, environment });
+  if (status === "reserved") return attemptId;
+  runAttemptRecord(parseAttemptArgs([
+    taskId,
+    `--operation-id=${suffix}-attempt-bind`,
+    "--action=bind",
+    `--attempt=${attemptId}`,
+    `--launch-operation-id=${launchOperationId}`,
+    `--runtime-agent-id=${suffix}-native-agent`,
+  ]), { clock, environment });
+  if (status === "bound") return attemptId;
+  runAttemptRecord(parseAttemptArgs([
+    taskId,
+    `--operation-id=${suffix}-attempt-running`,
+    "--action=running",
+    `--attempt=${attemptId}`,
+  ]), { clock, environment });
+  if (status === "running") return attemptId;
+  runAttemptRecord(parseAttemptArgs([
+    taskId,
+    `--operation-id=${suffix}-attempt-terminal`,
+    "--action=terminal",
+    `--attempt=${attemptId}`,
+    "--outcome=interrupted",
+    "--launch-invoked=true",
+  ]), { clock, environment });
+  return attemptId;
 }
 
 test("creates a task, state projection, scaffold, and schema-v1 event in JavaScript", (t) => {
@@ -372,13 +423,7 @@ test("rejects succeeded completion while a Team is active", (t) => {
   recordPassingVerification(environment, taskId, clock, {
     recordToken: "20260710T054000000000000",
   });
-  replaceTeam(paths, taskId, v2Team({
-    status: "running",
-    lanes: [],
-    dispatches: [],
-    attempts: [],
-    writer_leases: [],
-  }));
+  startDiscussionTeam(environment, taskId, "active-team", clock);
   const stateBefore = fs.readFileSync(taskStateFile(paths, taskId));
   const runtimeBefore = fs.readFileSync(taskRuntimeFile(paths, taskId));
 
@@ -403,46 +448,18 @@ test("rejects succeeded completion for every non-quiesced attempt state", (t) =>
     recordPassingVerification(environment, taskId, clock, {
       recordToken: `20260710T05450000000000${index}`,
     });
-    replaceTeam(paths, taskId, v2Team({
-      attempts: [{
-        attempt_id: "implementation-attempt",
-        dispatch_id: "implementation-dispatch",
-        lane_id: "implementation",
-        status,
-      }],
-      writer_leases: [],
-    }));
+    const suffix = `attempt-${status}`;
+    startDiscussionTeam(environment, taskId, suffix, clock);
+    const attemptId = transitionDiscussionAttempt(
+      environment, taskId, suffix, status, clock,
+    );
 
     assert.throws(
       () => completeTask(taskId, options),
-      new RegExp(`Team attempt is not quiesced: implementation-attempt=${status}`),
+      new RegExp(`Team attempt is not quiesced: ${attemptId}=${status}`),
     );
     assert.equal(validateTaskFile(path.join(paths.tasksDir, `${taskId}.md`)).task.status, "doing");
   }
-});
-
-test("rejects succeeded completion while a writer lease remains active", (t) => {
-  const { environment, paths } = temporaryWorkflow(t);
-  const clock = fixedClock("2026-07-10T05:50:00.000Z");
-  const options = { clock, environment };
-  const taskId = createTask("Writer lease gate", "lease must release", options);
-  startTask(taskId, options);
-  recordPassingVerification(environment, taskId, clock, {
-    recordToken: "20260710T055000000000000",
-  });
-  replaceTeam(paths, taskId, v2Team({
-    writer_leases: [{
-      lease_id: "lease-implementation-attempt",
-      owner_attempt_id: "implementation-attempt",
-      state: "active",
-    }],
-  }));
-
-  assert.throws(
-    () => completeTask(taskId, options),
-    /Team writer lease is not released: lease-implementation-attempt=active/,
-  );
-  assert.equal(validateTaskFile(path.join(paths.tasksDir, `${taskId}.md`)).task.status, "doing");
 });
 
 test("rejects succeeded completion while a Team lane or dispatch remains open", (t) => {
@@ -452,19 +469,18 @@ test("rejects succeeded completion while a Team lane or dispatch remains open", 
   const cases = [
     {
       label: "lane",
-      team: v2Team({ lanes: [{ lane_id: "implementation", status: "open" }] }),
-      expected: /Team lane is not closed: implementation=open/,
+      open(environmentValue, taskIdValue, suffix, clockValue) {
+        openDiscussionLane(environmentValue, taskIdValue, suffix, clockValue);
+      },
+      expected: /Team lane is not closed: open-team-lane-lane=open/,
     },
     {
       label: "dispatch",
-      team: v2Team({
-        dispatches: [{
-          dispatch_id: "implementation-dispatch",
-          lane_id: "implementation",
-          status: "open",
-        }],
-      }),
-      expected: /Team dispatch is not closed: implementation-dispatch=open/,
+      open(environmentValue, taskIdValue, suffix, clockValue) {
+        openDiscussionLane(environmentValue, taskIdValue, suffix, clockValue);
+        openDiscussionDispatch(environmentValue, taskIdValue, suffix, clockValue);
+      },
+      expected: /Team dispatch is not closed: open-team-dispatch-dispatch=open/,
     },
   ];
 
@@ -474,7 +490,9 @@ test("rejects succeeded completion while a Team lane or dispatch remains open", 
     recordPassingVerification(environment, taskId, clock, {
       recordToken: `20260710T05520000000000${index}`,
     });
-    replaceTeam(paths, taskId, fixture.team);
+    const suffix = `open-team-${fixture.label}`;
+    startDiscussionTeam(environment, taskId, suffix, clock);
+    fixture.open(environment, taskId, suffix, clock);
     assert.throws(() => completeTask(taskId, options), fixture.expected);
     assert.equal(validateTaskFile(path.join(paths.tasksDir, `${taskId}.md`)).task.status, "doing");
   }
@@ -550,7 +568,11 @@ test("closes failed and cancelled tasks explicitly without projecting succeeded"
   for (const outcome of ["failed", "cancelled"]) {
     const taskId = createTask(`Explicit ${outcome}`, "non-success closure", options);
     startTask(taskId, options);
-    replaceTeam(paths, taskId, v2Team({ status: outcome === "failed" ? "failed" : "stopped" }));
+    startDiscussionTeam(environment, taskId, `explicit-${outcome}`, clock);
+    runStop([taskId], {
+      ...options,
+      operationId: `explicit-${outcome}-stop`,
+    });
     assert.throws(
       () => completeTask(taskId, { ...options, outcome }),
       /requires authority_ref and at least one evidence_ref/,

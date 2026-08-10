@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const {
@@ -8,7 +9,7 @@ const {
 } = require("../core/command-runtime");
 const { taskMutationLockFile, withLock } = require("../core/lock");
 const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require("../core/paths");
-const { readAuthoritativeEvents } = require("../core/event-store");
+const { canonicalJson, readAuthoritativeEvents, sha256 } = require("../core/event-store");
 const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const {
   getTaskField,
@@ -37,20 +38,27 @@ const {
   openLane,
   quiesceAttempt,
   recordCapabilitySnapshot,
+  recordLaunchReconciliation,
   recordObservation,
   recordSelectionEvent,
   reserveAttempt,
+  resolveLaunchClaim,
   terminalAttempt,
+  teamControlPlaneClosureIssues,
 } = require("./lane-registry");
 const { classifyPaseoObservation } = require("./backend-failures");
 const { launchLabel, observePaseoCommand, reconcileLaunch } = require("./paseo-observer");
 const {
   admitTeamStart,
-  bindExecutionAuthority,
   briefRequestIdentity,
   globalAdmissionLockFile,
   validateTeamWriterAdmission,
 } = require("./admission");
+const {
+  assertActiveExecutionGrant,
+  authorityReplayPostcondition,
+} = require("./execution-grant");
+const { assertCanonicalGrantArtifacts, buildCanonicalScope } = require("./scope-artifacts");
 const {
   prepareWriterLeaseControlEvent,
   syncWriterLeaseControlAfterEvent,
@@ -89,6 +97,9 @@ const {
   validateReason,
 } = require("./args");
 
+const CONTROLLER_AUTHORITY_REF =
+  /^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
 function teamDir(paths, taskId) {
   return path.join(taskArtifactDir(paths, taskId), "team");
 }
@@ -118,8 +129,8 @@ function writerLeaseControlHooks(paths, taskId, options = {}) {
   };
 }
 
-function requireV2Team(paths, taskId) {
-  const state = readJsonObject(taskStateFile(paths, taskId));
+function requireV2Team(paths, taskId, currentState = null) {
+  const state = currentState || authoritativeTaskState(paths, taskId);
   const team = state.active_team && typeof state.active_team === "object" ? state.active_team : {};
   if (team.schema_version !== 2) throw new CommandError("team v2 run is required");
   return team;
@@ -132,14 +143,22 @@ function authoritativeTaskState(paths, taskId) {
   return readJsonObject(taskStateFile(paths, taskId));
 }
 
-function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
+function buildTeamProjection(
+  paths,
+  taskId,
+  team,
+  clock,
+  currentState = null,
+  currentTaskContent = null,
+) {
   deriveTeam(team);
   if (team.backend_sidecar && new Set(["mixed", "none"]).has(team.effective_backend)) {
     team.backend = "native";
   }
-  const taskFile = requireTaskFile(paths.tasksDir, taskId);
-  validateTaskFile(taskFile);
-  const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {
+  const taskFile = currentTaskContent === null ? requireTaskFile(paths.tasksDir, taskId) : null;
+  if (taskFile) validateTaskFile(taskFile);
+  const source = currentTaskContent === null ? fs.readFileSync(taskFile, "utf8") : currentTaskContent;
+  const taskContent = renderTaskFields(source, {
     active_team_backend: team.backend,
     active_team_mode: team.mode,
     active_team_status: team.status,
@@ -150,7 +169,7 @@ function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
     paths,
     taskId,
     taskContent,
-    currentState || readJsonObject(taskStateFile(paths, taskId)),
+    currentState || authoritativeTaskState(paths, taskId),
     clock,
   );
   state.active_team = team;
@@ -158,10 +177,104 @@ function buildTeamProjection(paths, taskId, team, clock, currentState = null) {
   return { task_content: taskContent, state };
 }
 
+function authoritySensitiveTeamReplayPostcondition(clock, environment, paths, taskId) {
+  return (context) => {
+    const team = context.existing.result?.team
+      || context.existing.projection?.state?.active_team;
+    if (team?.schema_version !== 2 || team.mode !== "execute") return null;
+    return authorityReplayPostcondition({
+      clock,
+      evidenceEpoch: team.evidence_epoch,
+      grantId: team.grant_id,
+      requireUnexpired: true,
+      scopeDigest: team.scope_digest,
+      sliceId: team.slice_id,
+      teamRunId: team.team_run_id,
+      validateCurrent({ grant }) {
+        if (!team.admission?.brief?.path) {
+          throw new CommandError("execute Team replay lacks its canonical brief path");
+        }
+        assertCanonicalGrantArtifacts({
+          briefPath: team.admission.brief.path,
+          environment,
+          grant,
+          paths,
+          taskId,
+        });
+      },
+    })(context);
+  };
+}
+
+function assertCurrentExecuteTeamAuthority(
+  team,
+  state,
+  clock,
+  environment,
+  paths,
+  taskId,
+  { requireUnexpired = false } = {},
+) {
+  if (team?.schema_version !== 2 || team.mode !== "execute") return null;
+  const grant = assertActiveExecutionGrant(state, {
+    evidenceEpoch: team.evidence_epoch,
+    grantId: team.grant_id,
+    scopeDigest: team.scope_digest,
+    sliceId: team.slice_id,
+  }, { clock, requireUnexpired });
+  if (team.admission?.grant_id !== grant.grant_id
+    || team.admission?.scope_digest !== grant.scope_digest
+    || team.admission?.evidence_epoch !== grant.evidence_epoch
+    || !team.admission?.brief?.path) {
+    throw new CommandError("Team admission no longer matches the current execution grant");
+  }
+  assertCanonicalGrantArtifacts({
+    briefPath: team.admission.brief.path,
+    environment,
+    grant,
+    paths,
+    taskId,
+  });
+  return grant;
+}
+
+function assertCurrentExecuteTeamAuthorityIdentity(team, state) {
+  if (team?.schema_version !== 2 || team.mode !== "execute") return null;
+  const grant = assertActiveExecutionGrant(state, {
+    evidenceEpoch: team.evidence_epoch,
+    grantId: team.grant_id,
+    scopeDigest: team.scope_digest,
+    sliceId: team.slice_id,
+  });
+  if (team.admission?.grant_id !== grant.grant_id
+    || team.admission?.scope_digest !== grant.scope_digest
+    || team.admission?.evidence_epoch !== grant.evidence_epoch) {
+    throw new CommandError("Team admission no longer matches the current execution grant");
+  }
+  return grant;
+}
+
+function assertEarlyTeamReplayAuthority(team, state, context, operationId) {
+  try {
+    return assertCurrentExecuteTeamAuthority(
+      team,
+      state,
+      context.clock,
+      context.environment,
+      context.paths,
+      context.taskId,
+      { requireUnexpired: true },
+    );
+  } catch (error) {
+    throw new CommandError(`stale authorization replay: ${operationId}: ${error.message}`);
+  }
+}
+
 function mutateV2Team(taskId, operationFn, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
   let output;
   let committed;
+  let authorityGuard = null;
   withLock(globalAdmissionLockFile(paths), () => {
     committed = mutateTaskRuntime(
       paths,
@@ -171,10 +284,29 @@ function mutateV2Team(taskId, operationFn, options = {}) {
         operationId: options.operationId,
         data: options.operationData || {},
       },
-      () => {
-        const team = requireV2Team(paths, taskId);
+      ({ currentProjection, occurredAt }) => {
+        const currentState = currentProjection.state;
+        if (options.requireDoingTask && currentState.status !== "doing") {
+          throw new CommandError(`${options.eventKind || "Team control"} requires a doing task`);
+        }
+        const team = requireV2Team(paths, taskId, currentState);
+        if (team.mode === "execute") {
+          authorityGuard = options.factualAuthorityReceipt
+            ? () => assertCurrentExecuteTeamAuthorityIdentity(team, currentState)
+            : () => assertCurrentExecuteTeamAuthority(
+              team,
+              currentState,
+              clock,
+              environment,
+              paths,
+              taskId,
+              { requireUnexpired: Boolean(options.requireUnexpiredAuthority) },
+            );
+          authorityGuard();
+        }
+        const eventClock = () => new Date(occurredAt);
         try {
-          output = operationFn(team, timestampSeconds(clock));
+          output = operationFn(team, timestampSeconds(eventClock));
         } catch (error) {
           if (error instanceof RegistryError) throw new CommandError(error.message);
           throw error;
@@ -182,7 +314,14 @@ function mutateV2Team(taskId, operationFn, options = {}) {
         validateTeamWriterAdmission(paths, taskId, output.team);
         return {
           projection: {
-            ...buildTeamProjection(paths, taskId, output.team, clock),
+            ...buildTeamProjection(
+              paths,
+              taskId,
+              output.team,
+              eventClock,
+              currentState,
+              currentProjection.task_content,
+            ),
             files: output.files || [],
           },
           result: output.result || {},
@@ -194,10 +333,44 @@ function mutateV2Team(taskId, operationFn, options = {}) {
       },
       {
         ...options,
-        ...writerLeaseControlHooks(paths, taskId, options),
+        ...writerLeaseControlHooks(paths, taskId, {
+          ...options,
+          beforeEventAppend(event) {
+            if (options.beforeEventAppend) options.beforeEventAppend(event);
+            if (authorityGuard) authorityGuard(event);
+          },
+        }),
         clock,
         environment,
         expectedRevision: options.expectedRevision,
+        replayPostcondition: options.replayPostcondition || ((context) => {
+          const replayTeam = context.existing.result?.team
+            || context.existing.projection?.state?.active_team;
+          if (replayTeam?.mode === "execute") {
+            return authorityReplayPostcondition({
+              clock,
+              evidenceEpoch: replayTeam.evidence_epoch,
+              grantId: replayTeam.grant_id,
+              requireUnexpired: true,
+              scopeDigest: replayTeam.scope_digest,
+              sliceId: replayTeam.slice_id,
+              teamRunId: replayTeam.team_run_id,
+              validateCurrent({ grant }) {
+                if (!replayTeam.admission?.brief?.path) {
+                  throw new CommandError("execute Team replay lacks its canonical brief path");
+                }
+                assertCanonicalGrantArtifacts({
+                  briefPath: replayTeam.admission.brief.path,
+                  environment,
+                  grant,
+                  paths,
+                  taskId,
+                });
+              },
+            })(context);
+          }
+          return null;
+        }),
       },
     );
   });
@@ -242,7 +415,12 @@ function runRecordStart(parsed, options = {}) {
     }
     validateReason(parsed.selectionAuthorityRef, "selection authority ref");
   }
-  validateExecutionAuthorization(parsed.mode, parsed.authorizationRef);
+  validateExecutionAuthorization(
+    parsed.mode,
+    parsed.authorizationRef,
+    parsed.grantId,
+    parsed.scopeDigest,
+  );
   const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const staffingFile = teamStaffingFile(paths, parsed.taskId);
@@ -250,6 +428,8 @@ function runRecordStart(parsed, options = {}) {
   const staffing = relativeToCodeHome(paths, staffingFile);
   let team;
   let committed;
+  let scopeGuard = null;
+  const startOperationId = parsed.operationId || options.operationId || crypto.randomUUID();
   withLock(globalAdmissionLockFile(paths), () => {
     const requestIdentity = briefRequestIdentity(parsed.briefPath);
     try {
@@ -258,13 +438,15 @@ function runRecordStart(parsed, options = {}) {
         parsed.taskId,
         {
           kind: "team.started",
-          operationId: parsed.operationId || options.operationId,
+          operationId: startOperationId,
           data: {
             mode: parsed.mode,
             objective: parsed.objective,
             backend: parsed.backend || "",
             fallback_policy: fallbackPolicy,
             authorization_ref: parsed.authorizationRef || "",
+            grant_id: parsed.grantId || "",
+            scope_digest: parsed.scopeDigest || "",
             agents: parsed.agents || "",
             roles: parsed.roles || "",
             providers: parsed.providers || "",
@@ -273,15 +455,24 @@ function runRecordStart(parsed, options = {}) {
             ...requestIdentity,
           },
         },
-        ({ revision }) => {
+        ({ currentProjection, occurredAt, revision }) => {
+          const eventClock = () => new Date(occurredAt);
+          if (!currentProjection?.state) {
+            throw new CommandError(`unknown task: ${parsed.taskId}`);
+          }
+          const state = JSON.parse(JSON.stringify(currentProjection.state));
           const admission = admitTeamStart({
             authorizationRef: parsed.authorizationRef,
             briefPath: parsed.briefPath,
             captureIdentity: options.captureIdentity,
-            clock,
+            clock: eventClock,
+            currentState: state,
             cwd,
             environment,
+            expectedGrantId: parsed.grantId,
+            expectedScopeDigest: parsed.scopeDigest,
             mode: parsed.mode,
+            objective: parsed.objective,
             paths,
             taskId: parsed.taskId,
           });
@@ -289,16 +480,12 @@ function runRecordStart(parsed, options = {}) {
           if (admission.slice_start_snapshot) {
             admission.slice_start_snapshot.captured_at_revision = revision + 1;
           }
-          const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-          const { task } = validateTaskFile(taskFile);
-          const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-          if (task.status !== "doing") {
+          if (state.status !== "doing") {
             throw new CommandError(`task must be doing before team start: ${parsed.taskId}`);
           }
           const previous = state.active_team && typeof state.active_team === "object"
             ? state.active_team
             : {};
-          bindExecutionAuthority(state, admission, revision + 1);
           const generation = previous.schema_version === 2
             ? Number(previous.generation || 0) + 1
             : 1;
@@ -315,7 +502,7 @@ function runRecordStart(parsed, options = {}) {
               providers: parsed.providers,
               decision,
               staffing,
-              now: timestampSeconds(clock),
+              now: timestampSeconds(eventClock),
               teamSelection: parsed.backend ? {
                 eventId: `selection-team-${String(generation).padStart(4, "0")}`,
                 kind: "backend",
@@ -332,10 +519,44 @@ function runRecordStart(parsed, options = {}) {
           team.admission = admission;
           team.admitted_owned_paths = admission.admitted_owned_paths;
           team.slice_id = admission.brief?.slice_id || "";
-          team.start_operation_id = parsed.operationId || options.operationId || "";
+          if (parsed.mode === "execute") {
+            team.grant_id = admission.grant_id;
+            team.scope_digest = admission.scope_digest;
+            team.evidence_epoch = admission.evidence_epoch;
+            const grant = assertActiveExecutionGrant(state, {
+              grantId: admission.grant_id,
+              scopeDigest: admission.scope_digest,
+            });
+            scopeGuard = () => {
+              const rebuilt = buildCanonicalScope({
+                authorizationRef: grant.authorization_provenance.ref,
+                briefPath: parsed.briefPath,
+                cwd,
+                environment,
+                evidencePolicy: grant.scope.evidence_policy,
+                grantId: grant.grant_id,
+                objective: grant.scope.objective,
+                parent: grant.scope.parent,
+                paths,
+                requireObjectiveMatchesSelected: false,
+                taskId: parsed.taskId,
+              });
+              if (rebuilt.scopeDigest !== grant.scope_digest) {
+                throw new CommandError("Team scope artifacts changed before start event append");
+              }
+            };
+          }
+          team.start_operation_id = startOperationId;
           validateTeamWriterAdmission(paths, parsed.taskId, team);
           return {
-            projection: buildTeamProjection(paths, parsed.taskId, team, clock, state),
+            projection: buildTeamProjection(
+              paths,
+              parsed.taskId,
+              team,
+              eventClock,
+              state,
+              currentProjection.task_content,
+            ),
             result: { team },
             legacy: [{
               kind: "team-record-start",
@@ -343,7 +564,35 @@ function runRecordStart(parsed, options = {}) {
             }],
           };
         },
-        { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
+        {
+          ...options,
+          ...writerLeaseControlHooks(paths, parsed.taskId, {
+            ...options,
+            beforeEventAppend(event) {
+              if (options.beforeEventAppend) options.beforeEventAppend(event);
+              if (scopeGuard) scopeGuard(event);
+            },
+          }),
+          clock,
+          environment,
+          replayPostcondition: parsed.mode === "execute"
+            ? authorityReplayPostcondition({
+              clock,
+              grantId: parsed.grantId,
+              requireUnexpired: true,
+              scopeDigest: parsed.scopeDigest,
+              validateCurrent({ grant }) {
+                assertCanonicalGrantArtifacts({
+                  briefPath: parsed.briefPath,
+                  environment,
+                  grant,
+                  paths,
+                  taskId: parsed.taskId,
+                });
+              },
+            })
+            : options.replayPostcondition,
+        },
       );
     } catch (error) {
       if (parsed.operationId
@@ -363,7 +612,10 @@ function runRecordStart(parsed, options = {}) {
     `staffing: ${staffingFile}`,
   ];
   if (parsed.mode === "execute") {
-    lines.push(`authorization_ref: ${parsed.authorizationRef}`);
+    lines.push(`authorization_ref: ${team.authorization_ref}`);
+    lines.push(`grant_id: ${team.grant_id}`);
+    lines.push(`scope_digest: ${team.scope_digest}`);
+    lines.push(`evidence_epoch: ${team.evidence_epoch}`);
     lines.push(`brief: ${team.admission.brief.path}`);
     lines.push(`slice_id: ${team.slice_id}`);
     lines.push(`operation_id: ${team.start_operation_id}`);
@@ -384,6 +636,15 @@ function controlResultLines(taskId, action, result) {
     `action: ${action}`,
     ...Object.entries(result || {}).map(([key, value]) => `${key}: ${displayValue(value)}`),
   ];
+}
+
+function assertTeamControlPlaneClosed(team, action) {
+  const issues = teamControlPlaneClosureIssues(team);
+  if (issues.length > 0) {
+    throw new CommandError(
+      `${action} requires a closed v2 Team control plane: ${issues.join("; ")}`,
+    );
+  }
 }
 
 function capabilityEntries(payload) {
@@ -490,8 +751,8 @@ function runSelectionRecord(parsed, options = {}) {
     const { clock, environment, paths } = commandOptions(options);
     const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
     validateTaskFile(taskFile);
-    readJsonObject(taskStateFile(paths, parsed.taskId));
-    const existingTeam = requireV2Team(paths, parsed.taskId);
+    const currentState = authoritativeTaskState(paths, parsed.taskId);
+    const existingTeam = requireV2Team(paths, parsed.taskId, currentState);
     const existingOperation = (existingTeam.operation_log || [])
       .find((entry) => entry.operation_id === parsed.operationId);
     if (existingOperation) {
@@ -502,6 +763,9 @@ function runSelectionRecord(parsed, options = {}) {
         || snapshot.provider !== parsed.provider || snapshot.model !== parsed.model) {
         throw new CommandError(`operation_id replay payload conflict: ${parsed.operationId}`);
       }
+      assertEarlyTeamReplayAuthority(existingTeam, currentState, {
+        clock, environment, paths, taskId: parsed.taskId,
+      }, parsed.operationId);
       return {
         exitCode: 0,
         lines: controlResultLines(parsed.taskId, "selection-record", existingOperation.result),
@@ -543,7 +807,14 @@ function runSelectionRecord(parsed, options = {}) {
       environment,
       paths,
       operationId: parsed.operationId,
-      operationData: { ...parsed },
+      operationData: {
+        ...parsed,
+        modelFamily: capability.modelFamily,
+        runtimeModeIds: capability.runtimeModeIds,
+        payloadDigest: capability.payloadDigest,
+        observationAction: "provider-models+provider-list",
+        observedAt: observed.observation.observed_at,
+      },
       eventKind: "team.capability.recorded",
     });
     return { exitCode: 0, lines: controlResultLines(parsed.taskId, "selection-record", output.result) };
@@ -583,6 +854,7 @@ function runLaneRecord(parsed, options = {}) {
     operationId: parsed.operationId,
     operationData: { ...parsed },
     eventKind: `team.lane.${parsed.action}`,
+    requireDoingTask: parsed.action === "open",
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `lane-${parsed.action}`, output.result) };
 }
@@ -613,6 +885,7 @@ function runDispatchRecord(parsed, options = {}) {
     operationId: parsed.operationId,
     operationData: { ...parsed },
     eventKind: `team.dispatch.${parsed.action}`,
+    requireDoingTask: parsed.action === "open",
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `dispatch-${parsed.action}`, output.result) };
 }
@@ -663,34 +936,194 @@ function agentsFromListResult(result) {
   throw new CommandError("Paseo agent list response does not contain agents");
 }
 
+function observeLaunchRequest(parsed, team, attempt, args) {
+  return {
+    schema_version: 1,
+    task_id: parsed.taskId,
+    team_run_id: team.team_run_id,
+    team_generation: team.generation,
+    attempt_id: attempt.attempt_id,
+    operation_id: parsed.operationId,
+    observation_id: parsed.observationId,
+    observer_action: parsed.observerAction,
+    observer_args: [...args],
+    launch_operation_id: attempt.launch_operation_id,
+  };
+}
+
+function observeLaunchClaimIdentity(parsed, team, attempt, args) {
+  const artifactIdentity = team.mode === "execute" ? {
+    brief_path: team.admission?.brief?.path || "",
+    brief_sha256: team.admission?.brief?.sha256 || "",
+    contract_sha256: team.admission?.brief?.contract_sha256 || "",
+    execution_plan_sha256: team.admission?.brief?.execution_plan_sha256 || "",
+  } : null;
+  const request = observeLaunchRequest(parsed, team, attempt, args);
+  return {
+    schema_version: 1,
+    claim_kind: "paseo-observer-launch",
+    task_id: parsed.taskId,
+    team_run_id: team.team_run_id,
+    team_generation: team.generation,
+    attempt_id: attempt.attempt_id,
+    attempt_status: attempt.status,
+    operation_id: parsed.operationId,
+    claim_operation_id: `${parsed.operationId}-observation-launch-claim`,
+    terminal_operation_id: `${parsed.operationId}-observation`,
+    request_digest: sha256(canonicalJson(request)),
+    launch_operation_id: attempt.launch_operation_id,
+    grant_id: team.mode === "execute" ? team.grant_id : "",
+    scope_digest: team.mode === "execute" ? team.scope_digest : "",
+    evidence_epoch: team.mode === "execute" ? team.evidence_epoch : 0,
+    slice_id: team.mode === "execute" ? team.slice_id : "",
+    artifact_identity: artifactIdentity,
+  };
+}
+
+function durableObserveLaunchClaimIdentity(claim) {
+  return Object.fromEntries([
+    "schema_version",
+    "claim_kind",
+    "task_id",
+    "team_run_id",
+    "team_generation",
+    "attempt_id",
+    "attempt_status",
+    "operation_id",
+    "claim_operation_id",
+    "terminal_operation_id",
+    "request_digest",
+    "launch_operation_id",
+    "grant_id",
+    "scope_digest",
+    "evidence_epoch",
+    "slice_id",
+    "artifact_identity",
+  ].map((field) => [field, claim[field]]));
+}
+
+function sameObserveLaunchScope(left, right) {
+  return left.task_id === right.task_id
+    && left.team_run_id === right.team_run_id
+    && left.attempt_id === right.attempt_id
+    && left.launch_operation_id === right.launch_operation_id;
+}
+
+function matchingObserveLaunchClaim(team, identity, options = {}) {
+  const claim = (team.observer_launch_claims || [])
+    .find((candidate) => candidate.operation_id === identity.operation_id);
+  if (!claim) return null;
+  const actualIdentity = durableObserveLaunchClaimIdentity(claim);
+  const expectedIdentity = { ...identity };
+  if (options.ignoreAttemptStatus) {
+    delete actualIdentity.attempt_status;
+    delete expectedIdentity.attempt_status;
+  }
+  if (canonicalJson(actualIdentity) !== canonicalJson(expectedIdentity)) {
+    throw new CommandError(`operation_id replay payload conflict: ${identity.operation_id}`);
+  }
+  return claim;
+}
+
+function durableObserveLaunchIdentity(team, parsed, attempt, args) {
+  const claim = (team.observer_launch_claims || [])
+    .find((candidate) => candidate.operation_id === parsed.operationId);
+  if (!claim) return null;
+  const expectedRequest = observeLaunchRequest(parsed, team, attempt, args);
+  if (claim.task_id !== parsed.taskId
+    || claim.team_run_id !== team.team_run_id
+    || claim.team_generation !== team.generation
+    || claim.attempt_id !== attempt.attempt_id
+    || claim.operation_id !== parsed.operationId
+    || claim.claim_operation_id !== `${parsed.operationId}-observation-launch-claim`
+    || claim.terminal_operation_id !== `${parsed.operationId}-observation`
+    || claim.launch_operation_id !== attempt.launch_operation_id
+    || claim.request_digest !== sha256(canonicalJson(expectedRequest))) {
+    throw new CommandError(`operation_id replay payload conflict: ${parsed.operationId}`);
+  }
+  return durableObserveLaunchClaimIdentity(claim);
+}
+
+function currentObserveLaunchIdentity(team, parsed, args, expected) {
+  const attempt = (team.attempts || [])
+    .find((candidate) => candidate.attempt_id === expected.attempt_id);
+  if (!attempt) throw new CommandError(`unknown attempt: ${expected.attempt_id}`);
+  if (attempt.status !== "reserved") {
+    throw new CommandError(`Paseo launch requires reserved attempt state: ${attempt.status}`);
+  }
+  const current = observeLaunchClaimIdentity(parsed, team, attempt, args);
+  if (canonicalJson(current) !== canonicalJson(expected)) {
+    throw new CommandError("Paseo launch binding changed before authoritative append");
+  }
+  return current;
+}
+
+function appendObserveLaunchClaim(teamInput, parsed, args, identity, now) {
+  const team = JSON.parse(JSON.stringify(teamInput));
+  currentObserveLaunchIdentity(team, parsed, args, identity);
+  const existing = matchingObserveLaunchClaim(team, identity);
+  if (existing) {
+    throw new CommandError(`Paseo launch claim is already ${existing.status}: ${identity.operation_id}`);
+  }
+  const conflicting = (team.observer_launch_claims || [])
+    .find((candidate) => sameObserveLaunchScope(candidate, identity));
+  if (conflicting) {
+    throw new CommandError(
+      `Paseo launch operation already has a canonical claim: ${identity.launch_operation_id}`,
+    );
+  }
+  const claim = { ...identity, status: "in_progress", claimed_at: now };
+  team.observer_launch_claims = [...(team.observer_launch_claims || []), claim];
+  return { team, result: { claim: JSON.parse(JSON.stringify(claim)) } };
+}
+
+function terminalizeObserveLaunchClaim(teamInput, identity, recordInput) {
+  const attempt = (teamInput.attempts || [])
+    .find((candidate) => candidate.attempt_id === identity.attempt_id);
+  if (!attempt || attempt.status !== "reserved"
+    || attempt.launch_operation_id !== identity.launch_operation_id) {
+    throw new CommandError("Paseo launch terminal receipt no longer matches its reserved attempt");
+  }
+  const claim = matchingObserveLaunchClaim(teamInput, identity);
+  if (!claim || claim.status !== "in_progress") {
+    throw new CommandError(`Paseo launch claim is not in progress: ${identity.operation_id}`);
+  }
+  const recorded = recordObservation(teamInput, recordInput);
+  const terminalClaim = matchingObserveLaunchClaim(recorded.team, identity);
+  terminalClaim.status = "terminal";
+  terminalClaim.terminal_at = recordInput.now;
+  terminalClaim.observation_id = recordInput.observationId;
+  terminalClaim.observation_action = recordInput.observation.action;
+  terminalClaim.runtime_agent_id = recordInput.observation.runtime_agent_id || "";
+  const terminalAttemptRecord = recorded.team.attempts
+    .find((candidate) => candidate.attempt_id === identity.attempt_id);
+  terminalAttemptRecord.launch_state = "actor-observed";
+  terminalAttemptRecord.launch_state_observation_id = recordInput.observationId;
+  terminalAttemptRecord.launch_state_updated_at = recordInput.now;
+  return {
+    ...recorded,
+    result: { ...recorded.result, claim: JSON.parse(JSON.stringify(terminalClaim)) },
+  };
+}
+
 function runObserveAttempt(parsed, options = {}) {
   const { clock, environment, paths } = commandOptions(options);
   const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
   validateTaskFile(taskFile);
   readJsonObject(taskStateFile(paths, parsed.taskId));
-  const existingTeam = requireV2Team(paths, parsed.taskId);
+  const currentState = authoritativeTaskState(paths, parsed.taskId);
+  const existingTeam = requireV2Team(paths, parsed.taskId, currentState);
+  if (parsed.observerAction === "run") {
+    assertCurrentExecuteTeamAuthorityIdentity(existingTeam, currentState);
+  } else {
+    assertCurrentExecuteTeamAuthority(
+      existingTeam, currentState, clock, environment, paths, parsed.taskId,
+      { requireUnexpired: false },
+    );
+  }
   const attempt = (existingTeam.attempts || []).find((item) => item.attempt_id === parsed.attemptId);
   if (!attempt) throw new CommandError(`unknown attempt: ${parsed.attemptId}`);
   const operationId = `${parsed.operationId}-observation`;
-  const existingOperation = (existingTeam.operation_log || [])
-    .find((entry) => entry.operation_id === operationId);
-  if (existingOperation) {
-    const observation = (existingTeam.observations || [])
-      .find((item) => item.observation_id === existingOperation.result.observation_id);
-    const actionMatches = observation && (observation.action === parsed.observerAction
-      || (parsed.observerAction === "run" && observation.action === "ls"
-        && observation.reconciliation_status === "matched"));
-    if (existingOperation.kind !== "observation.record" || !observation
-      || observation.observation_id !== parsed.observationId
-      || observation.attempt_id !== parsed.attemptId
-      || !actionMatches) {
-      throw new CommandError(`operation_id replay payload conflict: ${parsed.operationId}`);
-    }
-    return {
-      exitCode: 0,
-      lines: controlResultLines(parsed.taskId, "attempt-observe", existingOperation.result),
-    };
-  }
   if (!new Set(["run", "wait", "stop", "inspect"]).has(parsed.observerAction)) {
     throw new CommandError(`unsupported Paseo observer action: ${parsed.observerAction}`);
   }
@@ -706,6 +1139,86 @@ function runObserveAttempt(parsed, options = {}) {
       throw new CommandError(`${parsed.observerAction} observation does not accept observer args`);
     }
     args = [attempt.runtime_agent_id];
+  }
+  let launchIdentity = null;
+  let reconciliationOnly = false;
+  if (parsed.observerAction === "run") {
+    launchIdentity = durableObserveLaunchIdentity(existingTeam, parsed, attempt, args)
+      || observeLaunchClaimIdentity(parsed, existingTeam, attempt, args);
+    const durableClaim = (existingTeam.observer_launch_claims || [])
+      .find((candidate) => candidate.operation_id === parsed.operationId);
+    if (durableClaim) {
+      if (durableClaim.status === "in_progress") {
+        reconciliationOnly = true;
+      } else if (durableClaim.status !== "terminal") {
+        throw new CommandError(
+          `Paseo launch claim requires controller recovery and cannot be replayed: ${durableClaim.status}`,
+        );
+      }
+    }
+  }
+  const existingOperation = (existingTeam.operation_log || [])
+    .find((entry) => entry.operation_id === operationId);
+  if (existingOperation) {
+    const observation = (existingTeam.observations || [])
+      .find((item) => item.observation_id === existingOperation.result.observation_id);
+    const actionMatches = observation && (observation.action === parsed.observerAction
+      || (parsed.observerAction === "run" && observation.action === "ls"
+        && observation.reconciliation_status === "matched"));
+    if (existingOperation.kind !== "observation.record" || !observation
+      || observation.observation_id !== parsed.observationId
+      || observation.attempt_id !== parsed.attemptId
+      || !actionMatches) {
+      throw new CommandError(`operation_id replay payload conflict: ${parsed.operationId}`);
+    }
+    if (launchIdentity) {
+      const claim = matchingObserveLaunchClaim(existingTeam, launchIdentity, {
+        ignoreAttemptStatus: true,
+      });
+      if (!claim || claim.status !== "terminal"
+        || claim.observation_id !== parsed.observationId) {
+        throw new CommandError(`Paseo launch terminal receipt is incomplete: ${parsed.operationId}`);
+      }
+    }
+    return {
+      exitCode: 0,
+      lines: controlResultLines(parsed.taskId, "attempt-observe", existingOperation.result),
+    };
+  }
+  if (launchIdentity && !reconciliationOnly) {
+    if (options.beforeObserveLaunchClaim) options.beforeObserveLaunchClaim();
+    const claimed = mutateV2Team(parsed.taskId, (team, now) => (
+      appendObserveLaunchClaim(team, parsed, args, launchIdentity, now)
+    ), {
+      ...options,
+      clock,
+      environment,
+      paths,
+      operationId: launchIdentity.claim_operation_id,
+      operationData: launchIdentity,
+      eventKind: "team.attempt.observation.launch.claimed",
+      requireDoingTask: true,
+      requireUnexpiredAuthority: true,
+      replayPostcondition: launchIdentity.grant_id
+        ? authorityReplayPostcondition({
+          clock,
+          evidenceEpoch: launchIdentity.evidence_epoch,
+          grantId: launchIdentity.grant_id,
+          requireUnexpired: false,
+          scopeDigest: launchIdentity.scope_digest,
+          sliceId: launchIdentity.slice_id,
+          teamRunId: launchIdentity.team_run_id,
+        })
+        : options.replayPostcondition,
+    });
+    if (claimed.replay) {
+      reconciliationOnly = true;
+      const replayedIdentity = durableObserveLaunchClaimIdentity(claimed.result.claim || {});
+      if (canonicalJson(replayedIdentity) !== canonicalJson(launchIdentity)) {
+        throw new CommandError(`operation_id replay payload conflict: ${parsed.operationId}`);
+      }
+      launchIdentity = replayedIdentity;
+    }
   }
   const observer = options.observePaseoCommand || observePaseoCommand;
   const launchScope = {
@@ -729,9 +1242,6 @@ function runObserveAttempt(parsed, options = {}) {
     );
     const reconciliation = reconcileLaunch(agentsFromListResult(listed));
     reconciliationStatus = reconciliation.status;
-    if (reconciliation.status === "ambiguous") {
-      throw new CommandError("Paseo launch reconciliation is ambiguous");
-    }
     if (reconciliation.status === "matched") {
       if (!reconciliation.agent || typeof reconciliation.agent.id !== "string"
         || !reconciliation.agent.id.trim()) {
@@ -747,8 +1257,62 @@ function runObserveAttempt(parsed, options = {}) {
           reconciliation_status: "matched",
         },
       };
-    } else {
+    } else if (!reconciliationOnly && reconciliation.status === "missing") {
       observed = observer("run", args, observerOptions);
+    } else {
+      const reconciliationUuid = crypto.randomUUID();
+      const reconciliationOperationId =
+        `${parsed.operationId}-launch-reconcile-${reconciliationUuid}`;
+      const reconciliationObservationId =
+        `${parsed.observationId}-reconcile-${reconciliationUuid}`;
+      const reconciliationObservation = {
+        ...listed.observation,
+        action: "ls",
+        actor_created: false,
+        runtime_agent_id: "",
+        reconciliation_status: reconciliation.status,
+        attempt_id: attempt.attempt_id,
+        launch_operation_id: attempt.launch_operation_id,
+        launch_request_digest: launchIdentity.request_digest,
+      };
+      Object.assign(
+        reconciliationObservation,
+        classifyPaseoObservation(reconciliationObservation),
+      );
+      mutateV2Team(parsed.taskId, (team, now) => recordLaunchReconciliation(team, {
+        operationId: reconciliationOperationId,
+        claimOperationId: launchIdentity.claim_operation_id,
+        attemptId: launchIdentity.attempt_id,
+        launchOperationId: launchIdentity.launch_operation_id,
+        observationId: reconciliationObservationId,
+        observation: reconciliationObservation,
+        reconciliationStatus: reconciliation.status,
+        now,
+      }), {
+        ...options,
+        clock,
+        environment,
+        paths,
+        operationId: reconciliationOperationId,
+        operationData: {
+          taskId: parsed.taskId,
+          claimOperationId: launchIdentity.claim_operation_id,
+          attemptId: launchIdentity.attempt_id,
+          launchOperationId: launchIdentity.launch_operation_id,
+          observationId: reconciliationObservationId,
+          reconciliationStatus: reconciliation.status,
+          observation: reconciliationObservation,
+        },
+        eventKind: "team.attempt.observation.launch.reconciled",
+        factualAuthorityReceipt: true,
+        requireUnexpiredAuthority: false,
+      });
+      throw new CommandError(
+        `Paseo launch reconciliation is ${reconciliation.status}; no actor was launched and ` +
+          "the writer lease remains held in launch-state-unknown. Retry the same observe " +
+          "operation for ls-only reconciliation, or use team-attempt-record " +
+          "--action=resolve-launch with controller authority and canonical evidence",
+      );
     }
   } else {
     observed = observer(parsed.observerAction, args, observerOptions);
@@ -773,14 +1337,20 @@ function runObserveAttempt(parsed, options = {}) {
     ...observed.observation,
     attempt_id: attempt.attempt_id,
     launch_operation_id: attempt.launch_operation_id,
+    ...(launchIdentity ? { launch_request_digest: launchIdentity.request_digest } : {}),
   };
   Object.assign(observation, classifyPaseoObservation(observation));
-  const output = mutateV2Team(parsed.taskId, (team, now) => recordObservation(team, {
-    operationId,
-    observationId: parsed.observationId,
-    observation,
-    now,
-  }), {
+  const output = mutateV2Team(parsed.taskId, (team, now) => {
+    const recordInput = {
+      operationId,
+      observationId: parsed.observationId,
+      observation,
+      now,
+    };
+    return launchIdentity
+      ? terminalizeObserveLaunchClaim(team, launchIdentity, recordInput)
+      : recordObservation(team, recordInput);
+  }, {
     ...options,
     clock,
     environment,
@@ -793,18 +1363,56 @@ function runObserveAttempt(parsed, options = {}) {
       observationId: parsed.observationId,
       observerAction: parsed.observerAction,
       observerArgsJson: parsed.observerArgsJson || "",
+      observation,
+      ...(launchIdentity ? {
+        claimOperationId: launchIdentity.claim_operation_id,
+        requestDigest: launchIdentity.request_digest,
+      } : {}),
     },
     eventKind: "team.attempt.observed",
+    factualAuthorityReceipt: Boolean(launchIdentity),
+    requireUnexpiredAuthority: false,
+    replayPostcondition: launchIdentity ? (() => null) : options.replayPostcondition,
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, "attempt-observe", output.result) };
 }
 
 function runAttemptRecord(parsed, options = {}) {
   if (parsed.action === "observe") return runObserveAttempt(parsed, options);
-  const { paths } = commandOptions(options);
+  const { clock, environment, paths } = commandOptions(options);
   let evidenceRefs = commaList(parsed.evidenceRefs);
-  if (parsed.action === "quiesced" && evidenceRefs.length > 0) {
-    evidenceRefs = canonicalEvidenceRefs(paths, parsed.taskId, evidenceRefs, "quiescence evidence");
+  if (new Set(["quiesced", "resolve-launch"]).has(parsed.action)
+    && evidenceRefs.length > 0) {
+    const label = parsed.action === "resolve-launch"
+      ? "observer launch resolution evidence"
+      : "quiescence evidence";
+    evidenceRefs = canonicalEvidenceRefs(paths, parsed.taskId, evidenceRefs, label);
+  }
+  if (parsed.action === "resolve-launch") {
+    validateReason(parsed.reason, "observer launch resolution reason");
+    validateReason(parsed.authorityRef, "observer launch resolution authority ref");
+    if (!CONTROLLER_AUTHORITY_REF.test(parsed.authorityRef)) {
+      throw new CommandError(
+        "observer launch resolution requires a controller-recordable user-message: or operator-input: ref",
+      );
+    }
+    if (parsed.disposition !== "no-actor-confirmed") {
+      throw new CommandError("observer launch resolution only accepts no-actor-confirmed");
+    }
+  }
+  let resolutionEvidenceGuard = null;
+  if (parsed.action === "resolve-launch") {
+    resolutionEvidenceGuard = () => {
+      const current = canonicalEvidenceRefs(
+        paths,
+        parsed.taskId,
+        evidenceRefs,
+        "observer launch resolution evidence",
+      );
+      if (canonicalJson(current) !== canonicalJson(evidenceRefs)) {
+        throw new CommandError("observer launch resolution evidence changed before event append");
+      }
+    };
   }
   const output = mutateV2Team(parsed.taskId, (initialTeam, now) => {
     let transitioned;
@@ -836,15 +1444,34 @@ function runAttemptRecord(parsed, options = {}) {
         evidenceRefs,
         now,
       });
+    } else if (parsed.action === "resolve-launch") {
+      transitioned = resolveLaunchClaim(initialTeam, {
+        ...parsed,
+        evidenceRefs,
+        now,
+      });
     } else {
       throw new CommandError(ATTEMPT_USAGE);
     }
     return transitioned;
   }, {
     ...options,
+    clock,
+    environment,
+    paths,
     operationId: parsed.operationId,
     operationData: { ...parsed, evidenceRefs },
     eventKind: `team.attempt.${parsed.action}`,
+    requireDoingTask: parsed.action === "reserve",
+    requireUnexpiredAuthority: parsed.action === "reserve",
+    factualAuthorityReceipt: parsed.action === "resolve-launch",
+    replayPostcondition: parsed.action === "resolve-launch"
+      ? () => null
+      : options.replayPostcondition,
+    beforeEventAppend(event) {
+      if (options.beforeEventAppend) options.beforeEventAppend(event);
+      if (resolutionEvidenceGuard) resolutionEvidenceGuard(event);
+    },
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `attempt-${parsed.action}`, output.result) };
 }
@@ -863,6 +1490,8 @@ function runFallbackRecord(parsed, options = {}) {
     operationId: parsed.operationId,
     operationData: { ...parsed, evidenceRefs },
     eventKind: "team.attempt.fallback",
+    requireDoingTask: true,
+    requireUnexpiredAuthority: true,
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, "fallback-record", output.result) };
 }
@@ -948,6 +1577,7 @@ function runRecordFinalize(parsed, options = {}) {
   validateFinalStatus(parsed.status);
   const { clock, environment, paths } = commandOptions(options);
   let committed;
+  let authorityGuard = null;
   withLock(globalAdmissionLockFile(paths), () => {
     committed = mutateTaskRuntime(
       paths,
@@ -963,17 +1593,24 @@ function runRecordFinalize(parsed, options = {}) {
           staffing_file: path.resolve(parsed.staffingFile),
         },
       },
-      ({ currentProjection }) => {
+      ({ currentProjection, occurredAt }) => {
+        const eventClock = () => new Date(occurredAt);
         const currentState = currentProjection.state;
         const currentTeam = currentState.active_team && typeof currentState.active_team === "object"
           ? JSON.parse(JSON.stringify(currentState.active_team))
           : {};
         if (currentTeam.schema_version === 2) {
-          const output = finalizeV2Transition(parsed, { clock, paths }, currentTeam);
+          assertCurrentExecuteTeamAuthority(
+            currentTeam, currentState, clock, environment, paths, parsed.taskId,
+          );
+          authorityGuard = () => assertCurrentExecuteTeamAuthority(
+            currentTeam, currentState, clock, environment, paths, parsed.taskId,
+          );
+          const output = finalizeV2Transition(parsed, { clock: eventClock, paths }, currentTeam);
           validateTeamWriterAdmission(paths, parsed.taskId, output.team);
           return {
             projection: {
-              ...buildTeamProjection(paths, parsed.taskId, output.team, clock, currentState),
+              ...buildTeamProjection(paths, parsed.taskId, output.team, eventClock, currentState),
               files: output.files,
             },
             result: output.result,
@@ -1014,7 +1651,7 @@ function runRecordFinalize(parsed, options = {}) {
         parsed.taskId,
         taskContent,
         currentState,
-        clock,
+        eventClock,
       );
       state.active_team = {
         ...(state.active_team || {}),
@@ -1035,7 +1672,22 @@ function runRecordFinalize(parsed, options = {}) {
         }],
       };
       },
-      { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
+      {
+        ...options,
+        ...writerLeaseControlHooks(paths, parsed.taskId, {
+          ...options,
+          beforeEventAppend(event) {
+            if (options.beforeEventAppend) options.beforeEventAppend(event);
+            if (authorityGuard) authorityGuard(event);
+          },
+        }),
+        clock,
+        environment,
+        replayPostcondition: options.replayPostcondition
+          || authoritySensitiveTeamReplayPostcondition(
+            clock, environment, paths, parsed.taskId,
+          ),
+      },
     );
   });
   const effectiveBackend = committed.result.effective_backend || parsed.backend;
@@ -1075,9 +1727,7 @@ function finalizeV2Transition(parsed, context, team) {
     const roundAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team round", parsed.roundFile);
     const decisionAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team decision", parsed.decisionFile);
     const staffingAbsolute = validateExistingTeamArtifactPath(paths, parsed.taskId, "team staffing", parsed.staffingFile);
-    if (team.lanes.some((lane) => lane.status !== "closed")) {
-      throw new CommandError("v2 finalize requires all lanes closed");
-    }
+    assertTeamControlPlaneClosed(team, "team-record-finalize");
     deriveTeam(team);
     const effectiveBackend = team.effective_backend;
     if (parsed.backend && !backendAssertionMatches(
@@ -1151,6 +1801,7 @@ function runLoopRecord(parsed, options = {}) {
   }
   const { clock, environment, paths } = commandOptions(options);
   let committed;
+  let authorityGuard = null;
   withLock(globalAdmissionLockFile(paths), () => {
     committed = mutateTaskRuntime(
       paths,
@@ -1167,16 +1818,23 @@ function runLoopRecord(parsed, options = {}) {
           max_time: parsed.maxTime || "",
         },
       },
-      ({ currentProjection }) => {
+      ({ currentProjection, occurredAt }) => {
+        const eventClock = () => new Date(occurredAt);
         const currentState = currentProjection.state;
         const currentTeam = currentState.active_team && typeof currentState.active_team === "object"
           ? JSON.parse(JSON.stringify(currentState.active_team))
           : {};
         if (currentTeam.schema_version === 2) {
-          const output = loopV2Transition(parsed, { clock, paths }, currentTeam);
+          assertCurrentExecuteTeamAuthority(
+            currentTeam, currentState, clock, environment, paths, parsed.taskId,
+          );
+          authorityGuard = () => assertCurrentExecuteTeamAuthority(
+            currentTeam, currentState, clock, environment, paths, parsed.taskId,
+          );
+          const output = loopV2Transition(parsed, { clock: eventClock, paths }, currentTeam);
           validateTeamWriterAdmission(paths, parsed.taskId, output.team);
           return {
-            projection: buildTeamProjection(paths, parsed.taskId, output.team, clock, currentState),
+            projection: buildTeamProjection(paths, parsed.taskId, output.team, eventClock, currentState),
             result: output.result,
             legacy: output.legacy,
           };
@@ -1207,7 +1865,7 @@ function runLoopRecord(parsed, options = {}) {
         parsed.taskId,
         taskContent,
         currentState,
-        clock,
+        eventClock,
       );
       const nextLoop = {
         ...((nextState.active_team || {}).loop || {}),
@@ -1235,7 +1893,22 @@ function runLoopRecord(parsed, options = {}) {
         }],
       };
       },
-      { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
+      {
+        ...options,
+        ...writerLeaseControlHooks(paths, parsed.taskId, {
+          ...options,
+          beforeEventAppend(event) {
+            if (options.beforeEventAppend) options.beforeEventAppend(event);
+            if (authorityGuard) authorityGuard(event);
+          },
+        }),
+        clock,
+        environment,
+        replayPostcondition: options.replayPostcondition
+          || authoritySensitiveTeamReplayPostcondition(
+            clock, environment, paths, parsed.taskId,
+          ),
+      },
     );
   });
   return {
@@ -1255,6 +1928,7 @@ function loopV2Transition(parsed, context, team) {
   if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
       throw new CommandError("team-loop-record requires an active v2 team record in running status");
   }
+    assertTeamControlPlaneClosed(team, "team-loop-record");
     deriveTeam(team);
     const effective = team.effective_backend;
     if (parsed.backend && !backendAssertionMatches(
@@ -1335,6 +2009,30 @@ function runStatus(argv, options = {}) {
     ["team_loop_max_time", loop.max_time],
   ];
   if (team.schema_version === 2) {
+    const pendingLaunchClaims = (team.observer_launch_claims || [])
+      .filter((claim) => claim.status === "in_progress");
+    const indeterminateLaunchClaims = (team.observer_launch_claims || [])
+      .filter((claim) => claim.status === "indeterminate");
+    const pendingLaunchStates = pendingLaunchClaims.map((claim) => {
+      const attempt = (team.attempts || [])
+        .find((candidate) => candidate.attempt_id === claim.attempt_id);
+      return `${claim.attempt_id}:${claim.claim_operation_id}:` +
+        `${attempt?.launch_state || "claim-in-progress"}`;
+    });
+    const launchRecovery = pendingLaunchClaims.map((claim) => (
+      `codex-workflow team-attempt-record ${argv[0]} --operation-id=<new-id> ` +
+      `--action=resolve-launch --attempt=${claim.attempt_id} ` +
+      `--claim-operation-id=${claim.claim_operation_id} ` +
+      `--launch-operation-id=${claim.launch_operation_id} ` +
+      "--disposition=no-actor-confirmed " +
+      "--authority-ref=<user-message:...|operator-input:...> " +
+      "--reason=<single-line> --evidence-refs=<task-artifact-relative-file>"
+    ));
+    launchRecovery.push(...indeterminateLaunchClaims.map((claim) => (
+      `codex-workflow team-attempt-record ${argv[0]} --operation-id=<new-id> ` +
+      `--action=quiesced --attempt=${claim.attempt_id} ` +
+      "--evidence-refs=<task-artifact-relative-file>"
+    )));
     fields.push(
       ["team_schema_version", team.schema_version],
       ["team_run_id", team.team_run_id],
@@ -1350,6 +2048,10 @@ function runStatus(argv, options = {}) {
       ["team_admission_count", (team.admissions || []).length],
       ["team_fallback_count", (team.fallback_events || []).length],
       ["team_active_writer_leases", (team.writer_leases || []).filter((item) => item.state === "active").length],
+      ["team_observer_launch_claims_pending", pendingLaunchStates.join(",")],
+      ["team_observer_launch_claims_indeterminate", indeterminateLaunchClaims
+        .map((claim) => `${claim.attempt_id}:${claim.claim_operation_id}`).join(",")],
+      ["team_observer_launch_recovery", launchRecovery.join(" | ")],
       ["team_convergence", (team.lanes || []).map((lane) => `${lane.lane_id}=${lane.convergence}`).join(",")],
       ["team_legacy_projection", new Set(["mixed", "none"]).has(team.effective_backend)],
     );
@@ -1365,6 +2067,7 @@ function runStop(argv, options = {}) {
   const taskFile = requireTaskFile(paths.tasksDir, argv[0]);
   validateTaskFile(taskFile);
   const decision = relativeToCodeHome(paths, teamDecisionFile(paths, argv[0]));
+  let authorityGuard = null;
   withLock(globalAdmissionLockFile(paths), () => mutateTaskRuntime(
     paths,
     argv[0],
@@ -1373,24 +2076,26 @@ function runStop(argv, options = {}) {
       operationId: options.operationId,
       data: { status: "stopped" },
     },
-    ({ currentProjection }) => {
+    ({ currentProjection, occurredAt }) => {
+      const eventClock = () => new Date(occurredAt);
       const currentState = currentProjection.state;
       const team = currentState.active_team && typeof currentState.active_team === "object"
         ? JSON.parse(JSON.stringify(currentState.active_team))
         : {};
       if (team.schema_version === 2) {
+      assertCurrentExecuteTeamAuthority(team, currentState, clock, environment, paths, argv[0]);
+      authorityGuard = () => assertCurrentExecuteTeamAuthority(
+        team, currentState, clock, environment, paths, argv[0],
+      );
       if (!new Set(["running", "promoted:execute", "promoted:worktree"]).has(team.status)) {
         throw new CommandError(`team run is not mutable: ${team.status}`);
       }
-      if ((team.attempts || []).some((attempt) => new Set(["reserved", "bound", "running"]).has(attempt.status))
-        || (team.writer_leases || []).some((lease) => lease.state === "active")) {
-        throw new CommandError("team-stop requires active attempts to be terminal and quiesced first");
-      }
+      assertTeamControlPlaneClosed(team, "team-stop");
       team.status = "stopped";
       team.decision = decision;
         validateTeamWriterAdmission(paths, argv[0], team);
         return {
-          projection: buildTeamProjection(paths, argv[0], team, clock, currentState),
+          projection: buildTeamProjection(paths, argv[0], team, eventClock, currentState),
           legacy: [{ kind: "team-stop", detail: "stopped" }],
         };
       }
@@ -1405,7 +2110,7 @@ function runStop(argv, options = {}) {
         argv[0],
         taskContent,
         currentState,
-        clock,
+        eventClock,
       );
       nextState.active_team = {
         ...(nextState.active_team || {}),
@@ -1417,18 +2122,37 @@ function runStop(argv, options = {}) {
         legacy: [{ kind: "team-stop", detail: "stopped" }],
       };
     },
-    { ...options, ...writerLeaseControlHooks(paths, argv[0], options), clock, environment },
+    {
+      ...options,
+      ...writerLeaseControlHooks(paths, argv[0], {
+        ...options,
+        beforeEventAppend(event) {
+          if (options.beforeEventAppend) options.beforeEventAppend(event);
+          if (authorityGuard) authorityGuard(event);
+        },
+      }),
+      clock,
+      environment,
+      replayPostcondition: options.replayPostcondition
+        || authoritySensitiveTeamReplayPostcondition(clock, environment, paths, argv[0]),
+    },
   ));
   return { exitCode: 0, lines: [`task_id: ${argv[0]}`, "status: stopped"] };
 }
 
 function runPromote(parsed, options = {}) {
-  validateExecutionAuthorization(parsed.target, parsed.authorizationRef);
+  validateExecutionAuthorization(
+    parsed.target,
+    parsed.authorizationRef,
+    parsed.grantId,
+    parsed.scopeDigest,
+  );
   const { clock, cwd, environment, paths } = commandOptions(options);
   const decisionFile = teamDecisionFile(paths, parsed.taskId);
   const decision = relativeToCodeHome(paths, decisionFile);
   let replayed = false;
   let committed;
+  let scopeGuard = null;
   const operationId = parsed.operationId || options.operationId;
   withLock(globalAdmissionLockFile(paths), () => {
     const requestIdentity = parsed.target === "execute"
@@ -1444,17 +2168,51 @@ function runPromote(parsed, options = {}) {
           data: {
             target: parsed.target,
             authorization_ref: parsed.authorizationRef || "",
+            grant_id: parsed.grantId || "",
+            scope_digest: parsed.scopeDigest || "",
             ...requestIdentity,
           },
         },
-        ({ revision }) => {
+        ({ currentProjection, occurredAt, revision }) => {
+          const eventClock = () => new Date(occurredAt);
+          const state = JSON.parse(JSON.stringify(currentProjection.state));
+          if (parsed.target === "execute" && state.status !== "doing") {
+            throw new CommandError("execute Team promotion requires a doing task");
+          }
+          const activeTeam = state.active_team && typeof state.active_team === "object"
+            ? state.active_team
+            : {};
+          if (new Set(["execute", "finish"]).has(parsed.target)) {
+            const pendingLaunchClaims = (activeTeam.observer_launch_claims || [])
+              .filter((claim) => claim.status === "in_progress");
+            if (pendingLaunchClaims.length > 0) {
+              throw new CommandError(
+                `team ${parsed.target} promotion is blocked by in-progress observer launch claims: ${pendingLaunchClaims.map((claim) => claim.attempt_id).join(", ")}`,
+              );
+            }
+          }
+          if (parsed.target === "finish") {
+            assertTeamControlPlaneClosed(activeTeam, "team finish promotion");
+          }
+          if (parsed.target !== "execute" && activeTeam.schema_version === 2
+            && activeTeam.mode === "execute") {
+            assertCurrentExecuteTeamAuthority(
+              activeTeam, state, clock, environment, paths, parsed.taskId,
+            );
+            scopeGuard = () => assertCurrentExecuteTeamAuthority(
+              activeTeam, state, clock, environment, paths, parsed.taskId,
+            );
+          }
           const admission = parsed.target === "execute" ? admitTeamStart({
             authorizationRef: parsed.authorizationRef,
             briefPath: parsed.briefPath,
             captureIdentity: options.captureIdentity,
-            clock,
+            clock: eventClock,
+            currentState: state,
             cwd,
             environment,
+            expectedGrantId: parsed.grantId,
+            expectedScopeDigest: parsed.scopeDigest,
             mode: "execute",
             paths,
             taskId: parsed.taskId,
@@ -1465,11 +2223,6 @@ function runPromote(parsed, options = {}) {
           }
           const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
           validateTaskFile(taskFile);
-          const state = readJsonObject(taskStateFile(paths, parsed.taskId));
-          const activeTeam = state.active_team && typeof state.active_team === "object"
-            ? state.active_team
-            : {};
-          if (admission) bindExecutionAuthority(state, admission, revision + 1);
           if (activeTeam.schema_version === 2
             && !new Set(["running", "promoted:execute", "promoted:worktree"])
               .has(activeTeam.status)) {
@@ -1489,11 +2242,37 @@ function runPromote(parsed, options = {}) {
             decision,
           };
           if (parsed.target === "execute") {
-            promotedTeam.authorization_ref = parsed.authorizationRef;
+            promotedTeam.objective = admission.canonical_objective;
+            promotedTeam.authorization_ref = assertActiveExecutionGrant(state).authorization_provenance.ref;
             promotedTeam.admission = admission;
             promotedTeam.admitted_owned_paths = admission.admitted_owned_paths;
             promotedTeam.slice_id = admission.brief.slice_id;
+            promotedTeam.grant_id = admission.grant_id;
+            promotedTeam.scope_digest = admission.scope_digest;
+            promotedTeam.evidence_epoch = admission.evidence_epoch;
             promotedTeam.execution_operation_id = operationId || "";
+            const grant = assertActiveExecutionGrant(state, {
+              grantId: admission.grant_id,
+              scopeDigest: admission.scope_digest,
+            });
+            scopeGuard = () => {
+              const rebuilt = buildCanonicalScope({
+                authorizationRef: grant.authorization_provenance.ref,
+                briefPath: parsed.briefPath,
+                cwd,
+                environment,
+                evidencePolicy: grant.scope.evidence_policy,
+                grantId: grant.grant_id,
+                objective: grant.scope.objective,
+                parent: grant.scope.parent,
+                paths,
+                requireObjectiveMatchesSelected: false,
+                taskId: parsed.taskId,
+              });
+              if (rebuilt.scopeDigest !== grant.scope_digest) {
+                throw new CommandError("Team scope artifacts changed before promotion event append");
+              }
+            };
           }
           validateTeamWriterAdmission(paths, parsed.taskId, promotedTeam);
           const authorizationLines = parsed.target === "execute"
@@ -1503,7 +2282,7 @@ function runPromote(parsed, options = {}) {
             : "";
           const promotionBlock =
             `\n## Promotion\n\n- promoted_to: ${parsed.target}\n${authorizationLines}` +
-            `- created_at: ${timestampSeconds(clock)}\n`;
+            `- created_at: ${timestampSeconds(eventClock)}\n`;
           const projectionFile = {
             path: "team/decision.md",
             content_base64: Buffer.from(
@@ -1513,16 +2292,23 @@ function runPromote(parsed, options = {}) {
           let projection;
           if (activeTeam.schema_version === 2) {
             projection = {
-              ...buildTeamProjection(paths, parsed.taskId, promotedTeam, clock, state),
+              ...buildTeamProjection(
+                paths,
+                parsed.taskId,
+                promotedTeam,
+                eventClock,
+                state,
+                currentProjection.task_content,
+              ),
               files: [projectionFile],
             };
           } else {
-            const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {
+            const taskContent = renderTaskFields(currentProjection.task_content, {
               active_team_mode: mode,
               active_team_status: status,
               active_team_decision: decision,
             });
-            const nextState = projectTaskState(paths, parsed.taskId, taskContent, state, clock);
+            const nextState = projectTaskState(paths, parsed.taskId, taskContent, state, eventClock);
             nextState.active_team = promotedTeam;
             projection = {
               task_content: taskContent,
@@ -1536,7 +2322,37 @@ function runPromote(parsed, options = {}) {
             legacy: [{ kind: "team-promote", detail: parsed.target }],
           };
         },
-        { ...options, ...writerLeaseControlHooks(paths, parsed.taskId, options), clock, environment },
+        {
+          ...options,
+          ...writerLeaseControlHooks(paths, parsed.taskId, {
+            ...options,
+            beforeEventAppend(event) {
+              if (options.beforeEventAppend) options.beforeEventAppend(event);
+              if (scopeGuard) scopeGuard(event);
+            },
+          }),
+          clock,
+          environment,
+          replayPostcondition: parsed.target === "execute"
+            ? authorityReplayPostcondition({
+              clock,
+              grantId: parsed.grantId,
+              requireUnexpired: true,
+              scopeDigest: parsed.scopeDigest,
+              validateCurrent({ grant }) {
+                assertCanonicalGrantArtifacts({
+                  briefPath: parsed.briefPath,
+                  environment,
+                  grant,
+                  paths,
+                  taskId: parsed.taskId,
+                });
+              },
+            })
+            : options.replayPostcondition || authoritySensitiveTeamReplayPostcondition(
+              clock, environment, paths, parsed.taskId,
+            ),
+        },
       );
     } catch (error) {
       if (parsed.operationId
@@ -1556,6 +2372,8 @@ function runPromote(parsed, options = {}) {
     lines.push(`authorization_ref: ${parsed.authorizationRef}`);
     lines.push(`brief: ${parsed.briefPath}`);
     lines.push(`operation_id: ${parsed.operationId}`);
+    lines.push(`grant_id: ${parsed.grantId}`);
+    lines.push(`scope_digest: ${parsed.scopeDigest}`);
   }
   if (replayed) lines.push("replayed: true");
   return {

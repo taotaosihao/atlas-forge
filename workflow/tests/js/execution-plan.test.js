@@ -19,6 +19,14 @@ const { loadBundledProfile, profileBinding } = require(path.join(
   ROOT,
   "../plugins/atlas-workflow/contracts/release-certification/validators/profile.js",
 ));
+const {
+  canonicalScopeVNext,
+  scopeCoreDigest,
+  scopeDigest,
+} = require(path.join(
+  ROOT,
+  "../plugins/atlas-workflow/contracts/team-sdd/validators/scope-grant.js",
+));
 
 function fixturePlan() {
   return extractExecutionPlan(fs.readFileSync(path.join(
@@ -296,7 +304,7 @@ test("execution plan versions stay bound to contract and delivery semantics", ()
   const intent = productIntent();
   assert.match(
     validateExecutionPlan(fixturePlan(), { contractSemanticsVersion: 4, releaseIntent: intent }).join("\n"),
-    /product_release intent requires execution-plan schema version 2/,
+    /product_release intent requires release execution-plan schema version 2 or 4/,
   );
   assert.match(
     validateExecutionPlan(releasePlan(intent), { contractSemanticsVersion: 3 }).join("\n"),
@@ -304,23 +312,27 @@ test("execution plan versions stay bound to contract and delivery semantics", ()
   );
 });
 
-test("execution plan JSON Schema publishes both v1 and release-bound v2", () => {
+test("execution plan JSON Schema publishes legacy read schemas and strict vNext schemas", () => {
   const schema = JSON.parse(fs.readFileSync(path.join(
     ROOT,
     "../plugins/atlas-workflow/contracts/team-sdd/execution-plan.schema.json",
   ), "utf8"));
   assert.equal(schema.$schema, "http://json-schema.org/draft-07/schema#");
-  assert.equal(schema.oneOf.length, 2);
+  assert.equal(schema.oneOf.length, 4);
   const branch = (version) => schema.oneOf.find((item) => (
     item.properties.schema_version.enum.includes(version)
   ));
   const v1 = branch(1);
   const v2 = branch(2);
+  const v3 = branch(3);
+  const v4 = branch(4);
   assert.ok(v1);
   assert.ok(v2.required.includes("release"));
   assert.equal(v2.properties.release.$ref, "#/definitions/release_binding");
   assert.equal(v1.properties.slices.items.$ref, "#/definitions/slice_v1");
   assert.equal(v2.properties.slices.items.$ref, "#/definitions/slice_v2");
+  assert.equal(v3.properties.slices.items.$ref, "#/definitions/slice_v3");
+  assert.equal(v4.properties.slices.items.$ref, "#/definitions/slice_v4");
   assert.equal(schema.definitions.slice_v1.properties.checks.items.$ref, "#/definitions/check_v1");
   assert.equal(schema.definitions.slice_v2.properties.checks.items.$ref, "#/definitions/check_v2");
   assert.equal(
@@ -331,4 +343,169 @@ test("execution plan JSON Schema publishes both v1 and release-bound v2", () => 
   assert.ok(schema.definitions.release_requirement.required.includes("fact_schema_sha256"));
   assert.ok(schema.definitions.release_requirement.required.includes("evaluator_sha256"));
   assert.ok(schema.definitions.release_requirement.required.includes("pass_rule_sha256"));
+});
+
+test("vNext scope canonicalization sorts sets, preserves ordered arrays, and rejects path aliases", () => {
+  const raw = {
+    schema_version: 1,
+    grant_id: "grant-vnext",
+    task_id: "task-vnext",
+    repo: { realpath: "/canonical/repo", base_sha: "a".repeat(40) },
+    objective: "execute the selected canonical slice",
+    contract: {
+      path: "contracts/implementation-contract.final.md",
+      sha256: digest("b"),
+      semantics_version: 5,
+      authority_slices: [{
+        path: "/canonical/workflow/artifacts/task-vnext/team/sdd/slices/authority-vnext",
+        task_id: "task-vnext",
+        slice_id: "authority-vnext",
+        brief_json_sha256: digest("1"),
+        brief_md_sha256: digest("2"),
+        evidence_manifest_sha256: null,
+        review_verdict_sha256: null,
+        controller_resolution_sha256: null,
+        global_constraints_sha256: null,
+      }],
+    },
+    execution_plan: { schema_version: 3, sha256: digest("c") },
+    owned_paths: ["z/**", "a/**"],
+    forbidden_paths: ["private/z/**", "private/a/**"],
+    required_slices: [{
+      slice_id: "slice-b",
+      objective: "preserve this slice position",
+      brief_path: "team/sdd/slices/slice-b/brief.json",
+      brief_sha256: digest("d"),
+      depends_on: ["slice-a"],
+      keeper_outputs: ["keeper:z", "keeper:a"],
+      owned_paths: ["z/**"],
+      forbidden_paths: ["private/z/**"],
+      acceptance_refs: ["AC-Z", "AC-A"],
+      estimate: {
+        estimated_changed_files: 1, estimated_net_loc: 10, target_p90_minutes: 10,
+        serial_dependency_depth: 1, independent_vertical_count: 1,
+      },
+      budget: {
+        max_changed_files: 2, max_loc: 20, max_wall_clock_minutes: 20,
+        max_required_checks: 2,
+      },
+      checks: [{
+        check_id: "check-z",
+        gate_class: "contract",
+        command: "node --test z.test.js",
+        final_only: false,
+        cache_policy: "identity-bound",
+        release_requirement: null,
+      }, {
+        check_id: "check-a",
+        gate_class: "unit",
+        command: "node --test a.test.js",
+        final_only: false,
+        cache_policy: "identity-bound",
+        release_requirement: null,
+      }],
+    }, {
+      slice_id: "slice-a",
+      objective: "preserve the second slice position",
+      brief_path: "team/sdd/slices/slice-a/brief.json",
+      brief_sha256: digest("e"),
+      depends_on: [],
+      keeper_outputs: ["keeper:foundation"],
+      owned_paths: ["a/**"],
+      forbidden_paths: ["private/a/**"],
+      acceptance_refs: ["AC-FOUNDATION"],
+      estimate: {
+        estimated_changed_files: 1, estimated_net_loc: 10, target_p90_minutes: 10,
+        serial_dependency_depth: 0, independent_vertical_count: 1,
+      },
+      budget: {
+        max_changed_files: 2, max_loc: 20, max_wall_clock_minutes: 20,
+        max_required_checks: 1,
+      },
+      checks: [{
+        check_id: "check-foundation",
+        gate_class: "contract",
+        command: "node --test foundation.test.js",
+        final_only: false,
+        cache_policy: "identity-bound",
+        release_requirement: null,
+      }],
+    }],
+    size_exceptions: [],
+    scope_core_digest: digest("0"),
+    authorization_provenance: { kind: "user-message", ref: "user-message:vnext" },
+    release_binding: null,
+    parent: null,
+    supersedes_grant_id: null,
+    evidence_policy: {
+      mode: "retain-compatible",
+      retained_receipt_ids: ["receipt-z", "receipt-a"],
+    },
+    design_handoff: null,
+    first_code: null,
+  };
+  const core = canonicalScopeVNext(raw, { skipCoreDigestCheck: true });
+  raw.scope_core_digest = scopeCoreDigest(core);
+  const canonical = canonicalScopeVNext(raw);
+  assert.deepEqual(canonical.owned_paths, ["a/**", "z/**"]);
+  assert.deepEqual(canonical.forbidden_paths, ["private/a/**", "private/z/**"]);
+  assert.deepEqual(canonical.evidence_policy.retained_receipt_ids, ["receipt-a", "receipt-z"]);
+  assert.deepEqual(canonical.required_slices.map((slice) => slice.slice_id), ["slice-b", "slice-a"]);
+  assert.deepEqual(canonical.required_slices[0].checks.map((check) => check.check_id), [
+    "check-z", "check-a",
+  ]);
+  assert.match(scopeDigest(canonical), /^sha256:[a-f0-9]{64}$/);
+  const authorityDrift = clone(raw);
+  authorityDrift.contract.authority_slices[0].brief_md_sha256 = digest("3");
+  const driftCore = canonicalScopeVNext(authorityDrift, { skipCoreDigestCheck: true });
+  authorityDrift.scope_core_digest = scopeCoreDigest(driftCore);
+  assert.notEqual(scopeDigest(canonicalScopeVNext(authorityDrift)), scopeDigest(canonical));
+
+  for (const invalid of [
+    "/absolute/**",
+    "src\\alias/**",
+    "src//alias/**",
+    "src/./alias/**",
+    "src/../alias/**",
+    "src/alias/",
+    "src/e\u0301/**",
+  ]) {
+    const changed = clone(raw);
+    changed.required_slices[0].owned_paths = [invalid];
+    changed.owned_paths = [invalid, "a/**"];
+    assert.throws(
+      () => canonicalScopeVNext(changed, { skipCoreDigestCheck: true }),
+      /canonical POSIX|Unicode|empty, dot, or parent/,
+      invalid,
+    );
+  }
+  const duplicate = clone(raw);
+  duplicate.required_slices[0].owned_paths = ["z/**", "z/**"];
+  assert.throws(
+    () => canonicalScopeVNext(duplicate, { skipCoreDigestCheck: true }),
+    /duplicate value/,
+  );
+
+  const wrongVersion = clone(raw);
+  wrongVersion.execution_plan.schema_version = 4;
+  assert.throws(
+    () => canonicalScopeVNext(wrongVersion, { skipCoreDigestCheck: true }),
+    /contract\/execution-plan version matrix/,
+  );
+
+  const cyclic = clone(raw);
+  cyclic.required_slices[1].depends_on = ["slice-b"];
+  assert.throws(
+    () => canonicalScopeVNext(cyclic, { skipCoreDigestCheck: true }),
+    /dependency cycle/,
+  );
+
+  const ordinaryWithReleaseGate = clone(raw);
+  const profile = loadBundledProfile("web-ui-v1");
+  ordinaryWithReleaseGate.required_slices[0].checks[0].release_requirement
+    = releaseRequirementProjection(profile, profileBinding(profile), profile.requirements[0]);
+  assert.throws(
+    () => canonicalScopeVNext(ordinaryWithReleaseGate, { skipCoreDigestCheck: true }),
+    /ordinary semantics-v5 scope cannot carry release requirements/,
+  );
 });

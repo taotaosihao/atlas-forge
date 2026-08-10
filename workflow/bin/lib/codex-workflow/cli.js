@@ -26,6 +26,7 @@ const DIRECT_ROUTES = new Map([
   ["prompt-bundle", "./artifact/cli.js"],
   ["ready", "./verification/cli.js"],
   ["verify", "./verification/cli.js"],
+  ["verify-resolve", "./verification/cli.js"],
   ["gate-metric", "./verification/cli.js"],
   ["gate-report", "./verification/cli.js"],
   ["outcome-mark", "./outcome/cli.js"],
@@ -35,6 +36,9 @@ const DIRECT_ROUTES = new Map([
   ["lesson-candidate", "./feedback/cli.js"],
   ["learning-decision", "./feedback/cli.js"],
   ["team-record-start", "./team/cli.js"],
+  ["team-authorize", "./team/cli.js"],
+  ["team-grant", "./team/cli.js"],
+  ["team-replan", "./team/cli.js"],
   ["team-start", "./team/cli.js"],
   ["team-record-finalize", "./team/cli.js"],
   ["team-loop-record", "./team/cli.js"],
@@ -64,6 +68,11 @@ function main(argv, options = {}) {
   const modulePath = DIRECT_ROUTES.get(argv[0]);
   if (modulePath) {
     return require(modulePath).main(argv);
+  }
+  if (typeof argv[0] === "string" && argv[0].startsWith("team-")) {
+    const error = new Error(`unknown Team command: ${argv[0]}`);
+    error.exitCode = 1;
+    throw error;
   }
   return runLegacy(argv, options);
 }

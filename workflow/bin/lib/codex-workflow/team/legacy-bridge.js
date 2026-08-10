@@ -16,9 +16,15 @@ const { relativeToCodeHome, taskArtifactDir } = require("../core/paths");
 const {
   requireOpenExecutionTask,
   requireTaskFile,
+  renderTaskFields,
   validateTaskFile,
 } = require("../task/repository");
-const { readJsonObject, taskRuntimeFile, taskStateFile } = require("../task/runtime");
+const {
+  projectTaskState,
+  readJsonObject,
+  taskRuntimeFile,
+  taskStateFile,
+} = require("../task/runtime");
 
 const LEGACY_BIN = path.resolve(__dirname, "../../../codex-workflow-legacy");
 const LEGACY_TEAM_FILE = /^(?:decision|staffing|claude-review|round-[^/]+|loop-[^/]+)\.md$/;
@@ -136,10 +142,60 @@ function captureNewLegacyRows(paths, taskId, baseline) {
   });
 }
 
+function legacyTeamMode(argv) {
+  let mode = "discuss";
+  for (let index = 3; index < argv.length; index += 1) {
+    if (argv[index] === "--mode") {
+      mode = argv[index + 1] || "";
+      index += 1;
+    } else if (argv[index].startsWith("--mode=")) {
+      mode = argv[index].slice("--mode=".length);
+    }
+  }
+  return mode;
+}
+
+function discussDisplayProjection(currentProjection, rebased, files, legacyRows, paths, taskId) {
+  const state = JSON.parse(JSON.stringify(currentProjection.state));
+  const legacyTeam = rebased.state.active_team && typeof rebased.state.active_team === "object"
+    ? rebased.state.active_team
+    : {};
+  const display = Object.fromEntries([
+    "backend", "mode", "status", "decision", "staffing", "round_file", "objective",
+    "agents", "roles", "providers", "created_at",
+  ].flatMap((key) => Object.hasOwn(legacyTeam, key) ? [[key, legacyTeam[key]]] : []));
+  display.mode = "discuss";
+  if (state.active_team?.schema_version === 2) {
+    state.legacy_team_discuss = display;
+  } else {
+    state.active_team = display;
+  }
+  const taskContent = renderTaskFields(currentProjection.task_content, {
+    active_team_backend: display.backend || "legacy",
+    active_team_mode: "discuss",
+    active_team_status: display.status || "complete",
+    active_team_decision: display.decision || "",
+  });
+  const projected = projectTaskState(paths, taskId, taskContent, state);
+  if (state.active_team?.schema_version === 2) projected.active_team = state.active_team;
+  if (state.legacy_team_discuss) projected.legacy_team_discuss = state.legacy_team_discuss;
+  return {
+    projection: { task_content: taskContent, state: projected, files },
+    legacy: legacyRows,
+  };
+}
+
 function runLegacyTeamCommand(argv, options = {}) {
   const command = argv[0];
   if (!new Set(["team-start", "team-loop"]).has(command) || !argv[1]) {
     throw new CommandError("usage: codex-workflow {team-start|team-loop} <task-id> ...");
+  }
+  if (command === "team-loop") {
+    throw new CommandError("legacy team-loop is disabled because it implicitly launches execute mode");
+  }
+  const mode = legacyTeamMode(argv);
+  if (mode !== "discuss") {
+    throw new CommandError("legacy team-start is discuss-only; execute requires a vNext controller grant");
   }
   const { environment, paths } = commandOptions(options);
   const taskId = argv[1];
@@ -188,14 +244,14 @@ function runLegacyTeamCommand(argv, options = {}) {
           team_status: rebased.state.active_team?.status || "",
         },
       },
-      () => ({
-        projection: {
-          task_content: rebased.taskContent,
-          state: rebased.state,
-          files,
-        },
-        legacy: legacyRows,
-      }),
+      ({ currentProjection }) => discussDisplayProjection(
+        currentProjection,
+        rebased,
+        files,
+        legacyRows,
+        paths,
+        taskId,
+      ),
       { environment, expectedRevision: observedRevision },
     );
     return { exitCode, lines: [] };
@@ -209,6 +265,8 @@ module.exports = {
   LEGACY_TEAM_FILE,
   captureNewLegacyRows,
   captureLegacyTeamFiles,
+  discussDisplayProjection,
+  legacyTeamMode,
   rebaseLegacyProjection,
   runLegacyTeamCommand,
   seedIsolatedLegacyRoot,

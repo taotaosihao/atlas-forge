@@ -11,7 +11,6 @@ const {
   profileBinding,
 } = require("../../release-certification/validators/profile");
 const {
-  extractReleaseIntent,
   validateReleaseIntent,
 } = require("../../release-certification/validators/release-intent");
 
@@ -33,6 +32,8 @@ const PERMANENT_GATE_CLASSES = new Set([
 ]);
 const V1_TOP_LEVEL_KEYS = ["schema_version", "size_policy", "slices"];
 const V2_TOP_LEVEL_KEYS = [...V1_TOP_LEVEL_KEYS, "release"];
+const V3_TOP_LEVEL_KEYS = V1_TOP_LEVEL_KEYS;
+const V4_TOP_LEVEL_KEYS = V2_TOP_LEVEL_KEYS;
 const SIZE_POLICY_KEYS = ["policy_id"];
 const SLICE_KEYS = [
   "slice_id", "objective", "depends_on", "keeper_outputs", "owned_paths",
@@ -61,6 +62,8 @@ const RELEASE_REQUIREMENT_KEYS = [
 ];
 const EXCEPTION_KEYS = ["authority_ref", "expires_at", "reason", "compensating_controls"];
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
+const AUTHORITY_REF = /^(?:user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const CANONICAL_UTC = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\dZ$/;
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -115,9 +118,19 @@ function uniqueStrings(value, location, errors, { nonEmpty = false } = {}) {
   return value.filter((item) => typeof item === "string" && item.trim());
 }
 
-function pathPrefix(raw) {
+function canonicalPathPattern(raw) {
+  if (typeof raw !== "string" || !raw.trim() || raw !== raw.normalize("NFC")
+    || /[^\x20-\x7e]/.test(raw) || raw.startsWith("/") || raw.includes("\\")
+    || raw.includes("//") || raw.startsWith("./") || raw.endsWith("/")) return "";
+  const segments = raw.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === "..")) return "";
+  return raw;
+}
+
+function pathPrefix(raw, { strict = false } = {}) {
   if (typeof raw !== "string" || !raw.trim() || raw.startsWith("/") || raw.includes("\\")) return "";
-  const normalized = raw.replace(/^\.\//, "").replace(/\/+/g, "/");
+  if (strict && !canonicalPathPattern(raw)) return "";
+  const normalized = strict ? raw : raw.replace(/^\.\//, "").replace(/\/+/g, "/");
   if (normalized.split("/").includes("..")) return "";
   const segments = [];
   for (const segment of normalized.split("/")) {
@@ -127,17 +140,17 @@ function pathPrefix(raw) {
   return segments.join("/");
 }
 
-function pathsOverlap(left, right) {
-  const leftPrefix = pathPrefix(left);
-  const rightPrefix = pathPrefix(right);
+function pathsOverlap(left, right, options = {}) {
+  const leftPrefix = pathPrefix(left, options);
+  const rightPrefix = pathPrefix(right, options);
   if (!leftPrefix || !rightPrefix) return true;
   return leftPrefix === rightPrefix
     || leftPrefix.startsWith(`${rightPrefix}/`)
     || rightPrefix.startsWith(`${leftPrefix}/`);
 }
 
-function repositoryBroadPath(raw) {
-  const prefix = pathPrefix(raw);
+function repositoryBroadPath(raw, options = {}) {
+  const prefix = pathPrefix(raw, options);
   if (!prefix) return true;
   const normalized = String(raw).replace(/^\.\//, "").replace(/\/+$/g, "");
   if (normalized === "." || normalized === "**" || normalized === "**/*") return true;
@@ -153,13 +166,16 @@ function estimateOverBudget(estimate, budget, checks) {
     || checks.length > budget.max_required_checks;
 }
 
-function validateException(value, location, errors) {
+function validateException(value, location, errors, { strict = false } = {}) {
   if (!isObject(value)) {
     push(errors, location, "must be an object");
     return;
   }
   exactKeys(value, EXCEPTION_KEYS, EXCEPTION_KEYS, location, errors);
   nonEmptyString(value.authority_ref, `${location}.authority_ref`, errors);
+  if (strict && !AUTHORITY_REF.test(value.authority_ref || "")) {
+    push(errors, `${location}.authority_ref`, "must be a controller-recordable user-message: or operator-input: ref");
+  }
   nonEmptyString(value.reason, `${location}.reason`, errors);
   const controls = uniqueStrings(value.compensating_controls, `${location}.compensating_controls`, errors, { nonEmpty: true });
   if (controls.length === 0 && Array.isArray(value.compensating_controls)) {
@@ -167,6 +183,9 @@ function validateException(value, location, errors) {
   }
   if (typeof value.expires_at !== "string" || Number.isNaN(Date.parse(value.expires_at))) {
     push(errors, `${location}.expires_at`, "must be an ISO-8601 timestamp");
+  } else if (strict && (!CANONICAL_UTC.test(value.expires_at)
+    || new Date(value.expires_at).toISOString().replace(".000Z", "Z") !== value.expires_at)) {
+    push(errors, `${location}.expires_at`, "must use canonical UTC YYYY-MM-DDTHH:mm:ssZ");
   }
 }
 
@@ -175,7 +194,9 @@ function validateCheck(value, location, errors, { schemaVersion = 1 } = {}) {
     push(errors, location, "must be an object");
     return;
   }
-  const allowedKeys = schemaVersion === 2 ? [...CHECK_KEYS, "release_requirement"] : CHECK_KEYS;
+  const allowedKeys = new Set([2, 4]).has(schemaVersion)
+    ? [...CHECK_KEYS, "release_requirement"]
+    : CHECK_KEYS;
   exactKeys(value, CHECK_KEYS, allowedKeys, location, errors);
   safeId(value.check_id, `${location}.check_id`, errors);
   nonEmptyString(value.command, `${location}.command`, errors);
@@ -249,11 +270,14 @@ function validateSlice(slice, index, errors, schemaVersion) {
       { schemaVersion },
     ));
   }
-  if (slice.size_exception !== undefined) validateException(slice.size_exception, `${location}.size_exception`, errors);
+  const strict = schemaVersion >= 3;
+  if (slice.size_exception !== undefined) {
+    validateException(slice.size_exception, `${location}.size_exception`, errors, { strict });
+  }
   if (isObject(slice.estimate) && isObject(slice.budget)
     && Array.isArray(slice.owned_paths) && Array.isArray(slice.checks)) {
     const overBudget = estimateOverBudget(slice.estimate, slice.budget, slice.checks)
-      || slice.owned_paths.some(repositoryBroadPath);
+      || slice.owned_paths.some((owned) => repositoryBroadPath(owned, { strict }));
     if (overBudget && slice.size_exception === undefined) {
       push(errors, location, `slice exceeds ${POLICY_ID} and requires size_exception`);
     } else if (!overBudget && slice.size_exception !== undefined) {
@@ -261,10 +285,10 @@ function validateSlice(slice, index, errors, schemaVersion) {
     }
   }
   for (const owned of slice.owned_paths || []) {
-    if (!pathPrefix(owned)) push(errors, `${location}.owned_paths`, `invalid relative path pattern: ${owned}`);
+    if (!pathPrefix(owned, { strict })) push(errors, `${location}.owned_paths`, `invalid relative path pattern: ${owned}`);
     for (const forbidden of slice.forbidden_paths || []) {
-      if (!pathPrefix(forbidden)) push(errors, `${location}.forbidden_paths`, `invalid relative path pattern: ${forbidden}`);
-      if (pathsOverlap(owned, forbidden)) {
+      if (!pathPrefix(forbidden, { strict })) push(errors, `${location}.forbidden_paths`, `invalid relative path pattern: ${forbidden}`);
+      if (pathsOverlap(owned, forbidden, { strict })) {
         push(errors, location, `owned path overlaps forbidden path: ${owned} <> ${forbidden}`);
       }
     }
@@ -290,7 +314,9 @@ function releaseRequirementProjection(profile, binding, requirement) {
     evaluator_ref: definition.evaluator_ref,
     evaluator_sha256: definition.evaluator_sha256,
     pass_rule_sha256: definition.pass_rule_sha256,
-    required_candidate_components: [...requirement.check_definition.required_candidate_components],
+    required_candidate_components: [
+      ...requirement.check_definition.required_candidate_components,
+    ].sort(),
   };
 }
 
@@ -511,17 +537,38 @@ function validateGraph(slices, errors) {
 function validateExecutionPlan(value, { contractSemanticsVersion = null, releaseIntent = null } = {}) {
   const errors = [];
   if (!isObject(value)) return ["value: must be an object"];
-  const topLevelKeys = value.schema_version === 2 ? V2_TOP_LEVEL_KEYS : V1_TOP_LEVEL_KEYS;
+  const topLevelKeys = ({
+    1: V1_TOP_LEVEL_KEYS,
+    2: V2_TOP_LEVEL_KEYS,
+    3: V3_TOP_LEVEL_KEYS,
+    4: V4_TOP_LEVEL_KEYS,
+  })[value.schema_version] || V1_TOP_LEVEL_KEYS;
   exactKeys(value, topLevelKeys, topLevelKeys, "value", errors);
-  if (![1, 2].includes(value.schema_version)) push(errors, "schema_version", "must equal 1 or 2");
+  if (![1, 2, 3, 4].includes(value.schema_version)) {
+    push(errors, "schema_version", "must equal 1, 2, 3, or 4");
+  }
   if (contractSemanticsVersion === 3 && value.schema_version !== 1) {
     push(errors, "schema_version", "semantics-v3 contracts require execution-plan schema version 1");
   }
-  if (releaseIntent?.target_delivery_class === "product_release" && value.schema_version !== 2) {
-    push(errors, "schema_version", "product_release intent requires execution-plan schema version 2");
+  if (contractSemanticsVersion === 4) {
+    const expectedVersion = releaseIntent?.target_delivery_class === "product_release" ? 2 : 1;
+    if (value.schema_version !== expectedVersion) {
+      push(errors, "schema_version", `semantics-v4 contracts require execution-plan schema version ${expectedVersion} for the declared delivery class`);
+    }
   }
-  if (releaseIntent && releaseIntent.target_delivery_class !== "product_release" && value.schema_version !== 1) {
-    push(errors, "schema_version", "exploration and non_product intents require execution-plan schema version 1");
+  if (contractSemanticsVersion === 5 && value.schema_version !== 3) {
+    push(errors, "schema_version", "semantics-v5 contracts require execution-plan schema version 3");
+  }
+  if (contractSemanticsVersion === 6 && value.schema_version !== 4) {
+    push(errors, "schema_version", "semantics-v6 contracts require execution-plan schema version 4");
+  }
+  if (releaseIntent?.target_delivery_class === "product_release"
+    && !new Set([2, 4]).has(value.schema_version)) {
+    push(errors, "schema_version", "product_release intent requires release execution-plan schema version 2 or 4");
+  }
+  if (releaseIntent && releaseIntent.target_delivery_class !== "product_release"
+    && !new Set([1, 3]).has(value.schema_version)) {
+    push(errors, "schema_version", "non-release intent requires ordinary execution-plan schema version 1 or 3");
   }
   if (!isObject(value.size_policy)) {
     push(errors, "size_policy", "must be an object");
@@ -535,35 +582,13 @@ function validateExecutionPlan(value, { contractSemanticsVersion = null, release
   }
   value.slices.forEach((slice, index) => validateSlice(slice, index, errors, value.schema_version));
   validateGraph(value.slices, errors);
-  if (value.schema_version === 2) validateReleasePlan(value, releaseIntent, errors);
+  if (new Set([2, 4]).has(value.schema_version)) validateReleasePlan(value, releaseIntent, errors);
   return errors;
 }
 
 function extractExecutionPlan(markdown) {
-  const pattern = /^```atlas-execution-plan\+json[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
-  const matches = [...String(markdown).matchAll(pattern)];
-  if (matches.length !== 1) {
-    throw new Error(`expected exactly one atlas-execution-plan+json fenced block, found ${matches.length}`);
-  }
-  let plan;
-  try {
-    plan = JSON.parse(matches[0][1]);
-  } catch (error) {
-    throw new Error(`invalid execution plan JSON: ${error.message}`);
-  }
-  const semanticsMatch = /^contract_semantics_version:\s*(\d+)\s*$/m.exec(String(markdown));
-  const contractSemanticsVersion = semanticsMatch ? Number(semanticsMatch[1]) : null;
-  let releaseIntent = null;
-  if (contractSemanticsVersion === 4) {
-    try {
-      releaseIntent = extractReleaseIntent(markdown);
-    } catch {
-      // Release-intent diagnostics are owned by the contract envelope validator.
-    }
-  }
-  const errors = validateExecutionPlan(plan, { contractSemanticsVersion, releaseIntent });
-  if (errors.length > 0) throw new Error(errors.join("; "));
-  return plan;
+  const { parseImplementationContract } = require("./implementation-contract");
+  return parseImplementationContract(markdown).executionPlan;
 }
 
 module.exports = {
@@ -572,6 +597,7 @@ module.exports = {
   PERMANENT_GATE_CLASSES,
   POLICY_ID,
   canonicalJson,
+  canonicalPathPattern,
   estimateOverBudget,
   extractExecutionPlan,
   pathsOverlap,

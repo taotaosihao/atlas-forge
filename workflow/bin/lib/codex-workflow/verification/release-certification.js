@@ -56,6 +56,14 @@ function same(left, right) {
   return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 
+function sameReleaseBinding(left, right) {
+  const canonical = (value) => ({
+    ...stableValue(value || {}),
+    requirement_refs: [...(value?.requirement_refs || [])].sort(),
+  });
+  return same(canonical(left), canonical(right));
+}
+
 function exactKeys(value, keys, label, errors) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     errors.push(`${label} must be an object`);
@@ -96,7 +104,7 @@ function validateCandidateManifest(value, options = {}) {
   if (!exactKeys(value.release_binding, RELEASE_BINDING_KEYS, "candidate manifest release_binding", errors)) {
     return errors;
   }
-  if (options.releaseBinding && !same(value.release_binding, options.releaseBinding)) {
+  if (options.releaseBinding && !sameReleaseBinding(value.release_binding, options.releaseBinding)) {
     errors.push("candidate manifest release_binding does not match execution authority");
   }
   const profileRef = value.release_binding?.profile_ref;
@@ -316,7 +324,7 @@ function loadReleaseContracts(environment, paths) {
 function resolveValidatedReleaseIntent({ contractMarkdown, environment, paths, releaseBinding }) {
   const contracts = loadReleaseContracts(environment, paths);
   const intent = contracts.extractReleaseIntent(contractMarkdown);
-  if (!same(contracts.releasePlanBinding(intent), releaseBinding)) {
+  if (!sameReleaseBinding(contracts.releasePlanBinding(intent), releaseBinding)) {
     throw new ReleaseCertificationError("release intent no longer matches execution authority");
   }
   return { contracts, intent };
@@ -539,18 +547,30 @@ function integratedCandidateEvidenceErrors(input, manifest) {
 
 function evaluateReleaseSweep({
   contractMarkdown,
+  evidenceEpoch,
   environment = process.env,
+  grantId,
   paths,
   receipts,
   releaseBinding,
   repo,
   snapshot,
+  scopeDigest,
   taskId,
   workType,
 }) {
   const reasons = [];
   const summaries = [];
   try {
+    const authorityBindingProvided = [grantId, scopeDigest, evidenceEpoch]
+      .some((value) => value !== undefined);
+    if (authorityBindingProvided && (
+      !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(grantId || "")
+      || !/^sha256:[a-f0-9]{64}$/.test(scopeDigest || "")
+      || !Number.isInteger(evidenceEpoch) || evidenceEpoch < 1
+    )) {
+      throw new ReleaseCertificationError("release sweep authority binding is incomplete or invalid");
+    }
     const resolved = resolveValidatedReleaseIntent({
       contractMarkdown, environment, paths, releaseBinding,
     });
@@ -568,6 +588,13 @@ function evaluateReleaseSweep({
     const expectedRefs = new Set(releaseBinding.requirement_refs);
     const selected = [];
     for (const receipt of receipts || []) {
+      if (authorityBindingProvided && (receipt?.grant_id !== grantId
+        || receipt?.scope_digest !== scopeDigest
+        || receipt?.evidence_epoch !== evidenceEpoch)) {
+        throw new ReleaseCertificationError(
+          "release receipt does not match the current grant, scope, and evidence epoch",
+        );
+      }
       const record = resolveIdentityRecord(paths, taskId, receipt);
       if (!record.required_gate?.release_requirement) continue;
       selected.push({ record, summary: receipt });
@@ -769,6 +796,10 @@ function evaluateReleaseSweep({
       facts.set(requirementRef, effectiveFact);
       summaries.push({
         check_id: gate.check_id,
+        ...(authorityBindingProvided ? {
+          evidence_epoch: evidenceEpoch,
+          grant_id: grantId,
+        } : {}),
         requirement_ref: requirementRef,
         record_id: record.record_id,
         fact_id: fact.fact_id,
@@ -777,6 +808,7 @@ function evaluateReleaseSweep({
         reason_codes: [...effectiveFact.reason_codes],
         candidate_manifest_digest: manifest.manifest_digest,
         identity_record: summary.identity_record || "",
+        ...(authorityBindingProvided ? { scope_digest: scopeDigest } : {}),
       });
     }
     if (!sharedManifest || facts.size !== expectedRefs.size) {

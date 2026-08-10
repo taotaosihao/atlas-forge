@@ -6,18 +6,19 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const childProcess = require("child_process");
+const { TextDecoder } = require("util");
+const { validateContractText } = require("./codex-implementation-contract-lint");
 const { validateBrief } = require("../contracts/team-sdd/validators/brief");
 const {
   POLICY_ID,
   estimateOverBudget,
-  extractExecutionPlan,
   repositoryBroadPath,
   sha256Value,
 } = require("../contracts/team-sdd/validators/execution-plan");
 const {
-  extractContractWorkType,
-  extractReleaseIntent,
-} = require("../contracts/release-certification/validators/release-intent");
+  parseContractSemanticsVersion,
+  parseImplementationContract,
+} = require("../contracts/team-sdd/validators/implementation-contract");
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -26,13 +27,14 @@ function usage() {
   codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
     --objective <text> --acceptance <ref> --owned <path> --check <command> [options]
   codex-team-brief --task <task-id> --slice <slice-id> --repo <absolute-path> --base <rev> \\
-    --contract <semantics-v3-or-v4-contract>
+    --contract <semantics-v3-v4-read-only-or-v5-v6-executable-contract>
   codex-team-brief --task <task-id> --all-slices --repo <absolute-path> --base <rev> \\
-    --contract <semantics-v3-or-v4-contract>
+    --contract <semantics-v3-v4-read-only-or-v5-v6-executable-contract>
 
 options:
   --contract <file>           Sprint Contract markdown to compile into evidence-manifest.json
-  --all-slices                Compile every slice in a semantics-v3/v4 execution plan
+  --authority-slice <dir>     repeatable canonical authority slice for v5/v6 full semantic lint
+  --all-slices                Compile every slice in an execution plan
   --forbidden <path>           repeatable, comma-separated allowed
   --commit-policy <policy>     logical_outcome|changes_allowed_no_commit|no_change_allowed`);
 }
@@ -50,6 +52,7 @@ function parseArgs(argv) {
     forbidden: [],
     checks: [],
     contract: null,
+    authoritySlices: [],
     commitPolicy: "logical_outcome",
     help: false,
   };
@@ -99,6 +102,10 @@ function parseArgs(argv) {
       options.contract = argv[++i];
     } else if (arg.startsWith("--contract=")) {
       options.contract = arg.slice("--contract=".length);
+    } else if (arg === "--authority-slice") {
+      options.authoritySlices.push(argv[++i]);
+    } else if (arg.startsWith("--authority-slice=")) {
+      options.authoritySlices.push(arg.slice("--authority-slice=".length));
     } else if (arg === "--commit-policy") {
       options.commitPolicy = argv[++i];
     } else if (arg.startsWith("--commit-policy=")) {
@@ -122,8 +129,8 @@ function addList(target, raw) {
   }
 }
 
-function workflowRoot() {
-  return path.resolve(process.env.CODEX_WORKFLOW_ROOT || process.env.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
+function workflowRoot(environment = process.env) {
+  return path.resolve(environment.CODEX_WORKFLOW_ROOT || environment.ATLAS_WORKFLOW_ROOT || path.join(os.homedir(), ".codex", "workflow"));
 }
 
 function safeId(label, value) {
@@ -140,10 +147,10 @@ function ensureWithin(parent, child) {
   throw new Error(`resolved path escapes artifact root: ${child}`);
 }
 
-function sliceDir(taskId, sliceId) {
+function sliceDir(taskId, sliceId, environment = process.env) {
   safeId("task", taskId);
   safeId("slice", sliceId);
-  const artifactRoot = path.join(workflowRoot(), "artifacts", taskId);
+  const artifactRoot = path.join(workflowRoot(environment), "artifacts", taskId);
   const dir = path.join(artifactRoot, "team", "sdd", "slices", sliceId);
   ensureWithin(artifactRoot, dir);
   fs.mkdirSync(dir, { recursive: true });
@@ -156,34 +163,97 @@ function resolveCommit(repo, revision) {
   }).trim();
 }
 
-function sha256(file) {
-  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+function sameStat(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
 }
 
-function contractSemanticsVersion(text) {
-  const match = /^contract_semantics_version:\s*([^\s]+)\s*$/m.exec(text);
-  if (!match) return 1;
-  const version = Number(match[1]);
-  if (![1, 2, 3, 4].includes(version)) {
-    throw new Error(`unsupported contract_semantics_version: ${match[1]}`);
+function decodeContractUtf8(buffer, resolved) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch (error) {
+    throw new Error(`--contract is not readable UTF-8: ${resolved}: ${error.message}`);
   }
-  return version;
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-function readContract(options) {
+function stableContractSnapshot(file) {
+  const resolved = path.resolve(file || "");
+  let descriptor;
+  try {
+    descriptor = fs.openSync(
+      resolved,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
+    );
+  } catch (error) {
+    throw new Error(`--contract must be a canonical regular file: ${error.message}`);
+  }
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile()) throw new Error("--contract must be a canonical regular file");
+    const buffer = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor);
+    let pathStat;
+    try {
+      pathStat = fs.lstatSync(resolved);
+    } catch (error) {
+      throw new Error(`--contract changed while it was being read: ${error.message}`);
+    }
+    if (!sameStat(before, after) || buffer.length !== after.size
+      || !pathStat.isFile() || pathStat.isSymbolicLink() || !sameStat(after, pathStat)
+      || fs.realpathSync(resolved) !== resolved) {
+      throw new Error("--contract changed while it was being read or is not canonical");
+    }
+    return {
+      buffer,
+      path: resolved,
+      sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+      text: decodeContractUtf8(buffer, resolved),
+    };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function readContract(options, environment = process.env) {
   if (!options.contract) return null;
-  const contractPath = path.resolve(options.contract);
-  if (!fs.existsSync(contractPath) || !fs.statSync(contractPath).isFile()) {
-    throw new Error("--contract must exist and be a file");
+  const snapshot = stableContractSnapshot(options.contract);
+  const semanticsVersion = parseContractSemanticsVersion(snapshot.text);
+  let semantic = null;
+  let authorityIdentities = [];
+  if (new Set([3, 4, 5, 6]).has(semanticsVersion)) {
+    if (new Set([5, 6]).has(semanticsVersion)) {
+      const validation = validateContractText(snapshot.text, {
+        authoritySlices: options.authoritySlices,
+        expectedTaskId: options.task,
+        newAuthoring: true,
+        strict: true,
+        workflowRoot: workflowRoot(environment),
+      });
+      if (!validation.ok) {
+        throw new Error(`implementation contract semantic lint failed: ${validation.diagnostics
+          .filter((item) => item.severity === "ERROR")
+          .map((item) => `${item.code}: ${item.message}`)
+          .join("; ")}`);
+      }
+      authorityIdentities = validation.authorityIdentities;
+    }
+    semantic = parseImplementationContract(snapshot.text);
   }
-  const text = fs.readFileSync(contractPath, "utf8");
-  const semanticsVersion = contractSemanticsVersion(text);
   return {
-    path: contractPath,
-    sha256: sha256(contractPath),
+    path: snapshot.path,
+    sha256: snapshot.sha256,
     semanticsVersion,
-    workType: semanticsVersion === 4 ? extractContractWorkType(text) : null,
-    text,
+    plan: semantic?.executionPlan || null,
+    taskId: semantic?.taskId || "",
+    authorityIdentities,
+    workType: semantic?.workType || null,
+    text: snapshot.text,
   };
 }
 
@@ -225,12 +295,8 @@ function compileContract(options) {
   if (!options.contract) {
     return null;
   }
-  if (!fs.existsSync(options.contract) || !fs.statSync(options.contract).isFile()) {
-    throw new Error("--contract must exist and be a file");
-  }
-  const contractPath = path.resolve(options.contract);
-  const text = fs.readFileSync(contractPath, "utf8");
-  const rows = parseMarkdownTableRows(text);
+  const snapshot = stableContractSnapshot(options.contract);
+  const rows = parseMarkdownTableRows(snapshot.text);
   const selectedRows = [];
   for (const ref of options.acceptance) {
     const match = rows.find((row) => acceptanceId(row) === ref);
@@ -241,8 +307,8 @@ function compileContract(options) {
   }
   return {
     schema_version: 1,
-    contract_path: contractPath,
-    contract_sha256: sha256(contractPath),
+    contract_path: snapshot.path,
+    contract_sha256: snapshot.sha256,
     selected_acceptance_refs: [...options.acceptance],
     selected_acceptance_rows: selectedRows,
     owned_paths: [...options.owned],
@@ -280,14 +346,7 @@ function requireLegacyOptions(options) {
   }
 }
 
-function writeBriefFiles(brief, evidenceManifest = null) {
-  const dir = sliceDir(brief.task_id, brief.slice_id);
-  const sddDir = path.resolve(dir, "..", "..");
-  const globalConstraints = path.join(sddDir, "global-constraints.md");
-  if (!fs.existsSync(globalConstraints)) {
-    fs.writeFileSync(globalConstraints, "# Global Constraints\n\n- Follow the task brief and repository instructions.\n", "utf8");
-  }
-
+function writeBriefFiles(brief, evidenceManifest = null, environment = process.env) {
   const briefMarkdown = [
     "# Brief",
     "",
@@ -310,15 +369,20 @@ function writeBriefFiles(brief, evidenceManifest = null) {
     "",
     "## Required Checks",
     "",
-    ...(brief.schema_version === 3
+    ...(new Set([3, 4]).has(brief.schema_version)
       ? brief.checks.map((item) => `- ${item.check_id}: ${item.command}`)
       : brief.required_checks.map((item) => `- ${item}`)),
     "",
   ].join("\n");
-  fs.writeFileSync(path.join(dir, "brief.md"), briefMarkdown, "utf8");
-
   const errors = validateBrief(brief);
   if (errors.length > 0) throw new Error(errors.join("; "));
+  const dir = sliceDir(brief.task_id, brief.slice_id, environment);
+  const sddDir = path.resolve(dir, "..", "..");
+  const globalConstraints = path.join(sddDir, "global-constraints.md");
+  if (brief.schema_version !== 4 && !fs.existsSync(globalConstraints)) {
+    fs.writeFileSync(globalConstraints, "# Global Constraints\n\n- Follow the task brief and repository instructions.\n", "utf8");
+  }
+  fs.writeFileSync(path.join(dir, "brief.md"), briefMarkdown, "utf8");
   fs.writeFileSync(path.join(dir, "brief.json"), `${JSON.stringify(brief, null, 2)}\n`, "utf8");
   if (evidenceManifest) {
     fs.writeFileSync(path.join(dir, "evidence-manifest.json"), `${JSON.stringify(evidenceManifest, null, 2)}\n`, "utf8");
@@ -366,20 +430,25 @@ function sizeGate(slice) {
 
 function v3Brief(options, baseSha, contract, plan, slice) {
   const slices = new Map(plan.slices.map((item) => [item.slice_id, item]));
+  const executable = new Set([5, 6]).has(contract.semanticsVersion);
   return {
-    schema_version: 3,
+    schema_version: executable ? 4 : 3,
     task_id: options.task,
     slice_id: slice.slice_id,
     repo: fs.realpathSync(options.repo),
     base_sha: baseSha,
     objective: slice.objective,
-    requirements_path: "brief.md",
-    global_constraints_path: "../../global-constraints.md",
+    requirements_path: executable
+      ? `team/sdd/slices/${slice.slice_id}/brief.md`
+      : "brief.md",
+    global_constraints_path: executable ? "team/sdd/global-constraints.md" : "../../global-constraints.md",
     contract: {
       path: contract.path,
       sha256: `sha256:${contract.sha256}`,
       semantics_version: contract.semanticsVersion,
+      ...(executable ? { execution_plan_schema_version: plan.schema_version } : {}),
       execution_plan_sha256: `sha256:${sha256Value(plan)}`,
+      ...(executable ? { authority_slices: contract.authorityIdentities } : {}),
       ...(contract.workType ? { work_type: contract.workType } : {}),
       ...(plan.release ? { release: plan.release } : {}),
     },
@@ -442,22 +511,54 @@ function compatibilityPlan(options) {
   };
 }
 
-function writeBrief(options) {
-  const contract = readContract(options);
+function sameAuthorityIdentities(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function recheckExecutableContract(options, contract, environment) {
+  const snapshot = stableContractSnapshot(options.contract);
+  if (snapshot.path !== contract.path || snapshot.sha256 !== contract.sha256 || snapshot.text !== contract.text) {
+    throw new Error("implementation contract changed before brief output");
+  }
+  const validation = validateContractText(snapshot.text, {
+    authoritySlices: options.authoritySlices,
+    expectedTaskId: options.task,
+    newAuthoring: true,
+    strict: true,
+    workflowRoot: workflowRoot(environment),
+  });
+  if (!validation.ok) {
+    throw new Error(`implementation contract semantic recheck failed: ${validation.diagnostics
+      .filter((item) => item.severity === "ERROR")
+      .map((item) => `${item.code}: ${item.message}`)
+      .join("; ")}`);
+  }
+  if (!sameAuthorityIdentities(validation.authorityIdentities, contract.authorityIdentities)) {
+    throw new Error("authority slice identities changed before brief output");
+  }
+}
+
+function writeBrief(options, environment = process.env) {
+  const contract = readContract(options, environment);
   if (!contract) {
     requireLegacyOptions(options);
     writeBriefFiles(
       legacyBrief(options, resolveCommit(options.repo, options.base)),
       null,
+      environment,
     );
     return;
   }
-  if (![3, 4].includes(contract.semanticsVersion)) {
+  if (contract.taskId && contract.taskId !== options.task) {
+    throw new Error(`contract task_id does not match --task: ${contract.taskId} <> ${options.task}`);
+  }
+  if (![3, 4, 5, 6].includes(contract.semanticsVersion)) {
     requireLegacyOptions(options);
     const plan = compatibilityPlan(options);
     writeBriefFiles(
       v3Brief(options, resolveCommit(options.repo, options.base), contract, plan, plan.slices[0]),
       compileContract(options),
+      environment,
     );
     return;
   }
@@ -466,10 +567,9 @@ function writeBrief(options) {
   if (!options.allSlices && !options.slice) throw new Error("--slice or --all-slices is required");
   if (options.objective || options.acceptance.length || options.owned.length
     || options.forbidden.length || options.checks.length) {
-    throw new Error("semantics-v3/v4 contracts derive objective, acceptance, owned paths, and checks from the execution plan");
+    throw new Error("semantics-v3-v6 contracts derive objective, acceptance, owned paths, and checks from the execution plan");
   }
-  if (contract.semanticsVersion === 4) extractReleaseIntent(contract.text);
-  const plan = extractExecutionPlan(contract.text);
+  const plan = contract.plan;
   const selected = options.allSlices
     ? plan.slices
     : plan.slices.filter((slice) => slice.slice_id === options.slice);
@@ -478,7 +578,14 @@ function writeBrief(options) {
   }
   const baseSha = resolveCommit(options.repo, options.base);
   const briefs = selected.map((slice) => v3Brief(options, baseSha, contract, plan, slice));
-  for (const brief of briefs) writeBriefFiles(brief);
+  for (const brief of briefs) {
+    const errors = validateBrief(brief);
+    if (errors.length > 0) throw new Error(errors.join("; "));
+  }
+  if (new Set([5, 6]).has(contract.semanticsVersion)) {
+    recheckExecutableContract(options, contract, environment);
+  }
+  for (const brief of briefs) writeBriefFiles(brief, null, environment);
 }
 
 function main() {

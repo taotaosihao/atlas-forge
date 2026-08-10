@@ -131,6 +131,14 @@ Verification records bind the result to the current Git/worktree, cwd, argv,
 non-secret environment policy, toolchain, lockfiles, submodules, and explicit
 inputs. General verification remains supplemental and cannot satisfy a declared
 required gate. Any snapshot change after verification requires a new verification.
+Before argv execution, `verify` appends a durable operation claim. Replaying an
+in-progress claim never executes argv again, even with a different generated
+operation id or changed recorder-only metadata. If the controller cannot prove
+whether the terminal receipt committed, recover the exact pending claim with
+`verify-resolve`, a controller authority reference, and canonical task-artifact
+evidence. The resulting indeterminate tombstone blocks reuse of an older result
+for the same execution target until an explicit replan changes its bound grant
+epoch; direct/unbound verification remains blocked on the stable direct boundary.
 
 ### Product increment versus product release
 
@@ -279,7 +287,7 @@ controller can safely replay after a crash:
 ~/.codex/workflow/bin/codex-workflow team-selection-record <task-id> --operation-id <id> --event-id <snapshot-id> --kind capability --authority-ref <controller-observation-ref> --provider <exact-id> --model <exact-id>
 ~/.codex/workflow/bin/codex-workflow team-lane-record <task-id> --operation-id <id> --action open|close --lane <id> [--backend native|paseo] [--selection-event <id>] [--writable --paths <patterns>]
 ~/.codex/workflow/bin/codex-workflow team-dispatch-record <task-id> --operation-id <id> --action open|dispose|close --dispatch <id> [--lane <id>] [--required-perspective <id>] [--disposition <value>] [--admitted-attempts <ids>] [--evidence-refs <refs>]
-~/.codex/workflow/bin/codex-workflow team-attempt-record <task-id> --operation-id <id> --action reserve|bind|running|observe|terminal|quiesced --attempt <id> [--dispatch <id>] [--launch-operation-id <id>] [--capability-snapshot <id>] [--perspective <id>]
+~/.codex/workflow/bin/codex-workflow team-attempt-record <task-id> --operation-id <id> --action reserve|bind|running|observe|resolve-launch|terminal|quiesced --attempt <id> [--dispatch <id>] [--launch-operation-id <id>] [--capability-snapshot <id>] [--perspective <id>]
 ~/.codex/workflow/bin/codex-workflow team-fallback-record <task-id> --operation-id <id> --from-attempt <paseo-id> --to-attempt <native-id> --launch-operation-id <id> [--worktree-fingerprint <digest>] [--evidence-refs <refs>]
 ```
 
@@ -297,6 +305,14 @@ Attempt terminal state does not admit a result or release a writer lease.
 Admission is a controller disposition. Paseo quiescence requires an adapter
 receipt correlated to the exact attempt, launch, and actor; quiescence and
 fallback evidence must resolve to real files in the current task artifact tree.
+Paseo launch first records a durable observer claim. A retry of a pending claim
+performs list-only reconciliation and cannot launch a second actor. When audited
+evidence proves no actor was created, `resolve-launch` records an indeterminate
+claim and terminal attempt; the attempt must still be quiesced before its writer
+lease is released. A Team cannot stop, finish, finalize, replan, or start a new
+generation until every lane and dispatch is closed, every attempt is quiesced,
+every lease is released, and no launch claim is pending. A pending discussion
+claim may be promoted to `worktree`, but not to `execute` or `finish`.
 Writable fallback also requires preserved worktree evidence and a takeover
 fingerprint. Finalization derives requested, attempted, and effective backends
 from the v2 ledger and writes `team/backend-v2.json`; strict lint re-derives it

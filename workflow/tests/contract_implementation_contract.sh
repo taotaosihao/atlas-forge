@@ -3,6 +3,7 @@ set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-implementation-contract-lint"
+BRIEF_BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-brief"
 FIXTURE_ROOT="$ATLAS_FORGE_ROOT/test/fixtures/implementation-contract"
 CURRENT_AUTHORITY="$ATLAS_FORGE_ROOT/docs/atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-implementation-contract.XXXXXX")"
@@ -57,28 +58,15 @@ run_v2_valid() {
   pass "$label"
 }
 
-run_v3_new_authoring_valid() {
-  local label="$1" file="$2" authority_slice="$3"
+run_vnext_new_authoring_valid() {
+  local label="$1" file="$2" authority_slice="$3" semantics_version="$4"
   case_paths
   if ! "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
     show_failure "$label"
   fi
   grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
   grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
-  grep -q '^semantics_version: 3$' "$CASE_STDOUT" || show_failure "$label"
-  [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
-  pass "$label"
-}
-
-run_v4_new_authoring_valid() {
-  local label="$1" file="$2" authority_slice="$3"
-  case_paths
-  if ! "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
-    show_failure "$label"
-  fi
-  grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
-  grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
-  grep -q '^semantics_version: 4$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q "^semantics_version: $semantics_version$" "$CASE_STDOUT" || show_failure "$label"
   [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
   pass "$label"
 }
@@ -91,7 +79,7 @@ run_old_new_authoring_invalid() {
   status=$?
   set -e
   [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
-  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V3 ' "$CASE_STDERR" || show_failure "$label"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V5_OR_V6 ' "$CASE_STDERR" || show_failure "$label"
   pass "$label"
 }
 
@@ -103,8 +91,8 @@ run_unversioned_new_authoring_invalid() {
   status=$?
   set -e
   [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
-  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V3 ' "$CASE_STDERR" || show_failure "$label"
-  grep -q 'contract_semantics_version: 3 or 4' "$CASE_STDERR" || show_failure "$label"
+  grep -q '^ERROR NEW_AUTHORING_REQUIRES_V5_OR_V6 ' "$CASE_STDERR" || show_failure "$label"
+  grep -q 'contract_semantics_version: 5 or 6' "$CASE_STDERR" || show_failure "$label"
   grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
   ! grep -q 'contract_semantics_version: 1, 2, or 3' "$CASE_STDERR" || show_failure "$label"
   pass "$label"
@@ -335,10 +323,9 @@ fs.writeFileSync(path.join(target, "brief.json"), `${JSON.stringify(brief, null,
 NODE
 goal_only_contract="$TMP_ROOT/scope-admission-v2-goal-only.md"
 sed 's/current-required:finding-resolved/goal:REQ-1/g' "$scope_v2" > "$goal_only_contract"
-run_v3_new_authoring_valid \
-  'new authoring accepts a v3 goal-only authority slice' \
-  "$FIXTURE_ROOT/valid/scope-admission-v3.md" \
-  "$GOAL_ONLY_SLICE"
+run_old_new_authoring_invalid \
+  'new authoring rejects read-only semantics v3 contracts' \
+  "$FIXTURE_ROOT/valid/scope-admission-v3.md"
 release_v4_contract="$TMP_ROOT/scope-admission-v4.md"
 node - "$FIXTURE_ROOT/valid/scope-admission-v3.md" "$release_v4_contract" <<'NODE'
 const fs = require("fs");
@@ -361,10 +348,202 @@ const contract = fs.readFileSync(source, "utf8")
   .replace("## Execution Plan\n", `${intent}## Execution Plan\n`);
 fs.writeFileSync(target, contract);
 NODE
-run_v4_new_authoring_valid \
-  'new authoring accepts a v4 goal-only authority slice' \
-  "$release_v4_contract" \
-  "$GOAL_ONLY_SLICE"
+run_old_new_authoring_invalid \
+  'new authoring rejects read-only semantics v4 contracts' \
+  "$release_v4_contract"
+run_vnext_new_authoring_valid \
+  'new authoring accepts canonical semantics v5 with execution-plan v3' \
+  "$FIXTURE_ROOT/valid/scope-admission-v5.md" \
+  "$GOAL_ONLY_SLICE" \
+  5
+
+release_v6_contract="$TMP_ROOT/scope-admission-v6.md"
+node - "$ATLAS_FORGE_ROOT" "$FIXTURE_ROOT/valid/required-ui.md" "$release_v6_contract" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [root, source, target] = process.argv.slice(2);
+const {
+  releasePlanBinding,
+  releaseRequirementProjection,
+} = require(path.join(root, "plugins/atlas-workflow/contracts/team-sdd/validators/execution-plan.js"));
+const {
+  loadBundledProfile,
+  profileBinding,
+} = require(path.join(root, "plugins/atlas-workflow/contracts/release-certification/validators/profile.js"));
+const digest = (character) => `sha256:${character.repeat(64)}`;
+const profile = loadBundledProfile("web-ui-v1");
+const binding = profileBinding(profile);
+const intent = {
+  schema_version: 1,
+  target_delivery_class: "product_release",
+  target_delivery_authority_ref: "user-message:v6-fixture",
+  release_stage: "mvp",
+  surface_inventory: { ref: "REQ-1", sha256: digest("a") },
+  surface_kinds: ["web_ui"],
+  release_profile_refs: [{ profile_ref: profile.profile_id, profile_sha256: binding.profile_sha256 }],
+  release_claim_refs: ["REQ-1"],
+  audience_refs: ["REQ-1"],
+  critical_outcome_refs: ["REQ-1"],
+};
+const plan = {
+  schema_version: 4,
+  size_policy: { policy_id: "atlas-slice-size-v2" },
+  release: releasePlanBinding(intent),
+  slices: [{
+    slice_id: "release-vnext",
+    objective: "Implement and certify the governed Web UI candidate.",
+    depends_on: [],
+    keeper_outputs: ["release:web-ui-v1:evidence"],
+    owned_paths: ["product/release/**"],
+    forbidden_paths: ["plugins/multica-sdlc/**"],
+    acceptance_refs: ["REQ-1"],
+    risk_class: "critical",
+    failure_domain: "release-certification",
+    rollback_boundary: "one governed logical commit",
+    estimate: {
+      estimated_changed_files: 2,
+      estimated_net_loc: 200,
+      target_p90_minutes: 90,
+      serial_dependency_depth: 0,
+      independent_vertical_count: 1,
+    },
+    budget: {
+      max_changed_files: 4,
+      max_loc: 400,
+      max_wall_clock_minutes: 120,
+      max_required_checks: profile.requirements.length,
+    },
+    checks: profile.requirements.map((requirement) => ({
+      check_id: `release-${requirement.dimension}`,
+      gate_class: requirement.check_definition.allowed_gate_classes[0],
+      command: `atlas-release-collect ${requirement.requirement_id}`,
+      final_only: true,
+      cache_policy: "fresh-executed",
+      release_requirement: releaseRequirementProjection(profile, binding, requirement),
+    })),
+  }],
+};
+const gates = fs.readFileSync(source, "utf8")
+  .replace("# Valid implementation with served UI", "# Scope admission v6 contract")
+  .replace(
+    "contract_semantics_version: 1",
+    [
+      "task_id: fixture",
+      "contract_semantics_version: 6",
+      "finding_scope_admission: controller_current_required_only",
+      "safe_fallback_authority: none",
+    ].join("\n"),
+  );
+const contract = [
+  gates,
+  "",
+  "## Release Intent",
+  "",
+  "```atlas-release-intent+json",
+  JSON.stringify(intent, null, 2),
+  "```",
+  "",
+  "## Execution Plan",
+  "",
+  "```atlas-execution-plan+json",
+  JSON.stringify(plan, null, 2),
+  "```",
+  "",
+  "## Acceptance Criteria",
+  "",
+  "| ID | Criterion | Required | Verification | Authority |",
+  "|----|-----------|----------|--------------|-----------|",
+  "| AC-VNEXT | Preserve the governed release goal. | yes | structural lint | goal:REQ-1 |",
+  "",
+  "## Edge Cases",
+  "",
+  "| Case | Expected behavior | Required | Admission |",
+  "|------|-------------------|----------|-----------|",
+  "| Optional review suggestion | Keep it out of executable scope. | no | optional |",
+  "",
+  "## Failure And Stop Conditions",
+  "",
+  "- Stop and ask the user when: current authority cannot be established.",
+  "- Treat the task as failed when: a required validation row fails.",
+  "- Required safe fallback: not_applicable",
+  "- Optional fallback notes: retain non-required suggestions in finding provenance.",
+  "",
+  "## Finding Provenance",
+  "",
+  "| Finding ID | Disposition | Source | Follow-up |",
+  "|------------|-------------|--------|-----------|",
+  "| finding-vnext | visible-follow-up | review-verdict.json | Track outside this contract. |",
+  "",
+].join("\n");
+fs.writeFileSync(target, contract);
+NODE
+run_vnext_new_authoring_valid \
+  'new authoring accepts canonical semantics v6 with execution-plan v4' \
+  "$release_v6_contract" \
+  "$GOAL_ONLY_SLICE" \
+  6
+
+run_semantic_invalid \
+  'full v5 lint rejects a plan-valid contract with an invalid authoring envelope' \
+  "$FIXTURE_ROOT/invalid/v5-invalid-authoring-envelope.md" \
+  REQUIRED_FIELD_MISSING:first_code_guard
+
+case_paths
+set +e
+node "$BRIEF_BIN" \
+  --task fixture \
+  --slice slice-vnext-invalid \
+  --repo "$ATLAS_FORGE_ROOT" \
+  --base "$base_sha" \
+  --authority-slice "$GOAL_ONLY_SLICE" \
+  --contract "$FIXTURE_ROOT/invalid/v5-invalid-authoring-envelope.md" \
+  >"$CASE_STDOUT" 2>"$CASE_STDERR"
+status=$?
+set -e
+[[ "$status" -eq 1 ]] || show_failure 'brief builder rejects the same lint-invalid v5 contract'
+grep -q 'REQUIRED_FIELD_MISSING' "$CASE_STDERR" || show_failure 'brief builder rejects the same lint-invalid v5 contract'
+test ! -e "$CODEX_WORKFLOW_ROOT/artifacts/fixture/team/sdd/slices/slice-vnext-invalid"
+pass 'brief builder rejects the same full-lint-invalid v5 contract before artifact writes'
+
+for vnext_case in \
+  "5|slice-vnext|$FIXTURE_ROOT/valid/scope-admission-v5.md" \
+  "6|release-vnext|$release_v6_contract"; do
+  IFS='|' read -r semantics_version slice_id contract_file <<<"$vnext_case"
+  case_paths
+  if ! node "$BRIEF_BIN" \
+    --task fixture \
+    --slice "$slice_id" \
+    --repo "$ATLAS_FORGE_ROOT" \
+    --base "$base_sha" \
+    --authority-slice "$GOAL_ONLY_SLICE" \
+    --contract "$contract_file" \
+    >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+    show_failure "brief builder accepts semantics v$semantics_version"
+  fi
+  brief_file="$CODEX_WORKFLOW_ROOT/artifacts/fixture/team/sdd/slices/$slice_id/brief.json"
+  node - "$brief_file" "$semantics_version" "$GOAL_ONLY_SLICE" <<'NODE'
+const fs = require("fs");
+const [file, semantics, authoritySlice] = process.argv.slice(2);
+const brief = JSON.parse(fs.readFileSync(file, "utf8"));
+const expectedPlan = semantics === "5" ? 3 : 4;
+if (brief.schema_version !== 4) process.exit(1);
+if (brief.contract.semantics_version !== Number(semantics)) process.exit(1);
+if (brief.contract.execution_plan_schema_version !== expectedPlan) process.exit(1);
+if (brief.contract.authority_slices?.length !== 1) process.exit(1);
+const identity = brief.contract.authority_slices[0];
+if (identity.path !== authoritySlice || identity.task_id !== "fixture") process.exit(1);
+for (const field of ["brief_json_sha256", "brief_md_sha256"]) {
+  if (!/^sha256:[a-f0-9]{64}$/.test(identity[field] || "")) process.exit(1);
+}
+for (const field of [
+  "evidence_manifest_sha256", "review_verdict_sha256",
+  "controller_resolution_sha256", "global_constraints_sha256",
+]) {
+  if (identity[field] !== null && !/^sha256:[a-f0-9]{64}$/.test(identity[field])) process.exit(1);
+}
+NODE
+  pass "brief builder accepts full-lint-valid semantics v$semantics_version and preserves the plan matrix"
+done
 run_old_new_authoring_invalid \
   'new authoring rejects semantics v2 compatibility contracts' \
   "$goal_only_contract"
@@ -766,7 +945,7 @@ grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROO
 grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q -- '--strict --new-authoring' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'new authoring requires semantics v3' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'new authoring requires semantics v5, or semantics v6 for `product_release`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Freeze the smallest user-visible Goal before brownfield discovery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'Discovery cannot rewrite the frozen Goal' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
 grep -q 'binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"

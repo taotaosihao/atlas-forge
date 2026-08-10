@@ -5,8 +5,15 @@ const path = require("path");
 const childProcess = require("child_process");
 const { taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
+const { stableFileSnapshot, stableJsonSnapshot } = require("../core/stable-file");
 const { captureWorktreeSnapshot } = require("../core/worktree-snapshot");
 const { executionAuthorityTeam } = require("../team/execution-authority-event");
+const {
+  assertActiveExecutionGrant,
+  currentGrant,
+  executionHistoryRequired,
+  validateAuthorityEnvelope,
+} = require("../team/execution-grant");
 const {
   captureVerificationIdentity,
   digestCanonical,
@@ -27,6 +34,7 @@ const REQUIRED_GATE_BINDING_FIELDS = [
   "check_id", "slice_id", "contract_sha256", "execution_plan_sha256", "brief_sha256",
   "gate_class", "command_digest", "cache_policy", "final_only", "repo_realpath", "base_sha",
   "admission_head_sha", "admission_tree_oid",
+  "grant_id", "scope_digest", "evidence_epoch",
 ];
 
 class RequiredGateError extends Error {
@@ -34,6 +42,38 @@ class RequiredGateError extends Error {
     super(message);
     this.name = "RequiredGateError";
   }
+}
+
+function inProgressVerificationClaims(state, authority = null) {
+  const claims = Array.isArray(state?.verification?.operation_claims)
+    ? state.verification.operation_claims
+    : [];
+  return claims.filter((claim) => {
+    if (claim?.status !== "in_progress") return false;
+    if (!authority) return true;
+    const identity = claim.authority_identity;
+    return identity?.grant_id === authority.grant_id
+      && identity.scope_digest === authority.scope_digest
+      && identity.evidence_epoch === authority.evidence_epoch;
+  });
+}
+
+function indeterminateClaimsForRequiredCheck(state, expected) {
+  const claims = Array.isArray(state?.verification?.operation_claims)
+    ? state.verification.operation_claims
+    : [];
+  return claims.filter((claim) => {
+    if (claim?.status !== "indeterminate" || !claim.authority_identity) return false;
+    const authority = claim.authority_identity;
+    const binding = claim.required_check_binding;
+    return authority.grant_id === expected.grant_id
+      && authority.scope_digest === expected.scope_digest
+      && authority.evidence_epoch === expected.evidence_epoch
+      && binding?.check_id === expected.check_id
+      && binding.slice_id === expected.slice_id
+      && binding.gate_class === expected.gate_class
+      && binding.command_digest === expected.command_digest;
+  });
 }
 
 function readJson(file, label) {
@@ -102,7 +142,7 @@ function repositoryHead(repo, label) {
   return result.stdout.trim();
 }
 
-function admittedExecutionBrief(paths, taskId, state, requested = {}) {
+function admittedExecutionBrief(paths, taskId, state, requested = {}, options = {}) {
   const team = state.active_team && typeof state.active_team === "object"
     ? state.active_team
     : {};
@@ -112,7 +152,7 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
   const identity = admission.brief && typeof admission.brief === "object"
     ? admission.brief
     : null;
-  if (admission.mode !== "execution-v3" || !identity) return null;
+  if (admission.mode !== "execution-vnext" || !identity) return null;
   const snapshot = admission.slice_start_snapshot;
   if (!snapshot || typeof snapshot.head_sha !== "string" || !snapshot.head_sha
     || typeof snapshot.tree_oid !== "string" || !snapshot.tree_oid) {
@@ -122,8 +162,14 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
   if (requested.briefPath && path.resolve(requested.briefPath) !== file) {
     throw new RequiredGateError("verification brief does not match the admitted Team brief");
   }
-  const brief = readJson(file, "admitted Team brief");
-  if (brief.schema_version !== 3 || brief.task_id !== taskId) {
+  let briefSnapshot;
+  try {
+    briefSnapshot = stableJsonSnapshot(file, "admitted Team brief", { maximumBytes: 4 * 1024 * 1024 });
+  } catch (error) {
+    throw new RequiredGateError(error.message);
+  }
+  const brief = briefSnapshot.value;
+  if (brief.schema_version !== 4 || brief.task_id !== taskId) {
     throw new RequiredGateError("admitted Team brief task or schema mismatch");
   }
   const expected = path.join(
@@ -133,7 +179,7 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
   if (requested.sliceId && requested.sliceId !== brief.slice_id) {
     throw new RequiredGateError(`verification slice does not match admitted slice: ${brief.slice_id}`);
   }
-  const briefSha256 = sha256(fs.readFileSync(file));
+  const briefSha256 = briefSnapshot.sha256;
   if (briefSha256 !== identity.sha256) {
     throw new RequiredGateError("admitted Team brief sha256 no longer matches");
   }
@@ -149,17 +195,51 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}) {
     );
   }
   const contractFile = canonicalFile(brief.contract.path, "admitted implementation contract");
-  if (sha256(fs.readFileSync(contractFile)) !== identity.contract_sha256) {
+  let contractSnapshot;
+  try {
+    contractSnapshot = stableFileSnapshot(contractFile, "admitted implementation contract", {
+      maximumBytes: 4 * 1024 * 1024,
+      root: brief.repo,
+    });
+  } catch (error) {
+    throw new RequiredGateError(error.message);
+  }
+  if (contractSnapshot.sha256 !== identity.contract_sha256) {
     throw new RequiredGateError("admitted implementation contract sha256 no longer matches");
   }
   const repo = canonicalDirectory(brief.repo, "admitted repository");
   if (identity.repo && identity.repo !== repo) {
     throw new RequiredGateError("admitted Team repository identity no longer matches");
   }
-  return { admission, brief, briefSha256, contractFile, file, identity, repo, team };
+  const grant = assertActiveExecutionGrant(state, {
+    evidenceEpoch: admission.evidence_epoch,
+    grantId: admission.grant_id,
+    scopeDigest: admission.scope_digest,
+    sliceId: brief.slice_id,
+    briefSha256,
+  }, {
+    clock: options.clock,
+    requireUnexpired: Boolean(options.requireUnexpired),
+  });
+  if (team.grant_id !== grant.grant_id || team.scope_digest !== grant.scope_digest
+    || team.evidence_epoch !== grant.evidence_epoch) {
+    throw new RequiredGateError("admitted Team grant identity is no longer current");
+  }
+  return {
+    admission,
+    brief,
+    briefSha256,
+    contractFile,
+    contractSnapshot,
+    file,
+    grant,
+    identity,
+    repo,
+    team,
+  };
 }
 
-function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
+function bindRequiredCheck({ clock, commandText, cwd, parsed, paths, state }) {
   const requested = [parsed.briefPath, parsed.sliceId, parsed.checkId].filter(Boolean);
   if (requested.length > 0 && requested.length !== 3) {
     throw new RequiredGateError("bound verification requires --brief, --slice-id, and --check-id together");
@@ -168,8 +248,11 @@ function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
   const context = admittedExecutionBrief(paths, parsed.taskId, state, {
     briefPath: parsed.briefPath,
     sliceId: parsed.sliceId,
+  }, {
+    clock,
+    requireUnexpired: true,
   });
-  if (!context) throw new RequiredGateError("bound verification requires an admitted execution-v3 Team");
+  if (!context) throw new RequiredGateError("bound verification requires an admitted execution-vnext Team");
   const actualRepo = repositoryRoot(cwd, "unable to resolve verification repository");
   if (actualRepo !== context.repo) {
     throw new RequiredGateError(
@@ -182,7 +265,10 @@ function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
       "verification HEAD does not match the admitted slice-start HEAD; pause and replan",
     );
   }
-  const check = (context.brief.checks || []).find((item) => item.check_id === parsed.checkId);
+  const scopeSlice = context.grant.scope.required_slices.find(
+    (item) => item.slice_id === context.brief.slice_id,
+  );
+  const check = (scopeSlice?.checks || []).find((item) => item.check_id === parsed.checkId);
   if (!check) throw new RequiredGateError(`verification check is not declared by the admitted brief: ${parsed.checkId}`);
   if (commandText !== check.command) {
     throw new RequiredGateError(`verification command does not match check ${check.check_id}`);
@@ -200,9 +286,12 @@ function bindRequiredCheck({ commandText, cwd, parsed, paths, state }) {
     command_digest: sha256(commandText),
     contract_sha256: context.identity.contract_sha256,
     execution_plan_sha256: context.identity.execution_plan_sha256,
+    evidence_epoch: context.grant.evidence_epoch,
     final_only: check.final_only,
     gate_class: check.gate_class,
+    grant_id: context.grant.grant_id,
     repo_realpath: context.repo,
+    scope_digest: context.grant.scope_digest,
     slice_id: context.brief.slice_id,
     ...(check.release_requirement ? { release_requirement: check.release_requirement } : {}),
   };
@@ -212,7 +301,119 @@ function resolveCodeHomeReference(paths, reference) {
   return path.isAbsolute(reference) ? reference : path.resolve(paths.codeHome, reference);
 }
 
+function exactBinding(value, label, reasons, { history = false } = {}) {
+  const fields = history
+    ? ["grant_id", "scope_digest", "evidence_epoch", "retention_revision"]
+    : ["grant_id", "scope_digest", "evidence_epoch"];
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...fields].sort())
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.grant_id || "")
+    || !/^sha256:[a-f0-9]{64}$/.test(value.scope_digest || "")
+    || !Number.isInteger(value.evidence_epoch) || value.evidence_epoch < 1
+    || (history && (!Number.isInteger(value.retention_revision)
+      || value.retention_revision < 1))) {
+    reasons.push(`${label} is invalid`);
+    return null;
+  }
+  return value;
+}
+
+function sameBinding(left, right) {
+  return left?.grant_id === right?.grant_id
+    && left?.scope_digest === right?.scope_digest
+    && left?.evidence_epoch === right?.evidence_epoch;
+}
+
+function projectedReceipt(event, receiptType, receipt) {
+  if (receiptType === "verification") {
+    return event.projection?.state?.verification?.required_gates?.[receipt.check_id];
+  }
+  return event.projection?.state?.slice_acceptances?.[receipt.slice_id];
+}
+
+function validateRetainedReceipt(
+  paths,
+  taskId,
+  expected,
+  receipt,
+  options,
+  reasons,
+  receiptType = "verification",
+) {
+  const retentionFields = [
+    "origin_binding", "retained_from", "retention_history", "retention_revision",
+  ];
+  const hasRetention = retentionFields.some((field) => Object.hasOwn(receipt || {}, field));
+  if (!hasRetention) return { identityExpected: expected, retained: false };
+  const label = `${receiptType} receipt ${receipt?.record_id || receipt?.operation_id || "unknown"}`;
+  const origin = exactBinding(receipt.origin_binding, `${label} origin binding`, reasons);
+  const immediate = exactBinding(receipt.retained_from, `${label} retained-from binding`, reasons);
+  if (!Array.isArray(receipt.retention_history) || receipt.retention_history.length === 0) {
+    reasons.push(`${label} retention history is invalid`);
+    return { identityExpected: expected, retained: true };
+  }
+  const history = receipt.retention_history.map((entry, index) => exactBinding(
+    entry,
+    `${label} retention history[${index}]`,
+    reasons,
+    { history: true },
+  ));
+  if (!origin || !immediate || history.some((entry) => !entry)) {
+    return { identityExpected: expected, retained: true };
+  }
+  if (!sameBinding(origin, history[0])
+    || !sameBinding(immediate, history.at(-1))
+    || receipt.retention_revision !== history.at(-1).retention_revision) {
+    reasons.push(`${label} retention endpoints are inconsistent`);
+  }
+  let events = options.authorityEvents;
+  if (!events) {
+    try {
+      events = readAuthoritativeEvents(
+        path.join(taskArtifactDir(paths, taskId), "events-v2.jsonl"), taskId,
+      );
+    } catch (error) {
+      reasons.push(`${label} authoritative retention history is unavailable: ${error.message}`);
+      return {
+        identityExpected: { ...expected, ...origin },
+        retained: true,
+      };
+    }
+  }
+  const receiptId = receiptType === "verification" ? receipt.record_id : receipt.operation_id;
+  for (let index = 0; index < history.length; index += 1) {
+    const source = history[index];
+    const event = events.find((candidate) => candidate.revision === source.retention_revision);
+    const transition = event?.authority_transition;
+    const decision = transition?.evidence?.retained?.find((candidate) => (
+      candidate.receipt_id === receiptId && candidate.type === receiptType
+      && candidate.reason === "explicit-compatible-retention"
+    ));
+    const nextBinding = index + 1 < history.length ? history[index + 1] : expected;
+    const rebound = projectedReceipt(event || {}, receiptType, receipt);
+    if (event?.kind !== "authority.replanned"
+      || transition?.type !== "grant-replanned"
+      || transition.old_grant_id !== source.grant_id
+      || transition.old_scope_digest !== source.scope_digest
+      || transition.old_evidence_epoch !== source.evidence_epoch
+      || !sameBinding(transition.new_grant, nextBinding)
+      || !decision
+      || !sameBinding(rebound, transition.new_grant)) {
+      reasons.push(`${label} retention event ${source.retention_revision} is invalid`);
+      continue;
+    }
+    if (index === history.length - 1 && digestCanonical(rebound) !== digestCanonical(receipt)) {
+      reasons.push(`${label} does not match its authoritative retained projection`);
+    }
+  }
+  return {
+    identityExpected: { ...expected, ...origin },
+    retained: true,
+  };
+}
+
 function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
+  options = options || {};
   const initialReasonCount = reasons.length;
   if (!gate || typeof gate !== "object") {
     reasons.push(`missing required verification gate: ${expected.check_id}`);
@@ -223,6 +424,10 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
       reasons.push(`required verification gate ${expected.check_id} has mismatched ${field}`);
     }
   }
+  const retention = validateRetainedReceipt(
+    paths, taskId, expected, gate, options, reasons, "verification",
+  );
+  const identityExpected = retention.identityExpected;
   if (digestCanonical(gate.release_requirement || null)
     !== digestCanonical(expected.release_requirement || null)) {
     reasons.push(`required verification gate ${expected.check_id} has mismatched release_requirement`);
@@ -249,7 +454,7 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
       reasons.push(`required verification gate ${expected.check_id} record pointer mismatch`);
     }
     for (const field of REQUIRED_GATE_BINDING_FIELDS) {
-      if (record.required_gate?.[field] !== expected[field]) {
+      if (record.required_gate?.[field] !== identityExpected[field]) {
         reasons.push(`required verification gate ${expected.check_id} record mismatches ${field}`);
       }
     }
@@ -311,24 +516,28 @@ function validateGateRecord(paths, taskId, expected, gate, options, reasons) {
 }
 
 function validateDeliveryAuthority(events, authority, targetAuthorityRef, reasons) {
-  if (!authority?.release_binding) return;
-  const authorityRef = authority.delivery_authority_ref;
-  const revision = Number(authority.established_revision || 0);
+  if (!authority?.formal_product_release) return;
+  const delivery = authority.delivery_authority;
+  const authorityRef = delivery?.ref;
+  const revision = Number(delivery?.established_revision || 0);
   if (!/^(?:user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(authorityRef || "")
     || authorityRef !== targetAuthorityRef || !Number.isInteger(revision) || revision < 1) {
     reasons.push("release delivery authority is unresolved or is not controller-originated");
     return;
   }
   const event = events.find((candidate) => candidate.revision === revision);
-  const team = executionAuthorityTeam(event);
-  if (!team
-    || event.data?.authorization_ref !== authorityRef
-    || event.data?.contract_sha256 !== authority.contract_sha256
-    || event.data?.execution_plan_sha256 !== authority.execution_plan_sha256
-    || team.admission?.brief?.contract_sha256 !== authority.contract_sha256
-    || team.admission?.brief?.execution_plan_sha256 !== authority.execution_plan_sha256
-    || event.projection?.state?.execution_authority?.delivery_authority_ref !== authorityRef
-    || event.projection?.state?.execution_authority?.established_revision !== revision) {
+  const initial = authority.grants?.[0];
+  if (!event || event.kind !== "authority.grant.issued"
+    || event.authority_transition?.type !== "grant-issued"
+    || event.authority_transition?.grant?.grant_id !== initial?.grant_id
+    || event.authority_transition?.delivery_authority?.ref !== authorityRef
+    || delivery.contract_sha256 !== initial?.scope?.contract?.sha256
+    || delivery.execution_plan_sha256 !== initial?.scope?.execution_plan?.sha256
+    || digestCanonical(delivery.release_binding || null)
+      !== digestCanonical(initial?.scope?.release_binding || null)
+    || event.projection?.state?.execution_authority?.delivery_authority?.ref !== authorityRef
+    || event.projection?.state?.execution_authority?.delivery_authority?.established_revision
+      !== revision) {
     reasons.push("release delivery authority is not bound to its authoritative controller event");
   }
 }
@@ -338,7 +547,10 @@ function releaseSweepRequired(checks) {
 }
 
 function requiredGateAdmission(paths, taskId, state, options = {}) {
-  const context = admittedExecutionBrief(paths, taskId, state);
+  const context = admittedExecutionBrief(paths, taskId, state, {}, {
+    clock: options.clock,
+    requireUnexpired: true,
+  });
   if (!context) return null;
   const verification = state.verification && typeof state.verification === "object"
     ? state.verification
@@ -356,7 +568,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     let targetAuthorityRef = "";
     if (context.brief.contract.release) {
       targetAuthorityRef = resolveValidatedReleaseIntent({
-        contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
+        contractMarkdown: context.contractSnapshot.text,
         environment: options.environment || process.env,
         paths,
         releaseBinding: context.brief.contract.release,
@@ -368,7 +580,10 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
   } catch (error) {
     reasons.push(`unable to validate release delivery authority: ${error.message}`);
   }
-  const expectedChecks = (context.brief.checks || []).map((check) => ({
+  const scopeSlice = context.grant.scope.required_slices.find(
+    (slice) => slice.slice_id === context.brief.slice_id,
+  );
+  const expectedChecks = (scopeSlice?.checks || []).map((check) => ({
     admission_head_sha: context.admission.slice_start_snapshot.head_sha,
     admission_tree_oid: context.admission.slice_start_snapshot.tree_oid,
     base_sha: context.brief.base_sha,
@@ -378,15 +593,32 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
     command_digest: sha256(check.command),
     contract_sha256: context.identity.contract_sha256,
     execution_plan_sha256: context.identity.execution_plan_sha256,
+    evidence_epoch: context.grant.evidence_epoch,
     final_only: check.final_only,
     gate_class: check.gate_class,
+    grant_id: context.grant.grant_id,
     repo_realpath: context.repo,
+    scope_digest: context.grant.scope_digest,
     slice_id: context.brief.slice_id,
     ...(check.release_requirement ? { release_requirement: check.release_requirement } : {}),
   }));
   for (const expected of expectedChecks) {
+    const indeterminateClaims = indeterminateClaimsForRequiredCheck(state, expected);
+    if (indeterminateClaims.length > 0) {
+      reasons.push(
+        `required verification gate ${expected.check_id} is blocked by indeterminate ` +
+          `execution in the current authority epoch: ${indeterminateClaims
+            .map((claim) => claim.operation_id).join(", ")}`,
+      );
+      continue;
+    }
     const record = validateGateRecord(
-      paths, taskId, expected, gates[expected.check_id], options, reasons,
+      paths,
+      taskId,
+      expected,
+      gates[expected.check_id],
+      { ...options, authorityEvents },
+      reasons,
     );
     if (record) records.push(record);
   }
@@ -412,13 +644,16 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
       snapshot = captureWorktreeSnapshot(context.repo);
       const evaluateSweep = options.evaluateReleaseSweep || evaluateReleaseSweep;
       releaseCertification = evaluateSweep({
-        contractMarkdown: fs.readFileSync(context.contractFile, "utf8"),
+        contractMarkdown: context.contractSnapshot.text,
+        evidenceEpoch: context.grant.evidence_epoch,
         environment: options.environment || process.env,
+        grantId: context.grant.grant_id,
         paths,
         receipts: records.map((record) => gates[record.required_gate.check_id]),
         releaseBinding: context.brief.contract.release,
         repo: context.repo,
         snapshot,
+        scopeDigest: context.grant.scope_digest,
         taskId,
         workType: context.brief.contract.work_type,
       });
@@ -432,6 +667,12 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
   const releaseByCheck = new Map(
     (releaseCertification?.receiptSummaries || []).map((item) => [item.check_id, item]),
   );
+  if (releaseCertification?.admissible
+    && releaseCertification.decision?.status !== "certified") {
+    reasons.push(
+      `release final sweep is not certified: ${releaseCertification.decision?.status || "missing"}`,
+    );
+  }
   return {
     candidateTreeOid: candidateTrees.size === 1 ? [...candidateTrees][0] : "",
     identityDigest: records.length === 1 ? records[0].identity_digest : "",
@@ -445,15 +686,7 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
       const gate = gates[record.required_gate?.check_id] || {};
       const release = releaseByCheck.get(record.required_gate?.check_id);
       return {
-        ...(record.required_gate || {}),
-        event_revision: gate.event_revision || 0,
-        identity_digest: record.identity_digest,
-        identity_record: gate.identity_record || "",
-        candidate_tree_oid: record.required_gate?.candidate_tree_oid || "",
-        outcome: record.outcome,
-        provenance: record.provenance,
-        record_digest: record.record_id,
-        record_id: record.record_id,
+        ...gate,
         ...(release ? {
           release_fact_id: release.fact_id,
           release_fact_outcome: release.outcome,
@@ -467,54 +700,6 @@ function requiredGateAdmission(paths, taskId, state, options = {}) {
 
 function executionCompletionAdmission(paths, taskId, state, options = {}) {
   const authority = state.execution_authority;
-  if (!authority || typeof authority !== "object") return null;
-  const reasons = [];
-  if (authority.schema_version !== 1 || authority.status !== "active") {
-    reasons.push("task execution authority is not active schema version 1");
-  }
-  let repo = "";
-  let plan = null;
-  let contractMarkdown = "";
-  let targetAuthorityRef = "";
-  try {
-    repo = canonicalDirectory(authority.repo_realpath, "execution authority repository");
-    if (repo !== authority.repo_realpath) reasons.push("execution authority repository mismatch");
-    const contractFile = canonicalFile(authority.contract_path, "execution authority contract");
-    const relative = path.relative(repo, contractFile);
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      reasons.push("execution authority contract is outside the admitted repository");
-    }
-    if (sha256(fs.readFileSync(contractFile)) !== authority.contract_sha256) {
-      reasons.push("execution authority contract sha256 no longer matches");
-    }
-    contractMarkdown = fs.readFileSync(contractFile, "utf8");
-    const matches = [...contractMarkdown.matchAll(
-      /^```atlas-execution-plan\+json[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm,
-    )];
-    if (matches.length !== 1) throw new Error(`expected one execution plan; found ${matches.length}`);
-    plan = JSON.parse(matches[0][1]);
-    if (digestCanonical(plan) !== authority.execution_plan_sha256) {
-      reasons.push("execution authority plan sha256 no longer matches");
-    }
-    if (authority.release_binding) {
-      targetAuthorityRef = resolveValidatedReleaseIntent({
-        contractMarkdown,
-        environment: options.environment || process.env,
-        paths,
-        releaseBinding: authority.release_binding,
-      }).intent.target_delivery_authority_ref;
-    }
-  } catch (error) {
-    reasons.push(`unable to load task execution authority: ${error.message}`);
-  }
-  const slices = Array.isArray(plan?.slices) ? plan.slices : [];
-  const expectedSliceIds = slices.map((slice) => slice.slice_id);
-  if (JSON.stringify(authority.required_slices || []) !== JSON.stringify(expectedSliceIds)) {
-    reasons.push("execution authority required slice set does not match its plan");
-  }
-  const recordIds = [];
-  const releaseReceipts = [];
-  const acceptedEvents = [];
   let events = [];
   try {
     events = readAuthoritativeEvents(
@@ -522,8 +707,98 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
       taskId,
     );
   } catch (error) {
-    reasons.push(`unable to load authoritative slice evidence: ${error.message}`);
+    return {
+      passed: false,
+      reasons: [`unable to load authoritative execution history: ${error.message}`],
+      required: true,
+    };
   }
+  if (!authority || typeof authority !== "object") {
+    if (!executionHistoryRequired(events)) return null;
+    return {
+      passed: false,
+      reasons: ["formal execution history exists but current execution authority is missing"],
+      required: true,
+    };
+  }
+  const reasons = [];
+  if (authority.schema_version !== 2) {
+    return {
+      passed: false,
+      reasons: ["legacy or unknown execution authority is read-only and cannot authorize completion"],
+      required: true,
+    };
+  }
+  let grant;
+  try {
+    validateAuthorityEnvelope(authority);
+    grant = currentGrant(authority);
+  } catch (error) {
+    return {
+      passed: false,
+      reasons: [`current execution authority is invalid: ${error.message}`],
+      required: true,
+    };
+  }
+  if (!grant || grant.status !== "active") {
+    return {
+      passed: false,
+      reasons: ["task execution authority has no current active grant"],
+      required: true,
+    };
+  }
+  const scope = grant.scope;
+  let repo = "";
+  let plan = null;
+  let contractMarkdown = "";
+  let targetAuthorityRef = "";
+  try {
+    repo = canonicalDirectory(scope.repo.realpath, "execution authority repository");
+    if (repo !== scope.repo.realpath) reasons.push("execution authority repository mismatch");
+    const contractFile = canonicalFile(
+      path.resolve(repo, scope.contract.path),
+      "execution authority contract",
+    );
+    const relative = path.relative(repo, contractFile);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      reasons.push("execution authority contract is outside the admitted repository");
+    }
+    const contractSnapshot = stableFileSnapshot(contractFile, "execution authority contract", {
+      maximumBytes: 4 * 1024 * 1024,
+      root: repo,
+    });
+    if (contractSnapshot.sha256 !== scope.contract.sha256) {
+      reasons.push("execution authority contract sha256 no longer matches");
+    }
+    contractMarkdown = contractSnapshot.text;
+    const matches = [...contractMarkdown.matchAll(
+      /^```atlas-execution-plan\+json[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm,
+    )];
+    if (matches.length !== 1) throw new Error(`expected one execution plan; found ${matches.length}`);
+    plan = JSON.parse(matches[0][1]);
+    if (digestCanonical(plan) !== scope.execution_plan.sha256) {
+      reasons.push("execution authority plan sha256 no longer matches");
+    }
+    if (scope.release_binding) {
+      targetAuthorityRef = resolveValidatedReleaseIntent({
+        contractMarkdown,
+        environment: options.environment || process.env,
+        paths,
+        releaseBinding: scope.release_binding,
+      }).intent.target_delivery_authority_ref;
+    }
+  } catch (error) {
+    reasons.push(`unable to load task execution authority: ${error.message}`);
+  }
+  const slices = Array.isArray(plan?.slices) ? plan.slices : [];
+  const expectedSliceIds = slices.map((slice) => slice.slice_id);
+  if (JSON.stringify(scope.required_slices.map((slice) => slice.slice_id))
+    !== JSON.stringify(expectedSliceIds)) {
+    reasons.push("execution authority required slice set does not match its plan");
+  }
+  const recordIds = [];
+  const releaseReceipts = [];
+  const acceptedEvents = [];
   validateDeliveryAuthority(events, authority, targetAuthorityRef, reasons);
   for (const slice of slices) {
     const accepted = state.slice_acceptances?.[slice.slice_id];
@@ -531,6 +806,19 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
       reasons.push(`missing authoritative accepted slice: ${slice.slice_id}`);
       continue;
     }
+    validateRetainedReceipt(
+      paths,
+      taskId,
+      {
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        evidence_epoch: grant.evidence_epoch,
+      },
+      accepted,
+      { ...options, authorityEvents: events },
+      reasons,
+      "slice",
+    );
     const terminal = events.filter((event) => (
       new Set(["slice.accepted", "slice.superseded"]).has(event.kind)
       && (event.result?.accepted?.slice_id || event.data?.slice_id) === slice.slice_id
@@ -543,8 +831,11 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
       acceptedEvents.push(terminal);
     }
     if (accepted.task_id !== taskId || accepted.slice_id !== slice.slice_id
-      || accepted.contract_sha256 !== authority.contract_sha256
-      || accepted.execution_plan_sha256 !== authority.execution_plan_sha256) {
+      || accepted.contract_sha256 !== scope.contract.sha256
+      || accepted.execution_plan_sha256 !== scope.execution_plan.sha256
+      || accepted.grant_id !== grant.grant_id
+      || accepted.scope_digest !== grant.scope_digest
+      || accepted.evidence_epoch !== grant.evidence_epoch) {
       reasons.push(`accepted slice identity mismatch: ${slice.slice_id}`);
     }
     let brief;
@@ -553,11 +844,15 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
         path.join(taskArtifactDir(paths, taskId), "team", "sdd", "slices", slice.slice_id, "brief.json"),
         `accepted slice brief ${slice.slice_id}`,
       );
-      brief = readJson(briefFile, `accepted slice brief ${slice.slice_id}`);
-      if (sha256(fs.readFileSync(briefFile)) !== accepted.brief_sha256
+      const briefSnapshot = stableJsonSnapshot(briefFile, `accepted slice brief ${slice.slice_id}`, {
+        maximumBytes: 4 * 1024 * 1024,
+      });
+      brief = briefSnapshot.value;
+      if (briefSnapshot.sha256 !== accepted.brief_sha256
         || brief.task_id !== taskId || brief.slice_id !== slice.slice_id
-        || brief.contract?.sha256 !== authority.contract_sha256
-        || brief.contract?.execution_plan_sha256 !== authority.execution_plan_sha256) {
+        || brief.schema_version !== 4
+        || brief.contract?.sha256 !== scope.contract.sha256
+        || brief.contract?.execution_plan_sha256 !== scope.execution_plan.sha256) {
         reasons.push(`accepted slice brief identity mismatch: ${slice.slice_id}`);
       }
     } catch (error) {
@@ -572,13 +867,35 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
     }
     for (const check of slice.checks || []) {
       const record = byCheck.get(check.check_id);
+      const expectedGate = {
+        admission_head_sha: accepted.actual_size?.start_head_sha,
+        admission_tree_oid: accepted.actual_size?.start_tree_oid,
+        base_sha: scope.repo.base_sha,
+        brief_sha256: accepted.brief_sha256,
+        cache_policy: check.cache_policy,
+        check_id: check.check_id,
+        command_digest: sha256(check.command),
+        contract_sha256: scope.contract.sha256,
+        execution_plan_sha256: scope.execution_plan.sha256,
+        evidence_epoch: grant.evidence_epoch,
+        final_only: check.final_only,
+        gate_class: check.gate_class,
+        grant_id: grant.grant_id,
+        repo_realpath: repo,
+        scope_digest: grant.scope_digest,
+        slice_id: slice.slice_id,
+        ...(check.release_requirement ? { release_requirement: check.release_requirement } : {}),
+      };
       const verificationEvent = events.find((event) => (
         event.event_id === record?.verification_event_id
         && event.revision === record?.verification_revision
       ));
       if (!record || record.slice_id !== slice.slice_id
-        || record.contract_sha256 !== authority.contract_sha256
-        || record.execution_plan_sha256 !== authority.execution_plan_sha256
+        || record.contract_sha256 !== scope.contract.sha256
+        || record.execution_plan_sha256 !== scope.execution_plan.sha256
+        || record.grant_id !== grant.grant_id
+        || record.scope_digest !== grant.scope_digest
+        || record.evidence_epoch !== grant.evidence_epoch
         || record.brief_sha256 !== accepted.brief_sha256
         || record.gate_class !== check.gate_class
         || record.command_digest !== sha256(check.command)
@@ -603,6 +920,23 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
         || verificationEvent.data?.required_gate?.candidate_tree_oid !== record.candidate_tree_oid) {
         reasons.push(`accepted slice verification event is invalid: ${slice.slice_id}/${check.check_id}`);
       } else {
+        const projectedGate = state.verification?.required_gates?.[check.check_id];
+        const gateReasons = [];
+        const identity = validateGateRecord(
+          paths,
+          taskId,
+          expectedGate,
+          projectedGate,
+          { ...options, authorityEvents: events },
+          gateReasons,
+        );
+        if (!identity || identity.record_id !== record.record_id || gateReasons.length > 0) {
+          reasons.push(
+            `accepted slice verification identity is invalid: ${slice.slice_id}/${check.check_id}: `
+              + gateReasons.join("; "),
+          );
+          continue;
+        }
         recordIds.push(record.record_id);
         if (check.release_requirement) releaseReceipts.push(record);
       }
@@ -644,7 +978,10 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
           reasons.push("repository worktree changed after final slice acceptance");
         }
         completionSnapshot = {
-          schema_version: 1,
+          schema_version: 2,
+          grant_id: grant.grant_id,
+          scope_digest: grant.scope_digest,
+          evidence_epoch: grant.evidence_epoch,
           repo_realpath: repo,
           head_sha: current.head_sha,
           tree_oid: current.tree_oid,
@@ -657,8 +994,9 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
       }
     }
   }
-  if (authority.release_binding) {
-    if (authority.work_type !== "implementation") {
+  if (scope.release_binding) {
+    const initialWorkType = scope.contract.semantics_version === 6 ? "implementation" : "";
+    if (initialWorkType !== "implementation") {
       reasons.push("release completion authority requires work_type implementation");
     } else if (reasons.length > 0) {
       reasons.push("release certification requires valid completion and delivery authority evidence");
@@ -667,14 +1005,17 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
     } else {
       releaseCertification = evaluateReleaseSweep({
         contractMarkdown,
+        evidenceEpoch: grant.evidence_epoch,
         environment: options.environment || process.env,
+        grantId: grant.grant_id,
         paths,
         receipts: releaseReceipts,
-        releaseBinding: authority.release_binding,
+        releaseBinding: scope.release_binding,
         repo,
         snapshot: completionSnapshot,
+        scopeDigest: grant.scope_digest,
         taskId,
-        workType: authority.work_type,
+        workType: "implementation",
       });
       if (!releaseCertification.admissible) {
         reasons.push(...releaseCertification.reasons.map((reason) => `release final sweep: ${reason}`));
@@ -700,7 +1041,9 @@ module.exports = {
   admittedExecutionBrief,
   bindRequiredCheck,
   executionCompletionAdmission,
+  inProgressVerificationClaims,
   requiredGateAdmission,
   releaseSweepRequired,
   validateGateRecord,
+  validateRetainedReceipt,
 };

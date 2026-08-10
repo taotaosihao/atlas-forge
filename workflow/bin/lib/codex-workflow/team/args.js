@@ -6,7 +6,7 @@
 const { CommandError } = require("../core/command-runtime");
 
 const RECORD_START_USAGE =
-  'usage: codex-workflow team-record-start <task-id> "<objective>" --mode discuss|execute [--brief <brief.json>] [--operation-id <id>] [--backend native|paseo] [--fallback-policy codex|none] [--agents N] [--roles "<roles>"] [--providers "<providers>"] [--selection-authority-kind user-message|operator-input] [--selection-authority-ref <ref>] [--authorization-ref <user-message-ref>]';
+  'usage: codex-workflow team-record-start <task-id> "<objective>" --mode discuss|execute [--brief <brief.json>] [--operation-id <id>] [--grant-id <id>] [--scope-digest <sha256:hex>] [--backend native|paseo] [--fallback-policy codex|none] [--agents N] [--roles "<roles>"] [--providers "<providers>"] [--selection-authority-kind user-message|operator-input] [--selection-authority-ref <ref>] [--authorization-ref <user-message-ref>]';
 const RECORD_FINALIZE_USAGE =
   "usage: codex-workflow team-record-finalize <task-id> --backend native|paseo --status complete|failed|interrupted --round <file> --decision <file> --staffing <file>";
 const LOOP_RECORD_USAGE =
@@ -14,11 +14,16 @@ const LOOP_RECORD_USAGE =
 const STATUS_USAGE = "usage: codex-workflow team-status <task-id>";
 const STOP_USAGE = "usage: codex-workflow team-stop <task-id>";
 const PROMOTE_USAGE =
-  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish [--authorization-ref <user-message-ref>] [--brief <brief.json>] [--operation-id <id>]";
+  "usage: codex-workflow team-promote <task-id> --to execute|worktree|finish [--authorization-ref <user-message-ref>] [--brief <brief.json>] [--operation-id <id>] [--grant-id <id>] [--scope-digest <sha256:hex>]";
+const AUTHORIZE_USAGE =
+  'usage: codex-workflow team-authorize <task-id> "<objective>" --authorization-ref <user-message:ref|operator-input:ref> --brief <brief.json> --grant-id <id> --operation-id <id> [--expected-scope-digest <sha256:hex>]';
+const REPLAN_USAGE =
+  'usage: codex-workflow team-replan <task-id> "<objective>" --authorization-ref <new-ref> --brief <brief.json> --grant-id <new-id> --operation-id <id> --evidence-policy invalidate-incompatible|retain-compatible --expected-delta <json> [--retain-evidence <receipt-id>]...';
+const GRANT_USAGE = "usage: codex-workflow team-grant <task-id>";
 const SELECTION_USAGE = "usage: codex-workflow team-selection-record <task-id> --operation-id <id> --event-id <id> --kind backend|model|capability [options]";
 const LANE_USAGE = "usage: codex-workflow team-lane-record <task-id> --operation-id <id> --action open|close --lane <id> [options]";
 const DISPATCH_USAGE = "usage: codex-workflow team-dispatch-record <task-id> --operation-id <id> --action open|dispose|close --dispatch <id> [options]";
-const ATTEMPT_USAGE = "usage: codex-workflow team-attempt-record <task-id> --operation-id <id> --action reserve|bind|running|terminal|quiesced|observe --attempt <id> [options]";
+const ATTEMPT_USAGE = "usage: codex-workflow team-attempt-record <task-id> --operation-id <id> --action reserve|bind|running|terminal|quiesced|observe|resolve-launch --attempt <id> [options]";
 const FALLBACK_USAGE = "usage: codex-workflow team-fallback-record <task-id> --operation-id <id> --from-attempt <id> --to-attempt <id> --launch-operation-id <id> [options]";
 
 function parseFlags(argv, startIndex, configuration) {
@@ -94,14 +99,17 @@ function validateReason(value, label) {
   }
 }
 
-function validateExecutionAuthorization(mode, authorizationRef) {
+function validateExecutionAuthorization(mode, authorizationRef, grantId = "", scopeDigest = "") {
   if (mode !== "execute") {
     return;
   }
-  if (!authorizationRef) {
-    throw new CommandError("missing execute authorization ref");
+  if (authorizationRef) validateReason(authorizationRef, "execute authorization ref");
+  if (!grantId || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(grantId)) {
+    throw new CommandError("missing or invalid execute grant_id");
   }
-  validateReason(authorizationRef, "execute authorization ref");
+  if (!/^sha256:[a-f0-9]{64}$/.test(scopeDigest || "")) {
+    throw new CommandError("missing or invalid execute scope digest");
+  }
 }
 
 function commaList(value) {
@@ -144,6 +152,7 @@ function parseControlArgs(argv, usage, name) {
     "--admitted-attempts": "admittedAttempts",
     "--evidence-refs": "evidenceRefs",
     "--resolution-ref": "resolutionRef",
+    "--claim-operation-id": "claimOperationId",
     "--attempt": "attemptId",
     "--origin": "origin",
     "--retry-of": "retryOf",
@@ -161,6 +170,7 @@ function parseControlArgs(argv, usage, name) {
     "--failure-class": "failureClass",
     "--retry-eligible": "retryEligible",
     "--launch-invoked": "launchInvoked",
+    "--reason": "reason",
     "--from-attempt": "fromAttemptId",
     "--to-attempt": "toAttemptId",
     "--worktree-fingerprint": "worktreeFingerprint",
@@ -273,6 +283,16 @@ function parseAttemptArgs(argv) {
       required: ["attemptId", "observationId", "observerAction"],
       allowed: ["attemptId", "observationId", "observerAction", "observerArgsJson", "evidenceRefs"],
     },
+    "resolve-launch": {
+      required: [
+        "attemptId", "claimOperationId", "launchOperationId", "disposition",
+        "authorityRef", "reason", "evidenceRefs",
+      ],
+      allowed: [
+        "attemptId", "claimOperationId", "launchOperationId", "disposition",
+        "authorityRef", "reason", "evidenceRefs",
+      ],
+    },
   });
 }
 
@@ -310,7 +330,9 @@ function parseRecordStartArgs(argv) {
       selectionAuthorityRef: "",
       authorizationRef: "",
       briefPath: "",
+      grantId: "",
       operationId: "",
+      scopeDigest: "",
     },
     flags: {
       "--backend": "backend",
@@ -323,7 +345,9 @@ function parseRecordStartArgs(argv) {
       "--selection-authority-ref": "selectionAuthorityRef",
       "--authorization-ref": "authorizationRef",
       "--brief": "briefPath",
+      "--grant-id": "grantId",
       "--operation-id": "operationId",
+      "--scope-digest": "scopeDigest",
     },
     required: [
       ["mode", "missing team mode"],
@@ -418,12 +442,16 @@ function parsePromoteArgs(argv) {
   const parsed = parseFlags(argv, 1, {
     name: "team-promote",
     usage: PROMOTE_USAGE,
-    defaults: { target: "", authorizationRef: "", briefPath: "", operationId: "" },
+    defaults: {
+      target: "", authorizationRef: "", briefPath: "", grantId: "", operationId: "", scopeDigest: "",
+    },
     flags: {
       "--to": "target",
       "--authorization-ref": "authorizationRef",
       "--brief": "briefPath",
+      "--grant-id": "grantId",
       "--operation-id": "operationId",
+      "--scope-digest": "scopeDigest",
     },
   });
   if (!new Set(["execute", "worktree", "finish"]).has(parsed.target)) {
@@ -439,31 +467,131 @@ function parsePromoteArgs(argv) {
   return { ...parsed, taskId: argv[0] };
 }
 
+function parseAuthorityMutationArgs(argv, name, usage, { replan = false } = {}) {
+  if (argv.length < 2) throw new CommandError(usage);
+  const parsed = {
+    authorizationRef: "",
+    briefPath: "",
+    evidencePolicy: "",
+    expectedDelta: null,
+    expectedScopeDigest: "",
+    grantId: "",
+    objective: argv[1],
+    operationId: "",
+    retainEvidence: [],
+    taskId: argv[0],
+  };
+  const fields = new Map([
+    ["--authorization-ref", "authorizationRef"],
+    ["--brief", "briefPath"],
+    ["--evidence-policy", "evidencePolicy"],
+    ["--expected-delta", "expectedDelta"],
+    ["--expected-scope-digest", "expectedScopeDigest"],
+    ["--grant-id", "grantId"],
+    ["--operation-id", "operationId"],
+    ["--retain-evidence", "retainEvidence"],
+  ]);
+  for (let index = 2; index < argv.length; index += 1) {
+    const argument = argv[index];
+    let option = argument;
+    let value;
+    const separator = argument.indexOf("=");
+    if (separator !== -1) {
+      option = argument.slice(0, separator);
+      value = argument.slice(separator + 1);
+    }
+    const field = fields.get(option);
+    if (!field || (!replan && new Set(["evidencePolicy", "expectedDelta", "retainEvidence"]).has(field))) {
+      throw new CommandError(`unknown ${name} option: ${argument}`);
+    }
+    if (value === undefined) {
+      if (index + 1 >= argv.length) throw new CommandError(usage);
+      value = argv[++index];
+    }
+    if (field === "retainEvidence") parsed.retainEvidence.push(value);
+    else if (parsed[field] !== "" && parsed[field] !== null) throw new CommandError(`duplicate ${name} option: ${option}`);
+    else parsed[field] = value;
+  }
+  for (const field of ["authorizationRef", "briefPath", "grantId", "operationId"]) {
+    if (!parsed[field]) throw new CommandError(usage);
+  }
+  validateReason(parsed.authorizationRef, `${name} authorization ref`);
+  validateReason(parsed.objective, `${name} objective`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parsed.grantId)
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parsed.operationId)) {
+    throw new CommandError(`${name} grant and operation ids must be safe identifiers`);
+  }
+  if (parsed.expectedScopeDigest
+    && !/^sha256:[a-f0-9]{64}$/.test(parsed.expectedScopeDigest)) {
+    throw new CommandError(`${name} expected scope digest is invalid`);
+  }
+  if (replan) {
+    if (!new Set(["invalidate-incompatible", "retain-compatible"]).has(parsed.evidencePolicy)
+      || typeof parsed.expectedDelta !== "string") {
+      throw new CommandError(usage);
+    }
+    try {
+      parsed.expectedDelta = JSON.parse(parsed.expectedDelta);
+    } catch (error) {
+      throw new CommandError(`${name} expected delta is invalid JSON: ${error.message}`);
+    }
+    if (!Array.isArray(parsed.expectedDelta)) throw new CommandError(`${name} expected delta must be an array`);
+    if (parsed.evidencePolicy === "invalidate-incompatible" && parsed.retainEvidence.length > 0) {
+      throw new CommandError(`${name} invalidate-incompatible policy cannot retain evidence`);
+    }
+    if (new Set(parsed.retainEvidence).size !== parsed.retainEvidence.length) {
+      throw new CommandError(`${name} retain evidence ids must be unique`);
+    }
+  }
+  return parsed;
+}
+
+function parseAuthorizeArgs(argv) {
+  return parseAuthorityMutationArgs(argv, "team-authorize", AUTHORIZE_USAGE);
+}
+
+function parseReplanArgs(argv) {
+  return parseAuthorityMutationArgs(argv, "team-replan", REPLAN_USAGE, { replan: true });
+}
+
+function parseGrantArgs(argv) {
+  if (argv.length !== 1 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(argv[0])) {
+    throw new CommandError(GRANT_USAGE);
+  }
+  return { taskId: argv[0] };
+}
+
 module.exports = {
+  AUTHORIZE_USAGE,
   ATTEMPT_USAGE,
   DISPATCH_USAGE,
   FALLBACK_USAGE,
+  GRANT_USAGE,
   LANE_USAGE,
   LOOP_RECORD_USAGE,
   PROMOTE_USAGE,
   RECORD_FINALIZE_USAGE,
   RECORD_START_USAGE,
+  REPLAN_USAGE,
   SELECTION_USAGE,
   STATUS_USAGE,
   STOP_USAGE,
   booleanValue,
   commaList,
+  parseAuthorizeArgs,
   parseAttemptArgs,
   parseControlArgs,
   parseDispatchArgs,
   parseFallbackArgs,
   parseFlags,
+  parseGrantArgs,
   parseJsonStringArray,
   parseLaneArgs,
   parseLoopRecordArgs,
   parsePromoteArgs,
   parseRecordFinalizeArgs,
   parseRecordStartArgs,
+  parseReplanArgs,
   parseSelectionArgs,
   validateActionFields,
   validateBackend,

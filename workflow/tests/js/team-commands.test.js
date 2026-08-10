@@ -13,7 +13,15 @@ const PUBLIC_BIN = path.join(WORKFLOW_ROOT, "bin", "codex-workflow");
 const TEAM_LEDGER_BIN = path.resolve(
   WORKFLOW_ROOT, "../plugins/atlas-workflow/scripts/codex-team-ledger",
 );
+const V5_CONTRACT_FIXTURE = path.resolve(
+  WORKFLOW_ROOT,
+  "../test/fixtures/implementation-contract/valid/scope-admission-v5.md",
+);
 const TEMPLATE_DIR = path.join(WORKFLOW_ROOT, "templates");
+const { snapshotAuthoritySlices } = require(path.resolve(
+  WORKFLOW_ROOT,
+  "../plugins/atlas-workflow/contracts/team-sdd/validators/authority-slices.js",
+));
 const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
@@ -25,12 +33,13 @@ const { updateTaskCommand } = require(path.join(
 const {
   authoritativeEventDigest,
   canonicalJson,
+  readAuthoritativeEvents,
   sha256: eventStoreSha256,
 } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/event-store.js",
 ));
-const { taskEventFile } = require(path.join(
+const { mutateTaskRuntime, taskEventFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/task-mutation.js",
 ));
@@ -42,7 +51,14 @@ const { taskMutationLockFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/lock.js",
 ));
-const { archiveTask, completeTask, createTask, startTask } = require(path.join(
+const {
+  archiveTask,
+  blockTask,
+  completeTask,
+  createTask,
+  resumeTask,
+  startTask,
+} = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
 ));
@@ -53,6 +69,12 @@ const { getTaskField, taskFile, updateTaskFields } = require(path.join(
 const { readJsonObject, taskRuntimeFile, taskStateFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/runtime.js",
+));
+const {
+  recordLaunchReconciliation,
+} = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/lane-registry.js",
 ));
 const {
   parseAttemptArgs,
@@ -69,9 +91,9 @@ const {
   runFallbackRecord,
   runLaneRecord,
   runLoopRecord,
-  runPromote,
+  runPromote: runPromoteCommand,
   runRecordFinalize,
-  runRecordStart,
+  runRecordStart: runRecordStartCommand,
   runSelectionRecord,
   runStatus,
   runStop,
@@ -80,6 +102,32 @@ const {
   teamLockFile,
   teamStaffingFile,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/team/commands.js"));
+const {
+  parseAuthorizeArgs,
+  parseGrantArgs,
+  parseReplanArgs,
+  runAuthorize,
+  runGrant,
+  runReplan,
+} = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/authority-commands.js",
+));
+const {
+  applyAuthorityTransition,
+  validateGrant,
+} = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/execution-grant.js",
+));
+const { buildCanonicalScope } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/scope-artifacts.js",
+));
+const { runLegacyTeamCommand } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/legacy-bridge.js",
+));
 const { buildObservation, launchLabel } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/team/paseo-observer.js",
@@ -87,12 +135,17 @@ const { buildObservation, launchLabel } = require(path.join(
 const {
   formatCommand,
   parseVerifyArgs,
+  parseVerifyResolveArgs,
   runVerification,
+  runVerificationResolution,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/runner.js"));
+const { captureVerificationIdentity } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/identity.js",
+));
 const { executionCompletionAdmission, requiredGateAdmission } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/verification/required-gates.js",
 ));
-const { globalAdmissionLockFile } = require(path.join(
+const { bindExecutionAuthority, globalAdmissionLockFile } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/team/admission.js",
 ));
 const {
@@ -162,6 +215,127 @@ function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+function renderV5ExecutionContract(taskId, plan) {
+  const firstSlice = plan.slices[0];
+  const acceptanceRefs = [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))]
+    .sort();
+  const acceptanceRows = acceptanceRefs.map((ref) => (
+    `| ${ref} | Admit ${ref} from the canonical execution plan. | yes | structural lint | goal:${ref} |`
+  ));
+  return fs.readFileSync(V5_CONTRACT_FIXTURE, "utf8")
+    .replace(/^task_id: fixture$/m, `task_id: ${taskId}`)
+    .replace(
+      /^- first_code_slice: .*$/m,
+      "- first_code_slice: Implement runtime claim coordination in the workflow helper.",
+    )
+    .replace(
+      /^- first_code_verification: .*$/m,
+      `- first_code_verification: ${firstSlice.checks[0].command}`,
+    )
+    .replace(
+      /```atlas-execution-plan\+json\n[\s\S]*?\n```/,
+      `\`\`\`atlas-execution-plan+json\n${JSON.stringify(plan, null, 2)}\n\`\`\``,
+    )
+    .replace(
+      /## Acceptance Criteria\n\n[\s\S]*?\n## Edge Cases/,
+      [
+        "## Acceptance Criteria",
+        "",
+        "| ID | Criterion | Required | Verification | Authority |",
+        "|----|-----------|----------|--------------|-----------|",
+        ...acceptanceRows,
+        "",
+        "## Edge Cases",
+      ].join("\n"),
+    );
+}
+
+function writeFixtureAuthoritySlice(paths, taskId, repo, baseSha, plan) {
+  const sliceId = "authority-contract";
+  const sliceDir = path.join(
+    taskArtifactDir(paths, taskId),
+    "team", "sdd", "slices", sliceId,
+  );
+  const acceptanceRefs = [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))]
+    .sort();
+  const requiredChecks = [...new Set(
+    plan.slices.flatMap((slice) => slice.checks.map((check) => check.command)),
+  )].sort();
+  fs.mkdirSync(sliceDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sliceDir, "brief.md"),
+    `# Goal\n\n${acceptanceRefs.map((ref) => `- ${ref}`).join("\n")}\n`,
+  );
+  fs.writeFileSync(path.join(sliceDir, "brief.json"), `${JSON.stringify({
+    schema_version: 2,
+    task_id: taskId,
+    slice_id: sliceId,
+    repo,
+    base_sha: baseSha,
+    objective: "Provide canonical authority for the test execution contract.",
+    requirements_path: "brief.md",
+    global_constraints_path: "../../global-constraints.md",
+    owned_paths: ["workflow/test-authority/**"],
+    forbidden_paths: [],
+    acceptance_refs: acceptanceRefs,
+    required_checks: requiredChecks,
+    commit_policy: "logical_outcome",
+    output_contract: "final_message_json_only",
+  }, null, 2)}\n`);
+  return sliceDir;
+}
+
+function ensureFixtureGrant(parsed, options = {}) {
+  if (!parsed?.briefPath || !parsed?.authorizationRef) return parsed;
+  const paths = options.paths || resolvePaths(options.environment || process.env);
+  let state = readJsonObject(taskStateFile(paths, parsed.taskId));
+  let authority = state.execution_authority;
+  if (!authority) {
+    const brief = JSON.parse(fs.readFileSync(parsed.briefPath, "utf8"));
+    const grantId = `grant-${sha256(`${parsed.taskId}|${parsed.authorizationRef}`).slice(0, 16)}`;
+    const operationId = `authorize-${sha256(`${parsed.taskId}|${parsed.authorizationRef}`).slice(0, 16)}`;
+    runAuthorize(parseAuthorizeArgs([
+      parsed.taskId,
+      brief.objective,
+      `--authorization-ref=${parsed.authorizationRef}`,
+      `--brief=${parsed.briefPath}`,
+      `--grant-id=${grantId}`,
+      `--operation-id=${operationId}`,
+    ]), {
+      ...options,
+      cwd: options.cwd || brief.repo,
+      paths,
+    });
+    state = readJsonObject(taskStateFile(paths, parsed.taskId));
+    authority = state.execution_authority;
+  }
+  const grant = (authority?.grants || []).find(
+    (candidate) => candidate.grant_id === authority.current_grant_id,
+  ) || (authority?.grants || []).at(-1);
+  if (!grant) return parsed;
+  const brief = JSON.parse(fs.readFileSync(parsed.briefPath, "utf8"));
+  return {
+    ...parsed,
+    objective: parsed.mode === "execute" ? brief.objective : parsed.objective,
+    grantId: parsed.grantId || grant.grant_id,
+    scopeDigest: parsed.scopeDigest || grant.scope_digest,
+  };
+}
+
+function runRecordStart(parsed, options = {}) {
+  return runRecordStartCommand(
+    parsed?.mode === "execute" ? ensureFixtureGrant(parsed, options) : parsed,
+    options,
+  );
+}
+
+function runPromote(parsed, options = {}) {
+  return runPromoteCommand(
+    parsed?.target === "execute" ? ensureFixtureGrant(parsed, options) : parsed,
+    options,
+  );
+}
+
 function executionBrief(paths, taskId, options = {}) {
   const repo = path.join(paths.root, "execution-repo");
   fs.mkdirSync(repo, { recursive: true });
@@ -213,44 +387,42 @@ function executionBrief(paths, taskId, options = {}) {
     estimate: { ...slice.estimate, serial_dependency_depth: 0 },
   }));
   const plan = {
-    schema_version: 1,
+    schema_version: 3,
     size_policy: { policy_id: "atlas-slice-size-v2" },
     slices: [...dependencySlices, slice],
   };
-  const contract = path.join(repo, "implementation-contract.final.md");
-  fs.writeFileSync(contract, [
-    "# Test Contract",
-    "",
-    `task_id: ${taskId}`,
-    "contract_semantics_version: 3",
-    "",
-    "```atlas-execution-plan+json",
-    JSON.stringify(plan, null, 2),
-    "```",
-    "",
-  ].join("\n"));
-  spawnSync("git", ["-C", repo, "add", "implementation-contract.final.md"]);
+  const contractName = `implementation-contract.${taskId}.final.md`;
+  const contract = path.join(repo, contractName);
+  fs.writeFileSync(contract, renderV5ExecutionContract(taskId, plan));
+  spawnSync("git", ["-C", repo, "add", contractName]);
   spawnSync("git", ["-C", repo, "commit", "-qm", "test: execution contract"]);
   const baseSha = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const authoritySlice = writeFixtureAuthoritySlice(paths, taskId, repo, baseSha, plan);
+  const authoritySnapshot = snapshotAuthoritySlices([authoritySlice], {
+    expectedTaskId: taskId,
+    workflowRoot: paths.root,
+  });
   const slices = new Map(plan.slices.map((item) => [item.slice_id, item]));
   const contractIdentity = {
     path: contract,
     sha256: `sha256:${sha256(fs.readFileSync(contract))}`,
-    semantics_version: 3,
+    semantics_version: 5,
+    execution_plan_schema_version: 3,
     execution_plan_sha256: `sha256:${sha256(JSON.stringify(stableValue(plan)))}`,
+    authority_slices: authoritySnapshot.identities,
   };
   const briefs = {};
   const briefPaths = {};
   for (const selected of plan.slices) {
     const brief = {
-      schema_version: 3,
+      schema_version: 4,
       task_id: taskId,
       slice_id: selected.slice_id,
       repo,
       base_sha: baseSha,
       objective: selected.objective,
-      requirements_path: "brief.md",
-      global_constraints_path: "../../global-constraints.md",
+      requirements_path: "team/sdd/requirements.md",
+      global_constraints_path: "team/sdd/global-constraints.md",
       contract: contractIdentity,
       dependencies: selected.depends_on.map((sliceId) => ({
         slice_id: sliceId,
@@ -290,10 +462,70 @@ function executionBrief(paths, taskId, options = {}) {
     briefPath: briefPaths[selectedId],
     briefPaths,
     briefs,
+    authoritySlice,
     contract,
     plan,
     repo,
   };
+}
+
+function issueExecutionGrant(environment, paths, taskId, admission, options = {}) {
+  const authorizationRef = options.authorizationRef || "user-message:p0b-authorize";
+  const grantId = options.grantId || "p0b-grant-1";
+  const operationId = options.operationId || `authorize-${grantId}`;
+  const brief = JSON.parse(fs.readFileSync(admission.briefPath, "utf8"));
+  runAuthorize(parseAuthorizeArgs([
+    taskId,
+    options.objective || brief.objective,
+    `--authorization-ref=${authorizationRef}`,
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grantId}`,
+    `--operation-id=${operationId}`,
+  ]), {
+    clock: options.clock,
+    cwd: admission.repo,
+    environment,
+  });
+  const authority = readJsonObject(taskStateFile(paths, taskId)).execution_authority;
+  return authority.grants.find((grant) => grant.grant_id === authority.current_grant_id);
+}
+
+function replanRequest(environment, paths, taskId, admission, oldGrant, options = {}) {
+  const authorizationRef = options.authorizationRef || "operator-input:p0b-replan";
+  const grantId = options.grantId || "p0b-grant-2";
+  const evidencePolicy = options.evidencePolicy || "invalidate-incompatible";
+  const retainEvidence = [...(options.retainEvidence || [])].sort();
+  const brief = JSON.parse(fs.readFileSync(admission.briefPath, "utf8"));
+  const objective = options.objective || brief.objective;
+  const loaded = buildCanonicalScope({
+    authorizationRef,
+    briefPath: admission.briefPath,
+    cwd: admission.repo,
+    environment,
+    evidencePolicy: {
+      mode: evidencePolicy,
+      retained_receipt_ids: retainEvidence,
+    },
+    grantId,
+    objective,
+    parent: { grant_id: oldGrant.grant_id, scope_digest: oldGrant.scope_digest },
+    paths,
+    taskId,
+  });
+  const expectedDelta = options.expectedDelta === undefined
+    ? loaded.contracts.scopeDelta(oldGrant.scope, loaded.scope)
+    : options.expectedDelta;
+  return parseReplanArgs([
+    taskId,
+    objective,
+    `--authorization-ref=${authorizationRef}`,
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grantId}`,
+    `--operation-id=${options.operationId || `replan-${grantId}`}`,
+    `--evidence-policy=${evidencePolicy}`,
+    `--expected-delta=${JSON.stringify(expectedDelta)}`,
+    ...retainEvidence.map((receiptId) => `--retain-evidence=${receiptId}`),
+  ]);
 }
 
 function acceptedExecution(environment, paths, title = "Accepted execution") {
@@ -523,6 +755,194 @@ function startPaseoRecord(environment, taskId, clock = "2026-07-10T12:01:00.000Z
   );
 }
 
+function startAuthorizedPaseoAttempt(environment, paths, suffix, options = {}) {
+  const taskId = createFixtureTask(environment, `Authorized Paseo ${suffix}`);
+  const authorizationRef = options.authorizationRef || `user-message:${suffix}-authority`;
+  const admission = executionBrief(paths, taskId, {
+    ownedPaths: [`workflow/${suffix}/**`],
+    ...(options.sizeException ? {
+      budget: {
+        max_changed_files: 1,
+        max_loc: 1,
+        max_wall_clock_minutes: 1,
+        max_required_checks: 1,
+      },
+      sizeException: options.sizeException,
+    } : {}),
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef,
+    clock: clockAt("2026-07-10T12:01:00Z"),
+    grantId: `${suffix}-grant`,
+    operationId: `${suffix}-authorize`,
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--backend=paseo",
+    "--mode=execute",
+    `--authorization-ref=${authorizationRef}`,
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    `--operation-id=${suffix}-start`,
+    "--agents=1",
+    "--roles=implementer",
+    "--providers=codex=gpt-5.6",
+    "--selection-authority-kind=user-message",
+    `--selection-authority-ref=user-message:${suffix}-selection`,
+  ]), {
+    clock: clockAt("2026-07-10T12:02:00Z"),
+    cwd: admission.repo,
+    environment,
+  });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, `--operation-id=${suffix}-lane`, "--action=open", `--lane=${suffix}-lane`,
+    ...(options.writable ? ["--writable", `--paths=workflow/${suffix}/**`] : []),
+  ], "2026-07-10T12:03:00Z");
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, `--operation-id=${suffix}-dispatch`, "--action=open",
+    `--lane=${suffix}-lane`, `--dispatch=${suffix}-dispatch`,
+  ], "2026-07-10T12:04:00Z");
+  recordCapability(environment, taskId, {
+    snapshotId: `${suffix}-capability`,
+    provider: "openai",
+    model: "gpt-5.6",
+    family: "non-claude",
+    runtimeModes: options.writable ? ["structured-write-v1"] : [],
+  });
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, `--operation-id=${suffix}-reserve`, "--action=reserve",
+    `--dispatch=${suffix}-dispatch`, `--attempt=${suffix}-attempt`,
+    "--provider=openai", "--model=gpt-5.6",
+    `--capability-snapshot=${suffix}-capability`,
+    `--launch-operation-id=launch-${suffix}`,
+    ...(options.writable ? [
+      "--writable",
+      `--paths=workflow/${suffix}/**`,
+      "--runtime-mode-id=structured-write-v1",
+    ] : []),
+  ], "2026-07-10T12:06:00Z");
+  return { admission, grant, taskId, attemptId: `${suffix}-attempt` };
+}
+
+function startDiscussionPaseoAttempt(environment, paths, suffix, { withGrant = false } = {}) {
+  const taskId = createFixtureTask(environment, `Discussion Paseo ${suffix}`);
+  const admission = withGrant ? executionBrief(paths, taskId, {
+    ownedPaths: [`workflow/${suffix}/**`],
+  }) : null;
+  const grant = withGrant ? issueExecutionGrant(environment, paths, taskId, admission, {
+    grantId: `${suffix}-grant`,
+    operationId: `${suffix}-authorize`,
+  }) : null;
+  startPaseoRecord(environment, taskId);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId, `--operation-id=${suffix}-lane`, "--action=open", `--lane=${suffix}-lane`,
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, `--operation-id=${suffix}-dispatch`, "--action=open",
+    `--lane=${suffix}-lane`, `--dispatch=${suffix}-dispatch`,
+  ]);
+  recordCapability(environment, taskId, {
+    snapshotId: `${suffix}-capability`,
+    provider: "openai",
+    model: "gpt-5.6",
+    family: "non-claude",
+  });
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, `--operation-id=${suffix}-reserve`, "--action=reserve",
+    `--dispatch=${suffix}-dispatch`, `--attempt=${suffix}-attempt`,
+    "--provider=openai", "--model=gpt-5.6",
+    `--capability-snapshot=${suffix}-capability`,
+    `--launch-operation-id=launch-${suffix}`,
+  ]);
+  return { admission, grant, taskId, attemptId: `${suffix}-attempt` };
+}
+
+function startResolvedNoActorAttempt(environment, paths, suffix, options = {}) {
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, suffix, options);
+  const observeArgs = [
+    fixture.taskId,
+    `--operation-id=${suffix}-observe`,
+    "--action=observe",
+    `--attempt=${fixture.attemptId}`,
+    `--observation-id=${suffix}-observation`,
+    "--observer-action=run",
+    '--observer-args-json=["launch under durable claim"]',
+  ];
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    observeArgs,
+    "2026-07-10T12:07:00Z",
+    {
+      failAfterEventAppend: true,
+      observePaseoCommand() {
+        throw new Error("actor launch must not run before injected claim crash");
+      },
+    },
+  ), /authoritative event committed but projection is inconsistent/);
+  const claim = authoritativeEvents(paths, fixture.taskId).at(-1)
+    .projection.state.active_team.observer_launch_claims[0];
+  const evidenceRef = `recovery/${suffix}-no-actor.md`;
+  writeEvidence(paths, fixture.taskId, evidenceRef);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    fixture.taskId,
+    `--operation-id=${suffix}-resolve`,
+    "--action=resolve-launch",
+    `--attempt=${fixture.attemptId}`,
+    `--claim-operation-id=${claim.claim_operation_id}`,
+    `--launch-operation-id=${claim.launch_operation_id}`,
+    "--disposition=no-actor-confirmed",
+    `--authority-ref=operator-input:${suffix}-no-actor`,
+    "--reason=controller confirmed the durable launch claim created no actor",
+    `--evidence-refs=${evidenceRef}`,
+  ]);
+  return {
+    ...fixture,
+    claim,
+    dispatchId: `${suffix}-dispatch`,
+    evidenceRef,
+    laneId: `${suffix}-lane`,
+    writable: Boolean(options.writable),
+  };
+}
+
+function quiesceResolvedAttempt(environment, fixture) {
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    fixture.taskId,
+    `--operation-id=${fixture.attemptId}-quiesce`,
+    "--action=quiesced",
+    `--attempt=${fixture.attemptId}`,
+    `--evidence-refs=${fixture.evidenceRef}`,
+  ]);
+}
+
+function closeResolvedAttemptControlPlane(environment, fixture) {
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    fixture.taskId,
+    `--operation-id=${fixture.dispatchId}-dispose`,
+    "--action=dispose",
+    `--dispatch=${fixture.dispatchId}`,
+    "--disposition=rejected",
+    `--evidence-refs=${fixture.evidenceRef}`,
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    fixture.taskId,
+    `--operation-id=${fixture.dispatchId}-close`,
+    "--action=close",
+    `--dispatch=${fixture.dispatchId}`,
+  ]);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    fixture.taskId,
+    `--operation-id=${fixture.laneId}-close`,
+    "--action=close",
+    `--lane=${fixture.laneId}`,
+    "--convergence=CONSENSUS_WITH_RESERVATIONS",
+  ]);
+}
+
 function writeNativeArtifacts(paths, taskId) {
   const directory = teamDir(paths, taskId);
   const round = path.join(directory, "round-native.md");
@@ -666,6 +1086,27 @@ function recordAttemptObservation(environment, taskId, {
         return { observation, stdout: "", stderr: "" };
       },
     });
+}
+
+function successfulLaunchObserver(calls, runtimeAgentId = "paseo-launched-agent") {
+  return {
+    observePaseoCommand(action) {
+      calls[action] = (calls[action] || 0) + 1;
+      if (action === "ls") {
+        const stdout = JSON.stringify([]);
+        return {
+          stdout,
+          stderr: "",
+          observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+        };
+      }
+      const stdout = JSON.stringify({ status: "running", agent_id: runtimeAgentId });
+      const observation = buildObservation({ action, exitCode: 0, stdout, stderr: "" });
+      observation.actor_created = true;
+      observation.runtime_agent_id = runtimeAgentId;
+      return { stdout, stderr: "", observation };
+    },
+  };
 }
 
 test("record-start validates and records native running state", (t) => {
@@ -826,7 +1267,7 @@ test("record-start requires an explicit authorization ref before execute writes"
 
   assert.throws(
     () => runRecordStart(parsed, { environment }),
-    /missing execute authorization ref/,
+    /missing or invalid execute grant_id/,
   );
   assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
@@ -869,13 +1310,16 @@ test("record-start requires an explicit authorization ref before execute writes"
     { cwd: admission.repo, environment },
   ), /team start operation_id replay conflict/);
   fs.writeFileSync(admission.briefPath, briefBeforeReplayConflict);
-  assert.throws(() => runRecordStart(
+  const currentGrant = readJsonObject(stateFile).execution_authority.grants[0];
+  assert.throws(() => runRecordStartCommand(
     {
       ...parsed,
       objective: "conflicting replay objective",
       authorizationRef: "user-message:implement-roadmap",
       briefPath: admission.briefPath,
+      grantId: currentGrant.grant_id,
       operationId: "start-execution",
+      scopeDigest: currentGrant.scope_digest,
     },
     { cwd: admission.repo, environment },
   ), /team start operation_id replay conflict/);
@@ -919,7 +1363,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
     `--brief=${admission.briefPaths.foundation}`, "--operation-id=discuss-foundation",
   ]), { cwd: admission.repo, environment });
   runPromote(parsePromoteArgs([
-    taskId, "--to=execute", "--authorization-ref=user-message:foundation-execute",
+    taskId, "--to=execute", "--authorization-ref=user-message:dependency-execute",
     `--brief=${admission.briefPaths.foundation}`, "--operation-id=promote-foundation",
   ]), { cwd: admission.repo, environment });
   runPromote(parsePromoteArgs([taskId, "--to=finish"]), {
@@ -941,7 +1385,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
     taskId, `--brief=${admission.briefPaths.foundation}`,
     "--operation-id=accept-foundation-with-unowned-keeper",
-    "--keeper-output=event:foundation:ready=implementation-contract.final.md",
+    `--keeper-output=event:foundation:ready=${path.basename(admission.contract)}`,
   ]), { environment }), /keeper output is outside admitted ownership/);
   runSliceAccept(parseSliceAcceptArgs([
     taskId, `--brief=${admission.briefPaths.foundation}`,
@@ -961,18 +1405,19 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
     events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
     fs.writeFileSync(eventFile, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
   };
+  const dependencyTamperPattern = /dependency acceptance projection diverges from its terminal: foundation|slice\.accepted receipt differs from prior Team\/authority\/event evidence|slice\.accepted verification receipt differs from gate/;
   rewriteAccepted((accepted) => {
     accepted.brief_sha256 = `sha256:${"1".repeat(64)}`;
   });
   assert.throws(
     () => runRecordStart(parsed, { cwd: admission.repo, environment }),
-    /dependency Team generation is not authoritative: foundation/,
+    dependencyTamperPattern,
   );
   fs.writeFileSync(eventFile, acceptedStream);
   rewriteAccepted((accepted) => { accepted.generation += 1; });
   assert.throws(
     () => runRecordStart(parsed, { cwd: admission.repo, environment }),
-    /dependency Team generation is not authoritative: foundation/,
+    dependencyTamperPattern,
   );
   fs.writeFileSync(eventFile, acceptedStream);
   rewriteAccepted((accepted) => {
@@ -980,7 +1425,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   });
   assert.throws(
     () => runRecordStart(parsed, { cwd: admission.repo, environment }),
-    /dependency authoritative acceptance is invalid: foundation/,
+    dependencyTamperPattern,
   );
   fs.writeFileSync(eventFile, acceptedStream);
   rewriteAccepted((accepted) => {
@@ -988,7 +1433,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   });
   assert.throws(
     () => runRecordStart(parsed, { cwd: admission.repo, environment }),
-    /dependency authoritative acceptance is invalid: foundation/,
+    dependencyTamperPattern,
   );
   fs.writeFileSync(eventFile, acceptedStream);
   rewriteAccepted((accepted) => {
@@ -996,7 +1441,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   });
   assert.throws(
     () => runRecordStart(parsed, { cwd: admission.repo, environment }),
-    /dependency authoritative acceptance is invalid: foundation/,
+    dependencyTamperPattern,
   );
   fs.writeFileSync(eventFile, acceptedStream);
 
@@ -1077,7 +1522,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
   assert.throws(
     () => runRecordStart(parseRecordStartArgs([
       taskId, "retry dependent slice", "--mode=execute",
-      "--authorization-ref=user-message:dependency-retry",
+      "--authorization-ref=user-message:dependency-execute",
       `--brief=${admission.briefPath}`, "--operation-id=retry-dependent-slice",
     ]), { cwd: admission.repo, environment }),
     /dependency is not keeper-ready succeeded: foundation/,
@@ -1243,20 +1688,19 @@ test("task completion requires every command-bound admitted gate", (t) => {
   completeTask(taskId, { environment, operationId: "done-all-required-gates" });
   const completedState = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(completedState.status, "done");
-  assert.equal(completedState.execution_authority.status, "active");
-  assert.equal(completedState.execution_authority.completion.completed_revision, completedState.runtime_revision);
-  assert.equal(executionCompletionAdmission(paths, taskId, completedState).passed, true);
+  assert.equal(completedState.execution_authority.schema_version, 2);
+  assert.equal(completedState.execution_authority.current_grant_id, null);
+  const completedGrant = completedState.execution_authority.grants.at(-1);
+  assert.equal(completedGrant.status, "completed");
+  assert.equal(completedGrant.terminal.revision, completedState.runtime_revision);
+  assert.equal(executionCompletionAdmission(paths, taskId, completedState).passed, false);
   commitAcceptedWorktree(admission.repo, "test: finalize required gates");
   archiveTask(taskId, "completed execution retained for audit", {
     environment,
     operationId: "archive-completed-execution",
   });
   const archivedState = readJsonObject(taskStateFile(paths, taskId));
-  assert.equal(archivedState.execution_authority.status, "active");
-  assert.deepEqual(
-    archivedState.execution_authority.completion,
-    completedState.execution_authority.completion,
-  );
+  assert.deepEqual(archivedState.execution_authority, completedState.execution_authority);
 });
 
 test("completion is bound to the final accepted HEAD and worktree snapshot", (t) => {
@@ -1271,6 +1715,51 @@ test("completion is bound to the final accepted HEAD and worktree snapshot", (t)
     firstAcceptance.actual_size.accepted_tree_oid,
     firstAcceptance.actual_size.current_tree_oid,
   );
+
+  const acceptedSource = fs.readFileSync(source);
+  let beforeFinalAppend = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => completeTask(taskId, {
+    beforeEventAppend(event) {
+      if (event.kind === "task.completion.closed") {
+        fs.writeFileSync(source, "module.exports = 'drifted at completion commit point';\n");
+      }
+    },
+    environment,
+    operationId: "done-with-source-drift-at-final-append",
+  }), /verification admission changed|worktree changed|snapshot/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeFinalAppend);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+  fs.writeFileSync(source, acceptedSource);
+
+  const acceptedKeeper = fs.readFileSync(fixture.keeper);
+  beforeFinalAppend = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => completeTask(taskId, {
+    beforeEventAppend(event) {
+      if (event.kind === "task.completion.closed") {
+        fs.writeFileSync(fixture.keeper, "keeper drifted at completion commit point\n");
+      }
+    },
+    environment,
+    operationId: "done-with-keeper-drift-at-final-append",
+  }), /verification admission changed|keeper|digest|snapshot/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeFinalAppend);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+  fs.writeFileSync(fixture.keeper, acceptedKeeper);
+
+  const finalAppendUntracked = path.join(path.dirname(source), "final-append-untracked.txt");
+  beforeFinalAppend = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => completeTask(taskId, {
+    beforeEventAppend(event) {
+      if (event.kind === "task.completion.closed") {
+        fs.writeFileSync(finalAppendUntracked, "untracked at completion commit point\n");
+      }
+    },
+    environment,
+    operationId: "done-with-untracked-drift-at-final-append",
+  }), /verification admission changed|worktree changed|snapshot/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeFinalAppend);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+  fs.rmSync(finalAppendUntracked);
 
   fs.writeFileSync(source, "module.exports = 'changed after acceptance';\n");
   assert.throws(
@@ -1330,7 +1819,10 @@ test("completion is bound to the final accepted HEAD and worktree snapshot", (t)
 
   const completed = readJsonObject(taskStateFile(paths, taskId));
   assert.deepEqual(completed.completion.completion_snapshot, {
-    schema_version: 1,
+    schema_version: 2,
+    grant_id: completed.completion.grant_id,
+    scope_digest: completed.completion.scope_digest,
+    evidence_epoch: completed.completion.evidence_epoch,
     repo_realpath: admission.repo,
     head_sha: finalAcceptanceEvent.result.accepted.actual_size.accepted_head_sha,
     tree_oid: finalAcceptanceEvent.result.accepted.actual_size.accepted_tree_oid,
@@ -1499,17 +1991,18 @@ test("execution authority survives later Team generations and rejects implicit r
     /missing authoritative accepted slice: execution-slice/,
   );
   assert.equal(
-    readJsonObject(taskStateFile(paths, taskId)).execution_authority.execution_plan_sha256,
+    readJsonObject(taskStateFile(paths, taskId)).execution_authority.grants[0]
+      .scope.execution_plan.sha256,
     admission.brief.contract.execution_plan_sha256,
   );
 
   const replacement = executionBrief(paths, taskId, { ownedPaths: ["replacement/code/**"] });
   assert.throws(() => runRecordStart(parseRecordStartArgs([
     taskId, "implicitly replace authoritative plan", "--mode=execute",
-    "--authorization-ref=user-message:authority-plan-b",
+    "--authorization-ref=user-message:authority-plan-a",
     `--brief=${replacement.briefPath}`, "--operation-id=start-authority-plan-b",
   ]), { cwd: replacement.repo, environment }),
-  /task execution authority is already bound to another contract/);
+  /current vNext grant scope no longer matches the stable contract\/brief set/);
 });
 
 test("execute admission rejects global writer overlap until the lease is released", (t) => {
@@ -1591,14 +2084,14 @@ test("execute admission rejects global writer overlap until the lease is release
     "--attempt=first-writer-attempt",
     "--evidence-refs=team/first-writer-quiesced.json",
   ]);
-  const releasedSecondAdmission = executionBrief(paths, secondTask, { ownedPaths: ["workflow/test-owned/bin/**"] });
+  const releasedSecondAdmission = secondAdmission;
   const releasedSecondStart = parseRecordStartArgs([
     secondTask, "request overlapping writer scope after release", "--mode=execute",
     "--authorization-ref=user-message:second-writer",
     `--brief=${releasedSecondAdmission.briefPath}`, "--operation-id=start-second-writer",
   ]);
   runRecordStart(releasedSecondStart, { cwd: releasedSecondAdmission.repo, environment });
-  assert.equal(readTeam(paths, secondTask).admission.mode, "execution-v3");
+  assert.equal(readTeam(paths, secondTask).admission.mode, "execution-vnext");
 });
 
 test("writer lease recovery journal blocks overlap before event commit and converges on retry", (t) => {
@@ -2176,7 +2669,7 @@ test("size exceptions are explicit and cannot downgrade permanent gates", (t) =>
   });
   runRecordStart(parseRecordStartArgs([
     taskId, "execute exception-authorized slice", "--mode=execute",
-    "--authorization-ref=user-message:size-execute",
+    "--authorization-ref=user-message:size-exception",
     `--brief=${admitted.briefPath}`, "--operation-id=start-size-exception",
   ]), { cwd: admitted.repo, environment });
 
@@ -2331,8 +2824,28 @@ test("record-start rejects done and archived tasks before changing Team state", 
         environment,
       });
     } else {
-      updateTaskCommand(paths, taskId, { status: "done" }, { status: "done" },
-        clockAt("2026-07-10T12:00:30.000Z"));
+      const repo = path.join(paths.root, `direct-completion-${taskId}`);
+      fs.mkdirSync(repo, { recursive: true });
+      spawnSync("git", ["init", "-q", repo]);
+      spawnSync("git", ["-C", repo, "config", "user.email", "atlas@example.test"]);
+      spawnSync("git", ["-C", repo, "config", "user.name", "Atlas Test"]);
+      fs.writeFileSync(path.join(repo, "README.md"), "direct completion fixture\n");
+      spawnSync("git", ["-C", repo, "add", "README.md"]);
+      spawnSync("git", ["-C", repo, "commit", "-qm", "test: direct completion fixture"]);
+      runVerification(parseVerifyArgs([
+        taskId, "--", process.execPath, "-e", "process.exit(0)",
+      ]), {
+        clock: clockAt("2026-07-10T12:00:20.000Z"),
+        cwd: repo,
+        environment,
+        operationId: `verify-before-${status}`,
+        recordToken: "20260710T120020000000001",
+      });
+      completeTask(taskId, {
+        clock: clockAt("2026-07-10T12:00:30.000Z"),
+        environment,
+        operationId: `complete-before-${status}`,
+      });
     }
     const stateFile = taskStateFile(paths, taskId);
     const runtimeFile = taskRuntimeFile(paths, taskId);
@@ -2685,7 +3198,7 @@ test("promote updates state and accepts equals form through the public dispatche
   const runtimeBefore = fs.readFileSync(runtimeFile, "utf8");
   assert.throws(
     () => runPromote({ taskId, target: "execute", authorizationRef: "" }, { environment }),
-    /missing execute authorization ref/,
+    /missing or invalid execute grant_id/,
   );
   assert.equal(fs.readFileSync(stateFile, "utf8"), stateBefore);
   assert.equal(fs.readFileSync(runtimeFile, "utf8"), runtimeBefore);
@@ -2702,6 +3215,8 @@ test("promote updates state and accepts equals form through the public dispatche
     cwd: admission.repo,
     environment,
   });
+  let state = readJsonObject(taskStateFile(paths, taskId));
+  const issuedGrant = state.execution_authority.grants[0];
   assert.deepEqual(execute.lines, [
     `task_id: ${taskId}`,
     "target: execute",
@@ -2709,12 +3224,13 @@ test("promote updates state and accepts equals form through the public dispatche
     "authorization_ref: user-message:implement-roadmap",
     `brief: ${admission.briefPath}`,
     "operation_id: promote-execution",
+    `grant_id: ${issuedGrant.grant_id}`,
+    `scope_digest: ${issuedGrant.scope_digest}`,
   ]);
-  let state = readJsonObject(taskStateFile(paths, taskId));
   assert.equal(state.active_team.mode, "execute");
   assert.equal(state.active_team.promoted_to, "execute");
   assert.equal(state.active_team.authorization_ref, "user-message:implement-roadmap");
-  assert.equal(state.active_team.admission.mode, "execution-v3");
+  assert.equal(state.active_team.admission.mode, "execution-vnext");
   const runtimeAfterPromotion = fs.readFileSync(runtimeFile, "utf8");
   const replay = runPromote(parsePromoteArgs([
     taskId,
@@ -3227,6 +3743,15 @@ test("Paseo launch reconciliation binds only the exact observed actor", (t) => {
     "--attempt=reconcile-attempt", "--launch-operation-id=launch-reconcile-attempt",
     "--runtime-agent-id=paseo-exact-agent", "--observation-id=reconcile-observation",
   ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=reconcile-observe", "--action=observe",
+    "--attempt=reconcile-attempt", "--observation-id=reconcile-observation",
+    "--observer-action=run", '--observer-args-json=["should not launch"]',
+  ], "2026-07-10T12:06:30.000Z", {
+    observePaseoCommand() {
+      throw new Error("terminal observation replay after bind must not call Paseo");
+    },
+  });
   const wrongActor = buildObservation({
     action: "stop", exitCode: 0,
     stdout: JSON.stringify({ status: "stopped", agent_id: "different-agent" }),
@@ -3330,6 +3855,1659 @@ test("Paseo launch reconciliation binds only the exact observed actor", (t) => {
   );
   assert.equal(crashListCalls, 1);
   assert.equal(crashRunCalls, 1);
+});
+
+test("pending observer launch replay performs ls-only recovery and terminalizes an exact actor", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "observer-crash-recovery");
+  const argv = [
+    fixture.taskId,
+    "--operation-id=observer-crash-recovery-observe",
+    "--action=observe",
+    `--attempt=${fixture.attemptId}`,
+    "--observation-id=observer-crash-recovery-observation",
+    "--observer-action=run",
+    '--observer-args-json=["launch once"]',
+  ];
+  let listCalls = 0;
+  let runCalls = 0;
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:07:00Z",
+    {
+      beforeEventAppend(event) {
+        if (event.kind === "team.attempt.observed") {
+          throw new Error("controller crashed after actor launch");
+        }
+      },
+      observePaseoCommand(action) {
+        if (action === "ls") {
+          listCalls += 1;
+          const stdout = JSON.stringify([]);
+          return {
+            stdout,
+            stderr: "",
+            observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+          };
+        }
+        runCalls += 1;
+        const stdout = JSON.stringify({ status: "running", agent_id: "recovered-agent" });
+        const observation = buildObservation({ action, exitCode: 0, stdout, stderr: "" });
+        observation.actor_created = true;
+        observation.runtime_agent_id = "recovered-agent";
+        return { stdout, stderr: "", observation };
+      },
+    },
+  ), /controller crashed after actor launch/);
+  assert.equal(listCalls, 1);
+  assert.equal(runCalls, 1);
+  assert.equal(readTeam(paths, fixture.taskId).observer_launch_claims[0].status, "in_progress");
+
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:08:00Z",
+    {
+      observePaseoCommand(action) {
+        assert.equal(action, "ls");
+        listCalls += 1;
+        const stdout = JSON.stringify([{ id: "recovered-agent", status: "running" }]);
+        return {
+          stdout,
+          stderr: "",
+          observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+        };
+      },
+    },
+  );
+  assert.equal(listCalls, 2);
+  assert.equal(runCalls, 1);
+  const team = readTeam(paths, fixture.taskId);
+  assert.equal(team.observer_launch_claims[0].status, "terminal");
+  assert.equal(team.observer_launch_claims[0].runtime_agent_id, "recovered-agent");
+  assert.equal(
+    team.attempts.find((attempt) => attempt.attempt_id === fixture.attemptId).launch_state,
+    "actor-observed",
+  );
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    fixture.taskId,
+    "--operation-id=observer-crash-recovery-bind",
+    "--action=bind",
+    `--attempt=${fixture.attemptId}`,
+    "--launch-operation-id=launch-observer-crash-recovery",
+    "--runtime-agent-id=recovered-agent",
+    "--observation-id=observer-crash-recovery-observation",
+  ]);
+});
+
+test("missing observer replay stays launch-state-unknown until audited no-actor resolution", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(
+    environment,
+    paths,
+    "observer-no-actor-resolution",
+    { writable: true },
+  );
+  const argv = [
+    fixture.taskId,
+    "--operation-id=observer-no-actor-observe",
+    "--action=observe",
+    `--attempt=${fixture.attemptId}`,
+    "--observation-id=observer-no-actor-observation",
+    "--observer-action=run",
+    '--observer-args-json=["must never replay"]',
+  ];
+  let externalCalls = 0;
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:07:00Z",
+    {
+      failAfterEventAppend: true,
+      observePaseoCommand() { externalCalls += 1; },
+    },
+  ), /authoritative event committed but projection is inconsistent/);
+  assert.equal(externalCalls, 0);
+
+  const blockedLoop = path.join(teamDir(paths, fixture.taskId), "loop-pending-observer.md");
+  fs.writeFileSync(
+    blockedLoop,
+    "# Paseo Loop\n\n- backend: paseo\n\n## Evidence\n" +
+      "A terminal loop record must not strand the pending observer claim.\n",
+  );
+  assert.throws(() => runLoopRecord(parseLoopRecordArgs([
+    fixture.taskId,
+    "--backend=paseo",
+    "--status=loop-done",
+    `--loop=${blockedLoop}`,
+    "--iterations=1",
+  ]), { environment }), /team-loop-record requires a closed v2 Team control plane.*in-progress observer launch claim/);
+
+  const missingObserver = {
+    observePaseoCommand(action) {
+      assert.equal(action, "ls");
+      externalCalls += 1;
+      const stdout = JSON.stringify([]);
+      return {
+        stdout,
+        stderr: "",
+        observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+      };
+    },
+  };
+  for (let replay = 0; replay < 2; replay += 1) {
+    assert.throws(() => invokeControl(
+      runAttemptRecord,
+      parseAttemptArgs,
+      environment,
+      argv,
+      `2026-07-10T12:0${8 + replay}:00Z`,
+      missingObserver,
+    ), /launch-state-unknown.*resolve-launch/);
+  }
+  assert.equal(externalCalls, 2);
+  let team = readTeam(paths, fixture.taskId);
+  const claim = team.observer_launch_claims[0];
+  let attempt = team.attempts.find((candidate) => candidate.attempt_id === fixture.attemptId);
+  assert.equal(claim.status, "in_progress");
+  assert.equal(claim.reconciliations.length, 2);
+  assert.equal(attempt.launch_state, "launch-state-unknown");
+  assert.equal(attempt.launch_invoked, false);
+  assert.equal(team.writer_leases[0].state, "active");
+  assert.equal(
+    authoritativeEvents(paths, fixture.taskId)
+      .filter((event) => event.kind === "team.attempt.observation.launch.reconciled").length,
+    2,
+  );
+  const status = runStatus([fixture.taskId], { environment }).lines.join("\n");
+  assert.match(status, /team_observer_launch_claims_pending: .*launch-state-unknown/);
+  assert.match(status, /--action=resolve-launch/);
+
+  writeEvidence(paths, fixture.taskId, "recovery/no-actor-confirmed.md");
+  const resolutionArgs = [
+    fixture.taskId,
+    "--operation-id=resolve-observer-no-actor",
+    "--action=resolve-launch",
+    `--attempt=${fixture.attemptId}`,
+    `--claim-operation-id=${claim.claim_operation_id}`,
+    `--launch-operation-id=${claim.launch_operation_id}`,
+    "--disposition=no-actor-confirmed",
+    "--authority-ref=operator-input:no-actor-confirmed",
+    "--reason=controller inspected the provider and confirmed no actor exists",
+    "--evidence-refs=recovery/no-actor-confirmed.md",
+  ];
+  for (const authorityRef of [
+    "",
+    "user-message:",
+    "user-message:slash/not-canonical",
+    "operator-input:contains whitespace",
+    "user-message:control\tcharacter",
+    "self-assertion:invalid",
+  ]) {
+    assert.throws(() => invokeControl(
+      runAttemptRecord,
+      parseAttemptArgs,
+      environment,
+      resolutionArgs.map((argument) => (
+        argument.startsWith("--authority-ref=")
+          ? `--authority-ref=${authorityRef}`
+          : argument
+      )),
+    ), /missing team-attempt-record authorityRef|unsafe observer launch resolution authority ref|controller-recordable/);
+  }
+  const firstResolution = invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    resolutionArgs,
+  );
+  assert.deepEqual(invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    resolutionArgs,
+  ), firstResolution);
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    resolutionArgs.map((argument) => (
+      argument.startsWith("--reason=")
+        ? "--reason=conflicting no actor explanation"
+        : argument
+    )),
+  ), /operation_id replay payload conflict/);
+  team = readTeam(paths, fixture.taskId);
+  attempt = team.attempts.find((candidate) => candidate.attempt_id === fixture.attemptId);
+  assert.equal(team.observer_launch_claims[0].status, "indeterminate");
+  assert.equal(attempt.status, "terminal");
+  assert.equal(attempt.runtime_outcome, "interrupted");
+  assert.equal(attempt.launch_invoked, false);
+  assert.equal(team.writer_leases[0].state, "active");
+  assert.equal(
+    team.observations.some((observation) => observation.action === "run"),
+    false,
+  );
+  const resolvedStatus = runStatus([fixture.taskId], { environment }).lines.join("\n");
+  assert.match(resolvedStatus, /team_observer_launch_claims_indeterminate:/);
+  assert.match(resolvedStatus, /--action=quiesced/);
+
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    fixture.taskId,
+    "--operation-id=quiesce-observer-no-actor",
+    "--action=quiesced",
+    `--attempt=${fixture.attemptId}`,
+    "--evidence-refs=recovery/no-actor-confirmed.md",
+  ]);
+  team = readTeam(paths, fixture.taskId);
+  assert.equal(
+    team.attempts.find((candidate) => candidate.attempt_id === fixture.attemptId).status,
+    "quiesced",
+  );
+  assert.equal(team.writer_leases[0].state, "released");
+});
+
+test("every v2 Team terminal transition preserves recovery until control-plane closure", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+
+  const finish = startResolvedNoActorAttempt(
+    environment,
+    paths,
+    "terminal-guard-finish",
+    { writable: true },
+  );
+  assert.throws(() => completeTask(finish.taskId, {
+    clock: clockAt("2026-07-10T12:07:30Z"),
+    environment,
+  }), /Team writer lease is not released: .*active/);
+  assert.throws(() => runPromoteCommand(parsePromoteArgs([
+    finish.taskId,
+    "--to=finish",
+  ]), {
+    environment,
+    operationId: "finish-before-quiescence",
+  }), /team finish promotion requires a closed v2 Team control plane.*not quiesced.*writer lease is not released/);
+  quiesceResolvedAttempt(environment, finish);
+  closeResolvedAttemptControlPlane(environment, finish);
+  runPromoteCommand(parsePromoteArgs([finish.taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-after-control-plane-closure",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    finish.taskId,
+    "new generation after complete control-plane closure",
+    "--mode=discuss",
+    "--operation-id=start-generation-after-control-plane-closure",
+  ]), { environment });
+  assert.equal(readTeam(paths, finish.taskId).generation, 2);
+
+  const stopped = startResolvedNoActorAttempt(
+    environment,
+    paths,
+    "terminal-guard-stop",
+  );
+  assert.throws(() => runStop([stopped.taskId], {
+    environment,
+    operationId: "stop-before-quiescence",
+  }), /team-stop requires a closed v2 Team control plane.*not quiesced/);
+  quiesceResolvedAttempt(environment, stopped);
+  closeResolvedAttemptControlPlane(environment, stopped);
+  runStop([stopped.taskId], {
+    environment,
+    operationId: "stop-after-control-plane-closure",
+  });
+  assert.equal(readTeam(paths, stopped.taskId).status, "stopped");
+
+  const finalized = startResolvedNoActorAttempt(
+    environment,
+    paths,
+    "terminal-guard-finalize",
+  );
+  closeResolvedAttemptControlPlane(environment, finalized);
+  const artifacts = writeNativeArtifacts(paths, finalized.taskId);
+  for (const file of Object.values(artifacts)) {
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/backend: native/g, "backend: none"));
+  }
+  const finalizeArgs = parseRecordFinalizeArgs([
+    finalized.taskId,
+    "--backend=native",
+    "--status=interrupted",
+    `--round=${artifacts.round}`,
+    `--decision=${artifacts.decision}`,
+    `--staffing=${artifacts.staffing}`,
+  ]);
+  assert.throws(() => runRecordFinalize(finalizeArgs, {
+    environment,
+    operationId: "finalize-before-quiescence",
+  }), /team-record-finalize requires a closed v2 Team control plane.*not quiesced/);
+  quiesceResolvedAttempt(environment, finalized);
+  runRecordFinalize(finalizeArgs, {
+    environment,
+    operationId: "finalize-after-quiescence",
+  });
+  assert.equal(readTeam(paths, finalized.taskId).status, "interrupted");
+
+  const historical = startResolvedNoActorAttempt(
+    environment,
+    paths,
+    "terminal-guard-historical-generation",
+    { writable: true },
+  );
+  const beforeTerminalInjection = fs.readFileSync(
+    taskEventFile(paths, historical.taskId),
+    "utf8",
+  );
+  assert.throws(() => mutateTaskRuntime(paths, historical.taskId, {
+    kind: "test.historical-terminal-team",
+    operationId: "inject-historical-terminal-team",
+    data: {},
+  }, ({ currentProjection }) => {
+    const state = structuredClone(currentProjection.state);
+    state.active_team.status = "promoted:finish";
+    return {
+      projection: {
+        task_content: currentProjection.task_content,
+        state,
+      },
+    };
+  }, { environment }), /event changed Team state it does not own/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, historical.taskId), "utf8"),
+    beforeTerminalInjection,
+  );
+  assert.throws(() => runRecordStartCommand(parseRecordStartArgs([
+    historical.taskId,
+    "must not discard historical recovery state",
+    "--mode=discuss",
+    "--operation-id=start-over-unclosed-historical-generation",
+  ]), { environment }), /active v2 team run must finish/);
+  const retained = readTeam(paths, historical.taskId);
+  assert.equal(retained.generation, 1);
+  assert.equal(retained.attempts[0].status, "terminal");
+  assert.equal(retained.writer_leases[0].state, "active");
+});
+
+test("discussion observer claims block archive and execute promotion without blocking worktree", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const archiveFixture = startDiscussionPaseoAttempt(
+    environment,
+    paths,
+    "discussion-archive-claim",
+  );
+  const archiveObserve = [
+    archiveFixture.taskId,
+    "--operation-id=discussion-archive-observe",
+    "--action=observe",
+    `--attempt=${archiveFixture.attemptId}`,
+    "--observation-id=discussion-archive-observation",
+    "--observer-action=run",
+    '--observer-args-json=["claim only"]',
+  ];
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    archiveObserve,
+    "2026-07-10T12:07:00Z",
+    { failAfterEventAppend: true },
+  ), /authoritative event committed but projection is inconsistent/);
+  const beforeArchive = fs.readFileSync(taskEventFile(paths, archiveFixture.taskId), "utf8");
+  assert.throws(() => archiveTask(
+    archiveFixture.taskId,
+    "must retain the unresolved launch claim",
+    { environment, operationId: "archive-discussion-pending-observer" },
+  ), /archive is blocked by in-progress observer launch claims/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, archiveFixture.taskId), "utf8"),
+    beforeArchive,
+  );
+  const archiveClaim = readTeam(paths, archiveFixture.taskId).observer_launch_claims[0];
+  writeEvidence(paths, archiveFixture.taskId, "recovery/discussion-no-actor.md");
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    archiveFixture.taskId,
+    "--operation-id=resolve-discussion-archive-observer",
+    "--action=resolve-launch",
+    `--attempt=${archiveFixture.attemptId}`,
+    `--claim-operation-id=${archiveClaim.claim_operation_id}`,
+    `--launch-operation-id=${archiveClaim.launch_operation_id}`,
+    "--disposition=no-actor-confirmed",
+    "--authority-ref=operator-input:discussion-no-actor",
+    "--reason=controller confirmed the discussion actor was never created",
+    "--evidence-refs=recovery/discussion-no-actor.md",
+  ]);
+  const beforeUnquiescedArchive = fs.readFileSync(
+    taskEventFile(paths, archiveFixture.taskId),
+    "utf8",
+  );
+  assert.throws(() => archiveTask(
+    archiveFixture.taskId,
+    "must not abandon an unquiesced resolved attempt",
+    { environment, operationId: "archive-unquiesced-resolved-observer" },
+  ), /task archive requires a terminal, closed v2 Team control plane.*attempt is not quiesced/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, archiveFixture.taskId), "utf8"),
+    beforeUnquiescedArchive,
+  );
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    archiveFixture.taskId,
+    "--operation-id=quiesce-discussion-archive-observer",
+    "--action=quiesced",
+    `--attempt=${archiveFixture.attemptId}`,
+    "--evidence-refs=recovery/discussion-no-actor.md",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    archiveFixture.taskId,
+    "--operation-id=dispose-discussion-archive-dispatch",
+    "--action=dispose",
+    "--dispatch=discussion-archive-claim-dispatch",
+    "--disposition=rejected",
+    "--evidence-refs=recovery/discussion-no-actor.md",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    archiveFixture.taskId,
+    "--operation-id=close-discussion-archive-dispatch",
+    "--action=close",
+    "--dispatch=discussion-archive-claim-dispatch",
+  ]);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    archiveFixture.taskId,
+    "--operation-id=close-discussion-archive-lane",
+    "--action=close",
+    "--lane=discussion-archive-claim-lane",
+    "--convergence=CONSENSUS_WITH_RESERVATIONS",
+  ]);
+  runStop([archiveFixture.taskId], {
+    environment,
+    operationId: "stop-discussion-archive-team",
+  });
+  archiveTask(archiveFixture.taskId, "resolved discussion launch is quiesced", {
+    environment,
+    operationId: "archive-quiesced-resolved-observer",
+  });
+  assert.equal(readJsonObject(taskStateFile(paths, archiveFixture.taskId)).status, "archived");
+
+  const promotionFixture = startDiscussionPaseoAttempt(
+    environment,
+    paths,
+    "discussion-promote-claim",
+    { withGrant: true },
+  );
+  const promotionObserve = [
+    promotionFixture.taskId,
+    "--operation-id=discussion-promote-observe",
+    "--action=observe",
+    `--attempt=${promotionFixture.attemptId}`,
+    "--observation-id=discussion-promote-observation",
+    "--observer-action=run",
+    '--observer-args-json=["claim before promotion"]',
+  ];
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    promotionObserve,
+    "2026-07-10T12:07:00Z",
+    { failAfterEventAppend: true },
+  ), /authoritative event committed but projection is inconsistent/);
+  runPromoteCommand(parsePromoteArgs([promotionFixture.taskId, "--to=worktree"]), {
+    environment,
+    operationId: "worktree-with-pending-discussion-claim",
+  });
+  const beforeExecute = fs.readFileSync(taskEventFile(paths, promotionFixture.taskId), "utf8");
+  assert.throws(() => runPromoteCommand(parsePromoteArgs([
+    promotionFixture.taskId,
+    "--to=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${promotionFixture.admission.briefPath}`,
+    `--grant-id=${promotionFixture.grant.grant_id}`,
+    `--scope-digest=${promotionFixture.grant.scope_digest}`,
+    "--operation-id=execute-with-pending-discussion-claim",
+  ]), {
+    cwd: promotionFixture.admission.repo,
+    environment,
+  }), /execute promotion is blocked by in-progress observer launch claims/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, promotionFixture.taskId), "utf8"),
+    beforeExecute,
+  );
+
+  const brief = JSON.parse(fs.readFileSync(promotionFixture.admission.briefPath, "utf8"));
+  const beforeSyntheticExecute = fs.readFileSync(
+    taskEventFile(paths, promotionFixture.taskId),
+    "utf8",
+  );
+  assert.throws(() => mutateTaskRuntime(paths, promotionFixture.taskId, {
+    kind: "team.promoted",
+    operationId: "inject-execute-promoted-observer-claim",
+    data: { target: "execute" },
+  }, ({ currentProjection }) => {
+    const state = structuredClone(currentProjection.state);
+    const team = state.active_team;
+    team.mode = "execute";
+    team.status = "promoted:execute";
+    team.promoted_to = "execute";
+    team.authorization_ref = promotionFixture.grant.authorization_provenance.ref;
+    team.grant_id = promotionFixture.grant.grant_id;
+    team.scope_digest = promotionFixture.grant.scope_digest;
+    team.evidence_epoch = promotionFixture.grant.evidence_epoch;
+    team.slice_id = brief.slice_id;
+    team.objective = brief.objective;
+    team.admitted_owned_paths = [...brief.owned_paths];
+    team.admission = {
+      mode: "execution-vnext",
+      grant_id: promotionFixture.grant.grant_id,
+      scope_digest: promotionFixture.grant.scope_digest,
+      evidence_epoch: promotionFixture.grant.evidence_epoch,
+      admitted_owned_paths: [...brief.owned_paths],
+      brief: {
+        path: promotionFixture.admission.briefPath,
+        sha256: promotionFixture.grant.scope.required_slices[0].brief_sha256,
+        slice_id: brief.slice_id,
+        contract_sha256: promotionFixture.grant.scope.required_slices[0].contract_sha256,
+        execution_plan_sha256:
+          promotionFixture.grant.scope.required_slices[0].execution_plan_sha256,
+      },
+    };
+    return {
+      projection: {
+        task_content: currentProjection.task_content,
+        state,
+        files: [],
+      },
+    };
+  }, { environment }), /pending observer launch claim only permits worktree promotion|team\.promoted data has invalid fields/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, promotionFixture.taskId), "utf8"),
+    beforeSyntheticExecute,
+  );
+  assert.throws(() => mutateTaskRuntime(paths, promotionFixture.taskId, {
+    kind: "team.promoted",
+    operationId: "inject-finish-promoted-observer-claim",
+    data: { target: "finish" },
+  }, ({ currentProjection }) => {
+    const state = structuredClone(currentProjection.state);
+    state.active_team.status = "promoted:finish";
+    state.active_team.promoted_to = "finish";
+    return {
+      projection: {
+        task_content: currentProjection.task_content,
+        state,
+        files: [],
+      },
+    };
+  }, { environment }), /pending observer launch claim only permits worktree promotion|team\.promoted data has invalid fields/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, promotionFixture.taskId), "utf8"),
+    beforeSyntheticExecute,
+  );
+
+  let listCalls = 0;
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    promotionObserve,
+    "2026-07-10T12:08:00Z",
+    {
+      observePaseoCommand(action) {
+        assert.equal(action, "ls");
+        listCalls += 1;
+        const stdout = JSON.stringify([{ id: "legacy-promoted-agent", status: "running" }]);
+        return {
+          stdout,
+          stderr: "",
+          observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+        };
+      },
+    },
+  );
+  assert.equal(listCalls, 1);
+  const recoveredClaim = readTeam(paths, promotionFixture.taskId).observer_launch_claims[0];
+  assert.equal(recoveredClaim.status, "terminal");
+  assert.equal(recoveredClaim.grant_id, "");
+  assert.equal(recoveredClaim.scope_digest, "");
+});
+
+test("terminal discussion observer replay remains factual after normal execute promotion", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startDiscussionPaseoAttempt(
+    environment,
+    paths,
+    "discussion-terminal-promotion",
+    { withGrant: true },
+  );
+  const observeArgs = [
+    fixture.taskId,
+    "--operation-id=discussion-terminal-observe",
+    "--action=observe",
+    `--attempt=${fixture.attemptId}`,
+    "--observation-id=discussion-terminal-observation",
+    "--observer-action=run",
+    '--observer-args-json=["launch in discussion"]',
+  ];
+  const calls = {};
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    observeArgs,
+    "2026-07-10T12:07:00Z",
+    successfulLaunchObserver(calls, "discussion-terminal-agent"),
+  );
+  assert.equal(readTeam(paths, fixture.taskId).observer_launch_claims[0].grant_id, "");
+  runPromoteCommand(parsePromoteArgs([
+    fixture.taskId,
+    "--to=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${fixture.admission.briefPath}`,
+    `--grant-id=${fixture.grant.grant_id}`,
+    `--scope-digest=${fixture.grant.scope_digest}`,
+    "--operation-id=promote-after-terminal-discussion-observer",
+  ]), {
+    cwd: fixture.admission.repo,
+    environment,
+  });
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    observeArgs,
+    "2026-07-10T12:08:00Z",
+    { observePaseoCommand() { throw new Error("terminal replay must not call Paseo"); } },
+  );
+  assert.equal(calls.ls, 1);
+  assert.equal(calls.run, 1);
+  assert.equal(readTeam(paths, fixture.taskId).observer_launch_claims[0].status, "terminal");
+});
+
+test("semantic replay preserves a terminal observer claim's active attempt and writer lease", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(
+    environment,
+    paths,
+    "terminal-observer-semantic-replay",
+    { writable: true },
+  );
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    fixture.taskId,
+    "--operation-id=terminal-observer-semantic-observe",
+    "--action=observe",
+    `--attempt=${fixture.attemptId}`,
+    "--observation-id=terminal-observer-semantic-observation",
+    "--observer-action=run",
+    '--observer-args-json=["launch under a durable claim"]',
+  ], "2026-07-10T12:07:00Z", successfulLaunchObserver({}, "semantic-replay-agent"));
+  let team = readTeam(paths, fixture.taskId);
+  assert.equal(team.observer_launch_claims[0].status, "terminal");
+  assert.equal(team.attempts[0].status, "reserved");
+  assert.equal(team.writer_leases[0].state, "active");
+
+  mutateTaskRuntime(paths, fixture.taskId, {
+    kind: "test.observer.terminal-receipt-preserved",
+    operationId: "terminal-observer-semantic-preserved",
+  }, ({ currentProjection }) => ({ projection: currentProjection }), {
+    clock: clockAt("2026-07-10T12:07:30Z"),
+    environment,
+  });
+  const eventFile = taskEventFile(paths, fixture.taskId);
+  const canonicalStream = fs.readFileSync(eventFile, "utf8");
+  const expectTamperRejected = (change, pattern) => {
+    fs.writeFileSync(eventFile, canonicalStream);
+    const events = authoritativeEvents(paths, fixture.taskId);
+    change(events.at(-1).projection.state.active_team);
+    events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
+    fs.writeFileSync(
+      eventFile,
+      `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    );
+    assert.throws(() => readAuthoritativeEvents(eventFile, fixture.taskId), pattern);
+  };
+  expectTamperRejected((activeTeam) => {
+    activeTeam.attempts = [];
+  }, /event changed Team state it does not own/);
+  expectTamperRejected((activeTeam) => {
+    activeTeam.writer_leases = [];
+  }, /event changed Team state it does not own/);
+  expectTamperRejected((activeTeam) => {
+    activeTeam.status = "promoted:finish";
+  }, /event changed Team state it does not own/);
+  fs.writeFileSync(eventFile, canonicalStream);
+  team = readTeam(paths, fixture.taskId);
+  assert.equal(team.attempts[0].status, "reserved");
+  assert.equal(team.writer_leases[0].state, "active");
+});
+
+test("Team semantic replay rejects injected first claims and unclaimed active lease deletion", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Injected first observer claim");
+  startNativeRecord(environment, taskId);
+  const beforeStartInjection = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => mutateTaskRuntime(paths, taskId, {
+    kind: "test.team.inject-first-observer-claim",
+    operationId: "inject-first-observer-claim",
+    data: {},
+  }, ({ currentProjection }) => {
+    const state = structuredClone(currentProjection.state);
+    state.active_team.observer_launch_claims = [{
+      status: "in_progress",
+      attempt_id: "forged-attempt",
+    }];
+    return { projection: { task_content: currentProjection.task_content, state } };
+  }, { environment }), /non-claim event changed observer launch claims/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeStartInjection);
+
+  const fixture = startAuthorizedPaseoAttempt(
+    environment,
+    paths,
+    "unclaimed-active-lease-semantic-replay",
+    { writable: true },
+  );
+  assert.deepEqual(readTeam(paths, fixture.taskId).observer_launch_claims, []);
+  mutateTaskRuntime(paths, fixture.taskId, {
+    kind: "test.team.unclaimed-active-lease-preserved",
+    operationId: "unclaimed-active-lease-preserved",
+  }, ({ currentProjection }) => ({ projection: currentProjection }), { environment });
+  const eventFile = taskEventFile(paths, fixture.taskId);
+  const events = authoritativeEvents(paths, fixture.taskId);
+  events.at(-1).projection.state.active_team.writer_leases = [];
+  events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
+  fs.writeFileSync(
+    eventFile,
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  );
+  assert.throws(
+    () => readAuthoritativeEvents(eventFile, fixture.taskId),
+    /event changed Team state it does not own/,
+  );
+});
+
+test("one pending observer transition cannot rewrite another claim's attempt", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Parallel observer claim isolation");
+  startPaseoRecord(environment, taskId);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId,
+    "--operation-id=parallel-observer-lane",
+    "--action=open",
+    "--lane=parallel-observer-lane",
+  ]);
+  for (const suffix of ["a", "b"]) {
+    invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+      taskId,
+      `--operation-id=parallel-observer-dispatch-${suffix}`,
+      "--action=open",
+      "--lane=parallel-observer-lane",
+      `--dispatch=parallel-observer-dispatch-${suffix}`,
+    ]);
+  }
+  recordCapability(environment, taskId, {
+    snapshotId: "parallel-observer-capability",
+    provider: "openai",
+    model: "gpt-5.6",
+    family: "non-claude",
+  });
+  for (const suffix of ["a", "b"]) {
+    invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+      taskId,
+      `--operation-id=parallel-observer-reserve-${suffix}`,
+      "--action=reserve",
+      `--dispatch=parallel-observer-dispatch-${suffix}`,
+      `--attempt=parallel-observer-attempt-${suffix}`,
+      "--provider=openai",
+      "--model=gpt-5.6",
+      "--capability-snapshot=parallel-observer-capability",
+      `--launch-operation-id=parallel-observer-launch-${suffix}`,
+    ]);
+  }
+  for (const suffix of ["a", "b"]) {
+    assert.throws(() => invokeControl(
+      runAttemptRecord,
+      parseAttemptArgs,
+      environment,
+      [
+        taskId,
+        `--operation-id=parallel-observer-observe-${suffix}`,
+        "--action=observe",
+        `--attempt=parallel-observer-attempt-${suffix}`,
+        `--observation-id=parallel-observer-observation-${suffix}`,
+        "--observer-action=run",
+        '--observer-args-json=["claim before launch"]',
+      ],
+      "2026-07-10T12:07:00Z",
+      { failAfterEventAppend: true },
+    ), /authoritative event committed but projection is inconsistent/);
+  }
+  const claims = authoritativeEvents(paths, taskId).at(-1)
+    .projection.state.active_team.observer_launch_claims;
+  assert.deepEqual(claims.map((claim) => claim.status), ["in_progress", "in_progress"]);
+  const claimA = claims.find((claim) => claim.attempt_id === "parallel-observer-attempt-a");
+  const observationId = "parallel-observer-reconciliation-a";
+  const observation = buildObservation({
+    action: "ls",
+    exitCode: 0,
+    stdout: "[]",
+    stderr: "",
+  });
+  Object.assign(observation, {
+    actor_created: false,
+    runtime_agent_id: "",
+    reconciliation_status: "missing",
+    attempt_id: claimA.attempt_id,
+    launch_operation_id: claimA.launch_operation_id,
+    launch_request_digest: claimA.request_digest,
+  });
+  const before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => mutateTaskRuntime(paths, taskId, {
+    kind: "team.attempt.observation.launch.reconciled",
+    operationId: "parallel-observer-reconcile-a",
+    data: {
+      taskId,
+      claimOperationId: claimA.claim_operation_id,
+      attemptId: claimA.attempt_id,
+      launchOperationId: claimA.launch_operation_id,
+      observationId,
+      reconciliationStatus: "missing",
+      observation,
+    },
+  }, ({ currentProjection }) => {
+    const state = structuredClone(currentProjection.state);
+    const transitioned = recordLaunchReconciliation(state.active_team, {
+      operationId: "parallel-observer-reconcile-a",
+      claimOperationId: claimA.claim_operation_id,
+      attemptId: claimA.attempt_id,
+      launchOperationId: claimA.launch_operation_id,
+      observationId,
+      observation,
+      reconciliationStatus: "missing",
+      now: "2026-07-10T12:08:00Z",
+    });
+    transitioned.team.attempts.find(
+      (attempt) => attempt.attempt_id === "parallel-observer-attempt-b",
+    ).status = "terminal";
+    state.active_team = transitioned.team;
+    return {
+      projection: { task_content: currentProjection.task_content, state },
+      result: transitioned.result,
+    };
+  }, {
+    clock: clockAt("2026-07-10T12:08:00Z"),
+    environment,
+  }), /observer launch reconciliation projection is not the exact reducer transition: attempts/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+  assert.equal(
+    readTeam(paths, taskId).attempts.find(
+      (attempt) => attempt.attempt_id === "parallel-observer-attempt-b",
+    ).status,
+    "reserved",
+  );
+});
+
+test("observer launch rejects expired authority before claim or external observation", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const authorizationRef = "user-message:expired-observer-authority";
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "expired-observer", {
+    authorizationRef,
+    sizeException: {
+      authority_ref: authorizationRef,
+      expires_at: "2026-07-10T12:10:00Z",
+      reason: "exercise the observer launch expiry boundary",
+      compensating_controls: ["durable pre-launch claim"],
+    },
+  });
+  const argv = [
+    fixture.taskId, "--operation-id=expired-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=expired-observation",
+    "--observer-action=run", '--observer-args-json=["must not launch"]',
+  ];
+  const before = authoritativeEvents(paths, fixture.taskId).length;
+  let externalCalls = 0;
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:11:00Z",
+    { observePaseoCommand() { externalCalls += 1; } },
+  ), /expired/);
+  assert.equal(externalCalls, 0);
+  assert.equal(authoritativeEvents(paths, fixture.taskId).length, before);
+  assert.deepEqual(readTeam(paths, fixture.taskId).observer_launch_claims || [], []);
+});
+
+test("observer launch rechecks current attempt binding inside the claim transition", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "binding-drift");
+  const argv = [
+    fixture.taskId, "--operation-id=binding-drift-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=binding-drift-observation",
+    "--observer-action=run", '--observer-args-json=["must not launch"]',
+  ];
+  let externalCalls = 0;
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:07:00Z",
+    {
+      beforeObserveLaunchClaim() {
+        mutateTaskRuntime(paths, fixture.taskId, {
+          kind: "test.observer.binding-drifted",
+          operationId: "binding-drift-injected",
+          data: { attempt_id: fixture.attemptId },
+        }, ({ currentProjection }) => {
+          const state = structuredClone(currentProjection.state);
+          state.active_team.attempts
+            .find((attempt) => attempt.attempt_id === fixture.attemptId)
+            .launch_operation_id = "launch-binding-drift-replaced";
+          return {
+            projection: {
+              task_content: currentProjection.task_content,
+              state,
+              files: [],
+            },
+          };
+        }, { clock: clockAt("2026-07-10T12:07:00Z"), environment });
+      },
+      observePaseoCommand() { externalCalls += 1; },
+    },
+  ), /launch binding changed|event changed Team state it does not own/);
+  assert.equal(externalCalls, 0);
+  assert.deepEqual(readTeam(paths, fixture.taskId).observer_launch_claims || [], []);
+});
+
+test("observer launch rejects canonical artifact drift before committing its claim", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "claim-artifact-drift");
+  const originalContract = fs.readFileSync(fixture.admission.contract);
+  const argv = [
+    fixture.taskId, "--operation-id=artifact-drift-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=artifact-drift-observation",
+    "--observer-action=run", '--observer-args-json=["must not launch"]',
+  ];
+  const before = authoritativeEvents(paths, fixture.taskId).length;
+  let externalCalls = 0;
+  assert.throws(() => invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:07:00Z",
+    {
+      beforeEventAppend(event) {
+        if (event.kind === "team.attempt.observation.launch.claimed") {
+          fs.writeFileSync(
+            fixture.admission.contract,
+            Buffer.concat([originalContract, Buffer.from("\n")]),
+          );
+        }
+      },
+      observePaseoCommand() { externalCalls += 1; },
+    },
+  ), /changed before|digest does not match|no longer matches/);
+  assert.equal(externalCalls, 0);
+  assert.equal(authoritativeEvents(paths, fixture.taskId).length, before);
+  assert.deepEqual(readTeam(paths, fixture.taskId).observer_launch_claims || [], []);
+  fs.writeFileSync(fixture.admission.contract, originalContract);
+});
+
+test("pending observer launch claim blocks duplicate launch terminal stop and replan until receipt", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const authorizationRef = "user-message:observer-interleave-authority";
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "observer-interleave", {
+    authorizationRef,
+    sizeException: {
+      authority_ref: authorizationRef,
+      expires_at: "2026-07-10T12:10:00Z",
+      reason: "exercise launch claim and terminal expiry interleaving",
+      compensating_controls: ["terminal receipt remains factual after expiry"],
+    },
+  });
+  const primary = [
+    fixture.taskId, "--operation-id=primary-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=primary-observation",
+    "--observer-action=run", '--observer-args-json=["launch exactly once"]',
+  ];
+  const competing = [
+    fixture.taskId, "--operation-id=competing-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=competing-observation",
+    "--observer-action=run", '--observer-args-json=["different request"]',
+  ];
+  let now = "2026-07-10T12:09:00Z";
+  let listCalls = 0;
+  let runCalls = 0;
+  let competingExternalCalls = 0;
+  runAttemptRecord(parseAttemptArgs(primary), {
+    clock: () => new Date(now),
+    environment,
+    observePaseoCommand(action) {
+      if (action === "ls") {
+        listCalls += 1;
+        runPromoteCommand(parsePromoteArgs([fixture.taskId, "--to=worktree"]), {
+          clock: clockAt("2026-07-10T12:09:00Z"),
+          environment,
+          operationId: "worktree-during-observer-claim",
+        });
+        const beforeFinishPromotion = fs.readFileSync(
+          taskEventFile(paths, fixture.taskId),
+          "utf8",
+        );
+        assert.throws(() => runPromoteCommand(
+          parsePromoteArgs([fixture.taskId, "--to=finish"]),
+          {
+            clock: clockAt("2026-07-10T12:09:00Z"),
+            environment,
+            operationId: "finish-during-observer-claim",
+          },
+        ), /team finish promotion is blocked by in-progress observer launch claims/);
+        assert.equal(
+          fs.readFileSync(taskEventFile(paths, fixture.taskId), "utf8"),
+          beforeFinishPromotion,
+        );
+        assert.throws(() => invokeControl(
+          runAttemptRecord,
+          parseAttemptArgs,
+          environment,
+          competing,
+          "2026-07-10T12:09:00Z",
+          { observePaseoCommand() { competingExternalCalls += 1; } },
+        ), /canonical claim|already has/);
+        assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+          fixture.taskId, "--operation-id=terminal-during-claim", "--action=terminal",
+          `--attempt=${fixture.attemptId}`, "--outcome=succeeded", "--launch-invoked=false",
+        ], "2026-07-10T12:09:00Z"), /in-progress observer launch claim/);
+        assert.throws(() => runStop([fixture.taskId], {
+          clock: clockAt("2026-07-10T12:09:00Z"),
+          environment,
+          operationId: "stop-during-observer-claim",
+        }), /in-progress observer launch claim/);
+        assert.throws(() => runReplan(replanRequest(
+          environment,
+          paths,
+          fixture.taskId,
+          fixture.admission,
+          fixture.grant,
+          {
+            authorizationRef,
+            grantId: "observer-interleave-replanned",
+            operationId: "replan-during-observer-claim",
+          },
+        ), {
+          clock: clockAt("2026-07-10T12:09:00Z"),
+          cwd: fixture.admission.repo,
+          environment,
+        }), /in-progress observer launch claims/);
+        const stdout = JSON.stringify([]);
+        return {
+          stdout,
+          stderr: "",
+          observation: buildObservation({ action, exitCode: 0, stdout, stderr: "" }),
+        };
+      }
+      runCalls += 1;
+      now = "2026-07-10T12:11:00Z";
+      const stdout = JSON.stringify({ status: "running", agent_id: "observer-interleave-agent" });
+      const observation = buildObservation({ action, exitCode: 0, stdout, stderr: "" });
+      observation.actor_created = true;
+      observation.runtime_agent_id = "observer-interleave-agent";
+      return { stdout, stderr: "", observation };
+    },
+  });
+  assert.equal(listCalls, 1);
+  assert.equal(runCalls, 1);
+  assert.equal(competingExternalCalls, 0);
+  const claim = readTeam(paths, fixture.taskId).observer_launch_claims[0];
+  assert.equal(claim.status, "terminal");
+  assert.equal(claim.operation_id, "primary-observe");
+  assert.equal(claim.launch_operation_id, "launch-observer-interleave");
+  assert.equal(claim.grant_id, fixture.grant.grant_id);
+  assert.equal(claim.scope_digest, fixture.grant.scope_digest);
+  assert.equal(claim.evidence_epoch, fixture.grant.evidence_epoch);
+
+  runAttemptRecord(parseAttemptArgs(primary), {
+    clock: () => new Date(now),
+    environment,
+    observePaseoCommand() {
+      throw new Error("terminal replay must not observe or relaunch");
+    },
+  });
+  assert.equal(runCalls, 1);
+});
+
+test("pending bound verification claim blocks closure until an audited indeterminate resolution", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Pending verification closure barrier");
+  const counter = path.join(paths.root, "pending-verification-argv-count");
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    grantId: "pending-verification-grant",
+    operationId: "authorize-pending-verification",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-pending-verification",
+  ]), {
+    cwd: admission.repo,
+    environment,
+  });
+  runPromoteCommand(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-pending-verification",
+  });
+  const boundVerification = parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]);
+  const keeper = path.join(admission.repo, "workflow", "test-owned", "keeper.txt");
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "keeper before indeterminate revalidation\n");
+  runVerification(boundVerification, {
+    cwd: admission.repo,
+    environment,
+    operationId: "accepted-verification-before-indeterminate-revalidation",
+    recordToken: "20260710T120900000000098",
+  });
+  runSliceAccept(parseSliceAcceptArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--operation-id=accept-before-indeterminate-revalidation",
+    "--keeper-output=event:execution-slice-complete=workflow/test-owned/keeper.txt",
+  ]), { environment });
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  const replan = replanRequest(environment, paths, taskId, admission, grant, {
+    grantId: "pending-verification-replanned",
+    operationId: "replan-during-pending-verification",
+  });
+  let enteredCapture = false;
+
+  assert.throws(() => runVerification(boundVerification, {
+    captureIdentity() {
+      enteredCapture = true;
+      const claimedEvents = authoritativeEvents(paths, taskId);
+      assert.equal(claimedEvents.at(-1).kind, "verification.claimed");
+      const claimedLedger = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+
+      assert.throws(() => runReplan(replan, {
+        cwd: admission.repo,
+        environment,
+      }), /team-replan is blocked by in-progress verification claims/);
+      assert.throws(() => blockTask(taskId, "must not cross pending verification", {
+        environment,
+        operationId: "block-during-pending-verification",
+      }), /task block is blocked by in-progress verification claims/);
+      assert.throws(() => archiveTask(taskId, "must not archive pending verification", {
+        environment,
+        operationId: "archive-during-pending-verification",
+      }), /task archive is blocked by in-progress verification claims/);
+      for (const outcome of ["succeeded", "failed", "cancelled"]) {
+        assert.throws(() => completeTask(taskId, {
+          authorityRef: outcome === "succeeded" ? "" : "operator-input:pending-verification",
+          environment,
+          evidenceRefs: outcome === "succeeded" ? [] : ["event:pending-verification"],
+          operationId: `complete-${outcome}-during-pending-verification`,
+          outcome,
+        }), /task completion is blocked by in-progress verification claims/);
+      }
+
+      assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), claimedLedger);
+      assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+      assert.equal(
+        authoritativeEvents(paths, taskId)
+          .filter((event) => event.kind === "verification.recorded").length,
+        1,
+      );
+      throw new Error("stop after pending verification closure barriers");
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "pending-verification",
+    recordToken: "20260710T120900000000099",
+  }), /stop after pending verification closure barriers/);
+
+  assert.equal(enteredCapture, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  const claim = state.verification.operation_claims.find(
+    (candidate) => candidate.operation_id === "pending-verification",
+  );
+  assert.equal(state.status, "doing");
+  assert.equal(state.execution_authority.current_grant_id, grant.grant_id);
+  assert.equal(claim.status, "in_progress");
+  assert.equal(
+    authoritativeEvents(paths, taskId)
+      .filter((event) => event.kind === "verification.recorded").length,
+    1,
+  );
+
+  writeEvidence(paths, taskId, "recovery/pending-verification.md");
+  const resolutionArgs = [
+    taskId,
+    "--operation-id=resolve-pending-verification",
+    "--pending-operation-id=pending-verification",
+    "--claim-operation-id=pending-verification-verification-claim",
+    "--authority-ref=operator-input:pending-verification-resolution",
+    "--reason=controller was terminated after the command claim",
+    "--evidence=recovery/pending-verification.md",
+  ];
+  const resolved = runVerificationResolution(parseVerifyResolveArgs(resolutionArgs), {
+    environment,
+  });
+  assert.ok(resolved.lines.includes("status: indeterminate"));
+  assert.deepEqual(runVerificationResolution(parseVerifyResolveArgs(resolutionArgs), {
+    environment,
+  }), resolved);
+  const afterResolution = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(
+    afterResolution.verification.operation_claims.find(
+      (candidate) => candidate.operation_id === "pending-verification",
+    ).status,
+    "indeterminate",
+  );
+  const indeterminateClaim = afterResolution.verification.operation_claims.find(
+    (candidate) => candidate.operation_id === "pending-verification",
+  );
+  assert.deepEqual(indeterminateClaim.tombstone.authority_boundary, {
+    schema_version: 1,
+    kind: "execution-grant",
+    grant_id: grant.grant_id,
+    scope_digest: grant.scope_digest,
+    evidence_epoch: grant.evidence_epoch,
+    slice_id: "execution-slice",
+  });
+  assert.equal(indeterminateClaim.required_check_binding.check_id, "execution-contract");
+  assert.equal(
+    afterResolution.verification.required_gates["execution-contract"].outcome,
+    "passed",
+  );
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    authoritativeEvents(paths, taskId)
+      .filter((event) => event.kind === "verification.recorded").length,
+    1,
+  );
+
+  assert.throws(() => completeTask(taskId, {
+    environment,
+    operationId: "complete-succeeded-with-indeterminate-revalidation",
+    outcome: "succeeded",
+  }), /successful completion is blocked by indeterminate verification/);
+  runSliceSupersede(parseSliceSupersedeArgs([
+    taskId,
+    "--slice-id=execution-slice",
+    "--operation-id=supersede-before-indeterminate-readmission",
+    "--authority-ref=operator-input:indeterminate-readmission",
+    "--reason=prove the old accepted gate cannot be consumed after indeterminate revalidation",
+  ]), { environment });
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--operation-id=accept-after-indeterminate-revalidation",
+    "--keeper-output=event:execution-slice-complete=workflow/test-owned/keeper.txt",
+  ]), { environment }), /required verification gate execution-contract is blocked by indeterminate execution/);
+
+  for (const [operationId, parsed] of [
+    ["pending-verification", boundVerification],
+    ["pending-verification-same-epoch-new-operation", boundVerification],
+    ["pending-verification-same-epoch-gate-metadata", parseVerifyArgs([
+      taskId,
+      `--brief=${admission.briefPath}`,
+      "--slice-id=execution-slice",
+      "--check-id=execution-contract",
+      "--gate-class=contract",
+      "--trajectory=smoke-only",
+      "--evaluator=human",
+      "--evidence=event:metadata-only",
+      "--",
+      ...checkCommand,
+    ])],
+  ]) {
+    assert.throws(() => runVerification(parsed, {
+      cwd: admission.repo,
+      environment,
+      operationId,
+    }), /durably indeterminate/);
+  }
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims.length,
+    2,
+  );
+
+  runReplan(replan, {
+    cwd: admission.repo,
+    environment,
+  });
+  const replanned = readJsonObject(taskStateFile(paths, taskId));
+  const replannedGrant = replanned.execution_authority.grants.find(
+    (candidate) => candidate.grant_id === replanned.execution_authority.current_grant_id,
+  );
+  assert.ok(replannedGrant.evidence_epoch > grant.evidence_epoch);
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=operator-input:p0b-replan",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${replannedGrant.grant_id}`,
+    `--scope-digest=${replannedGrant.scope_digest}`,
+    "--operation-id=start-after-indeterminate-replan",
+  ]), {
+    cwd: admission.repo,
+    environment,
+  });
+  runPromoteCommand(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-after-indeterminate-replan",
+  });
+  runVerification(boundVerification, {
+    cwd: admission.repo,
+    environment,
+    operationId: "pending-verification-after-explicit-replan",
+    recordToken: "20260710T120900000000100",
+  });
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\nrun\n");
+  const afterReplanVerification = readJsonObject(taskStateFile(paths, taskId));
+  const newClaim = afterReplanVerification.verification.operation_claims.find(
+    (candidate) => candidate.operation_id === "pending-verification-after-explicit-replan",
+  );
+  assert.equal(newClaim.status, "terminal");
+  assert.equal(newClaim.authority_identity.grant_id, replannedGrant.grant_id);
+  assert.equal(newClaim.authority_identity.evidence_epoch, replannedGrant.evidence_epoch);
+  completeTask(taskId, {
+    authorityRef: "operator-input:failed-after-indeterminate-verification",
+    environment,
+    evidenceRefs: ["event:resolve-pending-verification"],
+    operationId: "complete-failed-after-indeterminate-verification",
+    outcome: "failed",
+  });
+  const completed = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(completed.status, "done");
+  assert.equal(completed.completion.outcome, "failed");
+  assert.equal(
+    completed.verification.operation_claims.find(
+      (candidate) => candidate.operation_id === "pending-verification",
+    ).status,
+    "indeterminate",
+  );
+});
+
+test("bound verification terminalizes after an unrelated team stop event", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification receipt after Team stop");
+  const counter = path.join(paths.root, "verification-after-stop-count");
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    grantId: "verification-after-stop-grant",
+    operationId: "authorize-verification-after-stop",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-verification-after-stop",
+  ]), { cwd: admission.repo, environment });
+  const parsed = parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]);
+  let stopped = false;
+  const first = runVerification(parsed, {
+    captureIdentity(input) {
+      if (!stopped) {
+        stopped = true;
+        runStop([taskId], {
+          environment,
+          operationId: "stop-during-verification",
+        });
+      }
+      return captureVerificationIdentity(input);
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verification-after-stop",
+    recordToken: "20260710T120900000000201",
+  });
+
+  assert.equal(stopped, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.deepEqual(
+    authoritativeEvents(paths, taskId)
+      .filter((event) => new Set([
+        "verification-after-stop-verification-claim",
+        "stop-during-verification",
+        "verification-after-stop",
+      ]).has(event.operation_id))
+      .map((event) => event.kind),
+    ["verification.claimed", "team.stopped", "verification.recorded"],
+  );
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims
+      .find((claim) => claim.operation_id === "verification-after-stop").status,
+    "terminal",
+  );
+
+  const replay = runVerification(parsed, {
+    captureIdentity() {
+      throw new Error("terminal replay after Team stop must not execute");
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verification-after-stop",
+    recordToken: "20260710T120900000000202",
+  });
+  assert.deepEqual(replay, first);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+});
+
+test("bound verification survives finish promotion and slice acceptance between claim and receipt", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification receipt after slice acceptance");
+  const counter = path.join(paths.root, "verification-after-accept-count");
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    grantId: "verification-after-accept-grant",
+    operationId: "authorize-verification-after-accept",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-verification-after-accept",
+  ]), { cwd: admission.repo, environment });
+  const keeperRelative = "workflow/test-owned/verification-after-accept.txt";
+  const keeper = path.join(admission.repo, keeperRelative);
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "accepted keeper\n");
+  const parsed = parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]);
+  let promoted = false;
+  runVerification(parsed, {
+    captureIdentity(input) {
+      if (!promoted) {
+        promoted = true;
+        runPromoteCommand(parsePromoteArgs([taskId, "--to=finish"]), {
+          environment,
+          operationId: "finish-during-bound-verification",
+        });
+      }
+      return captureVerificationIdentity(input);
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verification-before-accept",
+    recordToken: "20260710T120900000000203",
+  });
+  assert.equal(promoted, true);
+
+  let accepted = false;
+  const second = runVerification(parsed, {
+    captureIdentity(input) {
+      if (!accepted) {
+        accepted = true;
+        runSliceAccept(parseSliceAcceptArgs([
+          taskId,
+          `--brief=${admission.briefPath}`,
+          "--operation-id=accept-during-bound-verification",
+          `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+        ]), { environment });
+      }
+      return captureVerificationIdentity(input);
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verification-after-accept",
+    recordToken: "20260710T120900000000204",
+  });
+
+  assert.equal(accepted, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\nrun\n");
+  assert.deepEqual(
+    authoritativeEvents(paths, taskId)
+      .filter((event) => new Set([
+        "verification-before-accept-verification-claim",
+        "finish-during-bound-verification",
+        "verification-before-accept",
+        "verification-after-accept-verification-claim",
+        "accept-during-bound-verification",
+        "verification-after-accept",
+      ]).has(event.operation_id))
+      .map((event) => event.kind),
+    [
+      "verification.claimed",
+      "team.promoted",
+      "verification.recorded",
+      "verification.claimed",
+      "slice.accepted",
+      "verification.recorded",
+    ],
+  );
+  assert.deepEqual(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims
+      .map((claim) => [claim.operation_id, claim.status])
+      .filter(([operationId]) => operationId.startsWith("verification-"))
+      .sort(),
+    [
+      ["verification-after-accept", "terminal"],
+      ["verification-before-accept", "terminal"],
+    ],
+  );
+
+  const replay = runVerification(parsed, {
+    captureIdentity() {
+      throw new Error("same operation replay after acceptance must not execute");
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verification-after-accept",
+    recordToken: "20260710T120900000000205",
+  });
+  assert.deepEqual(replay, second);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\nrun\n");
+});
+
+test("observer launch records its factual terminal receipt across artifact drift", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const fixture = startAuthorizedPaseoAttempt(environment, paths, "terminal-artifact-drift");
+  const originalContract = fs.readFileSync(fixture.admission.contract);
+  const argv = [
+    fixture.taskId, "--operation-id=terminal-drift-observe", "--action=observe",
+    `--attempt=${fixture.attemptId}`, "--observation-id=terminal-drift-observation",
+    "--observer-action=run", '--observer-args-json=["launch once before drift"]',
+  ];
+  const calls = {};
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:07:00Z",
+    {
+      ...successfulLaunchObserver(calls, "terminal-drift-agent"),
+      beforeEventAppend(event) {
+        if (event.kind === "team.attempt.observed") {
+          fs.writeFileSync(
+            fixture.admission.contract,
+            Buffer.concat([originalContract, Buffer.from("\n")]),
+          );
+        }
+      },
+    },
+  );
+  assert.equal(calls.ls, 1);
+  assert.equal(calls.run, 1);
+  const terminal = readTeam(paths, fixture.taskId).observer_launch_claims[0];
+  assert.equal(terminal.status, "terminal");
+  assert.equal(
+    readTeam(paths, fixture.taskId).observations
+      .some((observation) => observation.observation_id === "terminal-drift-observation"),
+    true,
+  );
+  invokeControl(
+    runAttemptRecord,
+    parseAttemptArgs,
+    environment,
+    argv,
+    "2026-07-10T12:08:00Z",
+    { observePaseoCommand() { throw new Error("terminal replay must not call observer"); } },
+  );
+  assert.equal(calls.run, 1);
+  fs.writeFileSync(fixture.admission.contract, originalContract);
 });
 
 test("required perspective admission requires an independently bound actor", (t) => {
@@ -3809,4 +5987,1361 @@ test("admission aggregation derives mixed backend without caller override", (t) 
   assert.deepEqual(sidecar.attempted_backends, ["native", "paseo"]);
   assert.deepEqual(sidecar.lanes.map((lane) => lane.effective_backend).sort(), ["native", "paseo"]);
   assert.equal(getTaskField(taskFile(paths.tasksDir, taskId), "active_team_backend"), "native");
+});
+
+test("public legacy execute routes fail before temp creation or launcher invocation", async (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Legacy execute sentinel");
+  const marker = path.join(paths.root, "legacy-launcher-ran");
+  const sentinel = path.join(paths.root, "legacy-sentinel.js");
+  fs.writeFileSync(sentinel, [
+    "#!/usr/bin/env node",
+    `require('fs').writeFileSync(${JSON.stringify(marker)}, 'launched');`,
+  ].join("\n"));
+  fs.chmodSync(sentinel, 0o755);
+  const before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+
+  assert.throws(() => runLegacyTeamCommand([
+    "team-start", taskId, "legacy execute", "--mode=execute",
+  ], { environment, legacyBin: sentinel }), /discuss-only/);
+  assert.throws(() => runLegacyTeamCommand([
+    "team-loop", taskId, "legacy loop",
+  ], { environment, legacyBin: sentinel }), /implicitly launches execute mode/);
+  assert.throws(
+    () => bindExecutionAuthority({}, { mode: "execution-v3" }, 1),
+    /legacy execution admission is read-only/,
+  );
+
+  const publicStart = await spawnWorkflow(environment, [
+    "team-start", taskId, "legacy execute", "--mode=execute",
+  ], paths.root);
+  assert.equal(publicStart.status, 1);
+  assert.match(publicStart.stderr, /discuss-only/);
+  const publicLoop = await spawnWorkflow(environment, [
+    "team-loop", taskId, "legacy loop",
+  ], paths.root);
+  assert.equal(publicLoop.status, 1);
+  assert.match(publicLoop.stderr, /implicitly launches execute mode/);
+  const unknown = await spawnWorkflow(environment, ["team-unknown", taskId], paths.root);
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /unknown Team command/);
+
+  assert.equal(fs.existsSync(marker), false);
+  assert.deepEqual(
+    fs.existsSync(environment.TMPDIR)
+      ? fs.readdirSync(environment.TMPDIR).filter((entry) => entry.startsWith("codex-workflow-legacy-"))
+      : [],
+    [],
+  );
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+});
+
+test("public Team CLI accepts only vNext authority mutations and reports legacy and unknown versions", async (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const vNextTask = createFixtureTask(environment, "Public vNext authority");
+  const vNext = executionBrief(paths, vNextTask);
+  const authorized = await spawnWorkflow(environment, [
+    "team-authorize",
+    vNextTask,
+    vNext.brief.objective,
+    "--authorization-ref=user-message:public-vnext",
+    `--brief=${vNext.briefPath}`,
+    "--grant-id=public-vnext-grant",
+    "--operation-id=public-vnext-authorize",
+  ], vNext.repo);
+  assert.equal(authorized.status, 0, authorized.stderr);
+  assert.match(authorized.stdout, /grant_id: public-vnext-grant/);
+  assert.match(authorized.stdout, /scope_digest: sha256:[a-f0-9]{64}/);
+  const grant = await spawnWorkflow(environment, ["team-grant", vNextTask], vNext.repo);
+  assert.equal(grant.status, 0, grant.stderr);
+  assert.match(grant.stdout, /current_grant_id: public-vnext-grant/);
+
+  const legacyTask = createFixtureTask(environment, "Public legacy authority rejection");
+  const legacy = executionBrief(paths, legacyTask);
+  const legacyBrief = JSON.parse(fs.readFileSync(legacy.briefPath, "utf8"));
+  legacyBrief.schema_version = 3;
+  legacyBrief.contract.semantics_version = 3;
+  delete legacyBrief.contract.authority_slices;
+  delete legacyBrief.contract.execution_plan_schema_version;
+  fs.writeFileSync(legacy.briefPath, `${JSON.stringify(legacyBrief, null, 2)}\n`);
+  const legacyResult = await spawnWorkflow(environment, [
+    "team-authorize",
+    legacyTask,
+    legacyBrief.objective,
+    "--authorization-ref=user-message:public-legacy",
+    `--brief=${legacy.briefPath}`,
+    "--grant-id=public-legacy-grant",
+    "--operation-id=public-legacy-authorize",
+  ], legacy.repo);
+  assert.equal(legacyResult.status, 1);
+  assert.match(legacyResult.stderr, /schema_version 4|legacy 1\/2\/3/);
+  assert.equal(readJsonObject(taskStateFile(paths, legacyTask)).execution_authority, undefined);
+
+  const unknownTask = createFixtureTask(environment, "Public unknown authority rejection");
+  const unknownVersion = executionBrief(paths, unknownTask);
+  const unknownBrief = JSON.parse(fs.readFileSync(unknownVersion.briefPath, "utf8"));
+  unknownBrief.schema_version = 99;
+  fs.writeFileSync(unknownVersion.briefPath, `${JSON.stringify(unknownBrief, null, 2)}\n`);
+  const unknownResult = await spawnWorkflow(environment, [
+    "team-authorize",
+    unknownTask,
+    unknownBrief.objective,
+    "--authorization-ref=user-message:public-unknown",
+    `--brief=${unknownVersion.briefPath}`,
+    "--grant-id=public-unknown-grant",
+    "--operation-id=public-unknown-authorize",
+  ], unknownVersion.repo);
+  assert.equal(unknownResult.status, 1);
+  assert.match(unknownResult.stderr, /schema_version must be one of/);
+  assert.equal(readJsonObject(taskStateFile(paths, unknownTask)).execution_authority, undefined);
+});
+
+test("execute start and promote consume only an independently issued canonical grant", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Independent execution grant");
+  const admission = executionBrief(paths, taskId);
+  const brief = JSON.parse(fs.readFileSync(admission.briefPath, "utf8"));
+  const fakeDigest = `sha256:${"0".repeat(64)}`;
+  const before = authoritativeEvents(paths, taskId).length;
+
+  assert.throws(() => runRecordStartCommand(parseRecordStartArgs([
+    taskId, brief.objective, "--mode=execute",
+    "--authorization-ref=user-message:no-grant",
+    `--brief=${admission.briefPath}`,
+    "--grant-id=missing-grant", `--scope-digest=${fakeDigest}`,
+    "--operation-id=start-without-grant",
+  ]), { cwd: admission.repo, environment }), /execution authority schema version 2|current active execution grant/);
+  assert.equal(authoritativeEvents(paths, taskId).length, before);
+
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId, "discussion objective must not become execution authority", "--mode=discuss",
+    `--brief=${admission.briefPath}`, "--operation-id=start-discussion-drift",
+  ]), { cwd: admission.repo, environment });
+  assert.throws(() => runPromoteCommand(parsePromoteArgs([
+    taskId, "--to=execute", "--authorization-ref=user-message:no-grant",
+    `--brief=${admission.briefPath}`, "--grant-id=missing-grant",
+    `--scope-digest=${fakeDigest}`, "--operation-id=promote-without-grant",
+  ]), { cwd: admission.repo, environment }), /execution authority schema version 2|current active execution grant/);
+
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef: "user-message:independent-grant",
+    grantId: "independent-grant",
+  });
+  assert.throws(() => runRecordStartCommand(parseRecordStartArgs([
+    taskId, "caller supplied drift", "--mode=execute",
+    "--authorization-ref=user-message:independent-grant",
+    `--brief=${admission.briefPath}`, `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`, "--operation-id=start-wrong-objective",
+  ]), { cwd: admission.repo, environment }), /canonical current slice objective/);
+
+  runPromoteCommand(parsePromoteArgs([
+    taskId, "--to=execute", "--authorization-ref=user-message:independent-grant",
+    `--brief=${admission.briefPath}`, `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`, "--operation-id=promote-canonical-grant",
+  ]), { cwd: admission.repo, environment });
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.objective, brief.objective);
+  assert.notEqual(state.active_team.objective, "discussion objective must not become execution authority");
+  assert.equal(state.active_team.grant_id, grant.grant_id);
+  assert.equal(state.active_team.scope_digest, grant.scope_digest);
+  assert.equal(state.active_team.evidence_epoch, 1);
+  assert.ok(runGrant(parseGrantArgs([taskId]), { environment }).lines.includes(
+    `current_grant_id: ${grant.grant_id}`,
+  ));
+});
+
+test("derived state injection cannot launder authority evidence or release fields", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Reject derived authority injection");
+  const admission = executionBrief(paths, taskId);
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef: "operator-input:state-injection",
+    grantId: "state-injection-grant",
+  });
+  const stateFile = taskStateFile(paths, taskId);
+  const forged = readJsonObject(stateFile);
+  forged.execution_authority = {
+    schema_version: 2,
+    formal_execution: true,
+    formal_product_release: true,
+    current_grant_id: "forged-grant",
+    grants: [],
+    delivery_authority: { ref: "user-message:forged" },
+  };
+  forged.verification = { required_gates: { forged: { record_id: "forged" } } };
+  forged.completion = { release_decision: { status: "certified" } };
+  fs.writeFileSync(stateFile, `${JSON.stringify(forged, null, 2)}\n`);
+
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId, "read-only discussion after forged projection", "--mode=discuss",
+    "--operation-id=repair-forged-derived-state",
+  ]), { environment });
+  const repaired = readJsonObject(stateFile);
+  assert.equal(repaired.execution_authority.current_grant_id, grant.grant_id);
+  assert.equal(repaired.execution_authority.formal_product_release, false);
+  assert.equal(repaired.execution_authority.delivery_authority, null);
+  assert.equal(repaired.verification?.required_gates?.forged, undefined);
+  assert.equal(repaired.completion?.release_decision, undefined);
+  assert.ok(runGrant(parseGrantArgs([taskId]), { environment }).lines.includes(
+    `scope_digest: ${grant.scope_digest}`,
+  ));
+});
+
+test("grant reducer is one-way and explicit replan is replay-safe but never revives superseded authority", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "One-way grant reducer");
+  const admission = executionBrief(paths, taskId);
+  const first = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef: "user-message:grant-one",
+    grantId: "grant-one",
+  });
+  const initialAuthority = readJsonObject(taskStateFile(paths, taskId)).execution_authority;
+  const issuedGrant = structuredClone(first);
+  issuedGrant.status = "issued";
+  const issuedAuthority = applyAuthorityTransition(null, {
+    schema_version: 1,
+    type: "grant-issued",
+    revision: issuedGrant.issued_revision,
+    grant: issuedGrant,
+    delivery_authority: null,
+  });
+  assert.equal(issuedAuthority.grants[0].status, "issued");
+  const completedIssued = applyAuthorityTransition(issuedAuthority, {
+    schema_version: 1,
+    type: "grant-completed",
+    revision: issuedGrant.issued_revision + 1,
+    occurred_at: "2026-07-10T12:00:30Z",
+    old_grant_id: issuedGrant.grant_id,
+    old_scope_digest: issuedGrant.scope_digest,
+    old_evidence_epoch: issuedGrant.evidence_epoch,
+    outcome: "cancelled-before-activation",
+    reason: "unit issued grant terminal",
+  });
+  assert.equal(completedIssued.grants[0].status, "completed");
+  const revoked = applyAuthorityTransition(initialAuthority, {
+    schema_version: 1,
+    type: "grant-revoked",
+    revision: first.issued_revision + 1,
+    occurred_at: "2026-07-10T12:00:45Z",
+    old_grant_id: first.grant_id,
+    old_scope_digest: first.scope_digest,
+    old_evidence_epoch: first.evidence_epoch,
+    outcome: "cancelled",
+    reason: "unit active grant revocation",
+  });
+  assert.equal(revoked.grants[0].status, "revoked");
+  const completed = applyAuthorityTransition(initialAuthority, {
+    schema_version: 1,
+    type: "grant-completed",
+    revision: first.issued_revision + 1,
+    occurred_at: "2026-07-10T12:01:00Z",
+    old_grant_id: first.grant_id,
+    old_scope_digest: first.scope_digest,
+    old_evidence_epoch: first.evidence_epoch,
+    outcome: "succeeded",
+    reason: "unit reducer terminal",
+  });
+  assert.equal(completed.grants[0].status, "completed");
+  assert.equal(completed.current_grant_id, null);
+  assert.throws(() => applyAuthorityTransition(completed, {
+    schema_version: 1,
+    type: "grant-revoked",
+    revision: first.issued_revision + 2,
+    occurred_at: "2026-07-10T12:02:00Z",
+    old_grant_id: first.grant_id,
+    old_scope_digest: first.scope_digest,
+    old_evidence_epoch: first.evidence_epoch,
+    outcome: "",
+    reason: "must remain terminal",
+  }), /requires an active grant/);
+
+  blockTask(taskId, "pause without changing controller authority", {
+    environment,
+    operationId: "block-with-active-grant",
+  });
+  let persisted = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(persisted.status, "blocked");
+  assert.equal(persisted.execution_authority.current_grant_id, first.grant_id);
+  resumeTask(taskId, { environment, operationId: "resume-with-active-grant" });
+  persisted = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(persisted.status, "doing");
+  assert.equal(persisted.execution_authority.current_grant_id, first.grant_id);
+
+  const sameRef = replanRequest(environment, paths, taskId, admission, first, {
+    authorizationRef: "user-message:grant-one",
+    grantId: "grant-same-ref",
+  });
+  const beforeSameRef = authoritativeEvents(paths, taskId).length;
+  assert.throws(() => runReplan(sameRef, { cwd: admission.repo, environment }), /authorization ref was reused/);
+  assert.equal(authoritativeEvents(paths, taskId).length, beforeSameRef);
+
+  const secondRequest = replanRequest(environment, paths, taskId, admission, first, {
+    authorizationRef: "operator-input:grant-two",
+    grantId: "grant-two",
+    operationId: "replan-grant-two",
+  });
+  const result = runReplan(secondRequest, { cwd: admission.repo, environment });
+  assert.ok(result.lines.includes("evidence_epoch: 2"));
+  let authority = readJsonObject(taskStateFile(paths, taskId)).execution_authority;
+  assert.equal(authority.current_grant_id, "grant-two");
+  assert.equal(authority.grants.find((grant) => grant.grant_id === "grant-one").status, "superseded");
+  assert.equal(authority.grants.find((grant) => grant.grant_id === "grant-two").status, "active");
+  assert.ok(runReplan(secondRequest, { cwd: admission.repo, environment }).lines.includes("replayed: true"));
+
+  const second = authority.grants.find((grant) => grant.grant_id === "grant-two");
+  const thirdRequest = replanRequest(environment, paths, taskId, admission, second, {
+    authorizationRef: "user-message:grant-three",
+    grantId: "grant-three",
+    operationId: "replan-grant-three",
+  });
+  runReplan(thirdRequest, { cwd: admission.repo, environment });
+  const afterThird = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => runReplan(secondRequest, { cwd: admission.repo, environment }), /stale authorization replay/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), afterThird);
+  authority = readJsonObject(taskStateFile(paths, taskId)).execution_authority;
+  assert.equal(authority.current_grant_id, "grant-three");
+  assert.equal(authority.grants.find((grant) => grant.grant_id === "grant-two").status, "superseded");
+});
+
+test("replan requires quiescence and rejects missing assertions or incomplete brief sets with zero events", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Replan quiescence");
+  const admission = executionBrief(paths, taskId, { dependsOn: ["foundation"] });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef: "user-message:replan-quiescence",
+    grantId: "quiescent-old",
+  });
+  assert.throws(() => parseReplanArgs([
+    taskId,
+    admission.brief.objective,
+    "--authorization-ref=operator-input:missing-delta",
+    `--brief=${admission.briefPath}`,
+    "--grant-id=missing-delta", "--operation-id=missing-delta",
+    "--evidence-policy=invalidate-incompatible",
+  ]), /usage: codex-workflow team-replan/);
+  assert.throws(() => parseReplanArgs([
+    taskId,
+    admission.brief.objective,
+    "--authorization-ref=operator-input:missing-policy",
+    `--brief=${admission.briefPath}`,
+    "--grant-id=missing-policy", "--operation-id=missing-policy",
+    "--expected-delta=[]",
+  ]), /usage: codex-workflow team-replan/);
+
+  const wrongDelta = replanRequest(environment, paths, taskId, admission, grant, {
+    authorizationRef: "operator-input:wrong-delta",
+    expectedDelta: [],
+    grantId: "wrong-delta",
+  });
+  let before = authoritativeEvents(paths, taskId).length;
+  assert.throws(() => runReplan(wrongDelta, { cwd: admission.repo, environment }), /machine-computed scope delta/);
+  assert.equal(authoritativeEvents(paths, taskId).length, before);
+
+  const wrongScope = replanRequest(environment, paths, taskId, admission, grant, {
+    authorizationRef: "operator-input:wrong-scope-assertion",
+    grantId: "wrong-scope-assertion",
+  });
+  wrongScope.expectedScopeDigest = `sha256:${"0".repeat(64)}`;
+  before = authoritativeEvents(paths, taskId).length;
+  assert.throws(
+    () => runReplan(wrongScope, { cwd: admission.repo, environment }),
+    /expected scope digest does not match/,
+  );
+  assert.equal(authoritativeEvents(paths, taskId).length, before);
+
+  fs.rmSync(admission.briefPaths.foundation);
+  const missingBrief = parseReplanArgs([
+    taskId,
+    admission.brief.objective,
+    "--authorization-ref=operator-input:missing-brief",
+    `--brief=${admission.briefPath}`,
+    "--grant-id=missing-brief", "--operation-id=missing-brief",
+    "--evidence-policy=invalidate-incompatible", "--expected-delta=[]",
+  ]);
+  before = authoritativeEvents(paths, taskId).length;
+  assert.throws(() => runReplan(missingBrief, { cwd: admission.repo, environment }), /missing|ENOENT/);
+  assert.equal(authoritativeEvents(paths, taskId).length, before);
+});
+
+test("replan leaves an open real Team mutable until its control plane is closed", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Replan real control-plane closure");
+  const admission = executionBrief(paths, taskId, {
+    ownedPaths: ["workflow/replan-real-control-plane/**"],
+  });
+  const authorizationRef = "user-message:replan-real-control-plane";
+  const oldGrant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef,
+    grantId: "replan-real-old-grant",
+    operationId: "authorize-replan-real-old-grant",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    `--authorization-ref=${authorizationRef}`,
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${oldGrant.grant_id}`,
+    `--scope-digest=${oldGrant.scope_digest}`,
+    "--operation-id=start-replan-real-team",
+  ]), { cwd: admission.repo, environment });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId,
+    "--operation-id=open-replan-real-lane",
+    "--action=open",
+    "--lane=replan-real-lane",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId,
+    "--operation-id=open-replan-real-dispatch",
+    "--action=open",
+    "--lane=replan-real-lane",
+    "--dispatch=replan-real-dispatch",
+  ]);
+
+  const request = replanRequest(environment, paths, taskId, admission, oldGrant, {
+    authorizationRef: "operator-input:replan-real-new-authority",
+    grantId: "replan-real-new-grant",
+    operationId: "replan-real-after-closure",
+  });
+  const beforeRejectedReplan = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(
+    () => runReplan(request, { cwd: admission.repo, environment }),
+    /closed v2 Team control plane.*lane is not closed.*dispatch is not closed/,
+  );
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeRejectedReplan);
+  assert.equal(readTeam(paths, taskId).status, "running");
+
+  writeEvidence(paths, taskId, "replan/control-plane-rejected.md");
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId,
+    "--operation-id=dispose-replan-real-dispatch",
+    "--action=dispose",
+    "--dispatch=replan-real-dispatch",
+    "--disposition=rejected",
+    "--evidence-refs=replan/control-plane-rejected.md",
+  ]);
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId,
+    "--operation-id=close-replan-real-dispatch",
+    "--action=close",
+    "--dispatch=replan-real-dispatch",
+  ]);
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId,
+    "--operation-id=close-replan-real-lane",
+    "--action=close",
+    "--lane=replan-real-lane",
+    "--convergence=CONSENSUS_WITH_RESERVATIONS",
+  ]);
+
+  runReplan(request, { cwd: admission.repo, environment });
+  let state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.status, "stopped");
+  const newGrant = state.execution_authority.grants.find(
+    (candidate) => candidate.grant_id === "replan-real-new-grant",
+  );
+  assert.ok(newGrant);
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=operator-input:replan-real-new-authority",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${newGrant.grant_id}`,
+    `--scope-digest=${newGrant.scope_digest}`,
+    "--operation-id=start-replan-real-new-generation",
+  ]), { cwd: admission.repo, environment });
+  state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.active_team.generation, 2);
+  assert.equal(state.active_team.status, "running");
+  assert.equal(state.active_team.grant_id, newGrant.grant_id);
+});
+
+test("replan retains only explicitly compatible evidence and advances every binding epoch", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const { admission, taskId } = acceptedExecution(environment, paths, "Retained execution evidence");
+  const beforeState = readJsonObject(taskStateFile(paths, taskId));
+  const oldGrant = beforeState.execution_authority.grants.find(
+    (grant) => grant.grant_id === beforeState.execution_authority.current_grant_id,
+  );
+  const gate = beforeState.verification.required_gates["execution-contract"];
+  const accepted = beforeState.slice_acceptances["execution-slice"];
+  const retainedIds = [gate.record_id, accepted.operation_id].sort();
+  const request = replanRequest(environment, paths, taskId, admission, oldGrant, {
+    authorizationRef: "operator-input:retain-compatible",
+    evidencePolicy: "retain-compatible",
+    grantId: "retained-grant",
+    operationId: "replan-retain-compatible",
+    retainEvidence: retainedIds,
+  });
+  runReplan(request, { cwd: admission.repo, environment });
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  const newGrant = state.execution_authority.grants.find((grant) => grant.grant_id === "retained-grant");
+  assert.equal(newGrant.evidence_epoch, oldGrant.evidence_epoch + 1);
+  assert.deepEqual(newGrant.scope.evidence_policy.retained_receipt_ids, retainedIds);
+  const reboundGate = state.verification.required_gates["execution-contract"];
+  const reboundSlice = state.slice_acceptances["execution-slice"];
+  for (const receipt of [reboundGate, reboundSlice, ...reboundSlice.verification_records]) {
+    assert.equal(receipt.grant_id, newGrant.grant_id);
+    assert.equal(receipt.scope_digest, newGrant.scope_digest);
+    assert.equal(receipt.evidence_epoch, newGrant.evidence_epoch);
+    assert.deepEqual(receipt.retained_from, {
+      grant_id: oldGrant.grant_id,
+      scope_digest: oldGrant.scope_digest,
+      evidence_epoch: oldGrant.evidence_epoch,
+    });
+  }
+  assert.equal(state.execution_evidence_history.at(-1).receipts.length, 2);
+  const transition = authoritativeEvents(paths, taskId).at(-1).authority_transition;
+  assert.equal(transition.type, "grant-replanned");
+  assert.deepEqual(transition.evidence.retained.map((item) => item.receipt_id).sort(), retainedIds);
+  assert.deepEqual(transition.evidence.invalidated, []);
+
+  const eventFile = taskEventFile(paths, taskId);
+  const canonicalStream = fs.readFileSync(eventFile, "utf8");
+  const rewriteLastEvent = (change) => {
+    const events = canonicalStream.trim().split("\n").map((line) => JSON.parse(line));
+    change(events.at(-1));
+    events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
+    fs.writeFileSync(eventFile, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  };
+  rewriteLastEvent((event) => { event.authority_transition.evidence.retained.pop(); });
+  assert.throws(
+    () => readAuthoritativeEvents(eventFile, taskId),
+    /retained evidence decisions|evidence decisions/,
+  );
+  fs.writeFileSync(eventFile, canonicalStream);
+  rewriteLastEvent((event) => {
+    event.projection.state.verification.required_gates["execution-contract"].evidence_epoch -= 1;
+  });
+  assert.throws(
+    () => readAuthoritativeEvents(eventFile, taskId),
+    /retained evidence binding is stale/,
+  );
+  fs.writeFileSync(eventFile, canonicalStream);
+  rewriteLastEvent((event) => {
+    event.projection.state.verification.required_gates["execution-contract"]
+      .retained_from.grant_id = "forged-retained-source";
+  });
+  assert.throws(
+    () => readAuthoritativeEvents(eventFile, taskId),
+    /retained evidence audit projection is invalid/,
+  );
+  fs.writeFileSync(eventFile, canonicalStream);
+
+  const dependencyTask = createFixtureTask(environment, "Transitive evidence retention");
+  const dependencyCheck = [process.execPath, "-e", "process.exit(0)"];
+  const dependencyAdmission = executionBrief(paths, dependencyTask, {
+    command: formatCommand(dependencyCheck).trimEnd(),
+    dependsOn: ["foundation"],
+  });
+  const dependencyGrant = issueExecutionGrant(
+    environment,
+    paths,
+    dependencyTask,
+    dependencyAdmission,
+    {
+      authorizationRef: "user-message:transitive-retention",
+      grantId: "transitive-retention-old",
+      operationId: "authorize-transitive-retention",
+    },
+  );
+  for (const [index, sliceId] of ["foundation", "execution-slice"].entries()) {
+    const briefPath = dependencyAdmission.briefPaths[sliceId];
+    runRecordStartCommand(parseRecordStartArgs([
+      dependencyTask,
+      dependencyGrant.scope.required_slices.find((slice) => slice.slice_id === sliceId).objective,
+      "--mode=execute",
+      "--authorization-ref=user-message:transitive-retention",
+      `--brief=${briefPath}`,
+      `--grant-id=${dependencyGrant.grant_id}`,
+      `--scope-digest=${dependencyGrant.scope_digest}`,
+      `--operation-id=start-transitive-${sliceId}`,
+    ]), { cwd: dependencyAdmission.repo, environment });
+    runPromoteCommand(parsePromoteArgs([dependencyTask, "--to=finish"]), {
+      environment,
+      operationId: `finish-transitive-${sliceId}`,
+    });
+    const keeperRelative = sliceId === "foundation"
+      ? "dependencies/foundation/keeper.txt"
+      : "workflow/test-owned/keeper.txt";
+    const keeper = path.join(dependencyAdmission.repo, keeperRelative);
+    fs.mkdirSync(path.dirname(keeper), { recursive: true });
+    fs.writeFileSync(keeper, `${sliceId} keeper\n`);
+    runVerification(parseVerifyArgs([
+      dependencyTask,
+      `--brief=${briefPath}`,
+      `--slice-id=${sliceId}`,
+      `--check-id=${sliceId === "foundation" ? "check-foundation" : "execution-contract"}`,
+      "--",
+      ...dependencyCheck,
+    ]), {
+      cwd: dependencyAdmission.repo,
+      environment,
+      operationId: `verify-transitive-${sliceId}`,
+      recordToken: `20260729T01000000000001${index}`,
+    });
+    runSliceAccept(parseSliceAcceptArgs([
+      dependencyTask,
+      `--brief=${briefPath}`,
+      `--operation-id=accept-transitive-${sliceId}`,
+      `--keeper-output=${sliceId === "foundation"
+        ? "event:foundation:ready"
+        : "event:execution-slice-complete"}=${keeperRelative}`,
+    ]), { environment });
+  }
+  const dependencyState = readJsonObject(taskStateFile(paths, dependencyTask));
+  const dependentOnly = replanRequest(
+    environment,
+    paths,
+    dependencyTask,
+    dependencyAdmission,
+    dependencyGrant,
+    {
+      authorizationRef: "operator-input:dependent-only-retention",
+      evidencePolicy: "retain-compatible",
+      grantId: "transitive-retention-new",
+      operationId: "replan-dependent-only-retention",
+      retainEvidence: [
+        dependencyState.verification.required_gates["execution-contract"].record_id,
+        dependencyState.slice_acceptances["execution-slice"].operation_id,
+      ],
+    },
+  );
+  const beforeDependentOnly = authoritativeEvents(paths, dependencyTask).length;
+  assert.throws(
+    () => runReplan(dependentOnly, { cwd: dependencyAdmission.repo, environment }),
+    /retained transitive dependency foundation/,
+  );
+  assert.equal(authoritativeEvents(paths, dependencyTask).length, beforeDependentOnly);
+
+  const invalidated = acceptedExecution(environment, paths, "Default evidence invalidation");
+  const invalidatedBefore = readJsonObject(taskStateFile(paths, invalidated.taskId));
+  const invalidatedOldGrant = invalidatedBefore.execution_authority.grants.find(
+    (candidate) => candidate.grant_id
+      === invalidatedBefore.execution_authority.current_grant_id,
+  );
+  const invalidateRequest = replanRequest(
+    environment,
+    paths,
+    invalidated.taskId,
+    invalidated.admission,
+    invalidatedOldGrant,
+    {
+      authorizationRef: "operator-input:invalidate-all-evidence",
+      evidencePolicy: "invalidate-incompatible",
+      grantId: "invalidated-evidence-grant",
+      operationId: "replan-invalidate-all-evidence",
+    },
+  );
+  runReplan(invalidateRequest, { cwd: invalidated.admission.repo, environment });
+  const invalidatedAfter = readJsonObject(taskStateFile(paths, invalidated.taskId));
+  assert.deepEqual(invalidatedAfter.verification.required_gates, {});
+  assert.deepEqual(invalidatedAfter.slice_acceptances, {});
+  const invalidationTransition = authoritativeEvents(paths, invalidated.taskId)
+    .at(-1).authority_transition;
+  assert.equal(invalidationTransition.evidence.retained.length, 0);
+  assert.equal(invalidationTransition.evidence.invalidated.length, 2);
+  assert.equal(invalidatedAfter.execution_evidence_history.at(-1).receipts.length, 2);
+});
+
+test("authority artifact swaps cannot commit and post-append recovery preserves one valid grant event", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Authority artifact stability");
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+  });
+  const originalBrief = fs.readFileSync(admission.briefPath);
+  const originalContract = fs.readFileSync(admission.contract);
+  const initialEvents = authoritativeEvents(paths, taskId).length;
+  const authorize = (grantId, operationId, options = {}) => runAuthorize(parseAuthorizeArgs([
+    taskId,
+    admission.brief.objective,
+    "--authorization-ref=user-message:stable-artifacts",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grantId}`,
+    `--operation-id=${operationId}`,
+  ]), { cwd: admission.repo, environment, ...options });
+
+  assert.throws(() => authorize("brief-swap", "authorize-brief-swap", {
+    beforeEventAppend() {
+      const changed = JSON.parse(originalBrief.toString("utf8"));
+      changed.objective = "brief bytes changed after admission";
+      fs.writeFileSync(admission.briefPath, `${JSON.stringify(changed, null, 2)}\n`);
+    },
+  }), /changed before authoritative event append|does not match|invalid/);
+  assert.equal(authoritativeEvents(paths, taskId).length, initialEvents);
+  fs.writeFileSync(admission.briefPath, originalBrief);
+
+  assert.throws(() => authorize("contract-swap", "authorize-contract-swap", {
+    beforeEventAppend() {
+      fs.writeFileSync(admission.contract, Buffer.concat([originalContract, Buffer.from("\n") ]));
+    },
+  }), /changed before authoritative event append|digest does not match/);
+  assert.equal(authoritativeEvents(paths, taskId).length, initialEvents);
+  fs.writeFileSync(admission.contract, originalContract);
+
+  assert.throws(() => authorize("stable-grant", "authorize-stable-grant", {
+    failAfterEventAppend: true,
+  }), /event committed but projection is inconsistent/);
+  assert.equal(authoritativeEvents(paths, taskId).length, initialEvents + 1);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).execution_authority, undefined);
+  const replay = authorize("stable-grant", "authorize-stable-grant");
+  assert.ok(replay.lines.includes("replayed: true"));
+  assert.equal(authoritativeEvents(paths, taskId).length, initialEvents + 1);
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).execution_authority.current_grant_id,
+    "stable-grant",
+  );
+
+  fs.writeFileSync(admission.contract, Buffer.concat([originalContract, Buffer.from("\n") ]));
+  const beforeStaleReplay = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(
+    () => authorize("stable-grant", "authorize-stable-grant"),
+    /stale authorization replay.*(?:changed|digest|match)/,
+  );
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeStaleReplay);
+  fs.writeFileSync(admission.contract, originalContract);
+
+  const stableGrant = readJsonObject(taskStateFile(paths, taskId)).execution_authority.grants[0];
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=user-message:stable-artifacts",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${stableGrant.grant_id}`,
+    `--scope-digest=${stableGrant.scope_digest}`,
+    "--operation-id=start-stable-artifacts",
+  ]), { cwd: admission.repo, environment });
+  const beforeControl = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    taskId,
+    "--operation-id=open-lane-with-contract-swap",
+    "--action=open",
+    "--lane=artifact-swap-writer",
+    "--writable",
+    "--paths=workflow/test-owned/**",
+  ], "2026-07-10T12:14:00Z", {
+    beforeEventAppend() {
+      fs.writeFileSync(admission.contract, Buffer.concat([originalContract, Buffer.from("\n")]));
+    },
+  }), /changed before|no longer matches|digest does not match/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeControl);
+  fs.writeFileSync(admission.contract, originalContract);
+  const beforeVerification = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]), {
+    beforeEventAppend() {
+      const changed = JSON.parse(originalBrief.toString("utf8"));
+      changed.objective = "verification observed a swapped brief";
+      fs.writeFileSync(admission.briefPath, `${JSON.stringify(changed, null, 2)}\n`);
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "verify-stable-artifacts",
+    recordToken: "20260710T121500000000001",
+  }), /changed before event append|no longer matches|invalid|does not match/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), beforeVerification);
+  fs.writeFileSync(admission.briefPath, originalBrief);
+
+  const allBriefTask = createFixtureTask(environment, "All-brief verification stability");
+  const allBriefAdmission = executionBrief(paths, allBriefTask, {
+    briefSliceId: "foundation",
+    command: formatCommand(checkCommand).trimEnd(),
+    dependsOn: ["foundation"],
+  });
+  const allBriefGrant = issueExecutionGrant(
+    environment,
+    paths,
+    allBriefTask,
+    allBriefAdmission,
+    {
+      authorizationRef: "operator-input:all-brief-stability",
+      grantId: "all-brief-stability-grant",
+      operationId: "authorize-all-brief-stability",
+    },
+  );
+  runRecordStartCommand(parseRecordStartArgs([
+    allBriefTask,
+    allBriefAdmission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=operator-input:all-brief-stability",
+    `--brief=${allBriefAdmission.briefPath}`,
+    `--grant-id=${allBriefGrant.grant_id}`,
+    `--scope-digest=${allBriefGrant.scope_digest}`,
+    "--operation-id=start-all-brief-stability",
+  ]), { cwd: allBriefAdmission.repo, environment });
+  const otherBriefPath = allBriefAdmission.briefPaths["execution-slice"];
+  const originalOtherBrief = fs.readFileSync(otherBriefPath);
+  const beforeAllBriefVerification = fs.readFileSync(
+    taskEventFile(paths, allBriefTask),
+    "utf8",
+  );
+  assert.throws(() => runVerification(parseVerifyArgs([
+    allBriefTask,
+    `--brief=${allBriefAdmission.briefPath}`,
+    "--slice-id=foundation",
+    "--check-id=check-foundation",
+    "--",
+    ...checkCommand,
+  ]), {
+    beforeEventAppend() {
+      const changed = JSON.parse(originalOtherBrief.toString("utf8"));
+      changed.objective = "non-selected brief changed before verification append";
+      fs.writeFileSync(otherBriefPath, `${JSON.stringify(changed, null, 2)}\n`);
+    },
+    cwd: allBriefAdmission.repo,
+    environment,
+    operationId: "verify-all-brief-stability",
+    recordToken: "20260710T121500000000002",
+  }), /changed before event append|no longer matches|invalid|does not match/);
+  assert.equal(
+    fs.readFileSync(taskEventFile(paths, allBriefTask), "utf8"),
+    beforeAllBriefVerification,
+  );
+  fs.writeFileSync(otherBriefPath, originalOtherBrief);
+});
+
+test("legacy formal execution history cannot fall back to generic completion", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Legacy formal history completion");
+  mutateTaskRuntime(paths, taskId, {
+    kind: "team.started",
+    operationId: "legacy-formal-history",
+    data: { mode: "execute" },
+  }, ({ currentProjection }) => ({
+    projection: {
+      task_content: currentProjection.task_content,
+      state: currentProjection.state,
+    },
+  }));
+  const before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => completeTask(taskId, {
+    clock: clockAt("2026-07-10T12:10:00Z"),
+    environment,
+    authorityRef: "user-message:legacy-completion",
+    evidenceRefs: ["legacy-formal-history"],
+    operationId: "legacy-generic-completion",
+    outcome: "failed",
+  }), /formal execution history requires a current active vNext grant/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+});
+
+test("verification records a factual receipt after artifact drift while consumers stay strict", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification receipt after artifact drift");
+  const counter = path.join(paths.root, "artifact-drift-verification-count");
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ];
+  const admission = executionBrief(paths, taskId, {
+    command: formatCommand(checkCommand).trimEnd(),
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    grantId: "artifact-drift-verification-grant",
+    operationId: "authorize-artifact-drift-verification",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    "--authorization-ref=user-message:p0b-authorize",
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-artifact-drift-verification",
+  ]), { cwd: admission.repo, environment });
+  runPromoteCommand(parsePromoteArgs([taskId, "--to=finish"]), {
+    environment,
+    operationId: "finish-artifact-drift-verification",
+  });
+  const keeperRelative = "workflow/test-owned/artifact-drift-keeper.txt";
+  const keeper = path.join(admission.repo, keeperRelative);
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "artifact drift keeper\n");
+  const originalBrief = fs.readFileSync(admission.briefPath);
+  const changedBrief = JSON.parse(originalBrief.toString("utf8"));
+  changedBrief.objective = "drifted only after verification claim";
+  const parsed = parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]);
+  let drifted = false;
+  const first = runVerification(parsed, {
+    captureIdentity(input) {
+      if (!drifted) {
+        drifted = true;
+        fs.writeFileSync(admission.briefPath, `${JSON.stringify(changedBrief, null, 2)}\n`);
+      }
+      return captureVerificationIdentity(input);
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "artifact-drift-verification",
+    recordToken: "20260710T121500000000211",
+  });
+
+  assert.equal(drifted, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims
+      .find((claim) => claim.operation_id === "artifact-drift-verification").status,
+    "terminal",
+  );
+  const replay = runVerification(parsed, {
+    captureIdentity() {
+      throw new Error("artifact-drift terminal replay must not execute");
+    },
+    cwd: admission.repo,
+    environment,
+    operationId: "artifact-drift-verification",
+    recordToken: "20260710T121500000000212",
+  });
+  assert.deepEqual(replay, first);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+
+  let before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => runVerification(parsed, {
+    cwd: admission.repo,
+    environment,
+    operationId: "artifact-drift-new-verification",
+    recordToken: "20260710T121500000000213",
+  }), /brief.*(?:sha256|match|equal)|changed|digest/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+  assert.throws(() => requiredGateAdmission(
+    paths,
+    taskId,
+    readJsonObject(taskStateFile(paths, taskId)),
+    { environment },
+  ), /brief.*(?:sha256|match|equal)|changed|digest/);
+  const acceptArgs = parseSliceAcceptArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--operation-id=accept-artifact-drift-verification",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]);
+  assert.throws(() => runSliceAccept(acceptArgs, { environment }),
+    /brief.*(?:sha256|match|equal)|changed|digest/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+
+  fs.writeFileSync(admission.briefPath, originalBrief);
+  runSliceAccept(acceptArgs, { environment });
+  fs.writeFileSync(admission.briefPath, `${JSON.stringify(changedBrief, null, 2)}\n`);
+  before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => completeTask(taskId, {
+    environment,
+    operationId: "complete-artifact-drift-verification",
+  }), /changed|digest does not match|no longer matches|objective does not match/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+  fs.writeFileSync(admission.briefPath, originalBrief);
+});
+
+test("verification claim before expiry records after expiry but cannot authorize consumers", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification receipt after authority expiry");
+  const counter = path.join(paths.root, "expired-terminal-verification-count");
+  const authorityRef = "user-message:terminal-expiry-exception";
+  const sizeException = {
+    authority_ref: authorityRef,
+    expires_at: "2026-07-10T12:05:00Z",
+    reason: "exercise the claim-to-terminal expiry boundary",
+    compensating_controls: ["consumers recheck current authority"],
+  };
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ];
+  const admission = executionBrief(paths, taskId, {
+    budget: {
+      max_changed_files: 1,
+      max_loc: 1,
+      max_wall_clock_minutes: 1,
+      max_required_checks: 1,
+    },
+    command: formatCommand(checkCommand).trimEnd(),
+    ownedPaths: ["workflow/terminal-expiry/**"],
+    sizeException,
+  });
+  const grant = issueExecutionGrant(environment, paths, taskId, admission, {
+    authorizationRef: authorityRef,
+    clock: clockAt("2026-07-10T12:00:00Z"),
+    grantId: "terminal-expiry-grant",
+    operationId: "authorize-terminal-expiry",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    admission.brief.objective,
+    "--mode=execute",
+    `--authorization-ref=${authorityRef}`,
+    `--brief=${admission.briefPath}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-terminal-expiry",
+  ]), {
+    clock: clockAt("2026-07-10T12:01:00Z"),
+    cwd: admission.repo,
+    environment,
+  });
+  runPromoteCommand(parsePromoteArgs([taskId, "--to=finish"]), {
+    clock: clockAt("2026-07-10T12:02:00Z"),
+    environment,
+    operationId: "finish-terminal-expiry",
+  });
+  const keeperRelative = "workflow/terminal-expiry/keeper.txt";
+  const keeper = path.join(admission.repo, keeperRelative);
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "expiry keeper\n");
+  const parsed = parseVerifyArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]);
+  let now = "2026-07-10T12:03:00Z";
+  let crossedExpiry = false;
+  const first = runVerification(parsed, {
+    captureIdentity(input) {
+      const captured = captureVerificationIdentity(input);
+      if (!crossedExpiry) {
+        crossedExpiry = true;
+        now = "2026-07-10T12:06:00Z";
+      }
+      return captured;
+    },
+    clock: () => new Date(now),
+    cwd: admission.repo,
+    environment,
+    operationId: "terminal-expiry-verification",
+    recordToken: "20260710T120600000000211",
+  });
+
+  assert.equal(crossedExpiry, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims
+      .find((claim) => claim.operation_id === "terminal-expiry-verification").status,
+    "terminal",
+  );
+  const replay = runVerification(parsed, {
+    captureIdentity() {
+      throw new Error("expired terminal replay must not execute");
+    },
+    clock: () => new Date(now),
+    cwd: admission.repo,
+    environment,
+    operationId: "terminal-expiry-verification",
+    recordToken: "20260710T120600000000212",
+  });
+  assert.deepEqual(replay, first);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+
+  const before = fs.readFileSync(taskEventFile(paths, taskId), "utf8");
+  assert.throws(() => runVerification(parsed, {
+    clock: () => new Date(now),
+    cwd: admission.repo,
+    environment,
+    operationId: "terminal-expiry-new-verification",
+    recordToken: "20260710T120600000000213",
+  }), /size exception has expired/);
+  assert.throws(() => requiredGateAdmission(
+    paths,
+    taskId,
+    readJsonObject(taskStateFile(paths, taskId)),
+    { clock: () => new Date(now), environment },
+  ), /size exception has expired/);
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
+    taskId,
+    `--brief=${admission.briefPath}`,
+    "--operation-id=accept-terminal-expiry",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]), {
+    clock: () => new Date(now),
+    environment,
+  }), /size exception has expired/);
+  assert.throws(() => completeTask(taskId, {
+    clock: () => new Date(now),
+    environment,
+    operationId: "complete-terminal-expiry",
+  }), /size exception has expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, taskId), "utf8"), before);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).status, "doing");
+});
+
+test("size exceptions stay bound and are rechecked at replay start reserve acceptance and completion", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const expiresAt = "2026-07-10T12:05:00Z";
+  const exception = {
+    authority_ref: "user-message:expiring-size-exception",
+    expires_at: expiresAt,
+    reason: "bounded test slice needs one indivisible authority window",
+    compensating_controls: ["fresh final contract verification"],
+  };
+  const budget = {
+    max_changed_files: 1,
+    max_loc: 1,
+    max_wall_clock_minutes: 1,
+    max_required_checks: 1,
+  };
+  const firstTask = createFixtureTask(environment, "Expiring reserve authority");
+  const firstAdmission = executionBrief(paths, firstTask, {
+    budget,
+    ownedPaths: ["workflow/expiring-reserve/**"],
+    sizeException: exception,
+  });
+  const firstGrant = issueExecutionGrant(environment, paths, firstTask, firstAdmission, {
+    authorizationRef: exception.authority_ref,
+    clock: clockAt("2026-07-10T12:00:00Z"),
+    grantId: "expiring-reserve-grant",
+    operationId: "authorize-expiring-reserve",
+  });
+  assert.equal(firstGrant.scope.size_exceptions.length, 1);
+  const tampered = structuredClone(firstGrant);
+  tampered.scope.size_exceptions[0].task_id = "another-task";
+  tampered.scope_digest = `sha256:${sha256(JSON.stringify(stableValue(tampered.scope)))}`;
+  assert.throws(() => validateGrant(tampered), /binding or canonical order|binding is stale/);
+
+  const replayArgs = parseAuthorizeArgs([
+    firstTask,
+    firstAdmission.brief.objective,
+    `--authorization-ref=${exception.authority_ref}`,
+    `--brief=${firstAdmission.briefPath}`,
+    "--grant-id=expiring-reserve-grant",
+    "--operation-id=authorize-expiring-reserve",
+  ]);
+  let before = fs.readFileSync(taskEventFile(paths, firstTask), "utf8");
+  assert.throws(() => runAuthorize(replayArgs, {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    cwd: firstAdmission.repo,
+    environment,
+  }), /stale authorization replay.*expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, firstTask), "utf8"), before);
+
+  const startArgs = parseRecordStartArgs([
+    firstTask,
+    firstAdmission.brief.objective,
+    "--mode=execute",
+    `--authorization-ref=${exception.authority_ref}`,
+    `--brief=${firstAdmission.briefPath}`,
+    `--grant-id=${firstGrant.grant_id}`,
+    `--scope-digest=${firstGrant.scope_digest}`,
+    "--operation-id=start-expiring-reserve",
+  ]);
+  assert.throws(() => runRecordStartCommand(startArgs, {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    cwd: firstAdmission.repo,
+    environment,
+  }), /size exception has expired/);
+  runRecordStartCommand(startArgs, {
+    clock: clockAt("2026-07-10T12:01:00Z"),
+    cwd: firstAdmission.repo,
+    environment,
+  });
+  invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=expiring-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/expiring-reserve/**",
+  ], "2026-07-10T12:02:00Z");
+  invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    firstTask, "--operation-id=expiring-dispatch", "--action=open", "--lane=writer",
+    "--dispatch=expiring-dispatch",
+  ], "2026-07-10T12:03:00Z");
+  before = fs.readFileSync(taskEventFile(paths, firstTask), "utf8");
+  assert.throws(() => invokeControl(runLaneRecord, parseLaneArgs, environment, [
+    firstTask, "--operation-id=expiring-lane", "--action=open", "--lane=writer",
+    "--writable", "--paths=workflow/expiring-reserve/**",
+  ], "2026-07-10T12:06:00Z"), /stale authorization replay.*expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, firstTask), "utf8"), before);
+  before = fs.readFileSync(taskEventFile(paths, firstTask), "utf8");
+  assert.throws(() => invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    firstTask, "--operation-id=expiring-reserve", "--action=reserve",
+    "--dispatch=expiring-dispatch", "--attempt=expiring-attempt",
+    "--launch-operation-id=launch-expiring-attempt", "--writable",
+    "--paths=workflow/expiring-reserve/**",
+  ], "2026-07-10T12:06:00Z"), /size exception has expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, firstTask), "utf8"), before);
+
+  const secondTask = createFixtureTask(environment, "Expiring acceptance authority");
+  const verificationCounter = path.join(paths.root, "expiring-verification-count");
+  const checkCommand = [
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(verificationCounter)}, "run\\n")`,
+  ];
+  const secondAdmission = executionBrief(paths, secondTask, {
+    budget,
+    command: formatCommand(checkCommand).trimEnd(),
+    ownedPaths: ["workflow/expiring-accept/**"],
+    sizeException: exception,
+  });
+  const secondGrant = issueExecutionGrant(environment, paths, secondTask, secondAdmission, {
+    authorizationRef: exception.authority_ref,
+    clock: clockAt("2026-07-10T12:00:00Z"),
+    grantId: "expiring-accept-grant",
+    operationId: "authorize-expiring-accept",
+  });
+  runRecordStartCommand(parseRecordStartArgs([
+    secondTask,
+    secondAdmission.brief.objective,
+    "--mode=execute",
+    `--authorization-ref=${exception.authority_ref}`,
+    `--brief=${secondAdmission.briefPath}`,
+    `--grant-id=${secondGrant.grant_id}`,
+    `--scope-digest=${secondGrant.scope_digest}`,
+    "--operation-id=start-expiring-accept",
+  ]), {
+    clock: clockAt("2026-07-10T12:01:00Z"),
+    cwd: secondAdmission.repo,
+    environment,
+  });
+  runPromoteCommand(parsePromoteArgs([secondTask, "--to=finish"]), {
+    clock: clockAt("2026-07-10T12:02:00Z"),
+    environment,
+    operationId: "finish-expiring-accept",
+  });
+  const keeperRelative = "workflow/expiring-accept/keeper.txt";
+  const keeper = path.join(secondAdmission.repo, keeperRelative);
+  fs.mkdirSync(path.dirname(keeper), { recursive: true });
+  fs.writeFileSync(keeper, "expiring keeper\n");
+  const verificationResult = runVerification(parseVerifyArgs([
+    secondTask,
+    `--brief=${secondAdmission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]), {
+    clock: clockAt("2026-07-10T12:03:00Z"),
+    cwd: secondAdmission.repo,
+    environment,
+    operationId: "verify-expiring-accept",
+    recordToken: "20260710T120300000000001",
+  });
+  assert.equal(fs.readFileSync(verificationCounter, "utf8"), "run\n");
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  const expiredReplay = runVerification(parseVerifyArgs([
+    secondTask,
+    `--brief=${secondAdmission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]), {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    cwd: secondAdmission.repo,
+    environment,
+    operationId: "verify-expiring-accept",
+    recordToken: "20260710T120600000000001",
+  });
+  assert.deepEqual(expiredReplay, verificationResult);
+  assert.equal(fs.readFileSync(verificationCounter, "utf8"), "run\n");
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.throws(() => runVerification(parseVerifyArgs([
+    secondTask,
+    `--brief=${secondAdmission.briefPath}`,
+    "--slice-id=execution-slice",
+    "--check-id=execution-contract",
+    "--",
+    ...checkCommand,
+  ]), {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    cwd: secondAdmission.repo,
+    environment,
+    operationId: "verify-expired-initial",
+    recordToken: "20260710T120600000000002",
+  }), /expired/);
+  assert.equal(fs.readFileSync(verificationCounter, "utf8"), "run\n");
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.throws(() => requiredGateAdmission(
+    paths,
+    secondTask,
+    readJsonObject(taskStateFile(paths, secondTask)),
+    { clock: clockAt("2026-07-10T12:06:00Z"), environment },
+  ), /expired/);
+  assert.equal(fs.readFileSync(verificationCounter, "utf8"), "run\n");
+  const acceptArgs = parseSliceAcceptArgs([
+    secondTask,
+    `--brief=${secondAdmission.briefPath}`,
+    "--operation-id=accept-expiring-slice",
+    `--keeper-output=event:execution-slice-complete=${keeperRelative}`,
+  ]);
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  assert.throws(() => runSliceAccept(acceptArgs, {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    environment,
+  }), /size exception has expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  runSliceAccept(acceptArgs, {
+    clock: clockAt("2026-07-10T12:04:00Z"),
+    environment,
+  });
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  let finalAppendNow = "2026-07-10T12:04:10Z";
+  assert.throws(() => completeTask(secondTask, {
+    beforeEventAppend() {
+      finalAppendNow = "2026-07-10T12:06:00Z";
+    },
+    clock: () => new Date(finalAppendNow),
+    environment,
+    operationId: "complete-expired-at-final-append",
+  }), /size exception has expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, secondTask)).status, "doing");
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  assert.throws(() => completeTask(secondTask, {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    environment,
+    operationId: "complete-expired-slice",
+  }), /size exception has expired/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, secondTask)).status, "doing");
+  const originalCompletionContract = fs.readFileSync(secondAdmission.contract);
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  assert.throws(() => completeTask(secondTask, {
+    beforeEventAppend() {
+      fs.writeFileSync(
+        secondAdmission.contract,
+        Buffer.concat([originalCompletionContract, Buffer.from("\n")]),
+      );
+    },
+    clock: clockAt("2026-07-10T12:04:15Z"),
+    environment,
+    operationId: "complete-swapped-slice",
+  }), /changed before authoritative event append|digest does not match|no longer matches/);
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, secondTask)).status, "doing");
+  fs.writeFileSync(secondAdmission.contract, originalCompletionContract);
+  const completed = completeTask(secondTask, {
+    clock: clockAt("2026-07-10T12:04:30Z"),
+    environment,
+    operationId: "complete-expiring-slice",
+  });
+  before = fs.readFileSync(taskEventFile(paths, secondTask), "utf8");
+  const completedReplay = completeTask(secondTask, {
+    clock: clockAt("2026-07-10T12:06:00Z"),
+    environment,
+    operationId: "complete-expiring-slice",
+  });
+  assert.deepEqual(completedReplay, { ...completed, replay: true });
+  assert.equal(fs.readFileSync(taskEventFile(paths, secondTask), "utf8"), before);
+  assert.equal(readJsonObject(taskStateFile(paths, secondTask)).status, "done");
 });

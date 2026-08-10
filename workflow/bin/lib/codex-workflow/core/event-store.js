@@ -111,6 +111,32 @@ function readAuthoritativeEvents(file, taskId = "") {
         throw new Error(`corrupt authoritative event at line ${index + 1}: ${field} required`);
       }
     }
+    if (Number.isNaN(Date.parse(event.occurred_at))
+      || new Date(event.occurred_at).toISOString() !== event.occurred_at) {
+      throw new Error(
+        `corrupt authoritative event at line ${index + 1}: occurred_at must be canonical ISO UTC`,
+      );
+    }
+    if (typeof event.local_day !== "string"
+      || !/^\d{4}-\d{2}-\d{2}$/.test(event.local_day)
+      || !Number.isInteger(event.local_utc_offset_minutes)
+      || event.local_utc_offset_minutes < -14 * 60
+      || event.local_utc_offset_minutes > 14 * 60) {
+      throw new Error(
+        `corrupt authoritative event at line ${index + 1}: local day metadata required`,
+      );
+    }
+    const local = new Date(
+      Date.parse(event.occurred_at) + event.local_utc_offset_minutes * 60 * 1000,
+    );
+    const expectedLocalDay = [
+      local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(),
+    ].map((value, part) => String(value).padStart(part === 0 ? 4 : 2, "0")).join("-");
+    if (event.local_day !== expectedLocalDay) {
+      throw new Error(
+        `corrupt authoritative event at line ${index + 1}: local day metadata mismatch`,
+      );
+    }
     if (!event.projection || typeof event.projection !== "object"
       || typeof event.projection.task_content !== "string"
       || !event.projection.state || typeof event.projection.state !== "object"
@@ -160,6 +186,17 @@ function readAuthoritativeEvents(file, taskId = "") {
     operationIds.add(event.operation_id);
     events.push(event);
   }
+  // Loaded lazily to keep the core digest helpers independent from Team command modules.
+  // The reducer validates semantic authority transitions in addition to the hash chain.
+  require("../team/execution-grant").validateAuthorityEventProjection(events);
+  require("../verification/claim-event-validation")
+    .validateVerificationClaimEventProjection(events);
+  require("../team/evidence-event-validation")
+    .validateEvidenceEventProjection(events);
+  require("../team/observer-claim-event-validation")
+    .validateObserverClaimEventProjection(events);
+  require("../task/lifecycle-event-validation")
+    .validateTaskLifecycleEventProjection(events);
   return events;
 }
 

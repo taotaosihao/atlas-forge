@@ -109,10 +109,24 @@ function digestFile(file) {
   return sha256(fs.readFileSync(file));
 }
 
-function computeGoalRef(brief, sliceDir) {
+function computeGoalRefFromInputs(brief, { requirementsDigest, contractDigest = null }) {
   if (brief.requirements_path !== CANONICAL_REQUIREMENTS_PATH) {
     throw new Error(`requirements_path must be canonical: ${CANONICAL_REQUIREMENTS_PATH}`);
   }
+  const acceptanceRefs = [...brief.acceptance_refs]
+    .map((item) => item.trim())
+    .sort();
+  return sha256(JSON.stringify({
+    task_id: brief.task_id,
+    slice_id: brief.slice_id,
+    requirements_digest: requirementsDigest,
+    contract_digest: contractDigest,
+    acceptance_refs: acceptanceRefs,
+    base_sha: brief.base_sha,
+  }));
+}
+
+function computeGoalRef(brief, sliceDir) {
   const requirementsFile = path.join(sliceDir, CANONICAL_REQUIREMENTS_PATH);
   const requirementsStat = fs.lstatSync(requirementsFile);
   if (!requirementsStat.isFile() || requirementsStat.isSymbolicLink()) {
@@ -135,17 +149,10 @@ function computeGoalRef(brief, sliceDir) {
       ? manifest.contract_sha256
       : null;
   }
-  const acceptanceRefs = [...brief.acceptance_refs]
-    .map((item) => item.trim())
-    .sort();
-  return sha256(JSON.stringify({
-    task_id: brief.task_id,
-    slice_id: brief.slice_id,
-    requirements_digest: digestFile(requirementsFile),
-    contract_digest: contractDigest,
-    acceptance_refs: acceptanceRefs,
-    base_sha: brief.base_sha,
-  }));
+  return computeGoalRefFromInputs(brief, {
+    requirementsDigest: digestFile(requirementsFile),
+    contractDigest,
+  });
 }
 
 function validateControllerResolution(value) {
@@ -280,7 +287,7 @@ function validateControllerResolutionAgainst(value, context) {
     index,
     verdict,
     brief,
-    context.sliceDir,
+    context,
     errors,
   ));
   return errors;
@@ -299,7 +306,7 @@ function validateCoverage(expectedValues, actualValues, label, errors) {
   }
 }
 
-function validateAuthority(record, index, verdict, brief, sliceDir, errors) {
+function validateAuthority(record, index, verdict, brief, context, errors) {
   if (record.disposition !== "current-required") return;
   const label = `records[${index}]`;
   const refs = new Set(record.authority_refs);
@@ -332,6 +339,18 @@ function validateAuthority(record, index, verdict, brief, sliceDir, errors) {
     if (brief.global_constraints_path !== CANONICAL_GLOBAL_CONSTRAINTS_PATH) {
       errors.push(`${label} safety-data-permission-risk requires canonical global_constraints_path ${CANONICAL_GLOBAL_CONSTRAINTS_PATH}`);
     }
+    if (Object.hasOwn(context, "globalConstraintsDigest")) {
+      if (context.globalConstraintsDigest === null) {
+        errors.push(`${label} safety-data-permission-risk requires the current global constraints file`);
+      } else {
+        const constraintsRef = `constraints-sha256:${context.globalConstraintsDigest}`;
+        if (!refs.has(constraintsRef)) {
+          errors.push(`${label} safety-data-permission-risk requires ${constraintsRef}`);
+        }
+      }
+      return;
+    }
+    const sliceDir = context.sliceDir;
     const taskSddRoot = sliceDir ? path.resolve(sliceDir, "../..") : null;
     const constraintsPath = taskSddRoot
       ? path.join(taskSddRoot, "global-constraints.md")
@@ -365,6 +384,7 @@ function validateAuthority(record, index, verdict, brief, sliceDir, errors) {
 
 module.exports = {
   computeGoalRef,
+  computeGoalRefFromInputs,
   digestFile,
   validateControllerResolution,
   validateControllerResolutionAgainst,

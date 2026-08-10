@@ -31,14 +31,14 @@ Choose a path lease from actual write-conflict risk, separately from staffing:
   verification have no lease requirement.
 - A `product_increment` Team with one isolated writer and no fallback, takeover,
   or external concurrent writer does not require a lease by default.
-- That quick-path single writer does not enter execution-v3 or acquire a durable
-  writable-attempt solely because Team is available; keep strict execution-v3
+- That quick-path single writer does not enter execution-vnext or acquire a durable
+  writable-attempt solely because Team is available; keep strict execution-vnext
   admission for `product_release` unchanged.
 - Two or more possible writers require non-overlapping path ownership; use the
   existing lease/quiescence boundary when available. Fallback, takeover,
   uncertain old-writer quiescence, or a shared-workspace external writer must
   retain that boundary, and uncertainty stops new writers.
-- Formal `product_release` execution continues to use the existing execution-v3
+- Formal `product_release` execution continues to use the existing execution-vnext
   lease and admission rules. Do not create a general Team-independent lease
   runtime in the quick path.
 
@@ -161,7 +161,9 @@ Claude-family models are never eligible for automatic routing or model recommend
 ### Paseo Lifecycle And Codex Fallback
 
 - Reserve the attempt and any path-scoped writer lease before `paseo run`; bind the returned exact agent/workspace/worktree identity immediately after launch. Use a stable launch operation ID so recovery can reconcile a run/bind crash window without launching a second actor.
-- If the runtime cannot reconcile an indeterminate launch, keep the attempt `launch-state-unknown`, retain its writer lease, and return for human handling. Do not retry, fall back, or start a second actor.
+- Replaying a pending launch claim may execute only `paseo ls --global --label <exact-label>`. An exact match records the factual receipt and permits bind; missing or ambiguous results record reconciliation evidence, keep the attempt `launch-state-unknown`, retain its writer lease, and never replay `paseo run`.
+- Resolve `launch-state-unknown` only with `team-attempt-record --action=resolve-launch` targeting the exact pending claim and launch operation, `--disposition=no-actor-confirmed`, a canonical `user-message:` or `operator-input:` authority ref, a single-line reason, and non-empty canonical task-artifact evidence. This records an indeterminate claim and interrupted unlaunched attempt; quiesce with evidence before retry or fallback. Never use it as a broad reset.
+- If a verification command claim survives controller termination, do not run its argv again. `verify-resolve` may mark only the exact pending operation and claim `indeterminate` with a new operation ID, canonical controller authority, reason, and task-artifact evidence. It records no verification receipt or required-gate pass; replan or failed/cancelled closure must remain explicit.
 - Reuse an existing reviewer with exact-ID `send` and wait for real completion; do not busy-poll. Stop only the exact actor when continued execution would conflict, exceed scope, or waste material resources. Never use broad stop, daemon restart, agent delete, or provider mutation.
 - Treat quota/credits, trusted 429/Retry-After, provider/model/mode/auth unavailability, CLI/daemon failure, runtime crash, and timeout with no useful output as operational failures only when a trusted control/runtime observation supports the classification. Task output, tests, code defects, review findings, disagreement, or missing authority are not backend failures.
 - An automatic retry is a new append-only attempt, happens at most once for a dispatch, and requires the predecessor to be quiesced. Fallback likewise requires a quiesced Paseo predecessor.
@@ -315,7 +317,7 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 ```
 
 - `authorization_ref` is an audit guard against accidental promotion, not a host capability. Never fabricate it from workflow artifacts.
-- Execute start and promotion require canonical brief schema v3 binding an admitted contract semantics v3 or v4; Team revalidates its contract/plan digests, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock.
+- Execute start and promotion require canonical brief schema v4 binding an admitted contract semantics v5 or v6. Before compilation, `codex-team-brief` runs the same full semantic validator and canonical authority-slice checks as strict new-authoring lint, binds a sorted and duplicate-free snapshot of every authority input file into the brief, and performs a stable recheck before writing. Team recomputes those identities from the current canonical files and binds them into the exact scope/grant digest on authorize, replay, admission, verification, acceptance, completion, and replan; task mismatch, missing files, symlinks, or byte/existence drift fail closed. Team also revalidates contract/plan digests, the exact v5→execution-plan v3 or v6→execution-plan v4 mapping, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock. Historical semantics v3/v4 and brief schema v3 remain read-only discussion compatibility.
 - Discuss starts and non-execute promotions do not require the reference.
 
 ### Product Increment Evidence
@@ -333,10 +335,10 @@ never substitutes for the strict release path below.
 
 ## Release Certification
 
-Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
 
 - Classify target delivery independently from work type. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only when the request explicitly asks for formal certification, `release-ready`, or `certified`; without that intent it is `product_increment`. Neither completion can certify by prose alone. Only standalone work whose contract governs no release candidate may be `non_product` with a substantive reason. Explicit demo/prototype/spike work is `exploration`, remains isolated, and cannot make product-stage or release-readiness claims.
-- A newly authored explicit `product_release` uses contract semantics v4, execution-plan schema version 2, brief schema version 3, and the exact immutable Profile binding. Planning/review briefs may retain `product_release` and enter `discuss-v3`, but release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`. When formal release intent is explicit, `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor; those labels alone route to `product_increment`.
+- A newly authored explicit `product_release` uses contract semantics v6, execution-plan schema version 4, brief schema version 4, and the exact immutable Profile binding. Release-bearing `execution-vnext` admission and completion require the hash-bound `work_type=implementation`. Historical semantics-v4 planning/review briefs may retain `product_release` only as read-only `discuss-v3` compatibility. When formal release intent is explicit, `MVP`, `Beta`, limited release, GA, and scaled operation share the same Profile floor; those labels alone route to `product_increment`.
 - Its `target_delivery_authority_ref` must exactly equal the current controller-recordable `user-message:` or `operator-input:` execution authorization. Unresolved `goal:` and `current-required:` references cannot enter release certification.
 - Every Profile check belongs to one terminal release-certification slice that transitively depends on all other executable slices. Its fresh receipts must bind the same final source, artifact, surface inventory, config, runtime, data, intent, policy, and final worktree candidate.
 - The release collector reloads the digest-pinned official adapters, recomputes typed facts from raw inputs, and compares them before completion derives the decision. Adapter consistency, self-authored raw data, content hashes, stdout, and arbitrary passing commands are not producer authority; missing workflow-bound producer provenance makes the fact `cannot_verify`. Agents, reviewers, verifiers, and controller-authored prose cannot create or overwrite `release_decision`.

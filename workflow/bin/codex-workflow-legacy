@@ -2,6 +2,49 @@
 
 # Internal compatibility launcher. Use the public codex-workflow façade.
 
+legacy_team_execution_preflight() {
+  local command="${1:-}"
+  local mode="discuss"
+
+  case "$command" in
+    team-loop)
+      echo "codex-workflow-legacy: team-loop is disabled because it always enters execute mode" >&2
+      return 1
+      ;;
+    team-start)
+      shift
+      if [[ $# -ge 2 ]]; then
+        shift 2
+      fi
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --mode)
+            if [[ $# -lt 2 ]]; then
+              mode="<missing>"
+              break
+            fi
+            mode="$2"
+            shift 2
+            ;;
+          --mode=*)
+            mode="${1#--mode=}"
+            shift
+            ;;
+          *)
+            shift
+            ;;
+        esac
+      done
+      if [[ "$mode" != "discuss" ]]; then
+        echo "codex-workflow-legacy: team-start is discuss-only; refusing mode: $mode" >&2
+        return 1
+      fi
+      ;;
+  esac
+}
+
+legacy_team_execution_preflight "$@" || exit $?
+
 if [[ "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
   if [[ -z "${CODEX_WORKFLOW_BASH_REEXECED:-}" ]]; then
     for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
@@ -4756,7 +4799,7 @@ main() {
       shift
       cmd_team_start "$@"
       ;;
-    team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-slice-accept|team-slice-supersede)
+    team-authorize|team-grant|team-replan|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-slice-accept|team-slice-supersede)
       command="$1"
       shift
       node "$SCRIPT_DIR/lib/codex-workflow/team/cli.js" "$command" "$@"
@@ -4767,7 +4810,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-authorize|team-grant|team-replan|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede|team-loop}' >&2
       exit 1
       ;;
   esac

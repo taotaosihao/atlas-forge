@@ -18,7 +18,7 @@ const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
 ));
-const { createTask, startTask } = require(path.join(
+const { completeTask, createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
 ));
@@ -47,7 +47,9 @@ const {
   VERIFY_USAGE,
   formatCommand,
   parseVerifyArgs,
+  parseVerifyResolveArgs,
   runVerification,
+  runVerificationResolution,
 } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/runner.js",
@@ -181,6 +183,622 @@ test("runs a passing argv command and records independent verification metadata"
     detail: `${formatCommand(parsed.command)} => passed`,
     created_at: "2026-07-10T09:15:00Z",
   });
+});
+
+test("durable verification terminal replay returns the stored result and executes once", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification terminal replay");
+  const counter = path.join(home, "terminal-replay-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  const first = runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-replay",
+    recordToken: "20260710T091500000000101",
+  });
+  const replay = runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-replay",
+    recordToken: "20260710T091500000000102",
+  });
+
+  assert.deepEqual(replay, first);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  const claims = readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].status, "terminal");
+  assert.equal(claims[0].operation_id, "verification-terminal-replay");
+  assert.match(claims[0].request_digest, /^sha256:[a-f0-9]{64}$/);
+});
+
+test("an unrelated verification can fully terminalize between another claim and receipt", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Interleaved verification receipts");
+  const firstCounter = path.join(home, "interleaved-first-count");
+  const secondCounter = path.join(home, "interleaved-second-count");
+  const first = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(firstCounter)}, "run\\n")`,
+  ]);
+  const second = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(secondCounter)}, "run\\n")`,
+  ]);
+  let nested = false;
+  const firstResult = runVerification(first, {
+    captureIdentity(input) {
+      if (!nested) {
+        nested = true;
+        runVerification(second, {
+          clock: fixedClock,
+          environment,
+          operationId: "interleaved-verification-b",
+          recordToken: "20260710T091500000000112",
+        });
+      }
+      return captureVerificationIdentity(input);
+    },
+    clock: fixedClock,
+    environment,
+    operationId: "interleaved-verification-a",
+    recordToken: "20260710T091500000000111",
+  });
+
+  assert.equal(nested, true);
+  assert.equal(fs.readFileSync(firstCounter, "utf8"), "run\n");
+  assert.equal(fs.readFileSync(secondCounter, "utf8"), "run\n");
+  const claims = readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims;
+  assert.deepEqual(
+    claims.map((claim) => [claim.operation_id, claim.status]).sort(),
+    [
+      ["interleaved-verification-a", "terminal"],
+      ["interleaved-verification-b", "terminal"],
+    ],
+  );
+
+  const replay = runVerification(first, {
+    captureIdentity() {
+      throw new Error("terminal replay must not capture or execute");
+    },
+    clock: fixedClock,
+    environment,
+    operationId: "interleaved-verification-a",
+    recordToken: "20260710T091500000000113",
+  });
+  assert.deepEqual(replay, firstResult);
+  assert.equal(fs.readFileSync(firstCounter, "utf8"), "run\n");
+  assert.equal(fs.readFileSync(secondCounter, "utf8"), "run\n");
+});
+
+test("a new explicit operation intentionally reruns a terminal verification request", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Fresh verification operation");
+  const counter = path.join(home, "fresh-operation-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "fresh-verification-one",
+    recordToken: "20260710T091500000000114",
+  });
+  runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "fresh-verification-one",
+    recordToken: "20260710T091500000000115",
+  });
+  runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "fresh-verification-two",
+    recordToken: "20260710T091500000000116",
+  });
+
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\nrun\n");
+  assert.deepEqual(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims
+      .map((claim) => [claim.operation_id, claim.status]).sort(),
+    [
+      ["fresh-verification-one", "terminal"],
+      ["fresh-verification-two", "terminal"],
+    ],
+  );
+});
+
+test("a generated verification operation id cannot bypass the same pending request", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification generated id pending guard");
+  const counter = path.join(home, "generated-id-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  assert.throws(() => runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    failAfterClaimAppend: true,
+  }), /authoritative event committed but projection is inconsistent/);
+  assert.equal(fs.existsSync(counter), false);
+
+  assert.throws(() => runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+  }), (error) => {
+    assert.match(error.message, /request already has an in-progress claim/);
+    assert.match(error.message, /pending_operation_id=/);
+    assert.match(error.message, /claim_operation_id=.*-verification-claim/);
+    assert.match(error.message, /codex-workflow verify-resolve/);
+    return true;
+  });
+  assert.equal(fs.existsSync(counter), false);
+  const recorderMetadataVariants = [
+    ["--trajectory=smoke-only"],
+    ["--outcome=blocked"],
+    ["--evaluator=human"],
+    ["--failure-attribution=env"],
+    ["--evidence=event:controller-note"],
+  ];
+  for (const [index, metadata] of recorderMetadataVariants.entries()) {
+    const variant = parseVerifyArgs([
+      taskId,
+      ...metadata,
+      "--",
+      process.execPath,
+      "-e",
+      `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+    ]);
+    assert.throws(() => runVerification(variant, {
+      clock: fixedClock,
+      environment,
+      operationId: `verification-pending-metadata-${index}`,
+    }), /request already has an in-progress claim/);
+  }
+  assert.equal(fs.existsSync(counter), false);
+  const claims = readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].status, "in_progress");
+});
+
+test("verification execution fingerprint distinguishes argv cwd input and output changes", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const repo = path.join(home, "execution-fingerprint-repo");
+  fs.mkdirSync(path.join(repo, "cwd-a"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "cwd-b"), { recursive: true });
+  spawnSync("git", ["init", "-q", repo]);
+  spawnSync("git", ["-C", repo, "config", "user.email", "atlas@example.test"]);
+  spawnSync("git", ["-C", repo, "config", "user.name", "Atlas Test"]);
+  fs.writeFileSync(path.join(repo, "README.md"), "execution fingerprint fixture\n");
+  spawnSync("git", ["-C", repo, "add", "README.md"]);
+  spawnSync("git", ["-C", repo, "commit", "-qm", "test: initialize fingerprint fixture"]);
+  const inputA = path.join(repo, "input-a.txt");
+  const inputB = path.join(repo, "input-b.txt");
+  fs.writeFileSync(inputA, "input A\n");
+  fs.writeFileSync(inputB, "input B\n");
+
+  const cases = [
+    {
+      name: "argv",
+      baseCommand: [process.execPath, "-e", "process.exit(0)"],
+      variantCommand(counter) {
+        return [
+          process.execPath,
+          "-e",
+          `require("fs").appendFileSync(${JSON.stringify(counter)}, "argv\\n")`,
+        ];
+      },
+    },
+    {
+      name: "cwd",
+      baseCommand: [process.execPath, "-e", "process.exit(0)"],
+      baseCwd: path.join(repo, "cwd-a"),
+      variantCwd: path.join(repo, "cwd-b"),
+      variantCommand(counter) {
+        return [
+          process.execPath,
+          "-e",
+          `require("fs").appendFileSync(${JSON.stringify(counter)}, "cwd\\n")`,
+        ];
+      },
+      keepCommand: true,
+    },
+    {
+      name: "input",
+      baseCommand: [process.execPath, "-e", "process.exit(0)"],
+      baseFlags: ["--input", inputA],
+      variantFlags: ["--input", inputB],
+      variantCommand(counter) {
+        return [
+          process.execPath,
+          "-e",
+          `require("fs").appendFileSync(${JSON.stringify(counter)}, "input\\n")`,
+        ];
+      },
+      keepCommand: true,
+    },
+    {
+      name: "output",
+      outputCase: true,
+    },
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const taskId = createFixtureTask(environment, `Execution fingerprint ${item.name}`);
+    const counter = path.join(home, `${item.name}-execution-count`);
+    let baseCommand = item.baseCommand;
+    let variantCommand = item.variantCommand?.(counter);
+    let baseFlags = item.baseFlags || [];
+    let variantFlags = item.variantFlags || [];
+    if (item.keepCommand) baseCommand = variantCommand;
+    if (item.outputCase) {
+      const outputDir = path.join(taskArtifactDir(paths, taskId), "fingerprint-outputs");
+      fs.mkdirSync(outputDir, { recursive: true });
+      const outputCommand = [
+        process.execPath,
+        "-e",
+        `const fs=require("fs");const [file]=JSON.parse(process.env.ATLAS_VERIFICATION_OUTPUTS_JSON);` +
+          `fs.writeFileSync(file,"output\\n");fs.appendFileSync(${JSON.stringify(counter)},"output\\n")`,
+      ];
+      baseCommand = outputCommand;
+      variantCommand = outputCommand;
+      baseFlags = ["--output", path.join(outputDir, "base.txt")];
+      variantFlags = ["--output", path.join(outputDir, "variant.txt")];
+    }
+    const base = parseVerifyArgs([
+      taskId,
+      ...baseFlags,
+      "--",
+      ...baseCommand,
+    ]);
+    const variant = parseVerifyArgs([
+      taskId,
+      ...variantFlags,
+      "--",
+      ...variantCommand,
+    ]);
+    assert.throws(() => runVerification(base, {
+      clock: fixedClock,
+      cwd: item.baseCwd || repo,
+      environment,
+      failAfterClaimAppend: true,
+      operationId: `fingerprint-${item.name}-pending`,
+    }), /authoritative event committed but projection is inconsistent/);
+    runVerification(variant, {
+      clock: fixedClock,
+      cwd: item.variantCwd || repo,
+      environment,
+      operationId: `fingerprint-${item.name}-variant`,
+      recordToken: `20260710T0915000000002${index}`,
+    });
+    assert.equal(fs.readFileSync(counter, "utf8"), `${item.name}\n`);
+    const claims = readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims;
+    assert.deepEqual(claims.map((claim) => claim.status), ["in_progress", "terminal"]);
+    assert.notEqual(claims[0].execution_fingerprint, claims[1].execution_fingerprint);
+    assert.deepEqual(Object.keys(claims[0].execution_target).sort(), [
+      "command",
+      "cwd_realpath",
+      "input_paths",
+      "output_paths",
+      "schema_version",
+      "task_id",
+    ]);
+  }
+});
+
+test("a concurrent verification with the same operation fails before argv execution", (t) => {
+  const { environment, home } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification concurrent claim");
+  const counter = path.join(home, "concurrent-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  let nested = false;
+  runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-concurrent",
+    recordToken: "20260710T091500000000103",
+    captureIdentity(input) {
+      if (!nested) {
+        nested = true;
+        assert.throws(() => runVerification(parsed, {
+          clock: fixedClock,
+          environment,
+          operationId: "verification-concurrent",
+          recordToken: "20260710T091500000000104",
+        }), /verification operation is already in progress/);
+      }
+      return captureVerificationIdentity(input);
+    },
+  });
+  assert.equal(nested, true);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+});
+
+test("verification command crash before terminal append preserves pending claim and never reruns", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Verification terminal crash");
+  const counter = path.join(home, "terminal-crash-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  assert.throws(() => runVerification(parsed, {
+    beforeEventAppend(event) {
+      if (event.kind === "verification.recorded") {
+        throw new Error("injected verification terminal crash");
+      }
+    },
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-crash",
+    recordToken: "20260710T091500000000105",
+  }), /injected verification terminal crash/);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims[0].status,
+    "in_progress",
+  );
+
+  assert.throws(() => runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-crash",
+    recordToken: "20260710T091500000000106",
+  }), (error) => {
+    assert.match(error.message, /verification operation is already in progress/);
+    assert.match(error.message, /pending_operation_id=verification-terminal-crash/);
+    assert.match(
+      error.message,
+      /claim_operation_id=verification-terminal-crash-verification-claim/,
+    );
+    assert.match(error.message, /codex-workflow verify-resolve/);
+    return true;
+  });
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+
+  for (const authorityRef of [
+    "",
+    "user-message:",
+    "user-message:slash/not-canonical",
+    "operator-input:contains whitespace",
+    "user-message:control\tcharacter",
+    "workflow-self-assertion:invalid",
+  ]) {
+    assert.throws(() => parseVerifyResolveArgs([
+      taskId,
+      "--operation-id=verification-terminal-crash-resolution",
+      "--pending-operation-id=verification-terminal-crash",
+      "--claim-operation-id=verification-terminal-crash-verification-claim",
+      `--authority-ref=${authorityRef}`,
+      "--reason=controller process ended after argv execution",
+      "--evidence=recovery/verification-crash.md",
+    ]), /verify-resolve|controller-recordable/);
+  }
+  const missingEvidence = parseVerifyResolveArgs([
+    taskId,
+    "--operation-id=verification-terminal-crash-missing-evidence",
+    "--pending-operation-id=verification-terminal-crash",
+    "--claim-operation-id=verification-terminal-crash-verification-claim",
+    "--authority-ref=operator-input:verification-crash",
+    "--reason=controller process ended after argv execution",
+    "--evidence=recovery/missing.md",
+  ]);
+  assert.throws(() => runVerificationResolution(missingEvidence, {
+    clock: fixedClock,
+    environment,
+  }), /missing verify-resolve evidence/);
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims[0].status,
+    "in_progress",
+  );
+
+  const evidence = path.join(
+    taskArtifactDir(paths, taskId), "recovery", "verification-crash.md",
+  );
+  fs.mkdirSync(path.dirname(evidence), { recursive: true });
+  fs.writeFileSync(evidence, "controller confirmed argv result is indeterminate\n");
+  const resolveArgs = [
+    taskId,
+    "--operation-id=verification-terminal-crash-resolution",
+    "--pending-operation-id=verification-terminal-crash",
+    "--claim-operation-id=verification-terminal-crash-verification-claim",
+    "--authority-ref=operator-input:verification-crash",
+    "--reason=controller process ended after argv execution",
+    "--evidence=recovery/verification-crash.md",
+  ];
+  const beforeEvidenceSwap = readJsonObject(taskStateFile(paths, taskId));
+  const evidenceBytes = fs.readFileSync(evidence);
+  assert.throws(() => runVerificationResolution(parseVerifyResolveArgs([
+    ...resolveArgs.map((argument) => (
+      argument === "--operation-id=verification-terminal-crash-resolution"
+        ? "--operation-id=verification-terminal-crash-evidence-swap"
+        : argument
+    )),
+  ]), {
+    beforeEventAppend() {
+      fs.writeFileSync(evidence, "");
+    },
+    clock: fixedClock,
+    environment,
+  }), /canonical non-empty regular file/);
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).runtime_revision,
+    beforeEvidenceSwap.runtime_revision,
+  );
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims[0].status,
+    "in_progress",
+  );
+  fs.writeFileSync(evidence, evidenceBytes);
+  const resolved = runVerificationResolution(parseVerifyResolveArgs(resolveArgs), {
+    clock: fixedClock,
+    environment,
+  });
+  assert.ok(resolved.lines.includes("status: indeterminate"));
+  const resolvedState = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(resolvedState.verification.operation_claims[0].status, "indeterminate");
+  assert.equal(resolvedState.verification.operation_claims[0].resolution.disposition, "indeterminate");
+  assert.deepEqual(resolvedState.verification.operation_claims[0].tombstone, {
+    schema_version: 1,
+    request_digest: resolvedState.verification.operation_claims[0].request_digest,
+    execution_fingerprint:
+      resolvedState.verification.operation_claims[0].execution_fingerprint,
+    authority_boundary: {
+      schema_version: 1,
+      kind: "direct-unbound",
+    },
+    required_check_binding: null,
+  });
+  assert.equal(resolvedState.verification.required_gates, undefined);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.deepEqual(runVerificationResolution(parseVerifyResolveArgs(resolveArgs), {
+    clock: fixedClock,
+    environment,
+  }), resolved);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.throws(() => runVerificationResolution(parseVerifyResolveArgs([
+    ...resolveArgs.filter((argument) => !argument.startsWith("--reason=")),
+    "--reason=a conflicting controller explanation",
+  ]), {
+    clock: fixedClock,
+    environment,
+  }), /operation_id replay payload conflict/);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+
+  assert.throws(() => runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-crash",
+    recordToken: "20260710T091500000000117",
+  }), /durably indeterminate.*stable direct\/unbound authority boundary/);
+  assert.throws(() => runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-terminal-crash-new-operation",
+    recordToken: "20260710T091500000000118",
+  }), /durably indeterminate.*stable direct\/unbound authority boundary/);
+  for (const [index, metadata] of [
+    ["--trajectory=regressed"],
+    ["--outcome=skipped"],
+    ["--evaluator=human"],
+    ["--failure-attribution=dependency"],
+    ["--evidence=event:manual-resolution"],
+  ].entries()) {
+    const variant = parseVerifyArgs([
+      taskId,
+      ...metadata,
+      "--",
+      process.execPath,
+      "-e",
+      `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+    ]);
+    assert.throws(() => runVerification(variant, {
+      clock: fixedClock,
+      environment,
+      operationId: `verification-indeterminate-metadata-${index}`,
+    }), /durably indeterminate.*stable direct\/unbound authority boundary/);
+  }
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).verification.operation_claims.length,
+    1,
+  );
+});
+
+test("direct indeterminate revalidation tombstones an older pass for succeeded completion", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Direct indeterminate completion barrier");
+  const counter = path.join(home, "direct-indeterminate-completion-count");
+  const parsed = parseVerifyArgs([
+    taskId,
+    "--",
+    process.execPath,
+    "-e",
+    `require("fs").appendFileSync(${JSON.stringify(counter)}, "run\\n")`,
+  ]);
+  runVerification(parsed, {
+    clock: fixedClock,
+    environment,
+    operationId: "direct-pass-before-indeterminate",
+    recordToken: "20260710T091500000000119",
+  });
+  assert.throws(() => runVerification(parsed, {
+    beforeEventAppend(event) {
+      if (event.kind === "verification.recorded") {
+        throw new Error("lose direct revalidation terminal receipt");
+      }
+    },
+    clock: fixedClock,
+    environment,
+    operationId: "direct-indeterminate-revalidation",
+    recordToken: "20260710T091500000000120",
+  }), /lose direct revalidation terminal receipt/);
+  assert.equal(fs.readFileSync(counter, "utf8"), "run\nrun\n");
+  const evidence = path.join(taskArtifactDir(paths, taskId), "recovery", "direct.md");
+  fs.mkdirSync(path.dirname(evidence), { recursive: true });
+  fs.writeFileSync(evidence, "controller lost the second direct verification receipt\n");
+  runVerificationResolution(parseVerifyResolveArgs([
+    taskId,
+    "--operation-id=resolve-direct-indeterminate-revalidation",
+    "--pending-operation-id=direct-indeterminate-revalidation",
+    "--claim-operation-id=direct-indeterminate-revalidation-verification-claim",
+    "--authority-ref=operator-input:direct-indeterminate-revalidation",
+    "--reason=controller lost the terminal receipt after command execution",
+    "--evidence=recovery/direct.md",
+  ]), { clock: fixedClock, environment });
+
+  assert.throws(() => completeTask(taskId, {
+    clock: fixedClock,
+    environment,
+    operationId: "complete-direct-succeeded-after-indeterminate",
+    outcome: "succeeded",
+  }), /successful completion is blocked by indeterminate verification/);
+  completeTask(taskId, {
+    authorityRef: "operator-input:close-direct-indeterminate-as-failed",
+    clock: fixedClock,
+    environment,
+    evidenceRefs: ["event:resolve-direct-indeterminate-revalidation"],
+    operationId: "complete-direct-failed-after-indeterminate",
+    outcome: "failed",
+  });
+  const completed = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(completed.status, "done");
+  assert.equal(completed.completion.outcome, "failed");
+  assert.equal(
+    completed.verification.operation_claims.find(
+      (claim) => claim.operation_id === "direct-indeterminate-revalidation",
+    ).status,
+    "indeterminate",
+  );
 });
 
 test("binds authoritative time and controller-owned outputs into the verification record", (t) => {

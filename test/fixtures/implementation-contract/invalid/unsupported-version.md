@@ -1,3 +1,3 @@
 # Unsupported semantics version
 
-contract_semantics_version: 5
+contract_semantics_version: 7

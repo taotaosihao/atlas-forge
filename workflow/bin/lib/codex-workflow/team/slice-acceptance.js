@@ -6,6 +6,7 @@ const path = require("path");
 const { CommandError, commandOptions } = require("../core/command-runtime");
 const { sha256 } = require("../verification/identity");
 const { mutateTaskRuntime } = require("../core/task-mutation");
+const { stableJsonSnapshot } = require("../core/stable-file");
 const { taskArtifactDir } = require("../core/paths");
 const {
   renderTaskFields,
@@ -16,6 +17,11 @@ const {
 const { projectTaskState, readJsonObject, taskStateFile, timestampSeconds } = require("../task/runtime");
 const { requiredGateAdmission } = require("../verification/required-gates");
 const { teamClosureIssues } = require("./lane-registry");
+const {
+  assertActiveExecutionGrant,
+  authorityReplayPostcondition,
+} = require("./execution-grant");
+const { assertCanonicalGrantArtifacts, buildCanonicalScope } = require("./scope-artifacts");
 const {
   briefRequestIdentity,
   captureWorktreeSnapshot,
@@ -170,12 +176,12 @@ function actualSliceSize(brief, startSnapshot, candidateSnapshot = null) {
   }
   const current = candidateSnapshot || captureWorktreeSnapshot(brief.repo);
   const changedFiles = git(brief.repo, [
-    "diff-tree", "--no-commit-id", "-r", "--name-only", "-z",
+    "diff-tree", "--no-commit-id", "--no-renames", "-r", "--name-only", "-z",
     startSnapshot.tree_oid, current.tree_oid,
   ]).split("\0").filter(Boolean).sort();
   let loc = 0;
   for (const row of git(brief.repo, [
-    "diff-tree", "--no-commit-id", "-r", "--numstat",
+    "diff-tree", "--no-commit-id", "--no-renames", "-r", "--numstat",
     startSnapshot.tree_oid, current.tree_oid,
   ]).split("\n")) {
     if (!row) continue;
@@ -226,19 +232,27 @@ function treeFileDigest(repo, treeOid, relative) {
 }
 
 function readBriefForKeeperBindings(parsed) {
-  let brief;
+  let snapshot;
   try {
-    brief = JSON.parse(fs.readFileSync(parsed.briefPath, "utf8"));
+    snapshot = stableJsonSnapshot(parsed.briefPath, "Team vNext brief", {
+      maximumBytes: 4 * 1024 * 1024,
+    });
   } catch (error) {
     throw new CommandError(`unable to read Team brief for keeper outputs: ${error.message}`);
   }
-  if (!brief || brief.schema_version !== 3 || brief.task_id !== parsed.taskId
+  const brief = snapshot.value;
+  if (!brief || brief.schema_version !== 4 || brief.task_id !== parsed.taskId
     || !path.isAbsolute(brief.repo || "")) {
-    throw new CommandError("Team brief is invalid for slice acceptance");
+    throw new CommandError("vNext Team brief schema_version 4 is required for slice acceptance");
   }
   return {
     brief,
-    briefIdentity: briefRequestIdentity(parsed.briefPath),
+    briefIdentity: {
+      brief_path: snapshot.path,
+      brief_sha256: snapshot.sha256,
+      contract_sha256: String(brief.contract?.sha256 || ""),
+      execution_plan_sha256: String(brief.contract?.execution_plan_sha256 || ""),
+    },
     repo: fs.realpathSync(brief.repo),
   };
 }
@@ -276,17 +290,26 @@ function acceptedDependentSlices(paths, taskId, state, dependencySliceId) {
     const briefFile = path.join(
       taskArtifactDir(paths, taskId), "team", "sdd", "slices", sliceId, "brief.json",
     );
-    const identity = briefRequestIdentity(briefFile);
+    let snapshot;
+    try {
+      snapshot = stableJsonSnapshot(briefFile, `accepted dependent slice brief ${sliceId}`, {
+        maximumBytes: 4 * 1024 * 1024,
+        root: taskArtifactDir(paths, taskId),
+      });
+    } catch (error) {
+      throw new CommandError(`accepted dependent slice brief is invalid: ${sliceId}: ${error.message}`);
+    }
+    const brief = snapshot.value;
+    const identity = {
+      brief_path: snapshot.path,
+      brief_sha256: snapshot.sha256,
+      contract_sha256: String(brief.contract?.sha256 || ""),
+      execution_plan_sha256: String(brief.contract?.execution_plan_sha256 || ""),
+    };
     if (identity.brief_sha256 !== accepted.brief_sha256
       || identity.contract_sha256 !== accepted.contract_sha256
       || identity.execution_plan_sha256 !== accepted.execution_plan_sha256) {
       throw new CommandError(`accepted dependent slice brief identity is invalid: ${sliceId}`);
-    }
-    let brief;
-    try {
-      brief = JSON.parse(fs.readFileSync(briefFile, "utf8"));
-    } catch (error) {
-      throw new CommandError(`accepted dependent slice brief is invalid: ${sliceId}: ${error.message}`);
     }
     if (brief.task_id !== taskId || brief.slice_id !== sliceId) {
       throw new CommandError(`accepted dependent slice brief task identity is invalid: ${sliceId}`);
@@ -303,6 +326,7 @@ function runSliceAccept(parsed, options = {}) {
   const validateLedgerEvent = loadLedgerValidator(environment, paths);
   const { brief, briefIdentity, repo } = readBriefForKeeperBindings(parsed);
   let keepers = keeperBindings(parsed, repo);
+  let scopeGuard = null;
   const declared = [...brief.keeper_outputs].sort();
   if (JSON.stringify(keepers.map((item) => item.reference).sort()) !== JSON.stringify(declared)) {
     throw new CommandError("keeper output bindings must exactly cover the admitted brief");
@@ -321,7 +345,8 @@ function runSliceAccept(parsed, options = {}) {
           slice_id: brief.slice_id,
         },
       },
-      ({ currentProjection, events, revision }) => {
+      ({ currentProjection, events, occurredAt, revision }) => {
+        const eventClock = () => new Date(occurredAt);
         const currentBrief = briefRequestIdentity(parsed.briefPath);
         if (JSON.stringify(currentBrief) !== JSON.stringify(briefIdentity)) {
           throw new CommandError("Team brief changed while slice acceptance was being evaluated");
@@ -331,13 +356,26 @@ function runSliceAccept(parsed, options = {}) {
           throw new CommandError("keeper outputs changed while slice acceptance was being evaluated");
         }
         keepers = currentKeepers;
-        const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        const { task } = validateTaskFile(taskFile);
-        requireOpenExecutionTask(task, "team-slice-accept");
-        const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {});
-        const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
+        const currentState = JSON.parse(JSON.stringify(currentProjection.state));
+        if (currentState.status !== "doing") {
+          throw new CommandError(
+            `team-slice-accept requires task status doing; current status: ${currentState.status}`,
+          );
+        }
+        const taskContent = renderTaskFields(currentProjection.task_content, {});
+        const team = currentState.active_team && typeof currentState.active_team === "object"
+          ? currentState.active_team
+          : {};
+        const grant = assertActiveExecutionGrant(currentState, {
+          evidenceEpoch: team.evidence_epoch,
+          grantId: team.grant_id,
+          scopeDigest: team.scope_digest,
+          sliceId: brief.slice_id,
+          briefSha256: briefIdentity.brief_sha256,
+        }, { clock, requireUnexpired: true });
         const gates = requiredGateAdmission(paths, parsed.taskId, currentState, {
           captureIdentity: options.captureIdentity,
+          clock,
           environment,
         });
         if (!gates || !gates.passed) {
@@ -345,9 +383,6 @@ function runSliceAccept(parsed, options = {}) {
             `slice acceptance requires all admitted verification gates\n${(gates?.reasons || []).join("\n")}`,
           );
         }
-        const team = currentState.active_team && typeof currentState.active_team === "object"
-          ? currentState.active_team
-          : {};
         const closure = teamClosureIssues(team, "succeeded");
         if (closure.length > 0) throw new CommandError(closure.join("\n"));
         if (team.admission?.brief?.path !== path.resolve(parsed.briefPath)
@@ -356,8 +391,10 @@ function runSliceAccept(parsed, options = {}) {
         }
         validateDependencies(paths, brief, {
           captureIdentity: options.captureIdentity,
+          currentState,
           environment,
           validateCurrentIdentity: false,
+          expectedGrant: grant,
         });
         pauseAfterDependencyValidation(environment);
         const candidateSnapshot = captureWorktreeSnapshot(repo);
@@ -396,7 +433,7 @@ function runSliceAccept(parsed, options = {}) {
             verification_revision: event.revision,
           };
         });
-        const acceptedAt = timestampSeconds(clock);
+        const acceptedAt = timestampSeconds(eventClock);
         const accepted = {
           authority_ref: `team-run:${team.team_run_id}`,
           actual_size: actualSize,
@@ -405,6 +442,9 @@ function runSliceAccept(parsed, options = {}) {
           contract_sha256: team.admission.brief.contract_sha256,
           execution_plan_sha256: team.admission.brief.execution_plan_sha256,
           generation: team.generation,
+          grant_id: grant.grant_id,
+          scope_digest: grant.scope_digest,
+          evidence_epoch: grant.evidence_epoch,
           keeper_outputs: keepers,
           operation_id: parsed.operationId,
           revision: revision + 1,
@@ -414,7 +454,25 @@ function runSliceAccept(parsed, options = {}) {
           team_run_id: team.team_run_id,
           verification_records: verificationRecords,
         };
-        const state = projectTaskState(paths, parsed.taskId, taskContent, currentState, clock);
+        scopeGuard = () => {
+          const rebuilt = buildCanonicalScope({
+            authorizationRef: grant.authorization_provenance.ref,
+            briefPath: parsed.briefPath,
+            cwd: repo,
+            environment,
+            evidencePolicy: grant.scope.evidence_policy,
+            grantId: grant.grant_id,
+            objective: grant.scope.objective,
+            parent: grant.scope.parent,
+            paths,
+            requireObjectiveMatchesSelected: false,
+            taskId: parsed.taskId,
+          });
+          if (rebuilt.scopeDigest !== grant.scope_digest) {
+            throw new CommandError("Team scope artifacts changed before slice acceptance append");
+          }
+        };
+        const state = projectTaskState(paths, parsed.taskId, taskContent, currentState, eventClock);
         state.slice_acceptances = {
           ...(state.slice_acceptances || {}),
           [brief.slice_id]: accepted,
@@ -433,7 +491,29 @@ function runSliceAccept(parsed, options = {}) {
           legacy: [{ kind: "slice-accepted", detail: brief.slice_id }],
         };
       },
-      { ...options, clock, environment },
+      {
+        ...options,
+        clock,
+        environment,
+        beforeEventAppend(event) {
+          if (options.beforeEventAppend) options.beforeEventAppend(event);
+          if (scopeGuard) scopeGuard(event);
+        },
+        replayPostcondition: authorityReplayPostcondition({
+          clock,
+          requireUnexpired: true,
+          sliceId: brief.slice_id,
+          validateCurrent({ grant }) {
+            assertCanonicalGrantArtifacts({
+              briefPath: parsed.briefPath,
+              environment,
+              grant,
+              paths,
+              taskId: parsed.taskId,
+            });
+          },
+        }),
+      },
     );
   });
   const accepted = committed.result.accepted;
@@ -466,12 +546,16 @@ function runSliceSupersede(parsed, options = {}) {
           slice_id: parsed.sliceId,
         },
       },
-      () => {
-        const taskFile = requireTaskFile(paths.tasksDir, parsed.taskId);
-        const { task } = validateTaskFile(taskFile);
-        requireOpenExecutionTask(task, "team-slice-supersede");
-        const taskContent = renderTaskFields(fs.readFileSync(taskFile, "utf8"), {});
-        const currentState = readJsonObject(taskStateFile(paths, parsed.taskId));
+      ({ currentProjection, occurredAt }) => {
+        const eventClock = () => new Date(occurredAt);
+        const currentState = JSON.parse(JSON.stringify(currentProjection.state));
+        if (currentState.status !== "doing") {
+          throw new CommandError(
+            `team-slice-supersede requires task status doing; current status: ${currentState.status}`,
+          );
+        }
+        const grant = assertActiveExecutionGrant(currentState);
+        const taskContent = renderTaskFields(currentProjection.task_content, {});
         const accepted = currentState.slice_acceptances?.[parsed.sliceId];
         if (!accepted || accepted.status !== "accepted") {
           throw new CommandError(`slice does not have a current authoritative acceptance: ${parsed.sliceId}`);
@@ -489,9 +573,12 @@ function runSliceSupersede(parsed, options = {}) {
           authority_ref: parsed.authorityRef,
           reason: parsed.reason,
           slice_id: parsed.sliceId,
-          superseded_at: timestampSeconds(clock),
+          superseded_at: timestampSeconds(eventClock),
+          grant_id: grant.grant_id,
+          scope_digest: grant.scope_digest,
+          evidence_epoch: grant.evidence_epoch,
         };
-        const state = projectTaskState(paths, parsed.taskId, taskContent, currentState, clock);
+        const state = projectTaskState(paths, parsed.taskId, taskContent, currentState, eventClock);
         state.slice_acceptances = {
           ...(state.slice_acceptances || {}),
           [parsed.sliceId]: { ...accepted, status: "superseded", superseded },
@@ -502,7 +589,29 @@ function runSliceSupersede(parsed, options = {}) {
           legacy: [{ kind: "slice-superseded", detail: parsed.sliceId }],
         };
       },
-      { ...options, clock, environment },
+      {
+        ...options,
+        clock,
+        environment,
+        replayPostcondition: authorityReplayPostcondition({
+          clock,
+          requireUnexpired: true,
+          sliceId: parsed.sliceId,
+          validateCurrent({ grant }) {
+            const required = grant.scope.required_slices.find(
+              (slice) => slice.slice_id === parsed.sliceId,
+            );
+            if (!required) throw new CommandError("superseded slice is outside the current grant");
+            assertCanonicalGrantArtifacts({
+              briefPath: path.join(taskArtifactDir(paths, parsed.taskId), required.brief_path),
+              environment,
+              grant,
+              paths,
+              taskId: parsed.taskId,
+            });
+          },
+        }),
+      },
     );
   });
   return {

@@ -283,7 +283,12 @@ function resolveCodeHomeReference(paths, reference) {
 }
 
 function successfulVerificationAdmission(paths, taskId, options = {}) {
-  const state = readJsonObject(taskStateFile(paths, taskId));
+  const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  const state = options.state
+    ? JSON.parse(JSON.stringify(options.state))
+    : events.at(-1)?.projection?.state
+      ? JSON.parse(JSON.stringify(events.at(-1).projection.state))
+      : readJsonObject(taskStateFile(paths, taskId));
   try {
     const execution = executionCompletionAdmission(paths, taskId, state, options);
     if (execution) return execution;

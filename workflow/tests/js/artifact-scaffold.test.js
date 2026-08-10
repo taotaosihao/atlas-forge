@@ -10,23 +10,47 @@ const test = require("node:test");
 const WORKFLOW_ROOT = path.resolve(__dirname, "../..");
 const PUBLIC_BIN = path.join(WORKFLOW_ROOT, "bin", "codex-workflow");
 const TEMPLATE_DIR = path.join(WORKFLOW_ROOT, "templates");
-const { resolvePaths, taskArtifactDir } = require(path.join(
+const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
+));
+const { captureWorktreeSnapshot } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/worktree-snapshot.js",
 ));
 const { mutateTaskRuntime, taskEventFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/task-mutation.js",
 ));
-const { digestCanonical, sha256 } = require(path.join(
+const {
+  captureVerificationIdentity,
+  captureVerificationOutput,
+  digestCanonical,
+  sha256,
+} = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/identity.js",
 ));
-const { createTask } = require(path.join(
+const {
+  buildVerificationIdentityRecord,
+  renderVerificationRecord,
+} = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/verification/record.js",
+));
+const { formatCommand } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/verification/runner.js",
+));
+const { createTask, localDay, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
 ));
-const { taskRuntimeFile } = require(path.join(
+const { renderTaskFields } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/task/repository.js",
+));
+const { projectTaskState, taskRuntimeFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/runtime.js",
 ));
@@ -41,6 +65,22 @@ const {
 const { writePhaseReportProjection } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/artifact/phase-report.js",
+));
+const { transitionAuthorityState } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/execution-grant.js",
+));
+const { createTeamRun } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/lane-registry.js",
+));
+const {
+  canonicalScopeVNext,
+  scopeCoreDigest,
+  scopeDigest,
+} = require(path.resolve(
+  WORKFLOW_ROOT,
+  "../plugins/atlas-workflow/contracts/team-sdd/validators/scope-grant.js",
 ));
 
 function fixedClock() {
@@ -75,15 +115,45 @@ function canonicalPhaseFixture(t, {
 } = {}) {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Canonical phase report");
+  startTask(taskId, { clock: fixedClock, environment });
   const repo = path.join(paths.root, "phase-report-repo");
   fs.mkdirSync(repo, { recursive: true });
   assert.equal(spawnSync("git", ["init", "-q", repo]).status, 0);
   assert.equal(spawnSync("git", ["-C", repo, "config", "user.email", "atlas@example.test"]).status, 0);
   assert.equal(spawnSync("git", ["-C", repo, "config", "user.name", "Atlas Test"]).status, 0);
-  const candidateTree = "a".repeat(40);
+  const checkCommand = [process.execPath, "-e", "process.exit(0)"];
+  const checkCommandText = formatCommand(checkCommand).trimEnd();
+  const releaseBinding = withReleaseDecision ? {
+    target_delivery_class: "product_release",
+    intent_sha256: `sha256:${"d".repeat(64)}`,
+    profile_ref: "web-ui-v1",
+    profile_sha256: `sha256:${"e".repeat(64)}`,
+    check_definition_set_sha256: `sha256:${"9".repeat(64)}`,
+    requirement_refs: ["web-ui-v1.critical-journey"],
+  } : null;
+  const releaseRequirement = withReleaseDecision ? {
+    profile_ref: releaseBinding.profile_ref,
+    profile_sha256: releaseBinding.profile_sha256,
+    requirement_ref: releaseBinding.requirement_refs[0],
+    requirement_sha256: `sha256:${"1".repeat(64)}`,
+    dimension: "critical-journey",
+    required: true,
+    waiver_policy: "never",
+    definition_ref: "test-definition@1",
+    definition_sha256: `sha256:${"2".repeat(64)}`,
+    collector_adapter_ref: "test-collector@1",
+    collector_adapter_sha256: `sha256:${"3".repeat(64)}`,
+    fact_schema_ref: "test-fact@1",
+    fact_schema_sha256: `sha256:${"4".repeat(64)}`,
+    evaluator_ref: "test-evaluator@1",
+    evaluator_sha256: `sha256:${"5".repeat(64)}`,
+    pass_rule_sha256: `sha256:${"6".repeat(64)}`,
+    required_candidate_components: ["artifact"],
+  } : null;
   const plan = {
-    schema_version: 1,
+    schema_version: withReleaseDecision ? 4 : 3,
     size_policy: { policy_id: "atlas-slice-size-v2" },
+    ...(releaseBinding ? { release: releaseBinding } : {}),
     slices: [{
       slice_id: "product-flow",
       objective: "用户可以完成项目创建",
@@ -111,15 +181,20 @@ function canonicalPhaseFixture(t, {
       checks: [{
         check_id: "browser-create-project",
         gate_class: "browser-flow",
-        command: "node test-create-project.js",
+        command: checkCommandText,
         final_only: true,
         cache_policy: "fresh-executed",
+        ...(releaseRequirement ? { release_requirement: releaseRequirement } : {}),
       }],
     }],
   };
   const contract = path.join(repo, "implementation-contract.final.md");
   fs.writeFileSync(contract, [
     "# Product contract",
+    "",
+    `task_id: ${taskId}`,
+    `contract_semantics_version: ${withReleaseDecision ? 6 : 5}`,
+    ...(withReleaseDecision ? ["work_type: implementation"] : []),
     "",
     "## Acceptance Criteria",
     "",
@@ -134,91 +209,660 @@ function canonicalPhaseFixture(t, {
   ].join("\n"));
   assert.equal(spawnSync("git", ["-C", repo, "add", "implementation-contract.final.md"]).status, 0);
   assert.equal(spawnSync("git", ["-C", repo, "commit", "-qm", "test: phase report contract"]).status, 0);
-  const releaseBinding = {
-    intent_sha256: `sha256:${"d".repeat(64)}`,
-    profile_ref: "web-ui-v1",
-    profile_sha256: `sha256:${"e".repeat(64)}`,
-    requirement_refs: ["web-ui-v1.critical-journey"],
-  };
-  const authority = {
+  const baseSha = spawnSync(
+    "git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" },
+  ).stdout.trim();
+  const briefPath = path.join(
+    taskArtifactDir(paths, taskId), "team/sdd/slices/product-flow/brief.json",
+  );
+  fs.mkdirSync(path.dirname(briefPath), { recursive: true });
+  fs.writeFileSync(briefPath, "{\"schema_version\":4}\n");
+  const rawScope = {
     schema_version: 1,
+    grant_id: "phase-report-grant",
+    task_id: taskId,
+    repo: { realpath: fs.realpathSync(repo), base_sha: baseSha },
+    objective: "用户可以完成项目创建",
+    contract: {
+      path: "implementation-contract.final.md",
+      sha256: sha256(fs.readFileSync(contract)),
+      semantics_version: withReleaseDecision ? 6 : 5,
+      authority_slices: [{
+        path: path.join(
+          environment.CODEX_WORKFLOW_ROOT,
+          "artifacts", taskId, "team/sdd/slices/authority-phase-report",
+        ),
+        task_id: taskId,
+        slice_id: "authority-phase-report",
+        brief_json_sha256: `sha256:${"1".repeat(64)}`,
+        brief_md_sha256: `sha256:${"2".repeat(64)}`,
+        evidence_manifest_sha256: null,
+        review_verdict_sha256: null,
+        controller_resolution_sha256: null,
+        global_constraints_sha256: null,
+      }],
+    },
+    execution_plan: {
+      schema_version: plan.schema_version,
+      sha256: digestCanonical(plan),
+    },
+    owned_paths: ["src/**"],
+    forbidden_paths: [],
+    required_slices: [{
+      slice_id: "product-flow",
+      objective: "用户可以完成项目创建",
+      brief_path: "team/sdd/slices/product-flow/brief.json",
+      brief_sha256: sha256(fs.readFileSync(briefPath)),
+      depends_on: [],
+      keeper_outputs: ["product:create-project"],
+      owned_paths: ["src/**"],
+      forbidden_paths: [],
+      acceptance_refs: ["AC-PRODUCT"],
+      estimate: { ...plan.slices[0].estimate },
+      budget: { ...plan.slices[0].budget },
+      checks: [{
+        check_id: "browser-create-project",
+        gate_class: "browser-flow",
+        command: checkCommandText,
+        final_only: true,
+        cache_policy: "fresh-executed",
+        release_requirement: releaseRequirement,
+      }],
+    }],
+    size_exceptions: [],
+    scope_core_digest: `sha256:${"0".repeat(64)}`,
+    authorization_provenance: {
+      kind: "user-message",
+      ref: "user-message:phase-report",
+    },
+    release_binding: releaseBinding,
+    parent: null,
+    supersedes_grant_id: null,
+    evidence_policy: { mode: "invalidate-incompatible", retained_receipt_ids: [] },
+    design_handoff: null,
+    first_code: null,
+  };
+  const coreScope = canonicalScopeVNext(rawScope, { skipCoreDigestCheck: true });
+  rawScope.scope_core_digest = scopeCoreDigest(coreScope);
+  const scope = canonicalScopeVNext(rawScope);
+  const grant = {
+    schema_version: 1,
+    grant_id: "phase-report-grant",
     status: "active",
-    contract_path: contract,
-    contract_sha256: sha256(fs.readFileSync(contract)),
-    execution_plan_sha256: digestCanonical(plan),
-    repo_realpath: fs.realpathSync(repo),
-    required_slices: ["product-flow"],
-    ...(withReleaseDecision ? { release_binding: releaseBinding } : {}),
+    scope_digest: scopeDigest(scope),
+    scope,
+    evidence_epoch: 1,
+    authorization_provenance: scope.authorization_provenance,
+    issued_at: "2026-07-10T04:00:00Z",
+    issued_revision: 0,
+    terminal: null,
   };
   mutateTaskRuntime(paths, taskId, {
-    kind: "test.execution.authorized",
+    kind: "authority.grant.issued",
     operationId: "authorize-phase-report",
-  }, ({ currentProjection }) => ({
-    projection: {
-      task_content: currentProjection.task_content,
-      state: { ...currentProjection.state, execution_authority: authority },
+    data: {
+      authorization_ref: scope.authorization_provenance.ref,
+      brief_path: briefPath,
+      grant_id: grant.grant_id,
+      objective: scope.objective,
+      expected_scope_digest: grant.scope_digest,
     },
-  }), { clock: fixedClock, environment });
+  }, ({ currentProjection, revision }) => {
+    grant.issued_revision = revision + 1;
+    const transition = {
+      schema_version: 1,
+      type: "grant-issued",
+      revision: revision + 1,
+      grant,
+      delivery_authority: releaseBinding ? {
+        kind: "user-message",
+        ref: "user-message:phase-report",
+        established_revision: revision + 1,
+        contract_sha256: scope.contract.sha256,
+        execution_plan_sha256: scope.execution_plan.sha256,
+        release_binding: releaseBinding,
+      } : null,
+    };
+    const state = structuredClone(currentProjection.state);
+    transitionAuthorityState(state, transition);
+    return {
+      authorityTransition: transition,
+      projection: { task_content: currentProjection.task_content, state },
+      result: {
+        grant,
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        evidence_epoch: grant.evidence_epoch,
+      },
+    };
+  }, { clock: fixedClock, environment });
 
+  let acceptedReceipt = null;
+  let verificationReceipt = null;
+  let releaseFactId = "";
+  let candidateManifestDigest = "";
   if (accepted) {
-    const recordId = `sha256:${"b".repeat(64)}`;
-    const identityDigest = `sha256:${"c".repeat(64)}`;
+    const admissionSnapshot = captureWorktreeSnapshot(repo);
+    mutateTaskRuntime(paths, taskId, {
+      kind: "team.started",
+      operationId: "start-phase-report",
+      data: {
+        mode: "execute",
+        objective: scope.objective,
+        backend: "",
+        fallback_policy: "",
+        authorization_ref: scope.authorization_provenance.ref,
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        agents: "",
+        roles: "",
+        providers: "",
+        selection_authority_kind: "",
+        selection_authority_ref: "",
+        brief_path: briefPath,
+        brief_sha256: scope.required_slices[0].brief_sha256,
+        contract_sha256: scope.contract.sha256,
+        execution_plan_sha256: scope.execution_plan.sha256,
+      },
+    }, ({ currentProjection, revision }) => {
+      const artifactDir = currentProjection.state.artifact_dir;
+      const decisionPath = `${artifactDir}/team/decision.md`.replace(/^\//, "");
+      const staffingPath = `${artifactDir}/team/staffing.md`.replace(/^\//, "");
+      const admission = {
+        mode: "execution-vnext",
+        brief: {
+          path: briefPath,
+          sha256: scope.required_slices[0].brief_sha256,
+          slice_id: "product-flow",
+          contract_path: contract,
+          contract_sha256: scope.contract.sha256,
+          execution_plan_schema_version: scope.execution_plan.schema_version,
+          execution_plan_sha256: scope.execution_plan.sha256,
+          base_sha: scope.repo.base_sha,
+          repo: scope.repo.realpath,
+          ...(releaseBinding ? {
+            work_type: "implementation",
+            release: releaseBinding,
+            delivery_authority_ref: scope.authorization_provenance.ref,
+          } : {}),
+        },
+        admitted_owned_paths: [...scope.required_slices[0].owned_paths],
+        required_slices: ["product-flow"],
+        canonical_objective: scope.objective,
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        evidence_epoch: grant.evidence_epoch,
+        slice_start_snapshot: {
+          ...admissionSnapshot,
+          worktree_manifest_digest: digestCanonical(admissionSnapshot),
+          captured_at_revision: revision + 1,
+        },
+      };
+      const team = createTeamRun({
+        previous: currentProjection.state.active_team || {},
+        mode: "execute",
+        objective: scope.objective,
+        configuredBackend: null,
+        fallbackPolicy: "",
+        authorizationRef: scope.authorization_provenance.ref,
+        agents: "",
+        roles: "",
+        providers: "",
+        decision: decisionPath,
+        staffing: staffingPath,
+        now: "2026-07-10T04:00:00Z",
+        teamSelection: null,
+      });
+      Object.assign(team, {
+        admission,
+        admitted_owned_paths: [...admission.admitted_owned_paths],
+        slice_id: "product-flow",
+        start_operation_id: "start-phase-report",
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        evidence_epoch: grant.evidence_epoch,
+      });
+      const taskContent = renderTaskFields(currentProjection.task_content, {
+        active_team_backend: team.backend,
+        active_team_mode: team.mode,
+        active_team_status: team.status,
+        active_team_decision: team.decision,
+      });
+      const state = projectTaskState(
+        paths, taskId, taskContent, currentProjection.state, fixedClock,
+      );
+      state.active_team = team;
+      state.updated_at = "2026-07-10T04:00:00Z";
+      return {
+        projection: { task_content: taskContent, state },
+        result: { team },
+      };
+    }, { clock: fixedClock, environment });
+
+    mutateTaskRuntime(paths, taskId, {
+      kind: "team.promoted",
+      operationId: "finish-phase-report",
+      data: {
+        target: "finish",
+        authorization_ref: "",
+        grant_id: "",
+        scope_digest: "",
+        brief_path: "",
+        brief_sha256: "",
+        contract_sha256: "",
+        execution_plan_sha256: "",
+      },
+    }, ({ currentProjection }) => {
+      const team = structuredClone(currentProjection.state.active_team);
+      team.status = "promoted:finish";
+      team.promoted_to = "finish";
+      team.decision = `${currentProjection.state.artifact_dir}/team/decision.md`.replace(/^\//, "");
+      const taskContent = renderTaskFields(currentProjection.task_content, {
+        active_team_backend: team.backend,
+        active_team_mode: team.mode,
+        active_team_status: team.status,
+        active_team_decision: team.decision,
+      });
+      const state = projectTaskState(
+        paths, taskId, taskContent, currentProjection.state, fixedClock,
+      );
+      state.active_team = team;
+      state.updated_at = "2026-07-10T04:00:00Z";
+      return {
+        projection: { task_content: taskContent, state },
+        result: { team },
+      };
+    }, { clock: fixedClock, environment });
+
+    const keeperPath = path.join(repo, "src/keeper.txt");
+    fs.mkdirSync(path.dirname(keeperPath), { recursive: true });
+    fs.writeFileSync(keeperPath, "project creation verified\n");
+    assert.equal(spawnSync("git", ["-C", repo, "add", "src/keeper.txt"]).status, 0);
+    assert.equal(spawnSync(
+      "git", ["-C", repo, "commit", "-qm", "test: verified project flow"],
+    ).status, 0);
+    const acceptedHead = spawnSync(
+      "git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" },
+    ).stdout.trim();
+    const acceptedTree = spawnSync(
+      "git", ["-C", repo, "rev-parse", "HEAD^{tree}"], { encoding: "utf8" },
+    ).stdout.trim();
+
+    const releaseDir = path.join(taskArtifactDir(paths, taskId), "release-fixture");
+    fs.mkdirSync(releaseDir, { recursive: true });
+    const rawPath = path.join(releaseDir, "raw.json");
+    const candidatePath = path.join(releaseDir, "candidate.json");
+    const factPath = path.join(releaseDir, "fact.json");
+    let producerProvenance = null;
+    let releaseEvidence = null;
+    let identityInputPaths = [];
+    let outputs = [];
+    if (releaseRequirement) {
+      fs.writeFileSync(rawPath, `${JSON.stringify({ passed: true })}\n`);
+      const candidateBody = {
+        schema_version: 1,
+        source: {
+          repo_realpath: fs.realpathSync(repo),
+          head_sha: acceptedHead,
+          tree_oid: acceptedTree,
+        },
+        components: { artifact: { sha256: sha256("verified artifact") } },
+      };
+      const candidate = {
+        ...candidateBody,
+        manifest_digest: digestCanonical(candidateBody),
+      };
+      candidateManifestDigest = candidate.manifest_digest;
+      fs.writeFileSync(candidatePath, `${JSON.stringify(candidate)}\n`);
+      const factBody = {
+        schema_version: 1,
+        policy_binding: releaseRequirement,
+        candidate_manifest_digest: candidate.manifest_digest,
+        outcome: "passed",
+        reason_codes: [],
+        summary: "critical journey passed",
+        source: { ref: rawPath, sha256: sha256(fs.readFileSync(rawPath)), kind: "browser-report" },
+        evidence_refs: [rawPath],
+        evaluated_at: "2026-07-10T04:00:00Z",
+      };
+      const fact = { ...factBody, fact_id: digestCanonical(factBody) };
+      releaseFactId = fact.fact_id;
+      fs.writeFileSync(factPath, `${JSON.stringify(fact)}\n`);
+      identityInputPaths = [candidatePath, rawPath];
+      outputs = [captureVerificationOutput({ requested: factPath, path: factPath })];
+    }
+
+    const identityCapture = captureVerificationIdentity({
+      argv: checkCommand,
+      cwd: repo,
+      environment,
+      inputPaths: identityInputPaths,
+    });
+    const staticGate = {
+      admission_head_sha: admissionSnapshot.head_sha,
+      admission_tree_oid: admissionSnapshot.tree_oid,
+      brief_sha256: scope.required_slices[0].brief_sha256,
+      cache_policy: "fresh-executed",
+      base_sha: scope.repo.base_sha,
+      check_id: "browser-create-project",
+      command_digest: sha256(checkCommandText),
+      contract_sha256: scope.contract.sha256,
+      execution_plan_sha256: scope.execution_plan.sha256,
+      evidence_epoch: grant.evidence_epoch,
+      final_only: true,
+      gate_class: "browser-flow",
+      grant_id: grant.grant_id,
+      repo_realpath: scope.repo.realpath,
+      scope_digest: grant.scope_digest,
+      slice_id: "product-flow",
+      ...(releaseRequirement ? { release_requirement: releaseRequirement } : {}),
+    };
+    const completedGate = { ...staticGate, candidate_tree_oid: acceptedTree };
+    const authorityIdentity = {
+      grant_id: grant.grant_id,
+      scope_digest: grant.scope_digest,
+      evidence_epoch: grant.evidence_epoch,
+      slice_id: "product-flow",
+      brief_sha256: scope.required_slices[0].brief_sha256,
+      contract_sha256: scope.contract.sha256,
+      execution_plan_sha256: scope.execution_plan.sha256,
+      admission_head_sha: admissionSnapshot.head_sha,
+      admission_tree_oid: admissionSnapshot.tree_oid,
+      repo_realpath: scope.repo.realpath,
+    };
+    const checkBinding = {
+      schema_version: 1,
+      check_id: "browser-create-project",
+      slice_id: "product-flow",
+      gate_class: "browser-flow",
+      command_digest: sha256(checkCommandText),
+    };
+    const executionTarget = {
+      schema_version: 1,
+      task_id: taskId,
+      cwd_realpath: fs.realpathSync(repo),
+      command: [...checkCommand],
+      input_paths: [...identityInputPaths],
+      output_paths: releaseRequirement ? [factPath] : [],
+    };
+    const claimIdentity = {
+      schema_version: 2,
+      claim_kind: "verification-command",
+      task_id: taskId,
+      operation_id: "verify-phase-report",
+      claim_operation_id: "verify-phase-report-verification-claim",
+      terminal_operation_id: "verify-phase-report",
+      request_digest: digestCanonical({ executionTarget, staticGate }),
+      execution_fingerprint: digestCanonical(executionTarget),
+      execution_target: executionTarget,
+      required_check_binding: checkBinding,
+      authority_identity: authorityIdentity,
+    };
+    const claim = mutateTaskRuntime(paths, taskId, {
+      kind: "verification.claimed",
+      operationId: claimIdentity.claim_operation_id,
+      data: claimIdentity,
+    }, ({ currentProjection }) => {
+      const state = structuredClone(currentProjection.state);
+      const claimed = {
+        ...claimIdentity,
+        status: "in_progress",
+        claimed_at: "2026-07-10T04:00:00Z",
+      };
+      state.verification = {
+        ...(state.verification || {}),
+        operation_claims: [...(state.verification?.operation_claims || []), claimed],
+      };
+      return {
+        projection: { task_content: currentProjection.task_content, state },
+        result: { claim: claimed },
+      };
+    }, { clock: fixedClock, environment });
+
+    const sourceEntry = identityCapture.identity.inputs.find(
+      (entry) => entry.requested === rawPath,
+    );
+    if (releaseRequirement) {
+      producerProvenance = {
+        schema_version: 1,
+        producer_ref: "atlas-phase-report-fixture@1",
+        producer_sha256: identityCapture.identity.toolchain.find((entry) => entry.sha256).sha256,
+        source_ref: rawPath,
+        source_sha256: sourceEntry.sha256,
+        candidate_manifest_digest: candidateManifestDigest,
+        requirement_refs: [releaseRequirement.requirement_ref],
+      };
+      const factEntry = outputs[0];
+      const candidateEntry = identityCapture.identity.inputs.find(
+        (entry) => entry.requested === candidatePath,
+      );
+      releaseEvidence = {
+        schema_version: 1,
+        requirement_ref: releaseRequirement.requirement_ref,
+        fact: { entry: factEntry, content_base64: fs.readFileSync(factPath).toString("base64") },
+        candidate_manifest: {
+          entry: candidateEntry,
+          content_base64: fs.readFileSync(candidatePath).toString("base64"),
+        },
+        producer_provenance: producerProvenance,
+      };
+    }
+    const identityRecord = buildVerificationIdentityRecord({
+      schema_version: 3,
+      task_id: taskId,
+      created_at: "2026-07-10T04:00:00Z",
+      gate_class: "browser-flow",
+      verdict: "passed",
+      outcome: "passed",
+      provenance: "fresh-executed",
+      required_gate: completedGate,
+      identity: identityCapture.identity,
+      identity_digest: identityCapture.identityDigest,
+      pre_identity_digest: identityCapture.identityDigest,
+      snapshot_stable: true,
+      result: {
+        exit_code: 0,
+        stdout_sha256: sha256(""),
+        stderr_sha256: sha256(""),
+        evidence_refs: [],
+        outputs,
+        ...(producerProvenance ? { producer_provenance: producerProvenance } : {}),
+      },
+    });
+    const verificationDir = path.join(taskArtifactDir(paths, taskId), "verification");
+    fs.mkdirSync(verificationDir, { recursive: true });
+    const recordFile = path.join(verificationDir, "20260710T040000000000001.md");
+    const identityFile = path.join(verificationDir, "20260710T040000000000001.json");
+    const stdoutFile = path.join(paths.root, "phase-report-stdout");
+    const stderrFile = path.join(paths.root, "phase-report-stderr");
+    fs.writeFileSync(stdoutFile, "");
+    fs.writeFileSync(stderrFile, "");
+    const identityReference = relativeToCodeHome(paths, identityFile);
+    const recordContent = renderVerificationRecord({
+      recordFile,
+      recordType: "verification",
+      taskId,
+      commandText: `${checkCommandText} `,
+      cwd: repo,
+      exitCode: 0,
+      verdict: "passed",
+      stdoutFile,
+      stderrFile,
+      createdAt: "2026-07-10T04:00:00Z",
+      outcome: "passed",
+      trajectory: "",
+      evaluator: "local-command",
+      failureAttribution: "",
+      evidenceRefs: [],
+      identityRecord: identityReference,
+      recordId: identityRecord.record_id,
+      identityDigest: identityRecord.identity_digest,
+      snapshotStable: true,
+    });
+    const storedResult = {
+      exitCode: 0,
+      lines: [`task_id: ${taskId}`, `record: ${recordFile}`, "verdict: passed"],
+      identityFile,
+      recordFile,
+    };
     const verification = mutateTaskRuntime(paths, taskId, {
       kind: "verification.recorded",
       operationId: "verify-phase-report",
       data: {
-        record_id: recordId,
-        identity_digest: identityDigest,
-        required_gate: {
-          check_id: "browser-create-project",
-          candidate_tree_oid: candidateTree,
-        },
+        authority_identity: authorityIdentity,
+        claim_operation_id: claimIdentity.claim_operation_id,
+        record_id: identityRecord.record_id,
+        identity_digest: identityRecord.identity_digest,
+        observed_revision: claim.event.revision - 1,
+        claim_revision: claim.event.revision,
+        request_digest: claimIdentity.request_digest,
+        required_gate: completedGate,
+        release_evidence: releaseEvidence,
+        verdict: "passed",
+        outcome: "passed",
       },
-    }, ({ currentProjection }) => ({ projection: currentProjection }), {
-      clock: fixedClock,
-      environment,
-    });
+    }, ({ currentProjection, revision }) => {
+      const taskContent = renderTaskFields(currentProjection.task_content, {
+        last_verified_at: "2026-07-10T04:00:00Z",
+      });
+      const state = projectTaskState(paths, taskId, taskContent, currentProjection.state, fixedClock);
+      state.last_verified_at = "2026-07-10T04:00:00Z";
+      state.verification = {
+        ...(state.verification || {}),
+        last_record: relativeToCodeHome(paths, recordFile),
+        last_identity_record: identityReference,
+        last_exit_code: 0,
+        outcome: "passed",
+        trajectory: "",
+        evaluator: "local-command",
+        failure_attribution: "",
+        identity_schema_version: 3,
+        record_id: identityRecord.record_id,
+        identity_digest: identityRecord.identity_digest,
+        identity_stable: true,
+        evidence_refs: "-",
+        schema_version: 3,
+      };
+      state.verification.operation_claims = state.verification.operation_claims.map((item) => (
+        item.operation_id === claimIdentity.operation_id
+          ? {
+            ...item,
+            status: "terminal",
+            terminal_at: "2026-07-10T04:00:00Z",
+            result: storedResult,
+          }
+          : item
+      ));
+      state.verification.required_gates = {
+        ...(state.verification.required_gates || {}),
+        "browser-create-project": {
+          ...completedGate,
+          completed_at: "2026-07-10T04:00:00Z",
+          event_revision: revision + 1,
+          identity_digest: identityRecord.identity_digest,
+          identity_record: identityReference,
+          outcome: "passed",
+          provenance: "fresh-executed",
+          record_digest: identityRecord.record_id,
+          record_id: identityRecord.record_id,
+        },
+      };
+      return {
+        projection: {
+          task_content: taskContent,
+          state,
+          files: [
+            {
+              path: `verification/${path.basename(recordFile)}`,
+              content_base64: Buffer.from(recordContent).toString("base64"),
+            },
+            {
+              path: `verification/${path.basename(identityFile)}`,
+              content_base64: Buffer.from(`${JSON.stringify(identityRecord, null, 2)}\n`)
+                .toString("base64"),
+            },
+          ],
+        },
+        result: storedResult,
+      };
+    }, { clock: fixedClock, environment });
+
     mutateTaskRuntime(paths, taskId, {
       kind: "slice.accepted",
       operationId: "accept-phase-report",
-      data: { slice_id: "product-flow" },
-    }, ({ currentProjection, revision }) => {
-      const record = {
-        check_id: "browser-create-project",
+      data: {
+        brief_path: briefPath,
+        brief_sha256: scope.required_slices[0].brief_sha256,
+        contract_sha256: scope.contract.sha256,
+        execution_plan_sha256: scope.execution_plan.sha256,
+        keeper_outputs: [{
+          reference: "product:create-project",
+          path: "src/keeper.txt",
+          content_digest: sha256(fs.readFileSync(keeperPath)),
+        }],
         slice_id: "product-flow",
-        outcome: "passed",
-        provenance: "fresh-executed",
-        record_id: recordId,
-        identity_digest: identityDigest,
-        candidate_tree_oid: candidateTree,
+      },
+    }, ({ currentProjection, revision }) => {
+      const gate = currentProjection.state.verification.required_gates["browser-create-project"];
+      verificationReceipt = {
+        ...gate,
         verification_event_id: verification.event.event_id,
         verification_revision: verification.event.revision,
+        ...(releaseRequirement ? {
+          release_fact_id: releaseFactId,
+          release_fact_outcome: "passed",
+          candidate_manifest_digest: candidateManifestDigest,
+        } : {}),
       };
-      const acceptedValue = {
-        task_id: taskId,
-        slice_id: "product-flow",
-        status: "accepted",
+      acceptedReceipt = {
+        authority_ref: "team-run:run-0001",
+        actual_size: {
+          accepted_head_sha: acceptedHead,
+          accepted_tree_oid: acceptedTree,
+          changed_files: 1,
+          changed_paths: ["src/keeper.txt"],
+          current_tree_oid: acceptedTree,
+          loc: 1,
+          start_head_sha: admissionSnapshot.head_sha,
+          start_tree_oid: admissionSnapshot.tree_oid,
+        },
+        accepted_at: "2026-07-10T04:00:00Z",
+        brief_sha256: scope.required_slices[0].brief_sha256,
+        contract_sha256: scope.contract.sha256,
+        execution_plan_sha256: scope.execution_plan.sha256,
+        generation: 1,
+        grant_id: grant.grant_id,
+        scope_digest: grant.scope_digest,
+        evidence_epoch: grant.evidence_epoch,
+        keeper_outputs: [{
+          reference: "product:create-project",
+          path: "src/keeper.txt",
+          content_digest: sha256(fs.readFileSync(keeperPath)),
+        }],
         operation_id: "accept-phase-report",
         revision: revision + 1,
-        contract_sha256: authority.contract_sha256,
-        execution_plan_sha256: authority.execution_plan_sha256,
-        actual_size: { accepted_tree_oid: candidateTree },
-        verification_records: [record],
+        slice_id: "product-flow",
+        status: "accepted",
+        task_id: taskId,
+        team_run_id: "run-0001",
+        verification_records: [verificationReceipt],
       };
-      const state = {
-        ...currentProjection.state,
-        slice_acceptances: { "product-flow": acceptedValue },
+      const state = structuredClone(currentProjection.state);
+      state.slice_acceptances = {
+        ...(state.slice_acceptances || {}),
+        "product-flow": acceptedReceipt,
       };
       return {
         projection: { task_content: currentProjection.task_content, state },
-        result: { accepted: acceptedValue },
+        result: { accepted: acceptedReceipt },
       };
     }, { clock: fixedClock, environment });
   }
+  let decision = null;
   if (withReleaseDecision) {
     const resultBody = {
       requirement_ref: "web-ui-v1.critical-journey",
-      fact_id: `sha256:${"1".repeat(64)}`,
+      fact_id: releaseFactId,
       submitted_outcome: "passed",
       outcome: "passed",
       reason_codes: [],
@@ -233,37 +877,96 @@ function canonicalPhaseFixture(t, {
       intent_sha256: releaseBinding.intent_sha256,
       profile_ref: releaseBinding.profile_ref,
       profile_sha256: releaseBinding.profile_sha256,
-      candidate_manifest_digest: `sha256:${"f".repeat(64)}`,
+      candidate_manifest_digest: candidateManifestDigest,
       requirement_results: [{ ...resultBody, result_id: digestCanonical(resultBody) }],
     };
-    const decision = { ...body, decision_id: digestCanonical(body) };
-    mutateTaskRuntime(paths, taskId, {
-      kind: "task.completion.closed",
-      operationId: "complete-phase-report",
-      data: { outcome: "succeeded" },
-    }, ({ currentProjection, revision }) => {
-      const completedRevision = revision + 1;
-      const state = {
-        ...currentProjection.state,
-        completion: {
-          schema_version: 1,
-          outcome: "succeeded",
-          release_decision: decision,
-        },
-        execution_authority: {
-          ...currentProjection.state.execution_authority,
-          completion: {
-            completed_at: "2026-07-10T04:00:00Z",
-            completed_revision: completedRevision,
-          },
-        },
-      };
-      return {
-        projection: { task_content: currentProjection.task_content, state },
-        result: { completion: state.completion },
-      };
-    }, { clock: fixedClock, environment });
+    decision = { ...body, decision_id: digestCanonical(body) };
   }
+  const completionOutcome = accepted ? "succeeded" : "failed";
+  const completionEvidence = accepted ? [] : ["phase-report-fixture"];
+  mutateTaskRuntime(paths, taskId, {
+    kind: "task.completion.closed",
+    operationId: "complete-phase-report",
+    data: {
+      from: "doing",
+      to: "done",
+      outcome: completionOutcome,
+      authority_ref: scope.authorization_provenance.ref,
+      evidence_refs: completionEvidence,
+      no_verify_reason: "",
+    },
+  }, ({ currentProjection, revision }) => {
+    const activeGrant = currentProjection.state.execution_authority.grants.find(
+      (candidate) => candidate.grant_id
+        === currentProjection.state.execution_authority.current_grant_id,
+    );
+    const completedAt = "2026-07-10T04:00:00Z";
+    const completionSnapshot = accepted ? {
+      schema_version: 2,
+      grant_id: activeGrant.grant_id,
+      scope_digest: activeGrant.scope_digest,
+      evidence_epoch: activeGrant.evidence_epoch,
+      repo_realpath: scope.repo.realpath,
+      head_sha: acceptedReceipt.actual_size.accepted_head_sha,
+      tree_oid: acceptedReceipt.actual_size.accepted_tree_oid,
+      source_slice_id: "product-flow",
+      source_acceptance_event_id: currentProjection.state.last_event_id,
+      source_acceptance_revision: acceptedReceipt.revision,
+    } : null;
+    const team = currentProjection.state.active_team || {};
+    const taskContent = renderTaskFields(currentProjection.task_content, {
+      status: "done",
+      updated: localDay(fixedClock),
+      completion_outcome: completionOutcome,
+      completion_authority_ref: scope.authorization_provenance.ref,
+      completion_evidence_refs: completionEvidence.length > 0
+        ? completionEvidence.join(" ")
+        : "-",
+      completion_closed_at: completedAt,
+    });
+    const state = structuredClone(currentProjection.state);
+    state.status = "done";
+    state.updated_at = completedAt;
+    state.completion = {
+      schema_version: 1,
+      outcome: completionOutcome,
+      authority_ref: scope.authorization_provenance.ref,
+      evidence_refs: completionEvidence,
+      completion_snapshot: completionSnapshot,
+      verification_record_id: accepted ? verificationReceipt.record_id : "",
+      verification_identity_digest: "",
+      verification_record_ids: accepted ? [verificationReceipt.record_id] : [],
+      release_decision: accepted ? decision : null,
+      grant_id: activeGrant.grant_id,
+      scope_digest: activeGrant.scope_digest,
+      evidence_epoch: activeGrant.evidence_epoch,
+      team_run_id: team.team_run_id || "",
+      team_generation: team.generation || 0,
+      closed_at: completedAt,
+    };
+    const transition = {
+      schema_version: 1,
+      type: "grant-completed",
+      revision: revision + 1,
+      occurred_at: completedAt,
+      old_grant_id: activeGrant.grant_id,
+      old_scope_digest: activeGrant.scope_digest,
+      old_evidence_epoch: activeGrant.evidence_epoch,
+      outcome: completionOutcome,
+      reason: `task-completion:${completionOutcome}`,
+    };
+    transitionAuthorityState(state, transition);
+    return {
+      authorityTransition: transition,
+      projection: { task_content: taskContent, state },
+      result: {
+        outcome: completionOutcome,
+        grant_id: activeGrant.grant_id,
+        scope_digest: activeGrant.scope_digest,
+        evidence_epoch: activeGrant.evidence_epoch,
+      },
+    };
+  }, { clock: fixedClock, environment });
   return { environment, paths, taskId };
 }
 
@@ -418,9 +1121,9 @@ test("keeps absent release decision distinct from cannot_verify", (t) => {
   );
 });
 
-test("rejects accepted evidence replaced only in a later projection", (t) => {
+test("rejects accepted evidence replaced by a non-evidence event", (t) => {
   const value = canonicalPhaseFixture(t);
-  mutateTaskRuntime(value.paths, value.taskId, {
+  assert.throws(() => mutateTaskRuntime(value.paths, value.taskId, {
     kind: "test.unrelated",
     operationId: "tamper-phase-acceptance-projection",
   }, ({ currentProjection }) => {
@@ -441,26 +1144,15 @@ test("rejects accepted evidence replaced only in a later projection", (t) => {
         },
       },
     };
-  }, { clock: fixedClock, environment: value.environment });
-  assert.throws(
-    () => writePhaseReportProjection(value.taskId, "phase-tampered", {
-      environment: value.environment,
-    }),
-    /accepted slice authority is inconsistent/,
-  );
+  }, { clock: fixedClock, environment: value.environment }),
+  /event changed slice\/evidence history it does not own/);
 });
 
-test("rejects a digest-valid but semantically invalid release decision", (t) => {
-  const value = canonicalPhaseFixture(t, {
+test("rejects a digest-valid but semantically invalid release decision at completion", (t) => {
+  assert.throws(() => canonicalPhaseFixture(t, {
     invalidReleaseDecision: true,
     withReleaseDecision: true,
-  });
-  assert.throws(
-    () => writePhaseReportProjection(value.taskId, "phase-invalid-release", {
-      environment: value.environment,
-    }),
-    /stored release decision is invalid/,
-  );
+  }), /task completion release decision differs from execution authority/);
 });
 
 test("rejects a contract with no required acceptance criterion", (t) => {

@@ -5,8 +5,10 @@ const path = require("path");
 const { atomicWriteFile } = require("../core/atomic-file");
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { resolvePaths, taskArtifactDir } = require("../core/paths");
+const { stableFileSnapshot } = require("../core/stable-file");
 const { taskEventFile } = require("../core/task-mutation");
-const { digestCanonical, sha256 } = require("../verification/identity");
+const { digestCanonical } = require("../verification/identity");
+const { validateRetainedReceipt } = require("../verification/required-gates");
 const { validateSafeId } = require("./scaffold");
 
 const AC_HEADER = ["ID", "Criterion", "Required", "Verification", "Authority"];
@@ -19,20 +21,6 @@ class PhaseReportError extends Error {
     super(message);
     this.name = "PhaseReportError";
   }
-}
-
-function canonicalFile(file, label) {
-  const resolved = path.resolve(file || "");
-  let stat;
-  try {
-    stat = fs.lstatSync(resolved);
-  } catch (error) {
-    throw new PhaseReportError(`${label} is unavailable: ${error.message}`);
-  }
-  if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(resolved) !== resolved) {
-    throw new PhaseReportError(`${label} must be a canonical regular non-symlink file`);
-  }
-  return resolved;
 }
 
 function tableCells(line) {
@@ -105,7 +93,7 @@ function executionPlan(markdown) {
   }
 }
 
-function acceptedSliceEvidence(taskId, slice, state, events, authority) {
+function acceptedSliceEvidence(paths, taskId, slice, state, events, grant) {
   const projectedAccepted = state.slice_acceptances?.[slice.slice_id];
   const terminal = events.filter((event) => (
     new Set(["slice.accepted", "slice.superseded"]).has(event.kind)
@@ -117,13 +105,32 @@ function acceptedSliceEvidence(taskId, slice, state, events, authority) {
     }
     return { status: "not_yet_accepted", receiptIds: [], checks: [] };
   }
-  const accepted = terminal?.result?.accepted;
+  const accepted = projectedAccepted;
+  const retentionReasons = [];
+  const retention = accepted ? validateRetainedReceipt(
+    paths,
+    taskId,
+    {
+      grant_id: grant.grant_id,
+      scope_digest: grant.scope_digest,
+      evidence_epoch: grant.evidence_epoch,
+    },
+    accepted,
+    { authorityEvents: events, validateCurrentIdentity: false },
+    retentionReasons,
+    "slice",
+  ) : { retained: false };
   if (!projectedAccepted || projectedAccepted.status !== "accepted" || !accepted
     || terminal.revision !== accepted.revision
-    || digestCanonical(projectedAccepted) !== digestCanonical(accepted)
     || accepted.task_id !== taskId
-    || accepted.contract_sha256 !== authority.contract_sha256
-    || accepted.execution_plan_sha256 !== authority.execution_plan_sha256) {
+    || accepted.contract_sha256 !== grant.scope.contract.sha256
+    || accepted.execution_plan_sha256 !== grant.scope.execution_plan.sha256
+    || accepted.grant_id !== grant.grant_id
+    || accepted.scope_digest !== grant.scope_digest
+    || accepted.evidence_epoch !== grant.evidence_epoch
+    || retentionReasons.length > 0
+    || (!retention.retained
+      && digestCanonical(terminal.result?.accepted) !== digestCanonical(accepted))) {
     throw new PhaseReportError(`accepted slice authority is inconsistent: ${slice.slice_id}`);
   }
   const records = Array.isArray(accepted.verification_records)
@@ -141,6 +148,9 @@ function acceptedSliceEvidence(taskId, slice, state, events, authority) {
       && candidate.revision === record?.verification_revision
     ));
     if (!record || record.slice_id !== slice.slice_id
+      || record.grant_id !== grant.grant_id
+      || record.scope_digest !== grant.scope_digest
+      || record.evidence_epoch !== grant.evidence_epoch
       || record.outcome !== "passed" || record.provenance !== "fresh-executed"
       || record.candidate_tree_oid !== accepted.actual_size?.accepted_tree_oid
       || event?.kind !== "verification.recorded"
@@ -170,7 +180,7 @@ function exactKeys(value, expected) {
   return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
 }
 
-function releaseDecision(state, events, authority) {
+function releaseDecision(state, events, authority, grant) {
   const decision = state.completion?.release_decision;
   if (decision === null || decision === undefined) return null;
   if (!decision || typeof decision !== "object" || Array.isArray(decision)
@@ -190,7 +200,7 @@ function releaseDecision(state, events, authority) {
     || !DIGEST.test(decision.decision_id || "")) {
     throw new PhaseReportError("stored release decision is invalid");
   }
-  const binding = authority.release_binding;
+  const binding = grant.scope.release_binding;
   if (!binding || decision.intent_sha256 !== binding.intent_sha256
     || decision.profile_ref !== binding.profile_ref
     || decision.profile_sha256 !== binding.profile_sha256) {
@@ -199,13 +209,16 @@ function releaseDecision(state, events, authority) {
   if (state.completion?.schema_version !== 1 || state.completion?.outcome !== "succeeded") {
     throw new PhaseReportError("stored release decision is not attached to successful completion");
   }
-  const completionRevision = Number(authority.completion?.completed_revision || 0);
+  const completionRevision = Number(grant.terminal?.revision || 0);
   const completionEvent = events.find((event) => event.revision === completionRevision);
+  const projectedGrant = completionEvent?.projection?.state?.execution_authority?.grants?.find(
+    (candidate) => candidate.grant_id === grant.grant_id,
+  );
   if (!Number.isInteger(completionRevision) || completionRevision < 1
     || completionEvent?.kind !== "task.completion.closed"
     || completionEvent.data?.outcome !== "succeeded"
-    || completionEvent.projection?.state?.execution_authority?.completion?.completed_revision
-      !== completionRevision
+    || projectedGrant?.status !== "completed"
+    || projectedGrant?.terminal?.revision !== completionRevision
     || digestCanonical(completionEvent.projection?.state?.completion?.release_decision || null)
       !== digestCanonical(decision)) {
     throw new PhaseReportError("stored release decision is not bound to its completion event");
@@ -268,26 +281,47 @@ function buildPhaseReportProjection(taskId, phaseId, options = {}) {
   if (!latest) throw new PhaseReportError(`task has no authoritative state: ${taskId}`);
   const state = latest.projection.state;
   const authority = state.execution_authority;
-  if (!authority || authority.schema_version !== 1) {
+  if (!authority || authority.schema_version !== 2) {
     throw new PhaseReportError("phase report requires canonical execution authority");
   }
-  const contractFile = canonicalFile(authority.contract_path, "execution authority contract");
-  const repo = fs.realpathSync(authority.repo_realpath);
+  const completion = state.completion;
+  const grant = (authority.grants || []).find((candidate) => (
+    candidate.grant_id === completion?.grant_id
+  ));
+  const completionEvent = events.find((event) => event.revision === grant?.terminal?.revision);
+  if (!grant || grant.status !== "completed" || grant.scope_digest !== completion.scope_digest
+    || grant.evidence_epoch !== completion.evidence_epoch
+    || completionEvent?.kind !== "task.completion.closed"
+    || digestCanonical(completionEvent.projection?.state?.completion || null)
+      !== digestCanonical(completion || null)) {
+    throw new PhaseReportError("phase report completion is not bound to one completed execution grant");
+  }
+  const scope = grant.scope;
+  const repo = fs.realpathSync(scope.repo.realpath);
+  const contractFile = path.resolve(repo, scope.contract.path);
   const relative = path.relative(repo, contractFile);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new PhaseReportError("execution authority contract is outside its repository");
   }
-  const contractBytes = fs.readFileSync(contractFile);
-  if (sha256(contractBytes) !== authority.contract_sha256) {
+  let contractSnapshot;
+  try {
+    contractSnapshot = stableFileSnapshot(contractFile, "execution authority contract", {
+      maximumBytes: 4 * 1024 * 1024,
+      root: repo,
+    });
+  } catch (error) {
+    throw new PhaseReportError(error.message);
+  }
+  if (contractSnapshot.sha256 !== scope.contract.sha256) {
     throw new PhaseReportError("execution authority contract digest is invalid");
   }
-  const markdown = contractBytes.toString("utf8");
+  const markdown = contractSnapshot.text;
   const plan = executionPlan(markdown);
-  if (digestCanonical(plan) !== authority.execution_plan_sha256) {
+  if (digestCanonical(plan) !== scope.execution_plan.sha256) {
     throw new PhaseReportError("execution authority plan digest is invalid");
   }
   if (JSON.stringify(plan.slices.map((slice) => slice.slice_id))
-    !== JSON.stringify(authority.required_slices || [])) {
+    !== JSON.stringify(scope.required_slices.map((slice) => slice.slice_id))) {
     throw new PhaseReportError("execution authority slice set is inconsistent");
   }
   const criteria = acceptanceCriteria(markdown);
@@ -300,7 +334,7 @@ function buildPhaseReportProjection(taskId, phaseId, options = {}) {
     }
     sliceEvidence.set(
       slice.slice_id,
-      acceptedSliceEvidence(taskId, slice, state, events, authority),
+      acceptedSliceEvidence(paths, taskId, slice, state, events, grant),
     );
   }
   const projectedCriteria = criteria.map((criterion) => {
@@ -328,8 +362,8 @@ function buildPhaseReportProjection(taskId, phaseId, options = {}) {
     task_id: taskId,
     phase_id: phaseId,
     source_revision: latest.revision,
-    contract_sha256: authority.contract_sha256,
-    execution_plan_sha256: authority.execution_plan_sha256,
+    contract_sha256: scope.contract.sha256,
+    execution_plan_sha256: scope.execution_plan.sha256,
     slice_ids: plan.slices.map((slice) => slice.slice_id),
     coverage,
     required_count: required.length,
@@ -340,7 +374,7 @@ function buildPhaseReportProjection(taskId, phaseId, options = {}) {
       acceptance_refs: [...(slice.acceptance_refs || [])],
       ...sliceEvidence.get(slice.slice_id),
     })),
-    release_decision: releaseDecision(state, events, authority),
+    release_decision: releaseDecision(state, events, authority, grant),
   };
 }
 

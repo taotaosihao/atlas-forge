@@ -37,6 +37,13 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function eventLocalDay(timestamp) {
+  const date = new Date(timestamp);
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((value, index) => String(value).padStart(index === 0 ? 4 : 2, "0"))
+    .join("-");
+}
+
 function materializedProjectionFiles(events) {
   const files = new Map();
   for (const event of events) {
@@ -243,10 +250,6 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
     const expectedRevision = options.expectedRevision === undefined
       ? currentRevision
       : options.expectedRevision;
-    if (latest && !projectionMatches(paths, taskId, currentProjection)) {
-      applyTaskProjection(paths, taskId, currentProjection);
-    }
-    if (latest) appendMissingLegacyRows(paths, taskId, latest);
     const existing = events.find((event) => event.operation_id === operationId);
     if (existing) {
       const digest = eventPayloadDigest({
@@ -258,6 +261,18 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       if (existing.kind !== input.kind || existing.payload_digest !== digest) {
         throw new TaskMutationError(`operation_id replay payload conflict: ${operationId}`);
       }
+      if (options.replayPostcondition) {
+        options.replayPostcondition({
+          currentProjection: currentProjection ? clone(currentProjection) : null,
+          events,
+          existing: clone(existing),
+          latest: clone(latest),
+        });
+      }
+      if (latest && !projectionMatches(paths, taskId, currentProjection)) {
+        applyTaskProjection(paths, taskId, currentProjection);
+      }
+      if (latest) appendMissingLegacyRows(paths, taskId, latest);
       appendMissingLegacyRows(paths, taskId, existing);
       if (options.afterEventAppend && existing.event_id === latest.event_id) {
         options.afterEventAppend(existing, { replay: true });
@@ -269,14 +284,20 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
         result: clone(existing.result || {}),
       };
     }
+    if (latest && !projectionMatches(paths, taskId, currentProjection)) {
+      applyTaskProjection(paths, taskId, currentProjection);
+    }
+    if (latest) appendMissingLegacyRows(paths, taskId, latest);
     if (expectedRevision !== currentRevision) {
       throw new TaskMutationError(
         `stale task revision: expected ${expectedRevision}, current ${currentRevision}`,
       );
     }
+    const occurredAt = eventTimestamp(options.clock || (() => new Date()));
     const output = transition({
       currentProjection: currentProjection ? clone(currentProjection) : null,
       events,
+      occurredAt,
       revision: currentRevision,
     });
     const event = {
@@ -294,7 +315,9 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       }),
       last_event_id: events.at(-1)?.event_id || "",
       kind: input.kind,
-      occurred_at: eventTimestamp(options.clock || (() => new Date())),
+      occurred_at: occurredAt,
+      local_day: eventLocalDay(occurredAt),
+      local_utc_offset_minutes: -new Date(occurredAt).getTimezoneOffset(),
       consistency: {
         authority: "event",
         projection: "replayable",
@@ -305,11 +328,26 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       result: clone(output.result || {}),
       legacy: clone(output.legacy || []),
     };
+    if (output.authorityTransition !== undefined) {
+      event.authority_transition = clone(output.authorityTransition);
+    }
     event.projection = finalizedProjection(output.projection, event, paths, events);
     event.event_digest = authoritativeEventDigest(event);
     if (options.beforeEventAppend) {
       options.beforeEventAppend(event);
     }
+    if (event.event_digest !== authoritativeEventDigest(event)) {
+      throw new TaskMutationError("authoritative event changed after its record digest was computed");
+    }
+    require("../team/execution-grant").validateAuthorityEventProjection([...events, event]);
+    require("../verification/claim-event-validation")
+      .validateVerificationClaimEventProjection([...events, event]);
+    require("../team/evidence-event-validation")
+      .validateEvidenceEventProjection([...events, event]);
+    require("../team/observer-claim-event-validation")
+      .validateObserverClaimEventProjection([...events, event]);
+    require("../task/lifecycle-event-validation")
+      .validateTaskLifecycleEventProjection([...events, event]);
     if (options.failBeforeEventAppend) {
       throw new TaskMutationError("injected failure before authoritative event append");
     }

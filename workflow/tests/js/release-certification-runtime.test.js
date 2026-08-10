@@ -87,6 +87,9 @@ const {
   runPromote,
   runRecordStart,
 } = require(path.join(WORKFLOW_ROOT, "bin/lib/codex-workflow/team/commands"));
+const { parseAuthorizeArgs, runAuthorize } = require(path.join(
+  WORKFLOW_ROOT, "bin/lib/codex-workflow/team/authority-commands",
+));
 const { parseSliceAcceptArgs, runSliceAccept } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/team/slice-acceptance",
 ));
@@ -104,6 +107,112 @@ function write(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`);
   return file;
+}
+
+function writeReleaseAuthoritySlice(paths, taskId, repo, baseSha, acceptanceRefs) {
+  const sliceId = "release-authority";
+  const sliceDir = path.join(
+    taskArtifactDir(paths, taskId),
+    "team/sdd/slices",
+    sliceId,
+  );
+  fs.mkdirSync(sliceDir, { recursive: true });
+  write(path.join(sliceDir, "brief.md"), [
+    "# Release authority",
+    "",
+    ...acceptanceRefs.map((ref) => `- ${ref}`),
+    "",
+  ].join("\n"));
+  write(path.join(sliceDir, "brief.json"), {
+    schema_version: 2,
+    task_id: taskId,
+    slice_id: sliceId,
+    repo,
+    base_sha: baseSha,
+    objective: "Provide canonical goal authority for release runtime authoring.",
+    requirements_path: "brief.md",
+    global_constraints_path: "../../global-constraints.md",
+    owned_paths: ["release/output"],
+    forbidden_paths: ["plugins/multica-sdlc"],
+    acceptance_refs: acceptanceRefs,
+    required_checks: ["node --test workflow/tests/js/release-certification-runtime.test.js"],
+    commit_policy: "logical_outcome",
+    output_contract: "final_message_json_only",
+  });
+  return sliceDir;
+}
+
+function releaseContractMarkdown(taskId, intent, plan) {
+  const acceptanceRefs = [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))];
+  return [
+    "# Product release contract",
+    "",
+    `task_id: ${taskId}`,
+    "contract_semantics_version: 6",
+    "finding_scope_admission: controller_current_required_only",
+    "safe_fallback_authority: none",
+    "work_type: implementation",
+    "first_code_guard: required",
+    "first_code_not_applicable_reason:",
+    "product_ui_gate: required",
+    "product_ui_not_applicable_reason:",
+    "",
+    "## First Code Slice Guard",
+    "",
+    "- first_code_slice: Implement the governed release runtime and its final-sweep behavior.",
+    "- first_code_slice_kind: product",
+    "- first_code_owner: release-runtime-owner",
+    "- first_code_verification: node --test workflow/tests/js/release-certification-runtime.test.js",
+    "- allowed_contract_gate_only_until: contract authoring validation",
+    "- stop_if_no_code_by_phase: release implementation",
+    "- gate_parallelization_or_deferral_plan: Run admission checks before accepting the release execution slice.",
+    "",
+    "## Product/UI Acceptance Gate",
+    "",
+    "- first_operable_user_flow: Open the release candidate, complete its primary flow, and verify the saved result.",
+    "- browser_entrypoint: http://127.0.0.1:4173/release",
+    "- served_ui_validation_action: page.route('/api/**', route => route.fulfill({json: fixture})); never fulfill the main document or app bundle; page.goto(entrypoint); complete the primary flow and verify the saved result.",
+    "- ui_data_mode: API fixture data served behind the real application document and assets",
+    "- required_safety_gates: browser network boundary, credential isolation, and release authority checks",
+    "- allowed_headless_only_until: contract authoring validation",
+    "- stop_if_no_ui_by_phase: release implementation",
+    "",
+    "```atlas-release-intent+json",
+    JSON.stringify(intent, null, 2),
+    "```",
+    "",
+    "```atlas-execution-plan+json",
+    JSON.stringify(plan, null, 2),
+    "```",
+    "",
+    "## Acceptance Criteria",
+    "",
+    "| ID | Criterion | Required | Verification | Authority |",
+    "|----|-----------|----------|--------------|-----------|",
+    ...acceptanceRefs.map((ref) => (
+      `| ${ref} | Preserve the governed release requirement. | yes | release admission | goal:${ref} |`
+    )),
+    "",
+    "## Edge Cases",
+    "",
+    "| Case | Expected behavior | Required | Admission |",
+    "|------|-------------------|----------|-----------|",
+    "| Optional evidence note | Keep it outside executable scope. | no | optional |",
+    "",
+    "## Failure And Stop Conditions",
+    "",
+    "- Stop and ask the user when: release authority cannot be established.",
+    "- Treat the task as failed when: a required Profile validation fails.",
+    "- Required safe fallback: not_applicable",
+    "- Optional fallback notes: preserve non-required evidence as provenance.",
+    "",
+    "## Finding Provenance",
+    "",
+    "| Finding ID | Disposition | Source | Follow-up |",
+    "|------------|-------------|--------|-----------|",
+    "| release-note | informational | release fixture | none |",
+    "",
+  ].join("\n");
 }
 
 function contentRef(ref, file, kind) {
@@ -478,7 +587,7 @@ function releaseFixture(t, {
     checks: releaseSliceChecks,
   };
   const plan = {
-    schema_version: 2,
+    schema_version: 4,
     size_policy: { policy_id: "atlas-slice-size-v2" },
     release: releaseBinding,
     slices: briefMode === "full" ? [releaseSlice] : [releaseSlice, {
@@ -494,23 +603,38 @@ function releaseFixture(t, {
       budget: { ...releaseSlice.budget, max_required_checks: checks.length },
     }],
   };
-  const contract = write(path.join(repo, "implementation-contract.final.md"), [
-    "# Product release contract", "", `task_id: ${taskId}`,
-    "contract_semantics_version: 4", "work_type: implementation", "",
-    "```atlas-release-intent+json", JSON.stringify(intent, null, 2), "```", "",
-    "```atlas-execution-plan+json", JSON.stringify(plan, null, 2), "```", "",
-  ].join("\n"));
+  const contract = write(
+    path.join(repo, "implementation-contract.final.md"),
+    releaseContractMarkdown(taskId, intent, plan),
+  );
   git(repo, ["add", "implementation-contract.final.md"]);
   git(repo, ["commit", "-qm", "test: add product release contract"]);
   const base = git(repo, ["rev-parse", "HEAD"]);
+  const authoritySlice = writeReleaseAuthoritySlice(
+    paths,
+    taskId,
+    repo,
+    base,
+    [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))],
+  );
   const compile = spawnSync(process.execPath, [
-    BRIEF_BIN, "--task", taskId, "--slice", "release-slice", "--repo", repo,
-    "--base", base, "--contract", contract,
+    BRIEF_BIN, "--task", taskId, "--all-slices", "--repo", repo,
+    "--base", base, "--contract", contract, "--authority-slice", authoritySlice,
   ], { cwd: repo, env: environment, encoding: "utf8" });
   assert.equal(compile.status, 0, compile.stderr);
   const briefPath = path.join(
     taskArtifactDir(paths, taskId), "team/sdd/slices/release-slice/brief.json",
   );
+  const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
+  runAuthorize(parseAuthorizeArgs([
+    taskId,
+    brief.objective,
+    "--authorization-ref=user-message:release",
+    `--brief=${briefPath}`,
+    "--grant-id=release-grant",
+    "--operation-id=authorize-release",
+  ]), { clock, cwd: repo, environment });
+  const grant = readJsonObject(taskStateFile(paths, taskId)).execution_authority.grants[0];
   if (promotedExecution) {
     runRecordStart(parseRecordStartArgs([
       taskId, "discuss final release sweep", "--mode=discuss", `--brief=${briefPath}`,
@@ -518,12 +642,14 @@ function releaseFixture(t, {
     ]), { cwd: repo, environment });
     runPromote(parsePromoteArgs([
       taskId, "--to=execute", "--authorization-ref=user-message:release",
-      `--brief=${briefPath}`, "--operation-id=promote-release-sweep",
+      `--brief=${briefPath}`, `--grant-id=${grant.grant_id}`,
+      `--scope-digest=${grant.scope_digest}`, "--operation-id=promote-release-sweep",
     ]), { cwd: repo, environment });
   } else {
     runRecordStart(parseRecordStartArgs([
-      taskId, "execute final release sweep", "--mode=execute",
+      taskId, brief.objective, "--mode=execute",
       "--authorization-ref=user-message:release", `--brief=${briefPath}`,
+      `--grant-id=${grant.grant_id}`, `--scope-digest=${grant.scope_digest}`,
       "--operation-id=start-release-sweep",
     ]), { cwd: repo, environment });
   }
@@ -768,31 +894,36 @@ function releaseFixture(t, {
 test("self-attested release JSON plus an exit-zero command cannot certify a product", (t) => {
   const value = releaseFixture(t);
   const beforeAcceptance = readJsonObject(taskStateFile(value.paths, value.taskId));
-  assert.equal(beforeAcceptance.execution_authority.work_type, "implementation");
+  assert.equal(beforeAcceptance.execution_authority.schema_version, 2);
+  assert.equal(beforeAcceptance.execution_authority.formal_product_release, true);
+  assert.equal(
+    beforeAcceptance.execution_authority.delivery_authority.ref,
+    "user-message:release",
+  );
   const gates = requiredGateAdmission(value.paths, value.taskId, beforeAcceptance, {
     environment: value.environment,
   });
-  assert.equal(gates.passed, true, gates.reasons.join("\n"));
+  assert.equal(gates.passed, false);
+  assert.match(gates.reasons.join("\n"), /release final sweep is not certified: cannot_verify/);
   assert.equal(gates.releaseDecision.status, "cannot_verify");
   assert.equal(gates.verificationRecords.filter((item) => item.release_fact_id).length, 7);
   assert.ok(gates.verificationRecords.every((item) => (
     item.release_fact_outcome === "cannot_verify"
   )));
 
-  runSliceAccept(parseSliceAcceptArgs([
+  const beforeEvents = fs.readFileSync(taskEventFile(value.paths, value.taskId));
+  assert.throws(() => runSliceAccept(parseSliceAcceptArgs([
     value.taskId, `--brief=${value.briefPath}`, "--operation-id=accept-release-sweep",
     `--keeper-output=release:final-sweep=${value.keeperRelative}`,
-  ]), { environment: value.environment });
-  completeTask(value.taskId, {
-    clock, environment: value.environment, operationId: "complete-release-task",
-  });
-  const completed = readJsonObject(taskStateFile(value.paths, value.taskId));
-  assert.equal(completed.completion.release_decision.status, "cannot_verify");
-  assert.equal(completed.completion.release_decision.authority, "derived-from-final-release-sweep");
-  assert.equal(completed.completion.release_decision.candidate_manifest_digest,
+  ]), { environment: value.environment }), /release final sweep is not certified: cannot_verify/);
+  assert.deepEqual(fs.readFileSync(taskEventFile(value.paths, value.taskId)), beforeEvents);
+  assert.deepEqual(readJsonObject(taskStateFile(value.paths, value.taskId)), beforeAcceptance);
+
+  assert.equal(gates.releaseDecision.authority, "derived-from-final-release-sweep");
+  assert.equal(gates.releaseDecision.candidate_manifest_digest,
     JSON.parse(fs.readFileSync(value.candidatePath)).manifest_digest);
-  assert.match(completed.completion.release_decision.decision_id, /^sha256:[a-f0-9]{64}$/);
-  assert.ok(completed.completion.release_decision.requirement_results.every((result) => (
+  assert.match(gates.releaseDecision.decision_id, /^sha256:[a-f0-9]{64}$/);
+  assert.ok(gates.releaseDecision.requirement_results.every((result) => (
     result.submitted_outcome === "passed"
     && result.outcome === "cannot_verify"
     && /^sha256:[a-f0-9]{64}$/.test(result.fact_id)
@@ -805,14 +936,61 @@ test("self-attested release JSON plus an exit-zero command cannot certify a prod
       reason_codes: result.reason_codes,
     })
   )));
-  assert.equal(
-    executionCompletionAdmission(value.paths, value.taskId, completed, { environment: value.environment })
-      .releaseDecision.status,
-    "cannot_verify",
-  );
+  assert.throws(() => completeTask(value.taskId, {
+    clock, environment: value.environment, operationId: "complete-release-task",
+  }), /missing authoritative accepted slice|release final sweep is not certified: cannot_verify/);
+  assert.deepEqual(fs.readFileSync(taskEventFile(value.paths, value.taskId)), beforeEvents);
 });
 
-test("required gate admission layers a non-release slice before a fail-closed partial sweep", (t) => {
+test("indeterminate revalidation invalidates an older release gate before the final sweep", (t) => {
+  const value = releaseFixture(t);
+  const state = readJsonObject(taskStateFile(value.paths, value.taskId));
+  const gate = Object.values(state.verification.required_gates)[0];
+  state.verification.operation_claims.push({
+    schema_version: 1,
+    claim_kind: "verification-command",
+    operation_id: "indeterminate-release-revalidation",
+    claim_operation_id: "indeterminate-release-revalidation-verification-claim",
+    terminal_operation_id: "indeterminate-release-revalidation",
+    request_digest: `sha256:${"1".repeat(64)}`,
+    execution_fingerprint: `sha256:${"2".repeat(64)}`,
+    authority_identity: {
+      grant_id: gate.grant_id,
+      scope_digest: gate.scope_digest,
+      evidence_epoch: gate.evidence_epoch,
+      slice_id: gate.slice_id,
+    },
+    required_check_binding: {
+      schema_version: 1,
+      check_id: gate.check_id,
+      slice_id: gate.slice_id,
+      gate_class: gate.gate_class,
+      command_digest: gate.command_digest,
+    },
+    status: "indeterminate",
+  });
+  let sweepCalled = false;
+  const admission = requiredGateAdmission(value.paths, value.taskId, state, {
+    environment: value.environment,
+    evaluateReleaseSweep() {
+      sweepCalled = true;
+      throw new Error("release sweep must not consume an invalidated older gate");
+    },
+  });
+  assert.equal(admission.passed, false);
+  assert.match(
+    admission.reasons.join("\n"),
+    new RegExp(`required verification gate ${gate.check_id} is blocked by indeterminate execution`),
+  );
+  assert.equal(sweepCalled, false);
+  assert.equal(
+    admission.verificationRecords.some((record) => record.check_id === gate.check_id),
+    false,
+  );
+  assert.equal(admission.releaseDecision, undefined);
+});
+
+test("required gate admission layers a non-release slice and rejects partial brief rewrites", (t) => {
   const harness = releaseFixture(t, { briefMode: "non-release" });
   const harnessAdmission = requiredGateAdmission(
     harness.paths,
@@ -845,7 +1023,7 @@ test("required gate admission layers a non-release slice before a fail-closed pa
   });
   partialState.verification.required_gates = { [gate.check_id]: gate };
   let sweepCalled = false;
-  const partialAdmission = requiredGateAdmission(
+  assert.throws(() => requiredGateAdmission(
     partial.paths,
     partial.taskId,
     partialState,
@@ -863,11 +1041,8 @@ test("required gate admission layers a non-release slice before a fail-closed pa
         };
       },
     },
-  );
-  assert.equal(sweepCalled, true);
-  assert.equal(partialAdmission.passed, false);
-  assert.equal(Object.hasOwn(partialAdmission, "releaseDecision"), true);
-  assert.match(partialAdmission.reasons.join("\n"), /final release sweep coverage is incomplete/);
+  ), /canonical current slice brief/);
+  assert.equal(sweepCalled, false);
 });
 
 test("release evaluator rejects every invalid typed-fact input/output layer", (t) => {
@@ -894,22 +1069,27 @@ test("promoted execution with event-bound producer provenance can certify", (t) 
   const beforeAcceptance = readJsonObject(taskStateFile(value.paths, value.taskId));
   const events = readAuthoritativeEvents(taskEventFile(value.paths, value.taskId), value.taskId);
   const authorityEvent = events.find((event) => (
-    event.revision === beforeAcceptance.execution_authority.established_revision
+    event.revision === beforeAcceptance.execution_authority.delivery_authority.established_revision
   ));
-  assert.equal(authorityEvent.kind, "team.promoted");
-  assert.equal(authorityEvent.data.target, "execute");
+  assert.equal(authorityEvent.kind, "authority.grant.issued");
   assert.equal(authorityEvent.data.authorization_ref, "user-message:release");
+  const executeEvent = events.find((event) => (
+    event.kind === "team.promoted" && event.data?.target === "execute"
+  ));
+  assert.equal(executeEvent.data.grant_id, "release-grant");
+  assert.equal(
+    executeEvent.data.scope_digest,
+    beforeAcceptance.execution_authority.grants[0].scope_digest,
+  );
 
   const finishEvent = events.find((event) => (
     event.kind === "team.promoted" && event.data?.target === "finish"
   ));
   const wrongTarget = structuredClone(beforeAcceptance);
-  wrongTarget.execution_authority.established_revision = finishEvent.revision;
-  const rejected = requiredGateAdmission(value.paths, value.taskId, wrongTarget, {
+  wrongTarget.execution_authority.delivery_authority.established_revision = finishEvent.revision;
+  assert.throws(() => requiredGateAdmission(value.paths, value.taskId, wrongTarget, {
     environment: value.environment,
-  });
-  assert.equal(rejected.passed, false);
-  assert.match(rejected.reasons.join("\n"), /release delivery authority/);
+  }), /release delivery authority|immutable/);
 
   const gates = requiredGateAdmission(value.paths, value.taskId, beforeAcceptance, {
     environment: value.environment,
@@ -963,7 +1143,8 @@ test("public-path integrated admission remains cannot_verify without a trusted p
     readJsonObject(taskStateFile(value.paths, value.taskId)),
     { environment: value.environment },
   );
-  assert.equal(gates.passed, true, gates.reasons.join("\n"));
+  assert.equal(gates.passed, false);
+  assert.match(gates.reasons.join("\n"), /release final sweep is not certified: cannot_verify/);
   assert.equal(gates.releaseDecision.status, "cannot_verify");
   assert.equal(gates.verificationRecords.filter((item) => item.release_fact_id).length, 12);
   assert.ok(gates.verificationRecords.every((item) => (
@@ -1077,8 +1258,8 @@ test("release completion rejects a missing or mismatched controller authority ev
   const state = readJsonObject(taskStateFile(value.paths, value.taskId));
 
   for (const mutate of [
-    (candidate) => { candidate.execution_authority.delivery_authority_ref = "user-message:forged"; },
-    (candidate) => { candidate.execution_authority.established_revision += 1; },
+    (candidate) => { candidate.execution_authority.delivery_authority.ref = "user-message:forged"; },
+    (candidate) => { candidate.execution_authority.delivery_authority.established_revision += 1; },
   ]) {
     const forged = structuredClone(state);
     mutate(forged);
@@ -1091,16 +1272,16 @@ test("release completion rejects a missing or mismatched controller authority ev
   }
 });
 
-test("non-implementation release authority cannot derive a completion decision", (t) => {
+test("malformed release authority cannot derive a completion decision", (t) => {
   const value = releaseFixture(t);
   const state = readJsonObject(taskStateFile(value.paths, value.taskId));
-  state.execution_authority.work_type = "planning";
+  state.execution_authority.formal_product_release = false;
   const completion = executionCompletionAdmission(value.paths, value.taskId, state, {
     environment: value.environment,
   });
   assert.equal(completion.passed, false);
-  assert.equal(completion.releaseDecision, null);
-  assert.match(completion.reasons.join("\n"), /work_type implementation/);
+  assert.equal(completion.releaseDecision, undefined);
+  assert.match(completion.reasons.join("\n"), /release marker|execution authority/);
 });
 
 test("direct task verification can finish work but can never certify a release", (t) => {
@@ -1154,7 +1335,10 @@ test("valid final sweeps preserve denied and cannot_verify as distinct decisions
       readJsonObject(taskStateFile(value.paths, value.taskId)),
       { environment: value.environment },
     );
-    assert.equal(gates.passed, true, gates.reasons.join("\n"));
+    assert.equal(gates.passed, false);
+    assert.match(gates.reasons.join("\n"), new RegExp(
+      `release final sweep is not certified: ${expected}`,
+    ));
     assert.equal(gates.releaseDecision.status, expected);
   }
 });

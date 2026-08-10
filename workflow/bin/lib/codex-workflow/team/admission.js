@@ -12,8 +12,20 @@ const { captureWorktreeSnapshot: captureRepositorySnapshot } = require("../core/
 const { executionAuthorityTeam } = require("./execution-authority-event");
 const { pathsOverlap } = require("./lane-registry");
 const { activeControlPlaneLeases } = require("./writer-lease-control");
+const {
+  assertActiveExecutionGrant,
+  assertSizeExceptionValidity,
+} = require("./execution-grant");
+const {
+  buildCanonicalScope,
+  loadCanonicalScopeArtifacts,
+} = require("./scope-artifacts");
+const { stableJsonSnapshot } = require("../core/stable-file");
 const { sha256 } = require("../verification/identity");
-const { validateGateRecord } = require("../verification/required-gates");
+const {
+  validateGateRecord,
+  validateRetainedReceipt,
+} = require("../verification/required-gates");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SHA256 = /^sha256:([a-f0-9]{64})$/;
@@ -402,6 +414,11 @@ function validateSizeGate(brief, clock) {
 
 function validateDependencies(paths, brief, options = {}) {
   const events = readAuthoritativeEvents(taskEventFile(paths, brief.task_id), brief.task_id);
+  const expectedGrant = options.expectedGrant || null;
+  const currentState = options.currentState || events.at(-1)?.projection?.state || {};
+  if (brief.schema_version === 4 && !expectedGrant) {
+    throw new CommandError("vNext dependency validation requires the current execution grant");
+  }
   for (const dependency of brief.dependencies || []) {
     const terminal = events.filter((event) => (
       new Set(["slice.accepted", "slice.superseded"]).has(event.kind)
@@ -410,10 +427,35 @@ function validateDependencies(paths, brief, options = {}) {
     if (!terminal || terminal.kind !== "slice.accepted") {
       throw new CommandError(`dependency is not keeper-ready succeeded: ${dependency.slice_id}`);
     }
-    const accepted = terminal.result?.accepted;
+    const originalAccepted = terminal.result?.accepted;
+    const accepted = currentState.slice_acceptances?.[dependency.slice_id] || originalAccepted;
+    const retentionReasons = [];
+    const retention = expectedGrant
+      ? validateRetainedReceipt(
+        paths,
+        brief.task_id,
+        {
+          grant_id: expectedGrant.grant_id,
+          scope_digest: expectedGrant.scope_digest,
+          evidence_epoch: expectedGrant.evidence_epoch,
+        },
+        accepted,
+        { ...options, authorityEvents: events },
+        retentionReasons,
+        "slice",
+      )
+      : { identityExpected: {}, retained: false };
+    if (retentionReasons.length > 0) {
+      throw new CommandError(
+        `dependency retained acceptance is invalid: ${dependency.slice_id}: ${retentionReasons.join("; ")}`,
+      );
+    }
     if (!accepted || accepted.task_id !== brief.task_id
       || accepted.contract_sha256 !== brief.contract.sha256
       || accepted.execution_plan_sha256 !== brief.contract.execution_plan_sha256
+      || (expectedGrant && (accepted.grant_id !== expectedGrant.grant_id
+        || accepted.scope_digest !== expectedGrant.scope_digest
+        || accepted.evidence_epoch !== expectedGrant.evidence_epoch))
       || accepted.status !== "accepted"
       || !SAFE_ID.test(accepted.team_run_id || "")
       || !Number.isInteger(accepted.generation) || accepted.generation < 1
@@ -441,6 +483,9 @@ function validateDependencies(paths, brief, options = {}) {
       ))) {
       throw new CommandError(`dependency authoritative acceptance is invalid: ${dependency.slice_id}`);
     }
+    if (!retention.retained && digestValue(accepted) !== digestValue(originalAccepted)) {
+      throw new CommandError(`dependency acceptance projection diverges from its terminal: ${dependency.slice_id}`);
+    }
     const matchingRunEvent = events.slice(0, events.indexOf(terminal) + 1).findLast((event) => {
       const team = executionAuthorityTeam(event);
       return team?.team_run_id === accepted.team_run_id
@@ -449,7 +494,15 @@ function validateDependencies(paths, brief, options = {}) {
         && team?.admission?.brief?.sha256 === accepted.brief_sha256
         && team?.admission?.brief?.slice_id === dependency.slice_id
         && team?.admission?.brief?.contract_sha256 === accepted.contract_sha256
-        && team?.admission?.brief?.execution_plan_sha256 === accepted.execution_plan_sha256;
+        && team?.admission?.brief?.execution_plan_sha256 === accepted.execution_plan_sha256
+        && (!expectedGrant || (
+          team?.grant_id === retention.identityExpected.grant_id
+          && team?.scope_digest === retention.identityExpected.scope_digest
+          && team?.evidence_epoch === retention.identityExpected.evidence_epoch
+          && team?.admission?.grant_id === retention.identityExpected.grant_id
+          && team?.admission?.scope_digest === retention.identityExpected.scope_digest
+          && team?.admission?.evidence_epoch === retention.identityExpected.evidence_epoch
+        ));
     });
     if (!matchingRunEvent) {
       throw new CommandError(`dependency Team generation is not authoritative: ${dependency.slice_id}`);
@@ -462,11 +515,21 @@ function validateDependencies(paths, brief, options = {}) {
     const dependencyBriefPath = path.join(
       taskArtifactDir(paths, brief.task_id), "team", "sdd", "slices", dependency.slice_id, "brief.json",
     );
-    const dependencyBriefFile = canonicalFile(dependencyBriefPath, "dependency Team brief");
-    const dependencyBrief = readJson(dependencyBriefFile, "dependency Team brief");
-    if (`sha256:${digestFile(dependencyBriefFile)}` !== accepted.brief_sha256
+    let dependencyBriefSnapshot;
+    try {
+      dependencyBriefSnapshot = stableJsonSnapshot(
+        dependencyBriefPath,
+        "dependency Team brief",
+        { maximumBytes: 4 * 1024 * 1024 },
+      );
+    } catch (error) {
+      throw new CommandError(error.message);
+    }
+    const dependencyBrief = dependencyBriefSnapshot.value;
+    if (dependencyBriefSnapshot.sha256 !== accepted.brief_sha256
       || dependencyBrief.task_id !== brief.task_id
       || dependencyBrief.slice_id !== dependency.slice_id
+      || (expectedGrant && dependencyBrief.schema_version !== 4)
       || dependencyBrief.contract?.sha256 !== accepted.contract_sha256
       || dependencyBrief.contract?.execution_plan_sha256 !== accepted.execution_plan_sha256) {
       throw new CommandError(`dependency brief identity is invalid: ${dependency.slice_id}`);
@@ -482,7 +545,8 @@ function validateDependencies(paths, brief, options = {}) {
         event.event_id === record?.verification_event_id
         && event.revision === record?.verification_revision
       ));
-      const projectedGate = terminal.projection?.state?.verification?.required_gates?.[expected.check_id];
+      const projectedGate = currentState.verification?.required_gates?.[expected.check_id]
+        || terminal.projection?.state?.verification?.required_gates?.[expected.check_id];
       const expectedGate = {
         admission_head_sha: dependencyAdmission.slice_start_snapshot.head_sha,
         admission_tree_oid: dependencyAdmission.slice_start_snapshot.tree_oid,
@@ -493,6 +557,11 @@ function validateDependencies(paths, brief, options = {}) {
         command_digest: sha256(expected.command),
         contract_sha256: accepted.contract_sha256,
         execution_plan_sha256: accepted.execution_plan_sha256,
+        ...(expectedGrant ? {
+          evidence_epoch: expectedGrant.evidence_epoch,
+          grant_id: expectedGrant.grant_id,
+          scope_digest: expectedGrant.scope_digest,
+        } : {}),
         final_only: expected.final_only,
         gate_class: expected.gate_class,
         repo_realpath: brief.repo,
@@ -501,6 +570,9 @@ function validateDependencies(paths, brief, options = {}) {
       if (!record || record.slice_id !== dependency.slice_id
         || record.contract_sha256 !== accepted.contract_sha256
         || record.execution_plan_sha256 !== accepted.execution_plan_sha256
+        || (expectedGrant && (record.grant_id !== expectedGrant.grant_id
+          || record.scope_digest !== expectedGrant.scope_digest
+          || record.evidence_epoch !== expectedGrant.evidence_epoch))
         || record.brief_sha256 !== accepted.brief_sha256
         || record.gate_class !== expected.gate_class
         || record.command_digest !== expectedGate.command_digest
@@ -528,6 +600,7 @@ function validateDependencies(paths, brief, options = {}) {
         {
           captureIdentity: options.captureIdentity,
           environment: options.environment || process.env,
+          authorityEvents: events,
           validateCurrentIdentity: options.validateCurrentIdentity !== false,
         },
         gateReasons,
@@ -609,6 +682,9 @@ function assertNoGlobalWriterOverlap(paths, taskId, candidatePaths) {
 function validateTeamWriterAdmission(paths, taskId, team) {
   const admitted = team.admitted_owned_paths || [];
   const active = (team.writer_leases || []).filter((lease) => lease.state === "active");
+  if (team.mode !== "execute" && (admitted.length > 0 || active.length > 0)) {
+    throw new CommandError("discussion Team cannot carry writer admission or active writer leases");
+  }
   for (const lease of active) {
     for (const leasePath of lease.paths || []) {
       if (!admitted.some((scope) => (
@@ -629,15 +705,129 @@ function globalAdmissionLockFile(paths) {
   return path.join(paths.stateDir, ".team-execution-admission.lock");
 }
 
-function admitTeamStart({ authorizationRef, briefPath, captureIdentity, clock, cwd, environment, mode, paths, taskId }) {
+function admitTeamStart({
+  authorizationRef,
+  briefPath,
+  captureIdentity,
+  clock,
+  currentState,
+  cwd,
+  environment,
+  expectedGrantId,
+  expectedScopeDigest,
+  mode,
+  objective,
+  paths,
+  taskId,
+}) {
   if (mode === "discuss") {
     if (!briefPath) return { mode: "discuss-compat", brief: null, admitted_owned_paths: [] };
   } else if (!briefPath) {
     throw new CommandError("execute Team start requires --brief");
   }
   if (!briefPath) return { mode: "discuss-compat", brief: null, admitted_owned_paths: [] };
+  if (mode === "execute") {
+    const grant = assertActiveExecutionGrant(currentState || {}, {
+      grantId: expectedGrantId,
+      scopeDigest: expectedScopeDigest,
+    });
+    if (authorizationRef && authorizationRef !== grant.authorization_provenance.ref) {
+      throw new CommandError("execute authorization ref does not match the current active grant");
+    }
+    const loaded = buildCanonicalScope({
+      authorizationRef: grant.authorization_provenance.ref,
+      briefPath,
+      cwd,
+      environment,
+      evidencePolicy: grant.scope.evidence_policy,
+      grantId: grant.grant_id,
+      objective: grant.scope.objective,
+      parent: grant.scope.parent,
+      paths,
+      requireObjectiveMatchesSelected: false,
+      taskId,
+    });
+    if (loaded.scopeDigest !== grant.scope_digest
+      || JSON.stringify(loaded.scope) !== JSON.stringify(grant.scope)) {
+      throw new CommandError("current vNext grant scope no longer matches the stable contract/brief set");
+    }
+    const selectedScope = grant.scope.required_slices.find(
+      (slice) => slice.slice_id === loaded.selectedBrief.slice_id,
+    );
+    if (!selectedScope || (objective !== undefined && objective !== selectedScope.objective)) {
+      throw new CommandError("execute objective must equal the canonical current slice objective");
+    }
+    assertSizeExceptionValidity(grant, {
+      clock,
+      sliceId: loaded.selectedBrief.slice_id,
+    });
+    if (loaded.release) {
+      const deliveryRef = loaded.releaseIntent?.target_delivery_authority_ref || "";
+      if (currentState.execution_authority?.delivery_authority?.ref !== deliveryRef) {
+        throw new CommandError("product_release delivery authority differs from its immutable provenance");
+      }
+    }
+    validateDependencies(paths, loaded.selectedBrief, {
+      captureIdentity,
+      currentState,
+      environment,
+      expectedGrant: grant,
+      validateCurrentIdentity: true,
+    });
+    assertNoGlobalWriterOverlap(paths, taskId, selectedScope.owned_paths);
+    return {
+      mode: "execution-vnext",
+      brief: {
+        path: loaded.selectedSnapshot.path,
+        sha256: loaded.selectedSnapshot.sha256,
+        slice_id: loaded.selectedBrief.slice_id,
+        contract_path: loaded.artifacts.contract.path,
+        contract_sha256: loaded.artifacts.contract.sha256,
+        execution_plan_schema_version: loaded.artifacts.plan.schema_version,
+        execution_plan_sha256: loaded.artifacts.planSha256,
+        ...(loaded.workType ? { work_type: loaded.workType } : {}),
+        ...(loaded.release ? { release: grant.scope.release_binding } : {}),
+        ...(loaded.release ? {
+          delivery_authority_ref: loaded.releaseIntent.target_delivery_authority_ref,
+        } : {}),
+        base_sha: loaded.selectedBrief.base_sha,
+        repo: loaded.repo,
+      },
+      admitted_owned_paths: [...selectedScope.owned_paths],
+      required_slices: loaded.artifacts.requiredSlices.map((slice) => slice.slice_id),
+      canonical_objective: selectedScope.objective,
+      grant_id: grant.grant_id,
+      scope_digest: grant.scope_digest,
+      evidence_epoch: grant.evidence_epoch,
+      slice_start_snapshot: captureWorktreeSnapshot(loaded.repo),
+    };
+  }
+  const discussSnapshot = stableJsonSnapshot(
+    briefPath,
+    "Team discussion brief",
+    { maximumBytes: 4 * 1024 * 1024 },
+  );
+  if (discussSnapshot.value.schema_version === 4) {
+    const loaded = loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskId });
+    return {
+      mode: "discuss-vnext",
+      brief: {
+        path: loaded.selectedSnapshot.path,
+        sha256: loaded.selectedSnapshot.sha256,
+        slice_id: loaded.selectedBrief.slice_id,
+        contract_path: loaded.artifacts.contract.path,
+        contract_sha256: loaded.artifacts.contract.sha256,
+        execution_plan_schema_version: loaded.artifacts.plan.schema_version,
+        execution_plan_sha256: loaded.artifacts.planSha256,
+        base_sha: loaded.selectedBrief.base_sha,
+        repo: loaded.repo,
+      },
+      admitted_owned_paths: [],
+      required_slices: loaded.artifacts.requiredSlices.map((slice) => slice.slice_id),
+    };
+  }
   const file = canonicalFile(briefPath, "Team brief");
-  const brief = readJson(file, "Team brief");
+  const brief = discussSnapshot.value;
   requireBriefShape(brief, taskId);
   const expected = path.join(taskArtifactDir(paths, taskId), "team", "sdd", "slices", brief.slice_id, "brief.json");
   if (file !== expected) throw new CommandError(`Team brief is not at its canonical task path: ${expected}`);
@@ -660,6 +850,7 @@ function admitTeamStart({ authorizationRef, briefPath, captureIdentity, clock, c
   validateSizeGate(brief, clock);
   validateDependencies(paths, brief, {
     captureIdentity,
+    currentState,
     environment,
     validateCurrentIdentity: true,
   });
@@ -681,7 +872,7 @@ function admitTeamStart({ authorizationRef, briefPath, captureIdentity, clock, c
       base_sha: brief.base_sha,
       repo,
     },
-    admitted_owned_paths: [...brief.owned_paths],
+    admitted_owned_paths: mode === "execute" ? [...brief.owned_paths] : [],
     required_slices: binding.plan.slices.map((slice) => slice.slice_id),
     slice_start_snapshot: captureWorktreeSnapshot(repo),
   };
@@ -696,82 +887,34 @@ function briefRequestIdentity(briefPath) {
       execution_plan_sha256: "",
     };
   }
-  const file = canonicalFile(briefPath, "Team brief");
-  const brief = readJson(file, "Team brief");
+  let snapshot;
+  try {
+    snapshot = stableJsonSnapshot(briefPath, "Team brief", { maximumBytes: 4 * 1024 * 1024 });
+  } catch (error) {
+    throw new CommandError(error.message);
+  }
+  const file = snapshot.path;
+  const brief = snapshot.value;
   return {
     brief_path: file,
-    brief_sha256: `sha256:${digestFile(file)}`,
+    brief_sha256: snapshot.sha256,
     contract_sha256: String(brief.contract?.sha256 || ""),
     execution_plan_sha256: String(brief.contract?.execution_plan_sha256 || ""),
   };
 }
 
-function bindExecutionAuthority(state, admission, revision) {
-  if (admission?.mode !== "execution-v3") return state.execution_authority || null;
-  const requested = {
-    schema_version: 1,
-    status: "active",
-    contract_path: admission.brief.contract_path,
-    contract_sha256: admission.brief.contract_sha256,
-    execution_plan_sha256: admission.brief.execution_plan_sha256,
-    repo_realpath: admission.brief.repo,
-    required_slices: [...admission.required_slices],
-    ...(admission.brief.work_type ? { work_type: admission.brief.work_type } : {}),
-    ...(admission.brief.release ? { release_binding: admission.brief.release } : {}),
-    ...(admission.brief.release ? {
-      delivery_authority_ref: admission.brief.delivery_authority_ref,
-    } : {}),
-  };
-  const existing = state.execution_authority;
-  if (existing) {
-    if (existing.schema_version !== 1
-      || !new Set(["active", "completed"]).has(existing.status)) {
-      throw new CommandError("task execution authority has an invalid persistent state");
-    }
-    for (const field of [
-      "contract_path", "contract_sha256", "execution_plan_sha256", "repo_realpath", "work_type",
-    ]) {
-      if (existing[field] !== requested[field]) {
-        throw new CommandError(
-          "task execution authority is already bound to another contract; explicit replan is required",
-        );
-      }
-    }
-    if (!same(existing.release_binding || null, requested.release_binding || null)) {
-      throw new CommandError(
-        "task execution authority release binding changed; explicit replan is required",
-      );
-    }
-    if ((existing.delivery_authority_ref || "") !== (requested.delivery_authority_ref || "")) {
-      throw new CommandError(
-        "task execution authority delivery authority changed; explicit replan is required",
-      );
-    }
-    if (!same(existing.required_slices, requested.required_slices)) {
-      throw new CommandError(
-        "task execution authority slice set changed; explicit replan is required",
-      );
-    }
-    if (existing.status === "completed") {
-      const { completed_at: completedAt = "", ...rest } = existing;
-      state.execution_authority = {
-        ...rest,
-        status: "active",
-        ...(completedAt ? {
-          completion: {
-            completed_at: completedAt,
-            completed_revision: Number(existing.completed_revision || existing.established_revision || 0),
-          },
-        } : {}),
-      };
-    }
-    return state.execution_authority;
+function bindExecutionAuthority(state, admission) {
+  if (admission?.mode === "execution-vnext") {
+    throw new CommandError(
+      "execute consumption cannot create authority; issue a controller grant with team-authorize first",
+    );
   }
-  state.execution_authority = {
-    ...requested,
-    established_revision: revision,
-  };
-  return state.execution_authority;
+  if (admission?.mode === "execution-v3") {
+    throw new CommandError(
+      "legacy execution admission is read-only and cannot create or downgrade authority",
+    );
+  }
+  return state.execution_authority || null;
 }
 
 module.exports = {

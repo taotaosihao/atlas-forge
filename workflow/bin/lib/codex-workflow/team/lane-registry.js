@@ -30,6 +30,8 @@ const CONVERGENCE_STATES = new Set([
 const ACTIVE_TEAM_STATUSES = new Set(["running", "promoted:execute", "promoted:worktree"]);
 const SUCCESS_TEAM_STATUSES = new Set(["complete", "loop-done", "promoted:finish"]);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CONTROLLER_AUTHORITY_REF =
+  /^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 class RegistryError extends Error {
   constructor(message) {
@@ -120,17 +122,20 @@ function isTerminalTeamStatus(status) {
   ]).has(status);
 }
 
-function teamClosureIssues(team, outcome = "succeeded") {
-  if (!team || typeof team !== "object" || Array.isArray(team) || !team.status) return [];
+function isMutableTeamStatus(status) {
+  return ACTIVE_TEAM_STATUSES.has(status);
+}
+
+function teamControlPlaneClosureIssues(team) {
+  if (!team || typeof team !== "object" || Array.isArray(team)
+    || team.schema_version !== 2) return [];
   const issues = [];
-  if (outcome === "succeeded") {
-    if (!SUCCESS_TEAM_STATUSES.has(team.status)) {
-      issues.push(`Team is not terminal for succeeded completion: ${team.status}`);
-    }
-  } else if (!isTerminalTeamStatus(team.status)) {
-    issues.push(`Team is not terminal for ${outcome} completion: ${team.status}`);
+  for (const claim of (team.observer_launch_claims || [])
+    .filter((candidate) => candidate.status === "in_progress")) {
+    issues.push(
+      `Team has an in-progress observer launch claim: ${claim.attempt_id || "unknown"}`,
+    );
   }
-  if (team.schema_version !== 2) return issues;
 
   for (const field of ["lanes", "dispatches", "attempts", "writer_leases"]) {
     if (!Array.isArray(team[field])) {
@@ -167,11 +172,32 @@ function teamClosureIssues(team, outcome = "succeeded") {
   return issues;
 }
 
+function teamClosureIssues(team, outcome = "succeeded") {
+  if (!team || typeof team !== "object" || Array.isArray(team) || !team.status) return [];
+  const issues = [];
+  if (outcome === "succeeded") {
+    if (!SUCCESS_TEAM_STATUSES.has(team.status)) {
+      issues.push(`Team is not terminal for succeeded completion: ${team.status}`);
+    }
+  } else if (!isTerminalTeamStatus(team.status)) {
+    issues.push(`Team is not terminal for ${outcome} completion: ${team.status}`);
+  }
+  return [...issues, ...teamControlPlaneClosureIssues(team)];
+}
+
 function createTeamRun({ previous, mode, objective, configuredBackend, fallbackPolicy, authorizationRef,
   agents, roles, providers, decision, staffing, now, teamSelection }) {
   const current = previous && typeof previous === "object" ? previous : {};
   if (current.schema_version === 2 && !isTerminalTeamStatus(current.status)) {
     throw new RegistryError(`active v2 team run must finish before starting a new generation: ${current.status}`);
+  }
+  if (current.schema_version === 2) {
+    const closureIssues = teamControlPlaneClosureIssues(current);
+    if (closureIssues.length > 0) {
+      throw new RegistryError(
+        `previous v2 team control plane must be closed before starting a new generation: ${closureIssues.join("; ")}`,
+      );
+    }
   }
   if (current.schema_version !== 2 && current.backend
     && !isTerminalTeamStatus(current.status || "")) {
@@ -207,6 +233,7 @@ function createTeamRun({ previous, mode, objective, configuredBackend, fallbackP
     attempts: [],
     admissions: [],
     observations: [],
+    observer_launch_claims: [],
     capability_snapshots: [],
     fallback_events: [],
     takeover_permits: [],
@@ -521,6 +548,9 @@ function acquireLease(team, attempt, lane, now) {
     generation: team.generation,
     lane_id: lane.lane_id,
     owner_attempt_id: attempt.attempt_id,
+    grant_id: team.grant_id || "",
+    scope_digest: team.scope_digest || "",
+    evidence_epoch: team.evidence_epoch || 0,
     paths: [...attempt.owned_paths],
     state: "active",
     acquired_at: now,
@@ -569,6 +599,9 @@ function createReservedAttempt(team, dispatch, lane, input) {
   const ownedPaths = writable ? normalizePaths(requestedPaths) : [];
   if (writable && team.mode !== "execute") throw new RegistryError("writable attempt requires execute mode");
   if (writable && !team.authorization_ref) throw new RegistryError("writable attempt requires authorization_ref");
+  if (writable && (!team.grant_id || !team.scope_digest || !team.evidence_epoch)) {
+    throw new RegistryError("writable attempt requires current grant identity");
+  }
   if (writable && ownedPaths.length === 0) throw new RegistryError("writable attempt requires owned paths");
   if (ownedPaths.some((ownedPath) => !lane.owned_paths.includes(ownedPath))) {
     throw new RegistryError("attempt owned paths must be an exact subset of lane owned paths");
@@ -601,6 +634,9 @@ function createReservedAttempt(team, dispatch, lane, input) {
     writable,
     owned_paths: ownedPaths,
     authorization_ref: writable ? team.authorization_ref : "",
+    grant_id: team.mode === "execute" ? team.grant_id : "",
+    scope_digest: team.mode === "execute" ? team.scope_digest : "",
+    evidence_epoch: team.mode === "execute" ? team.evidence_epoch : 0,
     perspective_id: input.perspectiveId || "",
     launch_operation_id: safeId(input.launchOperationId, "launch_operation_id"),
     launch_invoked: false,
@@ -634,10 +670,21 @@ function reserveAttempt(teamInput, input) {
   });
 }
 
+function assertAttemptHasNoPendingLaunchClaim(team, attempt, action) {
+  if ((team.observer_launch_claims || []).some((claim) => (
+    claim.attempt_id === attempt.attempt_id && claim.status === "in_progress"
+  ))) {
+    throw new RegistryError(
+      `attempt ${action} is blocked by an in-progress observer launch claim`,
+    );
+  }
+}
+
 function bindAttempt(teamInput, input) {
   const team = clone(teamInput);
   return operation(team, input.operationId, "attempt.bind", input, () => {
     const attempt = requireAttempt(team, input.attemptId);
+    assertAttemptHasNoPendingLaunchClaim(team, attempt, "bind");
     if (attempt.status !== "reserved") throw new RegistryError("attempt bind requires reserved state");
     if (attempt.launch_operation_id !== input.launchOperationId) throw new RegistryError("launch operation mismatch");
     if (attempt.backend === "paseo") {
@@ -674,6 +721,7 @@ function markAttemptRunning(teamInput, input) {
   const team = clone(teamInput);
   return operation(team, input.operationId, "attempt.running", input, () => {
     const attempt = requireAttempt(team, input.attemptId);
+    assertAttemptHasNoPendingLaunchClaim(team, attempt, "running");
     if (attempt.status !== "bound") throw new RegistryError("attempt running requires bound state");
     attempt.status = "running";
     attempt.running_at = input.now;
@@ -685,6 +733,7 @@ function terminalAttempt(teamInput, input) {
   const team = clone(teamInput);
   return operation(team, input.operationId, "attempt.terminal", input, () => {
     const attempt = requireAttempt(team, input.attemptId);
+    assertAttemptHasNoPendingLaunchClaim(team, attempt, "terminal");
     if (!new Set(["reserved", "bound", "running"]).has(attempt.status)) {
       throw new RegistryError("attempt terminal requires reserved, bound, or running state");
     }
@@ -718,6 +767,7 @@ function quiesceAttempt(teamInput, input) {
   const team = clone(teamInput);
   return operation(team, input.operationId, "attempt.quiesced", input, () => {
     const attempt = requireAttempt(team, input.attemptId);
+    assertAttemptHasNoPendingLaunchClaim(team, attempt, "quiesce");
     if (attempt.status !== "terminal") throw new RegistryError("attempt quiesce requires terminal state");
     const evidenceRefs = [...new Set(input.evidenceRefs || [])];
     if ((attempt.writable || attempt.runtime_agent_id) && evidenceRefs.length === 0) {
@@ -772,6 +822,118 @@ function recordObservation(teamInput, input) {
   });
 }
 
+function requireInProgressLaunchClaim(team, input) {
+  safeId(input.claimOperationId, "claim operation id");
+  safeId(input.attemptId, "attempt id");
+  safeId(input.launchOperationId, "launch operation id");
+  const claim = (team.observer_launch_claims || []).find((candidate) => (
+    candidate.claim_operation_id === input.claimOperationId
+      && candidate.attempt_id === input.attemptId
+      && candidate.launch_operation_id === input.launchOperationId
+  ));
+  if (!claim || claim.status !== "in_progress") {
+    throw new RegistryError("observer launch resolution requires the exact in-progress claim");
+  }
+  return claim;
+}
+
+function recordLaunchReconciliation(teamInput, input) {
+  const team = clone(teamInput);
+  return operation(team, input.operationId, "attempt.launch-reconciliation", input, () => {
+    const attempt = requireAttempt(team, input.attemptId);
+    const claim = requireInProgressLaunchClaim(team, input);
+    if (attempt.status !== "reserved") {
+      throw new RegistryError("observer launch reconciliation requires a reserved attempt");
+    }
+    if (!input.observation || input.observation.adapter !== "atlas-paseo-observer"
+      || input.observation.schema_version !== 1 || input.observation.action !== "ls") {
+      throw new RegistryError("untrusted Paseo launch reconciliation observation");
+    }
+    if (!new Set(["missing", "ambiguous"]).has(input.reconciliationStatus)
+      || input.observation.reconciliation_status !== input.reconciliationStatus
+      || input.observation.attempt_id !== attempt.attempt_id
+      || input.observation.launch_operation_id !== attempt.launch_operation_id
+      || input.observation.launch_request_digest !== claim.request_digest) {
+      throw new RegistryError("Paseo launch reconciliation does not match its durable claim");
+    }
+    safeId(input.observationId, "observation id");
+    if (team.observations.some((item) => item.observation_id === input.observationId)) {
+      throw new RegistryError(`duplicate observation: ${input.observationId}`);
+    }
+    team.observations.push({
+      observation_id: input.observationId,
+      ...clone(input.observation),
+    });
+    attempt.launch_state = "launch-state-unknown";
+    attempt.launch_state_observation_id = input.observationId;
+    attempt.launch_state_updated_at = input.now;
+    claim.reconciliations = [...(claim.reconciliations || []), {
+      observation_id: input.observationId,
+      status: input.reconciliationStatus,
+      recorded_at: input.now,
+    }];
+    claim.last_reconciliation_status = input.reconciliationStatus;
+    claim.last_reconciliation_at = input.now;
+    return {
+      attempt_id: attempt.attempt_id,
+      claim_operation_id: claim.claim_operation_id,
+      launch_state: attempt.launch_state,
+      reconciliation_status: input.reconciliationStatus,
+    };
+  });
+}
+
+function resolveLaunchClaim(teamInput, input) {
+  const team = clone(teamInput);
+  return operation(team, input.operationId, "attempt.resolve-launch", input, () => {
+    const attempt = requireAttempt(team, input.attemptId);
+    const claim = requireInProgressLaunchClaim(team, input);
+    if (attempt.status !== "reserved" || attempt.runtime_agent_id || attempt.bound_at) {
+      throw new RegistryError(
+        "no-actor-confirmed resolution requires an unbound reserved attempt",
+      );
+    }
+    if (input.disposition !== "no-actor-confirmed") {
+      throw new RegistryError("observer launch resolution only accepts no-actor-confirmed");
+    }
+    const authorityRef = safeLine(input.authorityRef, "observer launch resolution authority ref");
+    if (!CONTROLLER_AUTHORITY_REF.test(authorityRef)) {
+      throw new RegistryError(
+        "observer launch resolution requires a controller-recordable user-message: or operator-input: ref",
+      );
+    }
+    const reason = safeLine(input.reason, "observer launch resolution reason");
+    const evidenceRefs = [...new Set(input.evidenceRefs || [])];
+    if (evidenceRefs.length === 0) {
+      throw new RegistryError("observer launch resolution requires canonical evidence");
+    }
+    claim.status = "indeterminate";
+    claim.resolved_at = input.now;
+    claim.resolution = {
+      schema_version: 1,
+      operation_id: input.operationId,
+      disposition: input.disposition,
+      authority_ref: authorityRef,
+      reason,
+      evidence_refs: evidenceRefs,
+    };
+    attempt.launch_state = "no-actor-confirmed";
+    attempt.launch_invoked = false;
+    attempt.runtime_outcome = "interrupted";
+    attempt.evidence_refs = evidenceRefs;
+    attempt.status = "terminal";
+    attempt.terminal_at = input.now;
+    attempt.launch_resolution_operation_id = input.operationId;
+    return {
+      attempt_id: attempt.attempt_id,
+      claim_operation_id: claim.claim_operation_id,
+      claim_status: claim.status,
+      disposition: input.disposition,
+      status: attempt.status,
+    };
+  });
+}
+
 function fallbackAttempt(teamInput, input) {
   const team = clone(teamInput);
   return operation(team, input.operationId, "fallback.create", input, () => {
@@ -807,6 +969,9 @@ function fallbackAttempt(teamInput, input) {
         worktree_fingerprint: input.worktreeFingerprint,
         evidence_refs: [...input.evidenceRefs],
         authorization_ref: predecessor.authorization_ref,
+        grant_id: predecessor.grant_id,
+        scope_digest: predecessor.scope_digest,
+        evidence_epoch: predecessor.evidence_epoch,
         lane_id: predecessor.lane_id,
         consumed_at: input.now,
       });
@@ -980,6 +1145,8 @@ module.exports = {
   deriveTeam,
   disposeDispatch,
   fallbackAttempt,
+  isMutableTeamStatus,
+  isTerminalTeamStatus,
   markAttemptRunning,
   normalizeLeasePath,
   openDispatch,
@@ -987,9 +1154,12 @@ module.exports = {
   pathsOverlap,
   quiesceAttempt,
   recordCapabilitySnapshot,
+  recordLaunchReconciliation,
   recordObservation,
   recordSelectionEvent,
   reserveAttempt,
+  resolveLaunchClaim,
   terminalAttempt,
+  teamControlPlaneClosureIssues,
   teamClosureIssues,
 };
