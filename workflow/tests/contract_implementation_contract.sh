@@ -425,6 +425,15 @@ const plan = {
 };
 const gates = fs.readFileSync(source, "utf8")
   .replace("# Valid implementation with served UI", "# Scope admission v6 contract")
+  .replace(/^- first_code_slice: .*$/m, `- first_code_slice: ${plan.slices[0].slice_id}`)
+  .replace(
+    /^- first_code_verification: .*$/m,
+    `- first_code_verification: ${plan.slices[0].checks[0].check_id}`,
+  )
+  .replace(
+    /^- allowed_contract_gate_only_until:/m,
+    "- first_code_stop_before_slice: task-completion\n- allowed_contract_gate_only_until:",
+  )
   .replace(
     "contract_semantics_version: 1",
     [

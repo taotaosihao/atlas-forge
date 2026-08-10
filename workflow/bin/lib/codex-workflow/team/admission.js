@@ -15,6 +15,7 @@ const { activeControlPlaneLeases } = require("./writer-lease-control");
 const {
   assertActiveExecutionGrant,
   assertSizeExceptionValidity,
+  firstCodeBoundary,
 } = require("./execution-grant");
 const {
   buildCanonicalScope,
@@ -35,6 +36,7 @@ const PERMANENT_GATES = new Set([
   "release-identity", "collision", "downgrade", "symlink", "exact-layout",
 ]);
 const SIZE_POLICY_ID = "atlas-slice-size-v2";
+const FIRST_CODE_STOP_CODE = "ATLAS_FIRST_CODE_STOP_REQUIRED";
 
 function pluginCandidates(environment, paths) {
   return [
@@ -767,6 +769,18 @@ function admitTeamStart({
         throw new CommandError("product_release delivery authority differs from its immutable provenance");
       }
     }
+    const firstCodeStop = firstCodeBoundary(
+      currentState.execution_authority,
+      loaded.selectedBrief.slice_id,
+    );
+    if (firstCodeStop.blocked) {
+      const error = new CommandError(
+        `first-code stop boundary reached at ${loaded.selectedBrief.slice_id}`,
+      );
+      error.code = FIRST_CODE_STOP_CODE;
+      error.firstCodeTarget = loaded.selectedBrief.slice_id;
+      throw error;
+    }
     validateDependencies(paths, loaded.selectedBrief, {
       captureIdentity,
       currentState,
@@ -918,6 +932,7 @@ function bindExecutionAuthority(state, admission) {
 }
 
 module.exports = {
+  FIRST_CODE_STOP_CODE,
   admitTeamStart,
   assertNoGlobalWriterOverlap,
   bindExecutionAuthority,

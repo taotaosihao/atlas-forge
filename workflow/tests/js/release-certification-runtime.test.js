@@ -93,6 +93,7 @@ const { parseAuthorizeArgs, runAuthorize } = require(path.join(
 const { parseSliceAcceptArgs, runSliceAccept } = require(path.join(
   WORKFLOW_ROOT, "bin/lib/codex-workflow/team/slice-acceptance",
 ));
+const { writeApprovedDesignHandoff } = require("./helpers/product-design-fixture");
 
 const NOW = "2026-07-30T08:00:00Z";
 const clock = () => new Date(NOW);
@@ -159,10 +160,11 @@ function releaseContractMarkdown(taskId, intent, plan) {
     "",
     "## First Code Slice Guard",
     "",
-    "- first_code_slice: Implement the governed release runtime and its final-sweep behavior.",
+    `- first_code_slice: ${plan.slices[0].slice_id}`,
     "- first_code_slice_kind: product",
     "- first_code_owner: release-runtime-owner",
-    "- first_code_verification: node --test workflow/tests/js/release-certification-runtime.test.js",
+    `- first_code_verification: ${plan.slices[0].checks[0].check_id}`,
+    `- first_code_stop_before_slice: ${plan.slices[1]?.slice_id || "task-completion"}`,
     "- allowed_contract_gate_only_until: contract authoring validation",
     "- stop_if_no_code_by_phase: release implementation",
     "- gate_parallelization_or_deferral_plan: Run admission checks before accepting the release execution slice.",
@@ -524,6 +526,11 @@ function releaseFixture(t, {
   git(repo, ["config", "user.name", "Atlas Test"]);
 
   const releaseRoot = path.join(taskArtifactDir(paths, taskId), "release");
+  writeApprovedDesignHandoff({
+    pluginRoot: PLUGIN_ROOT,
+    target: "product_release",
+    taskRoot: taskArtifactDir(paths, taskId),
+  });
   const materials = path.join(releaseRoot, "materials");
   const surfaceFile = write(path.join(materials, "surface-inventory.json"), { routes: ["/projects"] });
   const componentFiles = Object.fromEntries([

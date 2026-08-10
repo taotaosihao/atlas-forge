@@ -27,6 +27,7 @@ Compute identities with SHA-256 over UTF-8 canonical JSON followed by one LF.
 Serialize JSON without insignificant whitespace, preserve array order, and use
 the fixed key order shown below. Do not display identity hashes in a product
 manager summary and never treat a hash as approval or authority.
+Store every identity as `sha256:<64 lowercase hex>`.
 
 Derive A `context_identity` from exactly:
 
@@ -85,6 +86,11 @@ every condition:
 
 If any condition fails, treat E as `draft/non-executable` even when its stored
 status says `approved`. Never infer, repair, or carry forward approval.
+
+Production admission reads A/C/D/E only from
+`workflow/artifacts/<task-id>/product-design/`, rejects symlinks and identity or
+approval drift, and binds the four current file digests into the execution
+scope. Derived summaries and copied handoffs cannot authorize execution.
 
 ## Invalidation matrix
 

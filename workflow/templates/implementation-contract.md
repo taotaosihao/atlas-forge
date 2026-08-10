@@ -147,11 +147,12 @@ ordinary engineering checks may omit it. Exploration and non-product plans use s
 - first_code_slice_kind: product | runtime | api | cli | workflow | scanner_behavior
 - first_code_owner:
 - first_code_verification:
+- first_code_stop_before_slice:
 - allowed_contract_gate_only_until:
 - stop_if_no_code_by_phase:
 - gate_parallelization_or_deferral_plan:
 - Ordering rule: contract, scanner, fixture, and evidence-only preparation must be bounded before the first implementation diff; it cannot remain the only deliverable after the named stop point.
-- First-code rule: the first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
+- First-code rule: for semantics v5/v6, `first_code_slice`, `first_code_verification`, and `first_code_stop_before_slice` are exact execution-plan IDs (`task-completion` is the terminal stop sentinel). The first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
 - Gate-only non-completion: docs-only artifacts, scanner fixtures, analysis notes, and evidence bundles are not first code slices by themselves. For scanner/tooling tasks, implementing scanner/tool behavior may count; adding fixtures around unchanged behavior does not.
 - Safety rule: hard safety gates remain blockers for acceptance and release; starting a bounded code slice never authorizes skipping, weakening, or backfilling named safety gates.
 - Versioned stop: semantics version 1 requires `stop_if_no_code_by_phase`. The one-phase default applies only when interpreting an unversioned historical contract.

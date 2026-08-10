@@ -31,6 +31,7 @@ const EXPECTED_ROUTES = {
   ],
   "./artifact/cli.js": [
     "checkpoint",
+    "product-progress",
     "project-phase-report",
     "prompt-bundle",
     "route-decision",
@@ -107,8 +108,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 49 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 49);
+test("routes exactly 50 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 50);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)

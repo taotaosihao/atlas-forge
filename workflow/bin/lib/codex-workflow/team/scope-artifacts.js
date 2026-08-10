@@ -24,6 +24,7 @@ function loadCanonicalExecutionContracts(environment, paths) {
     const files = {
       brief: path.join(root, "contracts/team-sdd/validators/brief.js"),
       contract: path.join(root, "contracts/team-sdd/validators/implementation-contract.js"),
+      handoff: path.join(root, "contracts/product-design/validators/design-handoff.js"),
       intent: path.join(root, "contracts/release-certification/validators/release-intent.js"),
       lint: path.join(root, "scripts/codex-implementation-contract-lint"),
       scope: path.join(root, "contracts/team-sdd/validators/scope-grant.js"),
@@ -37,13 +38,17 @@ function loadCanonicalExecutionContracts(environment, paths) {
       ...require(planFile),
       ...require(files.brief),
       ...require(files.contract),
+      ...require(files.handoff),
       ...require(files.intent),
       ...require(files.lint),
       ...require(files.scope),
       pluginRoot: fs.realpathSync(root),
     };
     if (contracts.SCOPE_GRANT_CAPABILITY !== "atlas-scope-grant-vnext-1"
+      || contracts.DESIGN_HANDOFF_CAPABILITY !== "atlas-product-design-handoff-1"
       || typeof contracts.canonicalScopeVNext !== "function"
+      || typeof contracts.parseContractControls !== "function"
+      || typeof contracts.validateDesignHandoffArtifacts !== "function"
       || typeof contracts.validateContractText !== "function"
       || typeof contracts.scopeDigest !== "function") {
       throw new CommandError(`canonical execution validator root is not vNext capable: ${root}`);
@@ -238,6 +243,7 @@ function loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskI
   let release = null;
   const releaseIntent = parsedContract.releaseIntent;
   const workType = parsedContract.workType;
+  const controls = contracts.parseContractControls(contractSnapshot.text);
   if (semanticsVersion === 6) {
     try {
       release = contracts.releasePlanBinding(releaseIntent);
@@ -300,6 +306,51 @@ function loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskI
       })),
     });
   }
+  const firstCode = controls.first_code.guard === "required"
+    ? {
+      status: "required",
+      contract_sha256: contractSnapshot.sha256,
+      first_code_slice_id: controls.first_code.slice_id,
+      verification_check_id: controls.first_code.verification_check_id,
+      stop_before_slice_id: controls.first_code.stop_before_slice_id,
+    }
+    : {
+      status: "not_applicable",
+      reason: controls.first_code.not_applicable_reason,
+      contract_sha256: contractSnapshot.sha256,
+    };
+  let designHandoff;
+  if (controls.product_ui.gate === "required") {
+    const designArtifacts = Object.fromEntries(Object.entries(
+      contracts.DESIGN_HANDOFF_FILES,
+    ).map(([name, relativePath]) => {
+      const snapshot = snapshotText(
+        path.join(taskRoot, relativePath),
+        `Product Design ${name}`,
+        { root: taskRoot },
+      );
+      return [name, {
+        relative_path: relativePath,
+        sha256: snapshot.sha256,
+        text: snapshot.text,
+      }];
+    }));
+    try {
+      designHandoff = contracts.validateDesignHandoffArtifacts({
+        artifacts: designArtifacts,
+        expectedTarget: semanticsVersion === 6 ? "product_release" : "product_increment",
+        taskId,
+      });
+    } catch (error) {
+      throw new CommandError(`Product Design Handoff is not executable: ${error.message}`);
+    }
+  } else {
+    designHandoff = {
+      status: "not_applicable",
+      reason: controls.product_ui.not_applicable_reason,
+      contract_sha256: contractSnapshot.sha256,
+    };
+  }
   return {
     artifacts: {
       contract: {
@@ -314,6 +365,9 @@ function loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskI
       snapshots,
     },
     contracts,
+    controls,
+    designHandoff,
+    firstCode,
     release,
     releaseIntent,
     repo,
@@ -373,8 +427,8 @@ function buildCanonicalScope({
     parent: parent ? { grant_id: parent.grant_id, scope_digest: parent.scope_digest } : null,
     supersedes_grant_id: parent ? parent.grant_id : null,
     evidence_policy: evidencePolicy,
-    design_handoff: null,
-    first_code: null,
+    design_handoff: loaded.designHandoff,
+    first_code: loaded.firstCode,
   };
   const canonicalCore = loaded.contracts.canonicalScopeVNext(raw, {
     skipCoreDigestCheck: true,

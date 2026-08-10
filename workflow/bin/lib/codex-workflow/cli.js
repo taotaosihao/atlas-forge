@@ -20,6 +20,7 @@ const DIRECT_ROUTES = new Map([
   ["scaffold-team", "./artifact/cli.js"],
   ["scaffold-phase", "./artifact/cli.js"],
   ["project-phase-report", "./artifact/cli.js"],
+  ["product-progress", "./artifact/cli.js"],
   ["route-decision", "./artifact/cli.js"],
   ["checkpoint", "./artifact/cli.js"],
   ["source-snapshot", "./artifact/cli.js"],

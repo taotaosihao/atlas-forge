@@ -45,6 +45,7 @@ const { parseAuthorizeArgs, runAuthorize } = require(path.join(
   ROOT,
   "workflow/bin/lib/codex-workflow/team/authority-commands",
 ));
+const { writeApprovedDesignHandoff } = require("./helpers/product-design-fixture");
 
 function digest(char) {
   return `sha256:${char.repeat(64)}`;
@@ -124,10 +125,11 @@ function contractMarkdown(intent, plan, taskId, workType = "implementation") {
     "",
     "## First Code Slice Guard",
     "",
-    "- first_code_slice: Implement the governed release runtime and its final-sweep behavior.",
+    `- first_code_slice: ${plan.slices[0].slice_id}`,
     "- first_code_slice_kind: product",
     "- first_code_owner: release-runtime-owner",
-    "- first_code_verification: node --test workflow/tests/js/release-certification-admission.test.js",
+    `- first_code_verification: ${plan.slices[0].checks[0].check_id}`,
+    `- first_code_stop_before_slice: ${plan.slices[1]?.slice_id || "task-completion"}`,
     "- allowed_contract_gate_only_until: contract authoring validation",
     "- stop_if_no_code_by_phase: release implementation",
     "- gate_parallelization_or_deferral_plan: Run admission checks before accepting the release execution slice.",
@@ -269,6 +271,13 @@ function fixture(t, {
   const intent = productIntent(authorityRef);
   const vNext = workType === "implementation";
   const plan = releasePlan(intent, vNext ? 4 : 2);
+  if (vNext) {
+    writeApprovedDesignHandoff({
+      pluginRoot: PLUGIN_ROOT,
+      target: "product_release",
+      taskRoot: taskArtifactDir(paths, taskId),
+    });
+  }
   const contractName = `implementation-contract.${taskId}.final.md`;
   const contract = path.join(repo, contractName);
   const contractText = contractMarkdown(intent, plan, taskId, workType);
@@ -375,6 +384,42 @@ test("brief v4 and Team execution-vnext bind an exact semantics-v6 release polic
     value.currentState.execution_authority.delivery_authority.ref,
     "user-message:release",
   );
+});
+
+test("release admission rejects stale Flow identity and reopened Design blockers", (t) => {
+  const value = fixture(t);
+  const brief = JSON.parse(fs.readFileSync(value.briefPath, "utf8"));
+  const admit = () => admitTeamStart({
+    authorizationRef: "user-message:release",
+    briefPath: value.briefPath,
+    clock: () => new Date("2026-07-30T00:00:00Z"),
+    cwd: value.repo,
+    environment: value.environment,
+    currentState: value.currentState,
+    expectedGrantId: value.grant.grant_id,
+    expectedScopeDigest: value.grant.scope_digest,
+    mode: "execute",
+    objective: brief.objective,
+    paths: value.paths,
+    taskId: value.taskId,
+  });
+  const designDir = path.join(taskArtifactDir(value.paths, value.taskId), "product-design");
+  const flowFile = path.join(designDir, "D-flow-design.md");
+  const flow = fs.readFileSync(flowFile, "utf8");
+  fs.writeFileSync(flowFile, flow.replace(
+    "Open, act, save, confirm, and refresh.",
+    "Open, act, save, confirm, refresh, and publish.",
+  ));
+  assert.throws(admit, /Flow identity|flow identity|approved D identities/);
+  fs.writeFileSync(flowFile, flow);
+
+  const handoffFile = path.join(designDir, "E-design-handoff.md");
+  const handoff = fs.readFileSync(handoffFile, "utf8");
+  fs.writeFileSync(handoffFile, handoff.replace(
+    "## Blockers\nNone.",
+    "## Blockers\nRelease certificate is unresolved.",
+  ));
+  assert.throws(admit, /blocking open question or blocker/);
 });
 
 test("planning and review keep product_release classification but cannot enter certification execution", (t) => {

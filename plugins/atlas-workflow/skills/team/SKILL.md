@@ -413,7 +413,7 @@ Load optional protocol references only when the current contract actually requir
 - Read `references/sdd.md` for Codex-native SDD JSON contracts, slice ledger, implementer/reviewer reports, or `codex-team-*` helpers.
 - Read `references/business-acceptance.md` for business scenario, stakeholder, protocol/device, or dual-goal UI acceptance.
 - Read `references/code-review.md` when a substantive code or merge-readiness review needs the optional perspective menu, evidence checklist, focused deliberation prompts, or synthesis shape.
-- First-code and Product/UI gates belong to the selected implementation contract and the clarify/task skills; do not duplicate their full rules here.
+- First-code and Product/UI gates belong to the selected implementation contract and the clarify/task skills; do not duplicate their full rules here. Execute admission binds their production identities, and reaching the exact first-code stop before acceptance durably pauses the grant until explicit replan.
 
 ## Final Disclosure
 

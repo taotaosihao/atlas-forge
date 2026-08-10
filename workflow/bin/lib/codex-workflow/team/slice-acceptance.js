@@ -4,8 +4,9 @@ const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { CommandError, commandOptions } = require("../core/command-runtime");
+const { readAuthoritativeEvents } = require("../core/event-store");
 const { sha256 } = require("../verification/identity");
-const { mutateTaskRuntime } = require("../core/task-mutation");
+const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const { stableJsonSnapshot } = require("../core/stable-file");
 const { taskArtifactDir } = require("../core/paths");
 const {
@@ -20,7 +21,9 @@ const { teamClosureIssues } = require("./lane-registry");
 const {
   assertActiveExecutionGrant,
   authorityReplayPostcondition,
+  transitionFirstCodeState,
 } = require("./execution-grant");
+const { enforceFirstCodeBoundary } = require("./first-code");
 const { assertCanonicalGrantArtifacts, buildCanonicalScope } = require("./scope-artifacts");
 const {
   briefRequestIdentity,
@@ -333,6 +336,41 @@ function runSliceAccept(parsed, options = {}) {
   }
   let committed;
   withLock(globalAdmissionLockFile(paths), () => {
+    const boundaryState = readAuthoritativeEvents(
+      taskEventFile(paths, parsed.taskId),
+      parsed.taskId,
+    ).at(-1)?.projection?.state;
+    if (!boundaryState || boundaryState.status !== "doing") {
+      throw new CommandError(
+        `team-slice-accept requires task status doing; current status: ${boundaryState?.status || "unknown"}`,
+      );
+    }
+    const boundaryTeam = boundaryState.active_team && typeof boundaryState.active_team === "object"
+      ? boundaryState.active_team
+      : {};
+    const boundaryGrant = assertActiveExecutionGrant(boundaryState, {
+      evidenceEpoch: boundaryTeam.evidence_epoch,
+      grantId: boundaryTeam.grant_id,
+      scopeDigest: boundaryTeam.scope_digest,
+      sliceId: brief.slice_id,
+      briefSha256: briefIdentity.brief_sha256,
+    }, { clock, requireUnexpired: true });
+    if (boundaryTeam.admission?.brief?.path !== path.resolve(parsed.briefPath)
+      || boundaryTeam.slice_id !== brief.slice_id) {
+      throw new CommandError("slice acceptance brief does not match the active Team run");
+    }
+    assertCanonicalGrantArtifacts({
+      briefPath: parsed.briefPath,
+      environment,
+      grant: boundaryGrant,
+      paths,
+      taskId: parsed.taskId,
+    });
+    enforceFirstCodeBoundary(paths, parsed.taskId, brief.slice_id, {
+      clock,
+      environment,
+      operationId: parsed.operationId,
+    });
     committed = mutateTaskRuntime(
       paths,
       parsed.taskId,
@@ -477,6 +515,13 @@ function runSliceAccept(parsed, options = {}) {
           ...(state.slice_acceptances || {}),
           [brief.slice_id]: accepted,
         };
+        transitionFirstCodeState(state, {
+          kind: "slice.accepted",
+          operation_id: parsed.operationId,
+          revision: revision + 1,
+          data: { slice_id: brief.slice_id },
+          result: { accepted },
+        });
         return {
           projection: {
             task_content: taskContent,
@@ -546,7 +591,7 @@ function runSliceSupersede(parsed, options = {}) {
           slice_id: parsed.sliceId,
         },
       },
-      ({ currentProjection, occurredAt }) => {
+      ({ currentProjection, occurredAt, revision }) => {
         const eventClock = () => new Date(occurredAt);
         const currentState = JSON.parse(JSON.stringify(currentProjection.state));
         if (currentState.status !== "doing") {
@@ -583,6 +628,13 @@ function runSliceSupersede(parsed, options = {}) {
           ...(state.slice_acceptances || {}),
           [parsed.sliceId]: { ...accepted, status: "superseded", superseded },
         };
+        transitionFirstCodeState(state, {
+          kind: "slice.superseded",
+          operation_id: parsed.operationId,
+          revision: revision + 1,
+          data: { slice_id: parsed.sliceId },
+          result: { superseded },
+        });
         return {
           projection: { task_content: taskContent, state, files: [] },
           result: { superseded },

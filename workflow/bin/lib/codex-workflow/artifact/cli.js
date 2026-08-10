@@ -14,6 +14,11 @@ const { ROUTE_USAGE, parseRouteArgs, writeRouteDecision } = require("./routing")
 const { ArtifactError } = require("./runtime");
 const { PhaseReportError, writePhaseReportProjection } = require("./phase-report");
 const {
+  ProductProgressError,
+  readProductProgress,
+  renderProductProgress,
+} = require("./product-progress");
+const {
   ArtifactScaffoldError,
   scaffoldBrainstorm,
   scaffoldClarify,
@@ -29,6 +34,7 @@ const USAGE = {
   "scaffold-team": "usage: codex-workflow scaffold-team <task-id>",
   "scaffold-phase": "usage: codex-workflow scaffold-phase <task-id> <phase-id>",
   "project-phase-report": "usage: codex-workflow project-phase-report <task-id> <phase-id>",
+  "product-progress": "usage: codex-workflow product-progress <task-id> [--json]",
   "route-decision": ROUTE_USAGE,
   checkpoint: CHECKPOINT_USAGE,
   "source-snapshot": SOURCE_USAGE,
@@ -71,6 +77,14 @@ function runPlanning(command, argv, environment = process.env) {
     if (argv.length !== 2) throw new ArtifactCliError(USAGE[command]);
     const result = writePhaseReportProjection(argv[0], argv[1], { environment });
     writeLines([`projected\t${result.file}`]);
+  } else if (command === "product-progress") {
+    if (argv.length < 1 || argv.length > 2 || (argv[1] && argv[1] !== "--json")) {
+      throw new ArtifactCliError(USAGE[command]);
+    }
+    const progress = readProductProgress(argv[0], { environment });
+    writeLines(argv[1] === "--json"
+      ? [JSON.stringify(progress, null, 2)]
+      : renderProductProgress(progress));
   } else if (command === "route-decision") {
     const parsed = parseRouteArgs(argv);
     if (parsed.help) {
@@ -107,6 +121,7 @@ function main(argv) {
       !(error instanceof ArtifactError) &&
       !(error instanceof ArtifactScaffoldError) &&
       !(error instanceof PhaseReportError) &&
+      !(error instanceof ProductProgressError) &&
       !(error instanceof TaskRepositoryError)
     ) {
       process.stderr.write(`${error.message || String(error)}\n`);

@@ -217,6 +217,7 @@ function canonicalPhaseFixture(t, {
   );
   fs.mkdirSync(path.dirname(briefPath), { recursive: true });
   fs.writeFileSync(briefPath, "{\"schema_version\":4}\n");
+  const contractSha256 = sha256(fs.readFileSync(contract));
   const rawScope = {
     schema_version: 1,
     grant_id: "phase-report-grant",
@@ -225,7 +226,7 @@ function canonicalPhaseFixture(t, {
     objective: "用户可以完成项目创建",
     contract: {
       path: "implementation-contract.final.md",
-      sha256: sha256(fs.readFileSync(contract)),
+      sha256: contractSha256,
       semantics_version: withReleaseDecision ? 6 : 5,
       authority_slices: [{
         path: path.join(
@@ -279,8 +280,33 @@ function canonicalPhaseFixture(t, {
     parent: null,
     supersedes_grant_id: null,
     evidence_policy: { mode: "invalidate-incompatible", retained_receipt_ids: [] },
-    design_handoff: null,
-    first_code: null,
+    design_handoff: withReleaseDecision ? {
+      status: "approved",
+      task_id: taskId,
+      designed_feature_target: "product_release",
+      context_path: "product-design/A-product-context.md",
+      context_sha256: `sha256:${"a".repeat(64)}`,
+      context_identity: `sha256:${"b".repeat(64)}`,
+      scenario_path: "product-design/C-critical-scenario.md",
+      scenario_sha256: `sha256:${"c".repeat(64)}`,
+      scenario_identity: `sha256:${"d".repeat(64)}`,
+      scenario_approval_ref: "user-message:phase-report-scenario",
+      flow_path: "product-design/D-flow-design.md",
+      flow_sha256: `sha256:${"e".repeat(64)}`,
+      flow_identity: `sha256:${"f".repeat(64)}`,
+      flow_approval_ref: "user-message:phase-report-flow",
+      handoff_path: "product-design/E-design-handoff.md",
+      handoff_sha256: `sha256:${"7".repeat(64)}`,
+    } : {
+      status: "not_applicable",
+      reason: "This fixture has no executable Design Handoff.",
+      contract_sha256: contractSha256,
+    },
+    first_code: {
+      status: "not_applicable",
+      reason: "This fixture projects already-recorded acceptance rather than executing code.",
+      contract_sha256: contractSha256,
+    },
   };
   const coreScope = canonicalScopeVNext(rawScope, { skipCoreDigestCheck: true });
   rawScope.scope_core_digest = scopeCoreDigest(coreScope);

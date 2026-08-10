@@ -49,6 +49,7 @@ const {
 const { classifyPaseoObservation } = require("./backend-failures");
 const { launchLabel, observePaseoCommand, reconcileLaunch } = require("./paseo-observer");
 const {
+  FIRST_CODE_STOP_CODE,
   admitTeamStart,
   briefRequestIdentity,
   globalAdmissionLockFile,
@@ -57,8 +58,10 @@ const {
 const {
   assertActiveExecutionGrant,
   authorityReplayPostcondition,
+  firstCodeBoundary,
 } = require("./execution-grant");
 const { assertCanonicalGrantArtifacts, buildCanonicalScope } = require("./scope-artifacts");
+const { enforceFirstCodeBoundary } = require("./first-code");
 const {
   prepareWriterLeaseControlEvent,
   syncWriterLeaseControlAfterEvent,
@@ -303,6 +306,12 @@ function mutateV2Team(taskId, operationFn, options = {}) {
               { requireUnexpired: Boolean(options.requireUnexpiredAuthority) },
             );
           authorityGuard();
+          if (options.requireExecutableFirstCode
+            && firstCodeBoundary(currentState.execution_authority, team.slice_id).blocked) {
+            throw new CommandError(
+              "first-code boundary is paused-replan-required; explicit replan is required before further execution",
+            );
+          }
         }
         const eventClock = () => new Date(occurredAt);
         try {
@@ -598,6 +607,13 @@ function runRecordStart(parsed, options = {}) {
       if (parsed.operationId
         && error.message === `operation_id replay payload conflict: ${parsed.operationId}`) {
         throw new CommandError(`team start operation_id replay conflict: ${parsed.operationId}`);
+      }
+      if (error.code === FIRST_CODE_STOP_CODE) {
+        enforceFirstCodeBoundary(paths, parsed.taskId, error.firstCodeTarget, {
+          clock,
+          environment,
+          operationId: startOperationId,
+        });
       }
       throw error;
     }
@@ -1380,6 +1396,17 @@ function runObserveAttempt(parsed, options = {}) {
 function runAttemptRecord(parsed, options = {}) {
   if (parsed.action === "observe") return runObserveAttempt(parsed, options);
   const { clock, environment, paths } = commandOptions(options);
+  if (parsed.action === "reserve") {
+    const latest = readAuthoritativeEvents(taskEventFile(paths, parsed.taskId), parsed.taskId).at(-1);
+    const sliceId = latest?.projection?.state?.active_team?.slice_id;
+    if (sliceId) {
+      enforceFirstCodeBoundary(paths, parsed.taskId, sliceId, {
+        clock,
+        environment,
+        operationId: parsed.operationId,
+      });
+    }
+  }
   let evidenceRefs = commaList(parsed.evidenceRefs);
   if (new Set(["quiesced", "resolve-launch"]).has(parsed.action)
     && evidenceRefs.length > 0) {
@@ -1463,6 +1490,7 @@ function runAttemptRecord(parsed, options = {}) {
     operationData: { ...parsed, evidenceRefs },
     eventKind: `team.attempt.${parsed.action}`,
     requireDoingTask: parsed.action === "reserve",
+    requireExecutableFirstCode: parsed.action === "reserve",
     requireUnexpiredAuthority: parsed.action === "reserve",
     factualAuthorityReceipt: parsed.action === "resolve-launch",
     replayPostcondition: parsed.action === "resolve-launch"
@@ -2358,6 +2386,13 @@ function runPromote(parsed, options = {}) {
       if (parsed.operationId
         && error.message === `operation_id replay payload conflict: ${parsed.operationId}`) {
         throw new CommandError(`team promotion operation_id replay conflict: ${parsed.operationId}`);
+      }
+      if (error.code === FIRST_CODE_STOP_CODE) {
+        enforceFirstCodeBoundary(paths, parsed.taskId, error.firstCodeTarget, {
+          clock,
+          environment,
+          operationId,
+        });
       }
       throw error;
     }

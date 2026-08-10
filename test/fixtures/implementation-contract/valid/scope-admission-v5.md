@@ -12,10 +12,11 @@ product_ui_not_applicable_reason: This fixture has no user interface behavior.
 
 ## First Code Slice Guard
 
-- first_code_slice: Implement vNext runtime admission behavior in the workflow helper.
+- first_code_slice: slice-vnext
 - first_code_slice_kind: workflow
 - first_code_owner: atlas-workflow-owner
-- first_code_verification: node --test workflow/tests/js/implementation-contract-vnext-admission.test.js
+- first_code_verification: implementation-contract-vnext
+- first_code_stop_before_slice: task-completion
 - allowed_contract_gate_only_until: contract authoring validation
 - stop_if_no_code_by_phase: implementation admission
 - gate_parallelization_or_deferral_plan: Run semantic lint and runtime admission checks together before accepting execution.

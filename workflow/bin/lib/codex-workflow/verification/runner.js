@@ -44,6 +44,7 @@ const {
   authorityReplayPostcondition,
 } = require("../team/execution-grant");
 const { assertCanonicalGrantArtifacts } = require("../team/scope-artifacts");
+const { enforceFirstCodeBoundary } = require("../team/first-code");
 
 const VERIFY_USAGE =
   "usage: codex-workflow verify <task-id> [--brief <brief.json> --slice-id <id> --check-id <id>] [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... [--output <file>]... -- <command...>";
@@ -876,6 +877,13 @@ function runVerification(parsed, options = {}) {
     paths,
     state: latestState,
   });
+  if (requiredGate) {
+    enforceFirstCodeBoundary(paths, parsed.taskId, requiredGate.slice_id, {
+      clock,
+      environment,
+      operationId,
+    });
+  }
   const gateClass = requiredGate?.gate_class || parsed.gateClass || "general";
   const claimIdentity = verificationClaimIdentity(
     parsed,

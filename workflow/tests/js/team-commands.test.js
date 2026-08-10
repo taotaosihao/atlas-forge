@@ -215,7 +215,7 @@ function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-function renderV5ExecutionContract(taskId, plan) {
+function renderV5ExecutionContract(taskId, plan, firstCodeStopBeforeSlice = "task-completion") {
   const firstSlice = plan.slices[0];
   const acceptanceRefs = [...new Set(plan.slices.flatMap((slice) => slice.acceptance_refs))]
     .sort();
@@ -226,11 +226,15 @@ function renderV5ExecutionContract(taskId, plan) {
     .replace(/^task_id: fixture$/m, `task_id: ${taskId}`)
     .replace(
       /^- first_code_slice: .*$/m,
-      "- first_code_slice: Implement runtime claim coordination in the workflow helper.",
+      `- first_code_slice: ${firstSlice.slice_id}`,
     )
     .replace(
       /^- first_code_verification: .*$/m,
-      `- first_code_verification: ${firstSlice.checks[0].command}`,
+      `- first_code_verification: ${firstSlice.checks[0].check_id}`,
+    )
+    .replace(
+      /^- first_code_stop_before_slice: .*$/m,
+      `- first_code_stop_before_slice: ${firstCodeStopBeforeSlice}`,
     )
     .replace(
       /```atlas-execution-plan\+json\n[\s\S]*?\n```/,
@@ -393,7 +397,10 @@ function executionBrief(paths, taskId, options = {}) {
   };
   const contractName = `implementation-contract.${taskId}.final.md`;
   const contract = path.join(repo, contractName);
-  fs.writeFileSync(contract, renderV5ExecutionContract(taskId, plan));
+  fs.writeFileSync(
+    contract,
+    renderV5ExecutionContract(taskId, plan, options.firstCodeStopBeforeSlice),
+  );
   spawnSync("git", ["-C", repo, "add", contractName]);
   spawnSync("git", ["-C", repo, "commit", "-qm", "test: execution contract"]);
   const baseSha = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
@@ -1325,6 +1332,80 @@ test("record-start requires an explicit authorization ref before execute writes"
   ), /team start operation_id replay conflict/);
 });
 
+test("explicit first-code stop durably pauses until controller replan", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "First-code stop boundary");
+  const admission = executionBrief(paths, taskId, {
+    dependsOn: ["foundation"],
+    firstCodeStopBeforeSlice: "execution-slice",
+  });
+  const startStopSlice = (operationId) => runRecordStart(parseRecordStartArgs([
+    taskId,
+    "execute dependent slice",
+    "--mode=execute",
+    "--authorization-ref=user-message:first-code-stop",
+    `--brief=${admission.briefPath}`,
+    `--operation-id=${operationId}`,
+  ]), { cwd: admission.repo, environment });
+
+  assert.throws(
+    () => startStopSlice("reach-first-code-stop"),
+    /first-code slice foundation must be accepted with check check-foundation before execution-slice/,
+  );
+  let events = authoritativeEvents(paths, taskId);
+  assert.equal(events.at(-1).kind, "authority.first-code.paused");
+  assert.equal(events.at(-1).projection.state.execution_authority.first_code.status,
+    "paused-replan-required");
+  assert.equal(
+    events.filter((event) => event.kind === "authority.first-code.paused").length,
+    1,
+  );
+
+  const forgedState = readJsonObject(taskStateFile(paths, taskId));
+  forgedState.execution_authority.first_code = {
+    ...forgedState.execution_authority.first_code,
+    status: "active",
+    pause: null,
+  };
+  fs.writeFileSync(taskStateFile(paths, taskId), `${JSON.stringify(forgedState, null, 2)}\n`);
+  assert.throws(
+    () => startStopSlice("retry-first-code-stop"),
+    /first-code boundary is paused-replan-required; explicit replan is required/,
+  );
+  events = authoritativeEvents(paths, taskId);
+  assert.equal(
+    events.filter((event) => event.kind === "authority.first-code.paused").length,
+    1,
+  );
+
+  const oldAuthority = events.at(-1).projection.state.execution_authority;
+  const oldGrant = oldAuthority.grants.find(
+    (grant) => grant.grant_id === oldAuthority.current_grant_id,
+  );
+  const replan = replanRequest(environment, paths, taskId, admission, oldGrant, {
+    authorizationRef: "operator-input:first-code-stop-replan",
+    grantId: "first-code-stop-replanned",
+    operationId: "replan-first-code-stop",
+  });
+  runReplan(replan, { cwd: admission.repo, environment });
+  const replanned = readJsonObject(taskStateFile(paths, taskId));
+  const newGrant = replanned.execution_authority.grants.find(
+    (grant) => grant.grant_id === replanned.execution_authority.current_grant_id,
+  );
+  assert.equal(replanned.execution_authority.first_code.status, "active");
+  runRecordStartCommand(parseRecordStartArgs([
+    taskId,
+    "produce foundation",
+    "--mode=execute",
+    "--authorization-ref=operator-input:first-code-stop-replan",
+    `--brief=${admission.briefPaths.foundation}`,
+    `--grant-id=${newGrant.grant_id}`,
+    `--scope-digest=${newGrant.scope_digest}`,
+    "--operation-id=start-first-code-after-replan",
+  ]), { cwd: admission.repo, environment });
+  assert.equal(readTeam(paths, taskId).slice_id, "foundation");
+});
+
 test("execute admission requires keeper-ready succeeded dependencies", async (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Dependency admission");
@@ -1405,7 +1486,7 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
     events.at(-1).event_digest = authoritativeEventDigest(events.at(-1));
     fs.writeFileSync(eventFile, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
   };
-  const dependencyTamperPattern = /dependency acceptance projection diverges from its terminal: foundation|slice\.accepted receipt differs from prior Team\/authority\/event evidence|slice\.accepted verification receipt differs from gate/;
+  const dependencyTamperPattern = /dependency acceptance projection diverges from its terminal: foundation|slice\.accepted receipt differs from prior Team\/authority\/event evidence|slice\.accepted verification receipt differs from gate|first-code acceptance lacks its designated passed verification/;
   rewriteAccepted((accepted) => {
     accepted.brief_sha256 = `sha256:${"1".repeat(64)}`;
   });
@@ -1525,7 +1606,11 @@ test("execute admission requires keeper-ready succeeded dependencies", async (t)
       "--authorization-ref=user-message:dependency-execute",
       `--brief=${admission.briefPath}`, "--operation-id=retry-dependent-slice",
     ]), { cwd: admission.repo, environment }),
-    /dependency is not keeper-ready succeeded: foundation/,
+    /first-code boundary is paused-replan-required/,
+  );
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).execution_authority.first_code.status,
+    "paused-replan-required",
   );
 });
 
@@ -5167,7 +5252,11 @@ test("pending bound verification claim blocks closure until an audited indetermi
     `--brief=${admission.briefPath}`,
     "--operation-id=accept-after-indeterminate-revalidation",
     "--keeper-output=event:execution-slice-complete=workflow/test-owned/keeper.txt",
-  ]), { environment }), /required verification gate execution-contract is blocked by indeterminate execution/);
+  ]), { environment }), /first-code boundary is paused-replan-required/);
+  assert.equal(
+    readJsonObject(taskStateFile(paths, taskId)).execution_authority.first_code.status,
+    "paused-replan-required",
+  );
 
   for (const [operationId, parsed] of [
     ["pending-verification", boundVerification],
@@ -5189,7 +5278,7 @@ test("pending bound verification claim blocks closure until an audited indetermi
       cwd: admission.repo,
       environment,
       operationId,
-    }), /durably indeterminate/);
+    }), /first-code boundary is paused-replan-required/);
   }
   assert.equal(fs.readFileSync(counter, "utf8"), "run\n");
   assert.equal(

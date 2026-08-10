@@ -16,6 +16,16 @@ const RELEASE_REQUIREMENT_KEYS = [
   "fact_schema_sha256", "evaluator_ref", "evaluator_sha256", "pass_rule_sha256",
   "required_candidate_components",
 ];
+const DESIGN_HANDOFF_KEYS = [
+  "status", "task_id", "designed_feature_target", "context_path", "context_sha256",
+  "context_identity", "scenario_path", "scenario_sha256", "scenario_identity",
+  "scenario_approval_ref", "flow_path", "flow_sha256", "flow_identity",
+  "flow_approval_ref", "handoff_path", "handoff_sha256",
+];
+const FIRST_CODE_BINDING_KEYS = [
+  "status", "contract_sha256", "first_code_slice_id", "verification_check_id",
+  "stop_before_slice_id",
+];
 
 class ExecutionGrantError extends Error {
   constructor(message) {
@@ -163,6 +173,83 @@ function validateAuthorityIdentities(values, taskId) {
       throw new ExecutionGrantError(`${label} verdict/resolution presence is invalid`);
     }
   }
+}
+
+function validateDesignHandoffBinding(value, scope) {
+  if (value === null) return null;
+  if (value?.status === "not_applicable") {
+    exactKeys(value, ["status", "reason", "contract_sha256"], "execution design_handoff");
+    nonEmpty(value.reason, "execution design_handoff reason");
+    if (value.contract_sha256 !== scope.contract.sha256) {
+      throw new ExecutionGrantError("execution design_handoff not-applicable binding is stale");
+    }
+    return value;
+  }
+  exactKeys(value, DESIGN_HANDOFF_KEYS, "execution design_handoff");
+  if (value.status !== "approved" || value.task_id !== scope.task_id
+    || !new Set(["product_increment", "product_release"]).has(value.designed_feature_target)) {
+    throw new ExecutionGrantError("execution design_handoff approved identity is invalid");
+  }
+  for (const field of ["context_path", "scenario_path", "flow_path", "handoff_path"]) {
+    canonicalPath(value[field], `execution design_handoff ${field}`, { allowGlob: false });
+  }
+  for (const field of [
+    "context_sha256", "context_identity", "scenario_sha256", "scenario_identity",
+    "flow_sha256", "flow_identity", "handoff_sha256",
+  ]) {
+    if (!DIGEST.test(value[field] || "")) {
+      throw new ExecutionGrantError(`execution design_handoff ${field} is invalid`);
+    }
+  }
+  authorityRef(value.scenario_approval_ref, "execution design_handoff scenario approval");
+  authorityRef(value.flow_approval_ref, "execution design_handoff flow approval");
+  return value;
+}
+
+function dependsTransitively(slicesById, sliceId, dependencyId, visited = new Set()) {
+  if (sliceId === dependencyId) return true;
+  if (visited.has(sliceId)) return false;
+  visited.add(sliceId);
+  return (slicesById.get(sliceId)?.depends_on || [])
+    .some((candidate) => dependsTransitively(slicesById, candidate, dependencyId, visited));
+}
+
+function validateFirstCodeBinding(value, scope) {
+  if (value === null) return null;
+  if (value?.status === "not_applicable") {
+    exactKeys(value, ["status", "reason", "contract_sha256"], "execution first_code");
+    nonEmpty(value.reason, "execution first_code reason");
+    if (value.contract_sha256 !== scope.contract.sha256) {
+      throw new ExecutionGrantError("execution first_code not-applicable binding is stale");
+    }
+    return value;
+  }
+  exactKeys(value, FIRST_CODE_BINDING_KEYS, "execution first_code");
+  if (value.status !== "required" || value.contract_sha256 !== scope.contract.sha256) {
+    throw new ExecutionGrantError("execution first_code required identity is invalid");
+  }
+  for (const field of [
+    "first_code_slice_id", "verification_check_id", "stop_before_slice_id",
+  ]) {
+    if (!SAFE_ID.test(value[field] || "")) {
+      throw new ExecutionGrantError(`execution first_code ${field} is invalid`);
+    }
+  }
+  const slicesById = new Map(scope.required_slices.map((slice, index) => [
+    slice.slice_id, { ...slice, index },
+  ]));
+  const first = slicesById.get(value.first_code_slice_id);
+  if (!first || !first.checks.some((check) => check.check_id === value.verification_check_id)) {
+    throw new ExecutionGrantError("execution first_code slice/check binding is invalid");
+  }
+  if (value.stop_before_slice_id !== "task-completion") {
+    const stop = slicesById.get(value.stop_before_slice_id);
+    if (!stop || stop.index <= first.index
+      || !dependsTransitively(slicesById, stop.slice_id, first.slice_id)) {
+      throw new ExecutionGrantError("execution first_code stop slice binding is invalid");
+    }
+  }
+  return value;
 }
 
 function validateScope(scope, grantId) {
@@ -368,8 +455,19 @@ function validateScope(scope, grantId) {
     && scope.evidence_policy.retained_receipt_ids.length > 0) {
     throw new ExecutionGrantError("invalidate-incompatible scope cannot retain evidence");
   }
-  if (scope.design_handoff !== null || scope.first_code !== null) {
-    throw new ExecutionGrantError("execution scope reserved design placeholders must be null");
+  validateDesignHandoffBinding(scope.design_handoff, scope);
+  validateFirstCodeBinding(scope.first_code, scope);
+  if (scope.release_binding && (scope.design_handoff?.status !== "approved"
+    || scope.design_handoff.designed_feature_target !== "product_release")) {
+    throw new ExecutionGrantError(
+      "product_release scope requires an approved product_release Design Handoff",
+    );
+  }
+  if (!scope.release_binding && scope.design_handoff?.status === "approved"
+    && scope.design_handoff.designed_feature_target !== "product_increment") {
+    throw new ExecutionGrantError(
+      "ordinary execution scope may only bind a product_increment Design Handoff",
+    );
   }
   if (!DIGEST.test(scope.scope_core_digest || "")) {
     throw new ExecutionGrantError("execution scope core digest is invalid");
@@ -504,6 +602,205 @@ function validateGrant(grant, { initial = false } = {}) {
   return grant;
 }
 
+function initialFirstCodeState(grant) {
+  if (grant.scope.first_code?.status !== "required") return null;
+  return {
+    schema_version: 1,
+    grant_id: grant.grant_id,
+    scope_digest: grant.scope_digest,
+    evidence_epoch: grant.evidence_epoch,
+    status: "active",
+    receipt: null,
+    pause: null,
+  };
+}
+
+function validateFirstCodeState(authority) {
+  const state = authority.first_code;
+  const current = currentGrant(authority);
+  const binding = current?.scope?.first_code;
+  if (!state) {
+    if (binding?.status === "required") {
+      throw new ExecutionGrantError("execution authority is missing first-code runtime state");
+    }
+    return null;
+  }
+  exactKeys(state, [
+    "schema_version", "grant_id", "scope_digest", "evidence_epoch", "status",
+    "receipt", "pause",
+  ], "first-code runtime state");
+  const grant = (authority.grants || []).find((candidate) => candidate.grant_id === state.grant_id);
+  if (state.schema_version !== 1 || !grant || grant.scope.first_code?.status !== "required"
+    || state.scope_digest !== grant.scope_digest || state.evidence_epoch !== grant.evidence_epoch
+    || (current && current.grant_id !== grant.grant_id)
+    || !new Set(["active", "satisfied", "paused-replan-required"]).has(state.status)) {
+    throw new ExecutionGrantError("first-code runtime state identity is invalid");
+  }
+  if (state.status === "active") {
+    if (state.receipt !== null || state.pause !== null) {
+      throw new ExecutionGrantError("active first-code state cannot carry a terminal receipt");
+    }
+  } else if (state.status === "satisfied") {
+    exactKeys(state.receipt, [
+      "acceptance_operation_id", "accepted_revision", "verification_record_id",
+      "verification_revision",
+    ], "first-code satisfaction receipt");
+    if (!SAFE_ID.test(state.receipt.acceptance_operation_id || "")
+      || !Number.isInteger(state.receipt.accepted_revision)
+      || state.receipt.accepted_revision < 1
+      || !DIGEST.test(state.receipt.verification_record_id || "")
+      || !Number.isInteger(state.receipt.verification_revision)
+      || state.receipt.verification_revision >= state.receipt.accepted_revision
+      || state.pause !== null) {
+      throw new ExecutionGrantError("first-code satisfaction receipt is invalid");
+    }
+  } else {
+    exactKeys(state.pause, ["operation_id", "revision", "target", "reason"], "first-code pause");
+    if (!SAFE_ID.test(state.pause.operation_id || "")
+      || !Number.isInteger(state.pause.revision) || state.pause.revision < grant.issued_revision
+      || !SAFE_ID.test(state.pause.target || "") || !state.pause.reason
+      || state.receipt !== null) {
+      throw new ExecutionGrantError("first-code pause receipt is invalid");
+    }
+  }
+  return state;
+}
+
+function replannedFirstCodeState(authority, transition) {
+  const next = initialFirstCodeState(transition.new_grant);
+  if (!next) return null;
+  const previous = authority.first_code;
+  const retained = new Set(transition.evidence.retained.map((item) => item.receipt_id));
+  if (previous?.status === "satisfied"
+    && same(currentGrant(authority)?.scope.first_code, transition.new_grant.scope.first_code)
+    && retained.has(previous.receipt.acceptance_operation_id)) {
+    return {
+      ...next,
+      status: "satisfied",
+      receipt: clone(previous.receipt),
+    };
+  }
+  return next;
+}
+
+function firstCodeBoundary(authority, target) {
+  const grant = currentGrant(authority);
+  const binding = grant?.scope?.first_code;
+  if (!grant || binding?.status !== "required") return { blocked: false };
+  const state = validateFirstCodeState(authority);
+  if (state.status === "satisfied") return { blocked: false, grant, state };
+  if (state.status === "paused-replan-required") {
+    return { blocked: true, appendPause: false, grant, state };
+  }
+  if (target === "task-completion") {
+    return { blocked: true, appendPause: true, grant, state };
+  }
+  const targetIndex = grant.scope.required_slices.findIndex((slice) => slice.slice_id === target);
+  if (targetIndex < 0) throw new ExecutionGrantError(`first-code target is outside scope: ${target}`);
+  if (binding.stop_before_slice_id === "task-completion") {
+    return { blocked: false, grant, state };
+  }
+  const stopIndex = grant.scope.required_slices.findIndex(
+    (slice) => slice.slice_id === binding.stop_before_slice_id,
+  );
+  return {
+    blocked: targetIndex >= stopIndex,
+    appendPause: targetIndex >= stopIndex,
+    grant,
+    state,
+  };
+}
+
+function applyFirstCodeEvent(current, event) {
+  if (!current) return current;
+  const authority = clone(current);
+  const state = authority.first_code;
+  if (!state) {
+    if (event.kind === "authority.first-code.paused") {
+      throw new ExecutionGrantError("first-code pause event lacks a required binding");
+    }
+    return validateAuthorityEnvelope(authority);
+  }
+  const grant = (authority.grants || []).find((candidate) => candidate.grant_id === state.grant_id);
+  const binding = grant.scope.first_code;
+  if (event.kind === "slice.accepted"
+    && event.result?.accepted?.slice_id === binding.first_code_slice_id) {
+    if (!new Set(["active", "satisfied"]).has(state.status)) {
+      throw new ExecutionGrantError("first-code acceptance requires executable first-code state");
+    }
+    const accepted = event.result.accepted;
+    const verification = (accepted.verification_records || []).find(
+      (record) => record.check_id === binding.verification_check_id,
+    );
+    if (!verification || verification.outcome !== "passed"
+      || !DIGEST.test(verification.record_id || "")
+      || !Number.isInteger(verification.verification_revision)
+      || accepted.operation_id !== event.operation_id || accepted.revision !== event.revision) {
+      throw new ExecutionGrantError("first-code acceptance lacks its designated passed verification");
+    }
+    authority.first_code = {
+      ...state,
+      status: "satisfied",
+      receipt: {
+        acceptance_operation_id: accepted.operation_id,
+        accepted_revision: event.revision,
+        verification_record_id: verification.record_id,
+        verification_revision: verification.verification_revision,
+      },
+    };
+  } else if (event.kind === "slice.superseded"
+    && event.data?.slice_id === binding.first_code_slice_id) {
+    if (state.status !== "satisfied") {
+      throw new ExecutionGrantError("first-code supersession requires a satisfied acceptance");
+    }
+    authority.first_code = {
+      ...state,
+      status: "paused-replan-required",
+      receipt: null,
+      pause: {
+        operation_id: event.operation_id,
+        revision: event.revision,
+        target: binding.first_code_slice_id,
+        reason: "first-code-acceptance-superseded",
+      },
+    };
+  } else if (event.kind === "authority.first-code.paused") {
+    exactKeys(event.data, [
+      "grant_id", "scope_digest", "evidence_epoch", "first_code_slice_id",
+      "stop_before_slice_id", "target", "reason",
+    ], "authority.first-code.paused data");
+    if (state.status !== "active" || event.data.grant_id !== state.grant_id
+      || event.data.scope_digest !== state.scope_digest
+      || event.data.evidence_epoch !== state.evidence_epoch
+      || event.data.first_code_slice_id !== binding.first_code_slice_id
+      || event.data.stop_before_slice_id !== binding.stop_before_slice_id
+      || !firstCodeBoundary(authority, event.data.target).blocked
+      || !event.data.reason) {
+      throw new ExecutionGrantError("authority.first-code.paused does not match its active boundary");
+    }
+    authority.first_code = {
+      ...state,
+      status: "paused-replan-required",
+      pause: {
+        operation_id: event.operation_id,
+        revision: event.revision,
+        target: event.data.target,
+        reason: event.data.reason,
+      },
+    };
+    const expected = { first_code: authority.first_code };
+    if (event.result !== undefined && !same(event.result, expected)) {
+      throw new ExecutionGrantError("authority.first-code.paused result differs from its projection");
+    }
+  }
+  return validateAuthorityEnvelope(authority);
+}
+
+function transitionFirstCodeState(state, event) {
+  state.execution_authority = applyFirstCodeEvent(state.execution_authority, event);
+  return state.execution_authority?.first_code || null;
+}
+
 function emptyAuthority(grant, deliveryAuthority) {
   const release = grant.scope.release_binding !== null;
   if (release && !deliveryAuthority) {
@@ -512,6 +809,7 @@ function emptyAuthority(grant, deliveryAuthority) {
   if (!release && deliveryAuthority) {
     throw new ExecutionGrantError("ordinary execution grant cannot carry release delivery authority");
   }
+  const firstCode = initialFirstCodeState(grant);
   return {
     schema_version: 2,
     formal_execution: true,
@@ -519,6 +817,7 @@ function emptyAuthority(grant, deliveryAuthority) {
     current_grant_id: grant.grant_id,
     grants: [clone(grant)],
     delivery_authority: deliveryAuthority ? clone(deliveryAuthority) : null,
+    ...(firstCode ? { first_code: firstCode } : {}),
   };
 }
 
@@ -554,10 +853,20 @@ function validateAuthorityEnvelope(authority) {
     || typeof authority.formal_product_release !== "boolean") {
     throw new ExecutionGrantError("execution authority schema version 2 is invalid");
   }
-  exactKeys(authority, [
+  const authorityKeys = [
     "schema_version", "formal_execution", "formal_product_release", "current_grant_id",
     "grants", "delivery_authority",
-  ], "execution authority");
+  ];
+  for (const key of authorityKeys) {
+    if (!Object.hasOwn(authority, key)) {
+      throw new ExecutionGrantError(`execution authority is missing ${key}`);
+    }
+  }
+  for (const key of Object.keys(authority)) {
+    if (![...authorityKeys, "first_code"].includes(key)) {
+      throw new ExecutionGrantError(`execution authority has unknown key ${key}`);
+    }
+  }
   const ids = new Set();
   const refs = new Set();
   let active = 0;
@@ -604,6 +913,7 @@ function validateAuthorityEnvelope(authority) {
       throw new ExecutionGrantError("release delivery authority is not immutable or exactly bound");
     }
   }
+  validateFirstCodeState(authority);
   return authority;
 }
 
@@ -939,6 +1249,7 @@ function applyAuthorityTransition(current, transition) {
     if (!same(transition.evidence_policy, transition.new_grant.scope.evidence_policy)) {
       throw new ExecutionGrantError("replan evidence policy does not match the new canonical scope");
     }
+    const nextFirstCode = replannedFirstCodeState(authority, transition);
     const superseded = terminalGrant(active, {
       occurred_at: transition.occurred_at,
       revision: transition.revision,
@@ -951,6 +1262,8 @@ function applyAuthorityTransition(current, transition) {
     ));
     authority.grants.push(clone(transition.new_grant));
     authority.current_grant_id = transition.new_grant.grant_id;
+    if (nextFirstCode) authority.first_code = nextFirstCode;
+    else delete authority.first_code;
     return validateAuthorityEnvelope(authority);
   }
   if (transition.type === "grant-completed" || transition.type === "grant-revoked") {
@@ -1086,6 +1399,9 @@ function validateCompletedEvent(event, previousState, previousAuthority, transit
     || transition.outcome !== event.data.outcome
     || transition.reason !== `task-completion:${event.data.outcome}`
     || transition.occurred_at !== eventSeconds(event)
+    || (event.data.outcome === "succeeded"
+      && previousAuthority?.first_code
+      && previousAuthority.first_code.status !== "satisfied")
     || (event.data.outcome !== "succeeded"
       && (!event.data.authority_ref || event.data.evidence_refs.length === 0))
     || (event.data.no_verify_reason && event.data.outcome === "succeeded")
@@ -1165,6 +1481,7 @@ function validateAuthorityEventProjection(events) {
       }
       vNextSeen = true;
     }
+    if (reduced) reduced = applyFirstCodeEvent(reduced, event);
     validateAuthorityEventEnvelope(event, previousState, previousAuthority, transition);
     const projected = event.projection?.state?.execution_authority;
     if (!vNextSeen) {
@@ -1218,6 +1535,11 @@ function assertActiveExecutionGrant(state, expected = {}, options = {}) {
   const authority = validateAuthorityEnvelope(state.execution_authority);
   const grant = currentGrant(authority);
   if (!grant || grant.status !== "active") throw new ExecutionGrantError("current active execution grant is required");
+  if (grant.scope.design_handoff === null || grant.scope.first_code === null) {
+    throw new ExecutionGrantError(
+      "legacy execution grant is read-only; explicit replan to production governance bindings is required",
+    );
+  }
   if (expected.grantId && grant.grant_id !== expected.grantId) {
     throw new ExecutionGrantError("execution grant_id does not match current authority");
   }
@@ -1340,6 +1662,7 @@ module.exports = {
   ExecutionGrantError,
   TERMINAL_GRANT_STATES,
   applyAuthorityTransition,
+  applyFirstCodeEvent,
   assertActiveExecutionGrant,
   assertSizeExceptionValidity,
   authorityRef,
@@ -1347,9 +1670,11 @@ module.exports = {
   canonicalJson,
   currentGrant,
   executionHistoryRequired,
+  firstCodeBoundary,
   sha256Canonical,
   terminalAuthorityReplayPostcondition,
   transitionAuthorityState,
+  transitionFirstCodeState,
   validateAuthorityEnvelope,
   validateAuthorityEventProjection,
   validateGrant,

@@ -108,8 +108,20 @@
       },
       "additionalProperties": false
     },
-    "design_handoff": { "type": "null" },
-    "first_code": { "type": "null" }
+    "design_handoff": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/design_handoff_approved" },
+        { "$ref": "#/$defs/not_applicable_binding" }
+      ]
+    },
+    "first_code": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/first_code_required" },
+        { "$ref": "#/$defs/not_applicable_binding" }
+      ]
+    }
   },
   "allOf": [
     {
@@ -218,6 +230,63 @@
         "ref": { "type": "string", "pattern": "^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$" }
       },
       "additionalProperties": false
+    },
+    "not_applicable_binding": {
+      "type": "object",
+      "required": ["status", "reason", "contract_sha256"],
+      "properties": {
+        "status": { "const": "not_applicable" },
+        "reason": { "$ref": "#/$defs/non_empty" },
+        "contract_sha256": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "design_handoff_approved": {
+      "type": "object",
+      "required": [
+        "status", "task_id", "designed_feature_target", "context_path", "context_sha256",
+        "context_identity", "scenario_path", "scenario_sha256", "scenario_identity",
+        "scenario_approval_ref", "flow_path", "flow_sha256", "flow_identity",
+        "flow_approval_ref", "handoff_path", "handoff_sha256"
+      ],
+      "properties": {
+        "status": { "const": "approved" },
+        "task_id": { "$ref": "#/$defs/safe_id" },
+        "designed_feature_target": { "type": "string", "enum": ["product_increment", "product_release"] },
+        "context_path": { "$ref": "#/$defs/relative_path" },
+        "context_sha256": { "$ref": "#/$defs/digest" },
+        "context_identity": { "$ref": "#/$defs/digest" },
+        "scenario_path": { "$ref": "#/$defs/relative_path" },
+        "scenario_sha256": { "$ref": "#/$defs/digest" },
+        "scenario_identity": { "$ref": "#/$defs/digest" },
+        "scenario_approval_ref": { "$ref": "#/$defs/authority_ref" },
+        "flow_path": { "$ref": "#/$defs/relative_path" },
+        "flow_sha256": { "$ref": "#/$defs/digest" },
+        "flow_identity": { "$ref": "#/$defs/digest" },
+        "flow_approval_ref": { "$ref": "#/$defs/authority_ref" },
+        "handoff_path": { "$ref": "#/$defs/relative_path" },
+        "handoff_sha256": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "first_code_required": {
+      "type": "object",
+      "required": [
+        "status", "contract_sha256", "first_code_slice_id", "verification_check_id",
+        "stop_before_slice_id"
+      ],
+      "properties": {
+        "status": { "const": "required" },
+        "contract_sha256": { "$ref": "#/$defs/digest" },
+        "first_code_slice_id": { "$ref": "#/$defs/safe_id" },
+        "verification_check_id": { "$ref": "#/$defs/safe_id" },
+        "stop_before_slice_id": { "$ref": "#/$defs/safe_id" }
+      },
+      "additionalProperties": false
+    },
+    "authority_ref": {
+      "type": "string",
+      "pattern": "^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$"
     },
     "check": {
       "type": "object",

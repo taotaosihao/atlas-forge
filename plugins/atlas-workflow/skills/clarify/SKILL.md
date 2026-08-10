@@ -171,8 +171,12 @@ ceremony. If durable state is justified or an existing task is already relevant:
      `required` or `not_applicable`
    - when `First-code guard` is required, the contract must name
      `first_code_slice`, `first_code_owner`, `first_code_verification`,
+     `first_code_stop_before_slice`,
      `allowed_contract_gate_only_until`, `stop_if_no_code_by_phase`, and
      `gate_parallelization_or_deferral_plan`
+   - for semantics v5/v6, the slice, verification, and stop values are exact
+     execution-plan IDs; use `task-completion` only when completion itself is
+     the declared stop rather than a later slice
    - contract, scanner, fixture, and evidence-only preparation must be bounded
      by phase or step; the first code slice may be fixture-backed, mocked, or
      in-memory, but it must change the product, runtime, API, CLI, workflow, or

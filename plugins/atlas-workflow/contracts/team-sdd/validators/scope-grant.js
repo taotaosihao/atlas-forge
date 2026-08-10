@@ -21,6 +21,16 @@ const RELEASE_REQUIREMENT_KEYS = [
   "fact_schema_sha256", "evaluator_ref", "evaluator_sha256", "pass_rule_sha256",
   "required_candidate_components",
 ];
+const DESIGN_HANDOFF_KEYS = [
+  "status", "task_id", "designed_feature_target", "context_path", "context_sha256",
+  "context_identity", "scenario_path", "scenario_sha256", "scenario_identity",
+  "scenario_approval_ref", "flow_path", "flow_sha256", "flow_identity",
+  "flow_approval_ref", "handoff_path", "handoff_sha256",
+];
+const FIRST_CODE_KEYS = [
+  "status", "contract_sha256", "first_code_slice_id", "verification_check_id",
+  "stop_before_slice_id",
+];
 
 function fail(message) {
   throw new Error(message);
@@ -297,6 +307,73 @@ function canonicalSizeException(value, index, scope) {
   };
 }
 
+function canonicalDesignHandoff(value, taskId, contractSha256) {
+  if (value.status === "not_applicable") {
+    exact(value, ["status", "reason", "contract_sha256"], "design_handoff");
+    string(value.reason, "design_handoff.reason");
+    if (value.contract_sha256 !== contractSha256) {
+      fail("design_handoff not-applicable reason is not bound to the current contract");
+    }
+    return { status: "not_applicable", reason: value.reason, contract_sha256: contractSha256 };
+  }
+  exact(value, DESIGN_HANDOFF_KEYS, "design_handoff");
+  if (value.status !== "approved" || value.task_id !== taskId
+    || !new Set(["product_increment", "product_release"]).has(value.designed_feature_target)) {
+    fail("design_handoff approved identity is invalid");
+  }
+  for (const field of ["context_path", "scenario_path", "flow_path", "handoff_path"]) {
+    canonicalPathPattern(value[field], `design_handoff.${field}`, { allowGlob: false });
+  }
+  for (const field of [
+    "context_sha256", "context_identity", "scenario_sha256", "scenario_identity",
+    "flow_sha256", "flow_identity", "handoff_sha256",
+  ]) digest(value[field], `design_handoff.${field}`);
+  parseAuthorityRef(value.scenario_approval_ref, "design_handoff.scenario_approval_ref");
+  parseAuthorityRef(value.flow_approval_ref, "design_handoff.flow_approval_ref");
+  return Object.fromEntries(DESIGN_HANDOFF_KEYS.map((key) => [key, value[key]]));
+}
+
+function dependsTransitively(slicesById, sliceId, dependencyId, visited = new Set()) {
+  if (sliceId === dependencyId) return true;
+  if (visited.has(sliceId)) return false;
+  visited.add(sliceId);
+  return (slicesById.get(sliceId)?.depends_on || [])
+    .some((candidate) => dependsTransitively(slicesById, candidate, dependencyId, visited));
+}
+
+function canonicalFirstCode(value, requiredSlices, contractSha256) {
+  if (value.status === "not_applicable") {
+    exact(value, ["status", "reason", "contract_sha256"], "first_code");
+    string(value.reason, "first_code.reason");
+    if (value.contract_sha256 !== contractSha256) {
+      fail("first_code not-applicable reason is not bound to the current contract");
+    }
+    return { status: "not_applicable", reason: value.reason, contract_sha256: contractSha256 };
+  }
+  exact(value, FIRST_CODE_KEYS, "first_code");
+  if (value.status !== "required" || value.contract_sha256 !== contractSha256) {
+    fail("first_code required identity is invalid");
+  }
+  for (const field of [
+    "first_code_slice_id", "verification_check_id", "stop_before_slice_id",
+  ]) safeId(value[field], `first_code.${field}`);
+  const slicesById = new Map(requiredSlices.map((slice, index) => [
+    slice.slice_id, { ...slice, index },
+  ]));
+  const first = slicesById.get(value.first_code_slice_id);
+  if (!first || !first.checks.some((check) => check.check_id === value.verification_check_id)) {
+    fail("first_code slice/check binding does not exist in required_slices");
+  }
+  if (value.stop_before_slice_id !== "task-completion") {
+    const stop = slicesById.get(value.stop_before_slice_id);
+    if (!stop || stop.index <= first.index
+      || !dependsTransitively(slicesById, stop.slice_id, first.slice_id)) {
+      fail("first_code stop slice must follow and transitively depend on the first-code slice");
+    }
+  }
+  return Object.fromEntries(FIRST_CODE_KEYS.map((key) => [key, value[key]]));
+}
+
 function corePreimage(scope) {
   const value = { ...scope, size_exceptions: [] };
   delete value.scope_core_digest;
@@ -402,9 +479,12 @@ function canonicalScopeVNext(value, options = {}) {
     || (value.parent && value.parent.grant_id !== value.supersedes_grant_id)) {
     fail("scope parent and supersedes_grant_id must identify the same prior grant");
   }
-  if (value.design_handoff !== null || value.first_code !== null) {
-    fail("scope Design Handoff and first-code placeholders must remain null until their production schema is delivered");
-  }
+  const designHandoff = value.design_handoff === null
+    ? null
+    : canonicalDesignHandoff(value.design_handoff, value.task_id, value.contract.sha256);
+  const firstCode = value.first_code === null
+    ? null
+    : canonicalFirstCode(value.first_code, requiredSlices, value.contract.sha256);
   const scope = {
     schema_version: 1,
     grant_id: value.grant_id,
@@ -431,11 +511,19 @@ function canonicalScopeVNext(value, options = {}) {
     parent: value.parent === null ? null : { ...value.parent },
     supersedes_grant_id: value.supersedes_grant_id,
     evidence_policy: canonicalEvidencePolicy(value.evidence_policy),
-    design_handoff: null,
-    first_code: null,
+    design_handoff: designHandoff,
+    first_code: firstCode,
   };
   if ((scope.contract.semantics_version === 6) !== Boolean(scope.release_binding)) {
     fail("scope release_binding must be present exactly for contract semantics version 6");
+  }
+  if (scope.release_binding && (scope.design_handoff?.status !== "approved"
+    || scope.design_handoff.designed_feature_target !== "product_release")) {
+    fail("product_release scope requires an approved product_release Design Handoff");
+  }
+  if (!scope.release_binding && scope.design_handoff?.status === "approved"
+    && scope.design_handoff.designed_feature_target !== "product_increment") {
+    fail("ordinary executable scope may only bind a product_increment Design Handoff");
   }
   const releaseRequirements = requiredSlices.flatMap((slice) => (
     slice.checks.flatMap((check) => check.release_requirement ? [check.release_requirement] : [])

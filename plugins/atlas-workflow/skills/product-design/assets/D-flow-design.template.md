@@ -49,3 +49,5 @@ message strategies, and visible data-profile labeling/isolation.
 
 Record 3–7 visible acceptance steps, refresh/re-entry, failure recovery, and any
 flow-changing blocker. Gate 2 requires no blocking open question.
+
+- Blocking open questions: none

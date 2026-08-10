@@ -14,9 +14,13 @@ const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
 ));
-const { createTask } = require(path.join(
+const { createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/task/lifecycle.js",
+));
+const { taskEventFile } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/task-mutation.js",
 ));
 const { getTaskField, taskFile } = require(path.join(
   WORKFLOW_ROOT,
@@ -39,6 +43,10 @@ const {
 const { parseRouteArgs, writeRouteDecision } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/artifact/routing.js",
+));
+const { readProductProgress, renderProductProgress } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/artifact/product-progress.js",
 ));
 
 function fixedClock() {
@@ -219,6 +227,37 @@ test("builds prompt bundle hashes and rewrites provenance from the same model", 
   assert.deepEqual(bundle.skills, ["atlas-workflow:task"]);
   assert.match(fs.readFileSync(path.join(artifactDir, "provenance.md"), "utf8"), /- Agent: reviewer/);
   assert.equal(getTaskField(taskFile(paths.tasksDir, taskId), "prompt_bundle_id"), "p4a-bundle");
+});
+
+test("product progress is deterministic and reads only authoritative events", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Authoritative product progress");
+  startTask(taskId, { clock: fixedClock, environment });
+  const eventFile = taskEventFile(paths, taskId);
+  const eventStream = fs.readFileSync(eventFile, "utf8");
+  const baseline = readProductProgress(taskId, { environment });
+
+  const forgedState = readJsonObject(taskStateFile(paths, taskId));
+  forgedState.status = "done";
+  forgedState.blocked_reason = "forged blocker";
+  fs.writeFileSync(taskStateFile(paths, taskId), `${JSON.stringify(forgedState, null, 2)}\n`);
+  fs.writeFileSync(taskFile(paths.tasksDir, taskId), "# Forged title\n\nstatus: blocked\n");
+  const progressFile = path.join(taskArtifactDir(paths, taskId), "team", "sdd", "progress.jsonl");
+  fs.mkdirSync(path.dirname(progressFile), { recursive: true });
+  fs.writeFileSync(progressFile, `${JSON.stringify({ blocker: "forged ledger blocker" })}\n`);
+
+  assert.deepEqual(readProductProgress(taskId, { environment }), baseline);
+  assert.equal(fs.readFileSync(eventFile, "utf8"), eventStream);
+  const json = spawnSync(PUBLIC_BIN, ["product-progress", taskId, "--json"], {
+    encoding: "utf8",
+    env: environment,
+  });
+  assert.equal(json.status, 0, json.stderr);
+  assert.deepEqual(JSON.parse(json.stdout), baseline);
+  assert.equal(fs.readFileSync(eventFile, "utf8"), eventStream);
+  const rendered = renderProductProgress(baseline);
+  assert.equal(rendered.length, 11);
+  assert.match(rendered[0], new RegExp(`^产品进度｜${taskId}｜Authoritative product progress$`));
 });
 
 test("public dispatcher preserves route help, errors, and planning output", (t) => {

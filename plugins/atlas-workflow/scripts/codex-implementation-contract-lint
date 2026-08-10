@@ -39,6 +39,11 @@ const FIRST_CODE_FIELDS = [
   "gate_parallelization_or_deferral_plan",
 ];
 
+const VNEXT_FIRST_CODE_FIELDS = [
+  ...FIRST_CODE_FIELDS,
+  "first_code_stop_before_slice",
+];
+
 const PRODUCT_UI_FIELDS = [
   "first_operable_user_flow",
   "browser_entrypoint",
@@ -49,7 +54,7 @@ const PRODUCT_UI_FIELDS = [
   "stop_if_no_ui_by_phase",
 ];
 
-const DETAIL_FIELDS = new Set([...FIRST_CODE_FIELDS, ...PRODUCT_UI_FIELDS]);
+const DETAIL_FIELDS = new Set([...VNEXT_FIRST_CODE_FIELDS, ...PRODUCT_UI_FIELDS]);
 const RECOGNIZED_FIELDS = new Set([...ENVELOPE_FIELDS, ...DETAIL_FIELDS]);
 const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
 const GATE_VALUES = new Set(["required", "not_applicable"]);
@@ -368,7 +373,7 @@ function parseFields(content) {
         "top-level detail fields must appear before any H2-H6 section",
       ));
     } else if (DETAIL_FIELDS.has(key) && style === "bullet") {
-      const expectedSection = FIRST_CODE_FIELDS.includes(key) ? "first_code" : "product_ui";
+      const expectedSection = VNEXT_FIRST_CODE_FIELDS.includes(key) ? "first_code" : "product_ui";
       if (machineSection !== expectedSection) {
         diagnostics.push(makeDiagnostic(
           "ERROR",
@@ -1242,12 +1247,137 @@ function validateVersionFour(content, fields, initialDiagnostics, authority, str
   return diagnostics;
 }
 
+function validateVNextFirstCodeBinding(content, fields, diagnostics) {
+  if (fields.get("first_code_guard")?.value !== "required") return;
+  const add = (code, field, line, message) => {
+    diagnostics.push(makeDiagnostic("ERROR", code, field, line, message));
+  };
+  const records = new Map(VNEXT_FIRST_CODE_FIELDS.map((key) => [key, fields.get(key)]));
+  for (const [key, record] of records) {
+    if (!record || isPlaceholder(record.value) || isNotApplicableToken(record.value)) {
+      add(
+        "REQUIRED_FIELD_MISSING",
+        key,
+        record?.line || 0,
+        "vNext first-code authority requires this exact execution-plan binding",
+      );
+    }
+  }
+  const first = records.get("first_code_slice");
+  const verification = records.get("first_code_verification");
+  const stop = records.get("first_code_stop_before_slice");
+  if (!first || !verification || !stop) return;
+  const firstId = unwrapScalar(first.value);
+  const checkId = unwrapScalar(verification.value);
+  const stopId = unwrapScalar(stop.value);
+  for (const [record, value] of [[first, firstId], [verification, checkId], [stop, stopId]]) {
+    if (!SAFE_ID_PATTERN.test(value)) {
+      add(
+        "FIRST_CODE_PLAN_ID_INVALID",
+        record.key,
+        record.line,
+        "vNext first-code fields must use exact safe execution-plan IDs",
+      );
+    }
+  }
+  let plan;
+  try {
+    plan = parseImplementationContract(content).executionPlan;
+  } catch {
+    return;
+  }
+  const slices = new Map(plan.slices.map((slice, index) => [slice.slice_id, { index, slice }]));
+  const firstSlice = slices.get(firstId);
+  if (!firstSlice) {
+    add(
+      "FIRST_CODE_SLICE_UNKNOWN",
+      first.key,
+      first.line,
+      `first_code_slice is not an execution-plan slice: ${firstId}`,
+    );
+    return;
+  }
+  if (!firstSlice.slice.checks.some((check) => check.check_id === checkId)) {
+    add(
+      "FIRST_CODE_VERIFICATION_UNKNOWN",
+      verification.key,
+      verification.line,
+      `first_code_verification is not a check on ${firstId}: ${checkId}`,
+    );
+  }
+  if (stopId === "task-completion") return;
+  const stopSlice = slices.get(stopId);
+  if (!stopSlice) {
+    add(
+      "FIRST_CODE_STOP_SLICE_UNKNOWN",
+      stop.key,
+      stop.line,
+      `first_code_stop_before_slice is not an execution-plan slice: ${stopId}`,
+    );
+    return;
+  }
+  if (stopSlice.index <= firstSlice.index) {
+    add(
+      "FIRST_CODE_STOP_ORDER_INVALID",
+      stop.key,
+      stop.line,
+      "first_code_stop_before_slice must follow first_code_slice in canonical plan order",
+    );
+    return;
+  }
+  const byId = new Map(plan.slices.map((slice) => [slice.slice_id, slice]));
+  const visited = new Set();
+  const reachesFirst = (sliceId) => {
+    if (sliceId === firstId) return true;
+    if (visited.has(sliceId)) return false;
+    visited.add(sliceId);
+    return (byId.get(sliceId)?.depends_on || []).some(reachesFirst);
+  };
+  if (!reachesFirst(stopId)) {
+    add(
+      "FIRST_CODE_STOP_DEPENDENCY_INVALID",
+      stop.key,
+      stop.line,
+      "the stop slice must transitively depend on first_code_slice",
+    );
+  }
+}
+
+function parseContractControls(content) {
+  const parsed = parseFields(content);
+  if (parsed.diagnostics.some((item) => item.severity === "ERROR")) {
+    throw new Error("implementation contract control fields are ambiguous");
+  }
+  const value = (key) => unwrapScalar(parsed.fields.get(key)?.value || "");
+  return {
+    work_type: value("work_type"),
+    first_code: {
+      guard: value("first_code_guard"),
+      not_applicable_reason: value("first_code_not_applicable_reason"),
+      slice_id: value("first_code_slice"),
+      slice_kind: value("first_code_slice_kind"),
+      owner: value("first_code_owner"),
+      verification_check_id: value("first_code_verification"),
+      stop_before_slice_id: value("first_code_stop_before_slice"),
+    },
+    product_ui: {
+      gate: value("product_ui_gate"),
+      not_applicable_reason: value("product_ui_not_applicable_reason"),
+      browser_entrypoint: value("browser_entrypoint"),
+    },
+  };
+}
+
 function validateVersionFive(content, fields, initialDiagnostics, authority, strict) {
-  return validateVersionThree(content, fields, initialDiagnostics, authority, strict);
+  const diagnostics = validateVersionThree(content, fields, initialDiagnostics, authority, strict);
+  validateVNextFirstCodeBinding(content, fields, diagnostics);
+  return diagnostics;
 }
 
 function validateVersionSix(content, fields, initialDiagnostics, authority, strict) {
-  return validateVersionFour(content, fields, initialDiagnostics, authority, strict);
+  const diagnostics = validateVersionFour(content, fields, initialDiagnostics, authority, strict);
+  validateVNextFirstCodeBinding(content, fields, diagnostics);
+  return diagnostics;
 }
 
 function sortDiagnostics(diagnostics) {
@@ -1439,4 +1569,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { validateContractText };
+module.exports = { parseContractControls, validateContractText };

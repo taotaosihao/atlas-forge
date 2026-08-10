@@ -748,6 +748,10 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
     };
   }
   const scope = grant.scope;
+  if (scope.first_code?.status === "required"
+    && authority.first_code?.status !== "satisfied") {
+    reasons.push("first-code acceptance is not satisfied for the current execution grant");
+  }
   let repo = "";
   let plan = null;
   let contractMarkdown = "";
