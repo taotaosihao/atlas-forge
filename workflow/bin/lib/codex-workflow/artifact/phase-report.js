@@ -9,6 +9,7 @@ const { stableFileSnapshot } = require("../core/stable-file");
 const { taskEventFile } = require("../core/task-mutation");
 const { digestCanonical } = require("../verification/identity");
 const { validateRetainedReceipt } = require("../verification/required-gates");
+const { resolveScopeContract } = require("../team/contract-locator");
 const { validateSafeId } = require("./scaffold");
 
 const AC_HEADER = ["ID", "Criterion", "Required", "Verification", "Authority"];
@@ -298,16 +299,23 @@ function buildPhaseReportProjection(taskId, phaseId, options = {}) {
   }
   const scope = grant.scope;
   const repo = fs.realpathSync(scope.repo.realpath);
-  const contractFile = path.resolve(repo, scope.contract.path);
-  const relative = path.relative(repo, contractFile);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new PhaseReportError("execution authority contract is outside its repository");
+  let contractLocator;
+  try {
+    contractLocator = resolveScopeContract({
+      contractPath: scope.contract.path,
+      paths,
+      repo,
+      taskId: scope.task_id,
+    });
+  } catch (error) {
+    throw new PhaseReportError(error.message);
   }
+  const contractFile = contractLocator.file;
   let contractSnapshot;
   try {
     contractSnapshot = stableFileSnapshot(contractFile, "execution authority contract", {
       maximumBytes: 4 * 1024 * 1024,
-      root: repo,
+      root: contractLocator.root,
     });
   } catch (error) {
     throw new PhaseReportError(error.message);

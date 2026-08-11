@@ -4,6 +4,7 @@ const path = require("path");
 const { isDeepStrictEqual } = require("util");
 const { digestCanonical } = require("../verification/identity");
 const { currentGrant } = require("./execution-grant");
+const { TASK_ARTIFACT_PREFIX } = require("./contract-locator");
 const {
   bindAttempt,
   closeDispatch,
@@ -806,6 +807,10 @@ function validateExecutionAdmission(event, admission, grant, slice, previousStat
   ], "Team execution admission snapshot");
   const snapshot = admission.slice_start_snapshot;
   const repo = grant.scope.repo.realpath;
+  const scopeContractPath = grant.scope.contract.path;
+  const contractPathMatches = admission.brief.contract_path === scopeContractPath
+    || (!scopeContractPath.startsWith(TASK_ARTIFACT_PREFIX)
+      && admission.brief.contract_path === path.join(repo, scopeContractPath));
   if (admission.mode !== "execution-vnext"
     || admission.grant_id !== grant.grant_id
     || admission.scope_digest !== grant.scope_digest
@@ -821,7 +826,7 @@ function validateExecutionAdmission(event, admission, grant, slice, previousStat
     || !admission.brief.path.endsWith(`/${slice.brief_path}`)
     || admission.brief.sha256 !== slice.brief_sha256
     || admission.brief.slice_id !== slice.slice_id
-    || admission.brief.contract_path !== path.join(repo, grant.scope.contract.path)
+    || !contractPathMatches
     || admission.brief.contract_sha256 !== grant.scope.contract.sha256
     || admission.brief.execution_plan_schema_version
       !== grant.scope.execution_plan.schema_version
@@ -857,7 +862,7 @@ function validateExecutionAdmission(event, admission, grant, slice, previousStat
         && admission.brief.path.endsWith(`/${slice.brief_path}`),
       brief_sha: admission.brief.sha256 === slice.brief_sha256,
       brief_slice: admission.brief.slice_id === slice.slice_id,
-      contract_path: admission.brief.contract_path === path.join(repo, grant.scope.contract.path),
+      contract_path: contractPathMatches,
       contract_sha: admission.brief.contract_sha256 === grant.scope.contract.sha256,
       plan_version: admission.brief.execution_plan_schema_version
         === grant.scope.execution_plan.schema_version,

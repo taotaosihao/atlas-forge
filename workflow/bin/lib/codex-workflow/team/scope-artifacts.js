@@ -6,6 +6,7 @@ const path = require("path");
 const { CommandError } = require("../core/command-runtime");
 const { taskArtifactDir } = require("../core/paths");
 const { StableFileError, stableFileSnapshot, stableJsonSnapshot } = require("../core/stable-file");
+const { locateRequestedContract } = require("./contract-locator");
 
 const MAX_AUTHORITY_ARTIFACT_BYTES = 4 * 1024 * 1024;
 
@@ -193,7 +194,22 @@ function loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskI
     throw new CommandError(`Team vNext brief is not at its canonical task path: ${expectedSelected}`);
   }
   const { base, repo } = repositoryIdentity(selectedBrief, cwd);
-  const contractSnapshot = snapshotText(selectedBrief.contract.path, "Team vNext contract", { root: repo });
+  let contractLocator;
+  try {
+    contractLocator = locateRequestedContract({
+      paths,
+      repo,
+      requested: selectedBrief.contract.path,
+      taskId,
+    });
+  } catch (error) {
+    throw new CommandError(error.message);
+  }
+  const contractSnapshot = snapshotText(
+    contractLocator.file,
+    "Team vNext contract",
+    { root: contractLocator.root },
+  );
   if (selectedBrief.contract.sha256 !== contractSnapshot.sha256) {
     throw new CommandError("Team vNext contract digest does not match its stable bytes");
   }
@@ -355,7 +371,7 @@ function loadCanonicalScopeArtifacts({ briefPath, cwd, environment, paths, taskI
     artifacts: {
       contract: {
         path: contractSnapshot.path,
-        relativePath: relativeCanonical(repo, contractSnapshot.path, "Team vNext contract"),
+        scopePath: contractLocator.scopePath,
         sha256: contractSnapshot.sha256,
         stat: contractSnapshot.stat,
       },
@@ -404,7 +420,7 @@ function buildCanonicalScope({
     repo: { realpath: loaded.repo, base_sha: loaded.selectedBrief.base_sha },
     objective,
     contract: {
-      path: loaded.artifacts.contract.relativePath,
+      path: loaded.artifacts.contract.scopePath,
       sha256: loaded.artifacts.contract.sha256,
       semantics_version: loaded.semanticsVersion,
       authority_slices: loaded.authorityIdentities,

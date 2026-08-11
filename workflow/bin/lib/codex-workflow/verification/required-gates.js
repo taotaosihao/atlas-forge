@@ -14,6 +14,7 @@ const {
   executionHistoryRequired,
   validateAuthorityEnvelope,
 } = require("../team/execution-grant");
+const { locateRequestedContract, resolveScopeContract } = require("../team/contract-locator");
 const {
   captureVerificationIdentity,
   digestCanonical,
@@ -194,12 +195,24 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}, options = 
       "release verification requires admitted work_type implementation",
     );
   }
-  const contractFile = canonicalFile(brief.contract.path, "admitted implementation contract");
+  const repo = canonicalDirectory(brief.repo, "admitted repository");
+  let contractLocator;
+  try {
+    contractLocator = locateRequestedContract({
+      paths,
+      repo,
+      requested: brief.contract.path,
+      taskId,
+    });
+  } catch (error) {
+    throw new RequiredGateError(error.message);
+  }
+  const contractFile = canonicalFile(contractLocator.file, "admitted implementation contract");
   let contractSnapshot;
   try {
     contractSnapshot = stableFileSnapshot(contractFile, "admitted implementation contract", {
       maximumBytes: 4 * 1024 * 1024,
-      root: brief.repo,
+      root: contractLocator.root,
     });
   } catch (error) {
     throw new RequiredGateError(error.message);
@@ -207,7 +220,6 @@ function admittedExecutionBrief(paths, taskId, state, requested = {}, options = 
   if (contractSnapshot.sha256 !== identity.contract_sha256) {
     throw new RequiredGateError("admitted implementation contract sha256 no longer matches");
   }
-  const repo = canonicalDirectory(brief.repo, "admitted repository");
   if (identity.repo && identity.repo !== repo) {
     throw new RequiredGateError("admitted Team repository identity no longer matches");
   }
@@ -759,17 +771,16 @@ function executionCompletionAdmission(paths, taskId, state, options = {}) {
   try {
     repo = canonicalDirectory(scope.repo.realpath, "execution authority repository");
     if (repo !== scope.repo.realpath) reasons.push("execution authority repository mismatch");
-    const contractFile = canonicalFile(
-      path.resolve(repo, scope.contract.path),
-      "execution authority contract",
-    );
-    const relative = path.relative(repo, contractFile);
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      reasons.push("execution authority contract is outside the admitted repository");
-    }
+    const contractLocator = resolveScopeContract({
+      contractPath: scope.contract.path,
+      paths,
+      repo,
+      taskId: scope.task_id,
+    });
+    const contractFile = canonicalFile(contractLocator.file, "execution authority contract");
     const contractSnapshot = stableFileSnapshot(contractFile, "execution authority contract", {
       maximumBytes: 4 * 1024 * 1024,
-      root: repo,
+      root: contractLocator.root,
     });
     if (contractSnapshot.sha256 !== scope.contract.sha256) {
       reasons.push("execution authority contract sha256 no longer matches");

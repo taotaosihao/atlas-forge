@@ -66,6 +66,21 @@ const {
   ROOT,
   "workflow/bin/lib/codex-workflow/team/authority-commands",
 ));
+const { parseRecordStartArgs } = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/team/args",
+));
+const { runRecordStart } = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/team/commands",
+));
+const {
+  admittedExecutionBrief,
+  executionCompletionAdmission,
+} = require(path.join(
+  ROOT,
+  "workflow/bin/lib/codex-workflow/verification/required-gates",
+));
 
 const V5_DECOY_ENVELOPE = [
   "```text",
@@ -393,6 +408,109 @@ test("semantics v5 passes the same full lint through brief compilation and execu
     "--grant-id=v5-grant",
     "--operation-id=authorize-v5",
   ]), { clock, cwd: repo, environment }), /authority slice identities do not match current stable artifacts/);
+});
+
+test("execution vNext admits a canonical contract in the current task artifact root", (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-vnext-task-contract."));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const environment = {
+    ...process.env,
+    ATLAS_WORKFLOW_PLUGIN_ROOT: PLUGIN_ROOT,
+    CODEX_HOME_ROOT: home,
+    CODEX_WORKFLOW_ROOT: path.join(home, "workflow"),
+  };
+  const clock = () => new Date("2026-08-11T00:00:00Z");
+  const paths = resolvePaths(environment);
+  const taskId = createTask(
+    "vNext task artifact contract admission",
+    "authorize and start one slice from a task artifact contract",
+    { clock, environment },
+  );
+  startTask(taskId, { clock, environment });
+
+  const repo = path.join(home, "repo");
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, ["init", "-q"]);
+  git(repo, ["config", "user.email", "atlas@example.test"]);
+  git(repo, ["config", "user.name", "Atlas Test"]);
+  git(repo, ["commit", "--allow-empty", "-qm", "test: initialize repository"]);
+  const baseSha = git(repo, ["rev-parse", "HEAD"]);
+  const authoritySlice = writeAuthoritySlice(paths, taskId, repo, baseSha);
+  const contractPath = path.join(taskArtifactDir(paths, taskId), "implementation-contract.final.md");
+  fs.writeFileSync(
+    contractPath,
+    fs.readFileSync(CONTRACT_FIXTURE, "utf8").replace(/^task_id: fixture$/m, `task_id: ${taskId}`),
+    "utf8",
+  );
+
+  const compile = spawnSync("node", [
+    BRIEF_BIN,
+    "--task", taskId,
+    "--slice", "slice-vnext",
+    "--repo", repo,
+    "--base", baseSha,
+    "--contract", contractPath,
+    "--authority-slice", authoritySlice,
+  ], { cwd: repo, env: environment, encoding: "utf8" });
+  assert.equal(compile.status, 0, compile.stderr);
+  const briefPath = path.join(
+    taskArtifactDir(paths, taskId),
+    "team/sdd/slices/slice-vnext/brief.json",
+  );
+  const brief = JSON.parse(fs.readFileSync(briefPath, "utf8"));
+  const authorizationRef = "user-message:task-artifact-contract";
+  runAuthorize(parseAuthorizeArgs([
+    taskId,
+    brief.objective,
+    `--authorization-ref=${authorizationRef}`,
+    `--brief=${briefPath}`,
+    "--grant-id=task-artifact-grant",
+    "--operation-id=authorize-task-artifact",
+  ]), { clock, cwd: repo, environment });
+  const currentState = readJsonObject(taskStateFile(paths, taskId));
+  const grant = currentState.execution_authority.grants[0];
+  assert.equal(
+    grant.scope.contract.path,
+    "@workflow-task-artifact/implementation-contract.final.md",
+  );
+
+  const admission = admitTeamStart({
+    authorizationRef,
+    briefPath,
+    clock,
+    cwd: repo,
+    environment,
+    currentState,
+    expectedGrantId: grant.grant_id,
+    expectedScopeDigest: grant.scope_digest,
+    mode: "execute",
+    objective: brief.objective,
+    paths,
+    taskId,
+  });
+  assert.equal(admission.brief.contract_path, grant.scope.contract.path);
+
+  runRecordStart(parseRecordStartArgs([
+    taskId,
+    brief.objective,
+    "--mode=execute",
+    `--brief=${briefPath}`,
+    `--authorization-ref=${authorizationRef}`,
+    `--grant-id=${grant.grant_id}`,
+    `--scope-digest=${grant.scope_digest}`,
+    "--operation-id=start-task-artifact",
+  ]), { clock, cwd: repo, environment });
+  const started = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(started.active_team.admission.brief.contract_path, grant.scope.contract.path);
+  assert.equal(
+    admittedExecutionBrief(paths, taskId, started).contractFile,
+    contractPath,
+  );
+  assert.equal(
+    executionCompletionAdmission(paths, taskId, started, { clock, environment }).reasons
+      .some((reason) => reason.includes("contract")),
+    false,
+  );
 });
 
 test("authorize rejects a digest-correct schema-v4 brief whose v5 contract fails full authoring lint", (t) => {
