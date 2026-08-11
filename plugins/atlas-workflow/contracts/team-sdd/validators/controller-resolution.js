@@ -35,8 +35,9 @@ const RECORD_KEYS = [
 ];
 const GAP_KEYS = ["gap_id", "status", "evidence_refs", "reason"];
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
-const CANONICAL_REQUIREMENTS_PATH = "brief.md";
-const CANONICAL_GLOBAL_CONSTRAINTS_PATH = "../../global-constraints.md";
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const LEGACY_REQUIREMENTS_PATH = "brief.md";
+const LEGACY_GLOBAL_CONSTRAINTS_PATH = "../../global-constraints.md";
 const SAFETY_INVARIANTS = new Set([
   "invariant:safety",
   "invariant:data-integrity",
@@ -109,9 +110,79 @@ function digestFile(file) {
   return sha256(fs.readFileSync(file));
 }
 
+function canonicalRequirementsPath(brief) {
+  if (brief.schema_version !== 4) return LEGACY_REQUIREMENTS_PATH;
+  if (!SAFE_ID_PATTERN.test(brief.task_id || "") || !SAFE_ID_PATTERN.test(brief.slice_id || "")) {
+    throw new Error("schema-v4 requirements identity must use safe task_id and slice_id values");
+  }
+  return `team/sdd/slices/${brief.slice_id}/brief.md`;
+}
+
+function canonicalGlobalConstraintsPath(brief) {
+  return brief.schema_version === 4
+    ? "team/sdd/global-constraints.md"
+    : LEGACY_GLOBAL_CONSTRAINTS_PATH;
+}
+
+function statIdentity(stat) {
+  return [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+}
+
+function requireCanonicalDirectory(directory, label) {
+  const resolved = path.resolve(directory);
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(resolved) !== resolved) {
+    throw new Error(`${label} must be a canonical non-symlink directory`);
+  }
+  return resolved;
+}
+
+function stableCanonicalFileDigest(file, label) {
+  const resolved = path.resolve(file);
+  const linkBefore = fs.lstatSync(resolved);
+  if (!linkBefore.isFile() || linkBefore.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular non-symlink file`);
+  }
+  if (fs.realpathSync(resolved) !== resolved) {
+    throw new Error(`${label} must be a canonical regular non-symlink file`);
+  }
+
+  const flags = fs.constants.O_RDONLY
+    | (fs.constants.O_NOFOLLOW || 0)
+    | (fs.constants.O_NONBLOCK || 0);
+  const descriptor = fs.openSync(resolved, flags);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile() || statIdentity(before) !== statIdentity(linkBefore)) {
+      throw new Error(`${label} changed or is not a regular non-symlink file`);
+    }
+    const buffer = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const count = fs.readSync(descriptor, buffer, offset, buffer.length - offset, offset);
+      if (count === 0) throw new Error(`${label} changed while being read`);
+      offset += count;
+    }
+    const after = fs.fstatSync(descriptor);
+    const linkAfter = fs.lstatSync(resolved);
+    if (
+      statIdentity(before) !== statIdentity(after)
+      || statIdentity(after) !== statIdentity(linkAfter)
+      || linkAfter.isSymbolicLink()
+      || fs.realpathSync(resolved) !== resolved
+    ) {
+      throw new Error(`${label} changed or is not a canonical regular non-symlink file`);
+    }
+    return sha256(buffer);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 function computeGoalRefFromInputs(brief, { requirementsDigest, contractDigest = null }) {
-  if (brief.requirements_path !== CANONICAL_REQUIREMENTS_PATH) {
-    throw new Error(`requirements_path must be canonical: ${CANONICAL_REQUIREMENTS_PATH}`);
+  const expectedRequirementsPath = canonicalRequirementsPath(brief);
+  if (brief.requirements_path !== expectedRequirementsPath) {
+    throw new Error(`requirements_path must be canonical: ${expectedRequirementsPath}`);
   }
   const acceptanceRefs = [...brief.acceptance_refs]
     .map((item) => item.trim())
@@ -127,21 +198,48 @@ function computeGoalRefFromInputs(brief, { requirementsDigest, contractDigest = 
 }
 
 function computeGoalRef(brief, sliceDir) {
-  const requirementsFile = path.join(sliceDir, CANONICAL_REQUIREMENTS_PATH);
-  const requirementsStat = fs.lstatSync(requirementsFile);
-  if (!requirementsStat.isFile() || requirementsStat.isSymbolicLink()) {
-    throw new Error("canonical requirements file must be a regular non-symlink file");
+  if (typeof sliceDir !== "string" || !path.isAbsolute(sliceDir)) {
+    throw new Error("sliceDir must be an absolute path");
   }
-  const requirementsRealPath = fs.realpathSync(requirementsFile);
-  const relativeToSlice = path.relative(sliceDir, requirementsRealPath);
-  if (
-    requirementsRealPath !== requirementsFile
-    || relativeToSlice.startsWith("..")
-    || path.isAbsolute(relativeToSlice)
-  ) {
-    throw new Error("canonical requirements file must remain inside the current slice");
+  const resolvedSliceDir = path.resolve(sliceDir);
+  const expectedRequirementsPath = canonicalRequirementsPath(brief);
+  if (brief.requirements_path !== expectedRequirementsPath) {
+    throw new Error(`requirements_path must be canonical: ${expectedRequirementsPath}`);
   }
-  const evidenceManifestFile = path.join(sliceDir, "evidence-manifest.json");
+
+  let requirementsFile;
+  if (brief.schema_version === 4) {
+    requireCanonicalDirectory(resolvedSliceDir, "schema-v4 slice directory");
+    const taskArtifactRoot = requireCanonicalDirectory(
+      path.resolve(resolvedSliceDir, "../../../.."),
+      "schema-v4 task artifact root",
+    );
+    if (path.basename(taskArtifactRoot) !== brief.task_id) {
+      throw new Error("schema-v4 task artifact root must match brief.task_id");
+    }
+    const expectedSliceDir = path.join(
+      taskArtifactRoot,
+      "team",
+      "sdd",
+      "slices",
+      brief.slice_id,
+    );
+    if (resolvedSliceDir !== expectedSliceDir) {
+      throw new Error("schema-v4 slice directory must match brief.slice_id inside the current task artifact root");
+    }
+    requirementsFile = path.resolve(taskArtifactRoot, brief.requirements_path);
+    const relativeToTask = path.relative(taskArtifactRoot, requirementsFile);
+    if (
+      relativeToTask.startsWith("..")
+      || path.isAbsolute(relativeToTask)
+      || requirementsFile !== path.join(resolvedSliceDir, LEGACY_REQUIREMENTS_PATH)
+    ) {
+      throw new Error("schema-v4 requirements file must be the canonical brief.md for the current task and slice");
+    }
+  } else {
+    requirementsFile = path.join(resolvedSliceDir, LEGACY_REQUIREMENTS_PATH);
+  }
+  const evidenceManifestFile = path.join(resolvedSliceDir, "evidence-manifest.json");
   let contractDigest = null;
   if (fs.existsSync(evidenceManifestFile)) {
     const manifest = JSON.parse(fs.readFileSync(evidenceManifestFile, "utf8"));
@@ -150,7 +248,7 @@ function computeGoalRef(brief, sliceDir) {
       : null;
   }
   return computeGoalRefFromInputs(brief, {
-    requirementsDigest: digestFile(requirementsFile),
+    requirementsDigest: stableCanonicalFileDigest(requirementsFile, "canonical requirements file"),
     contractDigest,
   });
 }
@@ -336,8 +434,9 @@ function validateAuthority(record, index, verdict, brief, context, errors) {
     if (isPlaceholderReason(record.reason)) {
       errors.push(`${label} safety-data-permission-risk requires a substantive causal reason`);
     }
-    if (brief.global_constraints_path !== CANONICAL_GLOBAL_CONSTRAINTS_PATH) {
-      errors.push(`${label} safety-data-permission-risk requires canonical global_constraints_path ${CANONICAL_GLOBAL_CONSTRAINTS_PATH}`);
+    const expectedGlobalConstraintsPath = canonicalGlobalConstraintsPath(brief);
+    if (brief.global_constraints_path !== expectedGlobalConstraintsPath) {
+      errors.push(`${label} safety-data-permission-risk requires canonical global_constraints_path ${expectedGlobalConstraintsPath}`);
     }
     if (Object.hasOwn(context, "globalConstraintsDigest")) {
       if (context.globalConstraintsDigest === null) {
@@ -351,8 +450,17 @@ function validateAuthority(record, index, verdict, brief, context, errors) {
       return;
     }
     const sliceDir = context.sliceDir;
-    const taskSddRoot = sliceDir ? path.resolve(sliceDir, "../..") : null;
-    const constraintsPath = taskSddRoot
+    const taskArtifactRoot = sliceDir && brief.schema_version === 4
+      ? path.resolve(sliceDir, "../../../..")
+      : null;
+    const taskSddRoot = sliceDir
+      ? path.resolve(sliceDir, "../..")
+      : null;
+    const constraintsRoot = brief.schema_version === 4 ? taskArtifactRoot : sliceDir;
+    const constraintsPath = constraintsRoot
+      ? path.resolve(constraintsRoot, expectedGlobalConstraintsPath)
+      : null;
+    const expectedConstraintsPath = taskSddRoot
       ? path.join(taskSddRoot, "global-constraints.md")
       : null;
     let constraintsStat = null;
@@ -367,15 +475,20 @@ function validateAuthority(record, index, verdict, brief, context, errors) {
       const constraintsRealPath = fs.realpathSync(constraintsPath);
       const relativeToSddRoot = path.relative(taskSddRoot, constraintsRealPath);
       if (
-        constraintsRealPath !== constraintsPath
+        constraintsPath !== expectedConstraintsPath
+        || constraintsRealPath !== constraintsPath
         || relativeToSddRoot.startsWith("..")
         || path.isAbsolute(relativeToSddRoot)
       ) {
         errors.push(`${label} safety-data-permission-risk requires canonical constraints realpath inside the task SDD root`);
       } else {
-        const constraintsRef = `constraints-sha256:${digestFile(constraintsPath)}`;
-        if (!refs.has(constraintsRef)) {
-          errors.push(`${label} safety-data-permission-risk requires ${constraintsRef}`);
+        try {
+          const constraintsRef = `constraints-sha256:${stableCanonicalFileDigest(constraintsPath, "global constraints file")}`;
+          if (!refs.has(constraintsRef)) {
+            errors.push(`${label} safety-data-permission-risk requires ${constraintsRef}`);
+          }
+        } catch (error) {
+          errors.push(`${label} safety-data-permission-risk requires stable global constraints: ${error.message}`);
         }
       }
     }
