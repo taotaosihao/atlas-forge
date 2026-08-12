@@ -89,6 +89,16 @@ quality into workflow state, or changes the lane's goal, paths, authority, or
 acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
 relies on a global default subagent model.
 
+Native Atlas custom-agent profiles intentionally leave `model`,
+`model_reasoning_effort`, and `model_provider` unset. Codex gives values pinned in
+a custom-agent file precedence over explicit spawn values, which would otherwise
+silently disable either Saving mode or all-Sol Quality mode. The model-policy
+checker resolves the Saving matrix from the current catalog and fails when a
+native profile pins any of those routing fields; each admitted native dispatch
+must supply its exact matrix values explicitly. Run
+`atlas-agent-model-policy check --mode quality` before an all-Sol dispatch to
+validate the Sol role matrix and its reasoning levels against that same catalog.
+
 The root-session provider is also unchanged. Atlas routes a selected DeepSeek
 Flash alternative through Paseo's direct `deepseek` provider with model
 `deepseek-v4-flash:deepseek` and thinking `max`; Team never sends that model

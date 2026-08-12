@@ -1,7 +1,5 @@
 name = "atlas-sdd-verifier"
 description = "Atlas SDD verifier for read-only command and evidence verification. Use to check required gates and report evidence without writing artifacts."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "high"
 nickname_candidates = ["SDD Verifier", "Atlas Verifier", "Gate Verifier"]
 
 developer_instructions = """

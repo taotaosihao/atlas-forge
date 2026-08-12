@@ -195,6 +195,7 @@ Before the first native fan-out, inspect the model-visible `spawn_agent` schema 
 - If any required field is absent, classify the native surface as `schema-restricted`, do not start a generic or inherited child, disclose that exact routing is unavailable, and continue main-only.
 - If the tool returns a reserved-schema mismatch such as `Function '...' is reserved for use by this model and must match the configured schema`, stop new fan-out and return the exact error plus the version-sensitive MultiAgentV2 remediation to the user. Do not mutate user config or restart a runtime unless the current request explicitly authorizes those operations.
 - `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
+- Native Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`. OpenAI custom-agent files take precedence over explicit spawn values, so pinning any of those fields would silently defeat either the default-saving or all-Sol quality matrix. Every native dispatch therefore supplies the exact model and reasoning values explicitly.
 - Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
 - A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
 - Native child creation or provider metadata alone does not prove usable routing. Admission requires the child to receive the task-specific acceptance input and complete the task's meaningful tool/check loop under the expected read-only or writable authority.
@@ -207,7 +208,7 @@ Before the first exact Atlas dispatch, run:
 workflow/bin/atlas-agent-model-policy check
 ```
 
-This check validates the checked-in default-saving policy/profile projection. It does not prove billing or inference metadata. In default saving mode, the resolved profile and the explicit dispatch values must agree on model and reasoning effort.
+This check validates the checked-in default-saving dispatch policy and requires every native profile to remain model/provider-unpinned. It does not prove billing or inference metadata. In default saving mode, the resolved policy and explicit dispatch values must agree on model and reasoning effort.
 
 ### Default Saving Mode
 
@@ -215,13 +216,13 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `medium` | `none` |
+| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `high` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
-| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `high` | `none` |
+| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `max` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
-| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `high` | `none` |
-| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `medium` | `none` |
+| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `xhigh` | `none` |
+| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `max` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
@@ -243,7 +244,7 @@ The native `atlas-sdd-explorer` and the Paseo DeepSeek Flash attempt are alterna
 
 - For a single exploration dispatch, honor an exact user-selected candidate when it is currently available. Otherwise use Luna by default; choose DeepSeek Flash only when a current availability preflight passed and the lane explicitly values a non-OpenAI perspective. Do not use catalog order, price, an inferred slug, or a prior successful text reply as the selector.
 - DeepSeek Flash is currently available only when the Atlas-specific Paseo preference resolves to `deepseek/deepseek-v4-flash:deepseek`, the live direct provider is available, its model capability contains `deepseek-v4-flash:deepseek` with `max`, and the assigned Paseo agent completes the task's meaningful tool/check loop. Do not substitute the generic `zenmux` provider or a native Codex custom profile. A plain completion proves inference only.
-- Luna availability likewise requires profile discovery and host admission of the exact `atlas-sdd-explorer` / `gpt-5.6-luna` / `medium` route. Do not infer availability solely from the parent model or catalog presence.
+- Luna availability likewise requires profile discovery and host admission of the exact `atlas-sdd-explorer` / `gpt-5.6-luna` / `max` route. Do not infer availability solely from the parent model or catalog presence.
 - Dispatch both candidates only when the user explicitly requests both perspectives or independent cross-validation materially reduces a concrete risk. This is a per-lane decision, never a default fan-out. Start both from the same self-contained packet and keep their results independent until both first-round reports are complete.
 - The main Codex compares evidence, identifies agreement and material disagreement, verifies disputed facts when feasible, and makes the final synthesis. Do not decide by majority, silently merge incompatible claims, or let one agent broaden the other's authority.
 - If one candidate fails before producing useful evidence because its provider, model, auth, catalog, schema, quota, or tool loop is unavailable, disclose the failed layer. A single-candidate lane may retry the same packet once on the other currently available candidate; a requested dual-perspective lane reports the lost perspective rather than pretending fallback preserved independent cross-validation. Useful but conflicting output is not an availability failure and must be synthesized as disagreement.
@@ -255,19 +256,21 @@ Use the Sol phase-reviewer only for a completed phase/final integration result w
 
 Enter quality mode only when the user explicitly requests quality mode, all-Sol routing, or an equivalent higher-quality routing choice for the current Team or named lanes. Do not infer it from task difficulty, a failed check, reviewer disagreement, or available budget, and never automatically enable quality mode. The explicit choice does not persist into later tasks.
 
+Before the first quality-mode dispatch, run `workflow/bin/atlas-agent-model-policy check --mode quality` against the same current catalog and unpinned native profiles.
+
 In quality mode, keep the same `agent_type`, `fork_turns="none"`, staffing rules, and self-contained dispatch packet, but use the following model and supported reasoning values as explicit per-spawn overrides:
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
 | Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `max` | `none` |
 | Implementation | `atlas-sdd-implementer` | `gpt-5.6-sol` | `medium` | `none` |
-| Review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `max` | `none` |
-| Verification | `atlas-sdd-verifier` | `gpt-5.6-sol` | `high` | `none` |
-| Phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
-| Browser or visual verification | `atlas-sdd-browser-verifier` | `gpt-5.6-sol` | `high` | `none` |
-| Exploration | `atlas-sdd-explorer` | `gpt-5.6-sol` | `medium` | `none` |
+| Review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `xhigh` | `none` |
+| Verification | `atlas-sdd-verifier` | `gpt-5.6-sol` | `medium` | `none` |
+| Phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `xhigh` | `none` |
+| Browser or visual verification | `atlas-sdd-browser-verifier` | `gpt-5.6-sol` | `medium` | `none` |
+| Exploration | `atlas-sdd-explorer` | `gpt-5.6-sol` | `high` | `none` |
 
-The model difference between the default saving profiles and this table is an intentional, user-authorized override. Outside that explicit override, if the profile, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
+The model difference between the default saving policy and this table is an intentional, user-authorized override. Outside that explicit override, if the dispatch, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
 
 Visible runtime metadata is optional disclosure, not a daily audit gate. When the tool or UI does not expose trustworthy model evidence, state that billing-level model verification was not performed; do not claim the billing model is verified and do not add persistent runtime-log parsing solely for this workflow. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to main-only. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
 

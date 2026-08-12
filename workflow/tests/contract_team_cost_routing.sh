@@ -116,16 +116,16 @@ assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine im
 assert_has "$TEAM" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
 assert_has "$TEAM" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
 assert_has "$TEAM" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*high.*none' 'routine review defaults to Terra high'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*max.*none' 'routine review defaults to Terra max'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
-assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*medium.*none' 'planning defaults to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'planning defaults to Sol high'
 
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
 assert_has "$TEAM" 'mechanical or environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
-assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*high.*none' 'browser-heavy work defaults to Luna high'
-assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*medium.*none' 'exploration defaults to Luna medium'
+assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*xhigh.*none' 'browser-heavy work defaults to Luna xhigh'
+assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*max.*none' 'exploration defaults to Luna max'
 assert_has "$TEAM" 'Atlas always selects Paseo thinking `max`' 'DeepSeek Flash Paseo route uses max explicitly'
 assert_has "$TEAM" 'official `low` / `high` / `max` capability set' 'DeepSeek catalog follows the official effort set'
 assert_has "$TEAM" 'same logical read-only exploration role' 'Luna and DeepSeek preserve one logical responsibility'
@@ -135,6 +135,7 @@ assert_has "$TEAM" 'same self-contained packet' 'dual cross-check uses identical
 assert_has "$TEAM" 'main Codex compares evidence' 'controller synthesizes model disagreement'
 assert_has "$TEAM" 'cannot bypass the host/model allowlist' 'catalog cannot bypass host admission'
 assert_has "$TEAM" 'atlas-team-model-catalog' 'Team documents the allowlist catalog projection'
+assert_has "$TEAM" 'profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`' 'native profiles cannot shadow explicit routing'
 assert_lacks "$TEAM" '\| Routine implementation \(ZenMux alternative\)' 'DeepSeek is absent from the native spawn matrix'
 assert_lacks "$TEAM" '\| Read-heavy exploration \(ZenMux alternative\)' 'DeepSeek exploration is absent from the native spawn matrix'
 assert_has "$AGENTS/atlas-sdd-explorer.toml" 'sandbox_mode = "read-only"' 'Luna explorer has an explicit read-only sandbox'
@@ -153,9 +154,13 @@ assert_has "$TEAM" 'Explicit Quality Mode' 'quality mode is separately defined'
 assert_has "$TEAM" 'explicitly requests.*quality mode' 'quality mode requires an explicit user request'
 assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'quality implementation routes to Sol medium'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*max.*none' 'quality review routes to Sol max'
-assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*high.*none' 'quality verification routes to Sol high'
+assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality review routes to Sol xhigh'
+assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*medium.*none' 'quality verification routes to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality phase review routes to Sol xhigh'
+assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-sol.*medium.*none' 'quality browser verification routes to Sol medium'
+assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-sol.*high.*none' 'quality exploration routes to Sol high'
 assert_has "$TEAM" 'never automatically enable quality mode' 'quality mode is never activated automatically'
+assert_has "$TEAM" 'atlas-agent-model-policy check --mode quality' 'quality mode validates the all-Sol dispatch matrix'
 assert_has "$TEAM" 'staffing_mode' 'staffing is an independent decision'
 assert_has "$TEAM" 'model_policy' 'model policy is an independent decision'
 assert_has "$TEAM" 'release_mode' 'release mode is an independent decision'
@@ -165,8 +170,8 @@ assert_has "$TEAM" 'does not rewrite the root host model' 'Atlas does not rewrit
 assert_has "$TEAM" 'Saving/quality selection' 'saving and quality are not persisted'
 assert_has "$TEAM" 'Main-only single writers' 'single writers do not require a lease'
 assert_has "$TEAM" 'does not require a lease by default' 'isolated product increment writer has no default lease'
-assert_has "$TEAM" 'does not enter execution-v3 or acquire a durable' 'quick writer avoids durable execution-v3 attempt'
-assert_has "$TEAM" 'Formal `product_release` execution continues to use the existing execution-v3' 'strict release lease remains'
+assert_has "$TEAM" 'does not enter execution-vnext or acquire a durable' 'quick writer avoids durable execution-vnext attempt'
+assert_has "$TEAM" 'Formal `product_release` execution continues to use the existing execution-vnext' 'strict release lease remains'
 assert_has "$README" 'Staffing, Team, path lease, model choice, and release mode are independent' 'README keeps decisions orthogonal'
 assert_has "$README" 'root host model' 'README protects host model'
 assert_has "$AGENTS/atlas-sdd-browser-verifier.toml" 'would benefit from extra judgment, recommend routing' 'final Sol browser review remains conditional'
@@ -182,7 +187,7 @@ assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'atlas-native-agent-inb
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek explorer cannot scan other role packets'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek implementer cannot scan other role packets'
 assert_has "$TEAM" '`task_name`.*does not select' 'task name is not treated as a custom-agent selector'
-assert_has "$TEAM" 'Outside that explicit override.*mismatch.*do not spawn' 'unexpected profile and dispatch mismatch blocks spawn'
+assert_has "$TEAM" 'Outside that explicit override.*mismatch.*do not spawn' 'unexpected dispatch and policy mismatch blocks spawn'
 assert_lacks "$TEAM" 'reasonable available fallback and disclose it' 'unavailable exact profile cannot use a generic fallback'
 assert_lacks "$TEAM" 'default_subagent_model' 'team does not require a global default subagent model'
 assert_lacks "$TEAM" 'session JSONL' 'team does not require strict session-log auditing'
@@ -192,5 +197,11 @@ assert_has "$TEAM" 'fall back to main-only' 'confirmed cost anomaly has a determ
 
 assert_has "$AGENTS/atlas-sdd-implementer.toml" 'Do not force a dedicated commit for every slice' 'implementer follows moderate commit boundaries'
 assert_lacks "$AGENTS/atlas-sdd-implementer.toml" 'create a dedicated git commit before reporting' 'per-slice commit requirement'
+
+for native_role in planner implementer reviewer verifier phase-reviewer browser-verifier explorer; do
+  assert_lacks "$AGENTS/atlas-sdd-$native_role.toml" '^model\s*=' "$native_role leaves model selection to explicit dispatch"
+  assert_lacks "$AGENTS/atlas-sdd-$native_role.toml" '^model_reasoning_effort\s*=' "$native_role leaves reasoning selection to explicit dispatch"
+  assert_lacks "$AGENTS/atlas-sdd-$native_role.toml" '^model_provider\s*=' "$native_role leaves provider selection to explicit dispatch"
+done
 
 printf 'contract_team_cost_routing: ok\n'

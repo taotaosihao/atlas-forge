@@ -1,7 +1,5 @@
 name = "atlas-sdd-phase-reviewer"
 description = "Atlas SDD phase reviewer for phase boundaries, final integration gates, and explicitly requested Sol review."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "medium"
 nickname_candidates = ["Phase Reviewer", "Atlas Phase Reviewer", "Integration Reviewer"]
 
 developer_instructions = """

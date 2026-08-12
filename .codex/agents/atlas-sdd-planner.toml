@@ -1,7 +1,5 @@
 name = "atlas-sdd-planner"
 description = "Atlas SDD planner for implementation plans, slice boundaries, risks, and acceptance gates before execution."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "medium"
 nickname_candidates = ["SDD Planner", "Atlas Planner", "Plan Architect"]
 
 developer_instructions = """

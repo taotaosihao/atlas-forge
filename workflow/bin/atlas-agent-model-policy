@@ -18,16 +18,17 @@ function readJson(file, label) {
 }
 
 function parseArgs(argv) {
-  const args = { command: 'check' };
+  const args = { command: 'check', mode: 'saving' };
   if (argv[0] && !argv[0].startsWith('--')) args.command = argv.shift();
   while (argv.length) {
     const flag = argv.shift();
-    if (!['--catalog', '--policy', '--agents-dir'].includes(flag) || !argv.length) {
+    if (!['--catalog', '--policy', '--agents-dir', '--mode'].includes(flag) || !argv.length) {
       fail(`invalid argument ${flag}`);
     }
     args[flag.slice(2).replace('-', '_')] = argv.shift();
   }
   if (!['check', 'resolve'].includes(args.command)) fail(`unknown command ${args.command}`);
+  if (!['saving', 'quality'].includes(args.mode)) fail(`unknown mode ${args.mode}`);
   return args;
 }
 
@@ -35,7 +36,7 @@ function compareFamily(a, b) {
   return a.major - b.major || a.minor - b.minor;
 }
 
-function resolvePolicy(catalog, policy) {
+function resolvePolicy(catalog, policy, mode) {
   const familyPattern = new RegExp(policy.family.slug_pattern);
   const models = (catalog.models || []).flatMap((model) => {
     const match = familyPattern.exec(model.slug || '');
@@ -57,8 +58,10 @@ function resolvePolicy(catalog, policy) {
     capabilityModels[capability] = matches[0];
   }
 
+  const rolePolicy = mode === 'quality' ? policy.quality_roles : policy.roles;
+  if (!rolePolicy || typeof rolePolicy !== 'object') fail(`policy lacks ${mode} roles`);
   const roles = {};
-  for (const [role, profile] of Object.entries(policy.roles)) {
+  for (const [role, profile] of Object.entries(rolePolicy)) {
     const model = capabilityModels[profile.capability];
     if (!model) fail(`role ${role} references unknown capability ${profile.capability}`);
     const efforts = (model.supported_reasoning_levels || []).map((entry) => entry.effort);
@@ -69,6 +72,7 @@ function resolvePolicy(catalog, policy) {
   }
   return {
     family: `${latestFamily.major}.${latestFamily.minor}`,
+    mode,
     capabilities: Object.fromEntries(
       Object.entries(capabilityModels).map(([capability, model]) => [capability, model.slug]),
     ),
@@ -93,21 +97,6 @@ function readAgent(file) {
   };
 }
 
-function modelAlias(model) {
-  return String(model || '').split('-').at(-1).toLowerCase();
-}
-
-function escapeExpression(value) {
-  return value.replace(/[|\\{}()[\]^$+*?.-]/g, '\\$&');
-}
-
-function contradictoryAliases(source, expectedModel, capabilityModels) {
-  const expected = modelAlias(expectedModel);
-  return [...new Set(Object.values(capabilityModels).map(modelAlias))]
-    .filter((alias) => alias && alias !== expected)
-    .filter((alias) => new RegExp(`\\b${escapeExpression(alias)}\\b`, 'i').test(source));
-}
-
 const args = parseArgs(process.argv.slice(2));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const managedAgentsDir = fs.existsSync(path.join(repoRoot, '.codex', 'agents'))
@@ -117,7 +106,7 @@ const catalogFile = path.resolve(args.catalog || path.join(os.homedir(), '.codex
 const policyFile = path.resolve(args.policy || path.join(managedAgentsDir, 'model-policy.json'));
 const agentsDir = path.resolve(args.agents_dir || managedAgentsDir);
 const policy = readJson(policyFile, 'policy');
-const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy);
+const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy, args.mode);
 
 if (args.command === 'resolve') {
   const { capabilities: _capabilities, ...publicResolved } = resolved;
@@ -125,7 +114,7 @@ if (args.command === 'resolve') {
   process.exit(0);
 }
 
-for (const [role, expected] of Object.entries(resolved.roles)) {
+for (const role of Object.keys(resolved.roles)) {
   const file = path.join(agentsDir, `${role}.toml`);
   let actual;
   try {
@@ -133,12 +122,13 @@ for (const [role, expected] of Object.entries(resolved.roles)) {
   } catch (error) {
     fail(`cannot read agent ${file}: ${error.message}`);
   }
-  if (actual.model !== expected.model || actual.model_reasoning_effort !== expected.model_reasoning_effort) {
-    fail(`${role} is stale: expected ${expected.model}/${expected.model_reasoning_effort}, found ${actual.model || 'missing'}/${actual.model_reasoning_effort || 'missing'}`);
-  }
-  const contradictions = contradictoryAliases(actual.source, expected.model, resolved.capabilities);
-  if (contradictions.length > 0) {
-    fail(`${role} prose contradicts ${expected.model}: found alternate model aliases ${contradictions.join(', ')}`);
+  const pinned = [
+    ['model', actual.model],
+    ['model_reasoning_effort', actual.model_reasoning_effort],
+    ['model_provider', actual.model_provider],
+  ].filter(([, value]) => value !== undefined);
+  if (pinned.length > 0) {
+    fail(`${role} must leave native routing to explicit dispatch values; remove ${pinned.map(([key]) => key).join(', ')}`);
   }
 }
 
@@ -174,4 +164,4 @@ for (const [role, expected] of Object.entries(equivalentRoles)) {
 }
 
 const roleCount = Object.keys(resolved.roles).length + Object.keys(equivalentRoles).length;
-process.stdout.write(`atlas-agent-model-policy: ok family=${resolved.family} roles=${roleCount}\n`);
+process.stdout.write(`atlas-agent-model-policy: ok family=${resolved.family} mode=${resolved.mode} roles=${roleCount}\n`);
