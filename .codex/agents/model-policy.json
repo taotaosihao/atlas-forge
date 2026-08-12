@@ -30,13 +30,13 @@
   "equivalent_roles": {
     "atlas-sdd-implementer-deepseek": {
       "equivalent_to": "atlas-sdd-implementer",
-      "model": "deepseek-v4-flash:deepseek",
+      "model": "deepseek-v4-pro:deepseek",
       "reasoning_effort": "max",
       "model_provider": "zenmux"
     },
     "atlas-sdd-explorer-deepseek": {
       "equivalent_to": "atlas-sdd-explorer",
-      "model": "deepseek-v4-flash:deepseek",
+      "model": "deepseek-v4-pro:deepseek",
       "reasoning_effort": "max",
       "model_provider": "zenmux",
       "sandbox_mode": "read-only"

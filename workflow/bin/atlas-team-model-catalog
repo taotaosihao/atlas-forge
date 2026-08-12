@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const LUNA_MODEL = 'gpt-5.6-luna';
-const DEEPSEEK_MODEL = 'deepseek-v4-flash:deepseek';
+const DEEPSEEK_MODEL = 'deepseek-v4-pro:deepseek';
 
 function fail(message) {
   process.stderr.write(`atlas-team-model-catalog: ${message}\n`);
@@ -56,7 +56,7 @@ function validateDeepSeekEffort(model) {
   const unique = [...new Set(efforts)].sort();
   const expected = ['high', 'low', 'max'];
   if (efforts.length !== expected.length || JSON.stringify(unique) !== JSON.stringify(expected)) {
-    fail(`${DEEPSEEK_MODEL} must declare the official low/high/max reasoning efforts exactly once`);
+    fail(`${DEEPSEEK_MODEL} must declare the configured low/high/max reasoning efforts exactly once`);
   }
   if (model.default_reasoning_level !== 'max') {
     fail(`${DEEPSEEK_MODEL} default_reasoning_level must be max`);

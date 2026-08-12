@@ -27,11 +27,11 @@ make_agents() {
   printf 'developer_instructions = """phase reviewer"""\n' > "$dir/atlas-sdd-phase-reviewer.toml"
   printf 'developer_instructions = """planner"""\n' > "$dir/atlas-sdd-planner.toml"
   printf 'developer_instructions = """same writable implementer"""\n' > "$dir/atlas-sdd-implementer.toml"
-  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = """same writable implementer"""\n' > "$dir/atlas-sdd-implementer-deepseek.toml"
+  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "max"\ndeveloper_instructions = """same writable implementer"""\n' > "$dir/atlas-sdd-implementer-deepseek.toml"
   printf 'developer_instructions = """verifier"""\n' > "$dir/atlas-sdd-verifier.toml"
   printf 'developer_instructions = """browser verifier"""\n' > "$dir/atlas-sdd-browser-verifier.toml"
   printf 'sandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' > "$dir/atlas-sdd-explorer.toml"
-  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "max"\nsandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' > "$dir/atlas-sdd-explorer-deepseek.toml"
+  printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "max"\nsandbox_mode = "read-only"\ndeveloper_instructions = """same read-only explorer"""\n' > "$dir/atlas-sdd-explorer-deepseek.toml"
 }
 
 make_catalog "$TMP_ROOT/5.6.json" 5.6
@@ -79,7 +79,7 @@ if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
 fi
 
 cp -R "$TMP_ROOT/agents" "$TMP_ROOT/agents-divergent-equivalent"
-printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-flash:deepseek"\nmodel_reasoning_effort = "medium"\nsandbox_mode = "read-only"\ndeveloper_instructions = """different role"""\n' \
+printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "medium"\nsandbox_mode = "read-only"\ndeveloper_instructions = """different role"""\n' \
   > "$TMP_ROOT/agents-divergent-equivalent/atlas-sdd-explorer-deepseek.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
   --catalog "$TMP_ROOT/5.6.json" \

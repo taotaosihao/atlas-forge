@@ -114,7 +114,7 @@ child_count = min(ready_independent_clusters, host_available_child_slots, 3)
 ## 7. 模型与 backend 不变量
 
 - native roles 继续使用当前 checked-in saving matrix，并显式设置 `fork_turns="none"`。
-- DeepSeek Flash implementation/exploration 使用 provider-bound `atlas-sdd-implementer-deepseek` / `atlas-sdd-explorer-deepseek` 原生 profile、`deepseek-v4-flash:deepseek` 和 reasoning `max`；通过 native `spawn_agent` 派发。
+- DeepSeek V4 Pro implementation/exploration 使用 provider-bound `atlas-sdd-implementer-deepseek` / `atlas-sdd-explorer-deepseek` 原生 profile、`deepseek-v4-pro:deepseek` 和 reasoning `max`；通过 native `spawn_agent` 派发。
 - Paseo 继续要求用户或 operator 的范围化显式选择，不读取 orchestration preferences 代替 controller 决策。
 - quality mode 仅在用户明确要求时启用，不因并行默认自动切换全 Sol。
 - schema-restricted、profile mismatch、reserved schema mismatch 和 confirmed cost anomaly 继续 fail closed；不能用 generic/inherited child 补位。

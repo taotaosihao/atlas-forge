@@ -1,6 +1,6 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260812161313",
+  "version": "0.1.0+codex.20260812163012",
   "description": "Atlas workflow plugin for bounded local Codex work with Codex-native team coordination and explicit Paseo lanes.",
   "author": {
     "name": "Local Atlas",

@@ -247,10 +247,10 @@ atlas-team-model-catalog
 
 The helper preserves the official catalog, promotes only the exact Luna entry
 to v2 when necessary, and appends the isolated native DeepSeek catalog entry
-`deepseek-v4-flash:deepseek` as v2. It writes
+`deepseek-v4-pro:deepseek` as v2. It writes
 `~/.codex/model-catalogs/atlas-team.json` atomically with mode 600 and never
 modifies `models_cache.json`. The user-level `model_catalog_json` must point to
-that output. The isolated entry must declare the official `low`, `high`, and
+that output. The isolated entry must declare the configured `low`, `high`, and
 `max` efforts exactly once and set `default_reasoning_level` to `max`.
 Regenerate it whenever either input catalog changes. Catalog
 metadata remains subject to the host's model allowlist, entitlement, and tool

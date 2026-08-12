@@ -101,7 +101,7 @@ dispatch must supply its exact matrix values explicitly. Run
 `atlas-agent-model-policy check --mode quality` before an all-Sol dispatch to
 validate the Sol role matrix and its reasoning levels against that same catalog.
 
-The root-session provider is also unchanged. DeepSeek Flash is a child-local
+The root-session provider is also unchanged. DeepSeek V4 Pro is a child-local
 ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
 custom-agent profile, not in the root session. A bare DeepSeek `model` override
 on the inherited `explorer` or `implementer` role does not switch providers and
@@ -112,7 +112,7 @@ host rejects native `max`, the exact DeepSeek child route is unavailable and
 falls back according to the lane policy without changing its configured effort.
 
 Routine implementation keeps Luna as the default native single writer and
-offers `atlas-sdd-implementer-deepseek` / `deepseek-v4-flash:deepseek` as an
+offers `atlas-sdd-implementer-deepseek` / `deepseek-v4-pro:deepseek` as an
 availability-gated native ZenMux alternative with the exact same implementer
 instructions, inherited sandbox semantics, owned paths, acceptance inputs, and
 report contract. Atlas never sends the same writable packet to both candidates
@@ -123,10 +123,10 @@ lease/quiescence boundary. A writable fallback starts only after the previous
 writer is proven quiesced and its diff/untracked evidence is preserved.
 
 For read-heavy exploration, the native
-`atlas-sdd-explorer-deepseek` / `deepseek-v4-flash:deepseek` route is an
+`atlas-sdd-explorer-deepseek` / `deepseek-v4-pro:deepseek` route is an
 availability-gated alternative to Luna with the same read-only role contract.
 Its upstream ZenMux `/models` identity remains
-`deepseek/deepseek-v4-flash`; Atlas validates both boundaries and never guesses
+`deepseek/deepseek-v4-pro`; Atlas validates both boundaries and never guesses
 or interchanges the identifiers. Atlas keeps Luna as the ordinary
 single-dispatch default, selects DeepSeek only for an explicit non-OpenAI
 perspective after a live route preflight, and dispatches both only when
@@ -154,7 +154,7 @@ usable.
 the official cache plus the isolated DeepSeek catalog. It preserves every
 official entry, promotes the exact Luna entry to `multi_agent_version=v2` only
 while the official catalog has not done so, and adds
-`deepseek-v4-flash:deepseek` as v2. The isolated entry must declare the official
+`deepseek-v4-pro:deepseek` as v2. The isolated entry must declare the configured
 `low`, `high`, and `max` efforts exactly once and use `max` as Atlas's default.
 Point the user-level `model_catalog_json` at
 `~/.codex/model-catalogs/atlas-team.json`, regenerate it after either input

@@ -23,7 +23,7 @@ cat > "$TMP_ROOT/official.json" <<'JSON'
 }
 JSON
 cat > "$TMP_ROOT/deepseek.json" <<'JSON'
-{"models":[{"slug":"deepseek-v4-flash:deepseek","display_name":"DeepSeek Flash via ZenMux","default_reasoning_level":"max","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"},{"effort":"max"}]}]}
+{"models":[{"slug":"deepseek-v4-pro:deepseek","display_name":"DeepSeek V4 Pro via ZenMux","default_reasoning_level":"max","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"},{"effort":"max"}]}]}
 JSON
 chmod 600 "$TMP_ROOT/official.json" "$TMP_ROOT/deepseek.json"
 
@@ -44,12 +44,12 @@ jq -e '.metadata.preserved == true' "$TMP_ROOT/atlas-team.json" >/dev/null \
   || fail 'official catalog metadata was not preserved'
 jq -e '
   [.models[] | select(.multi_agent_version == "v2") | .slug]
-  == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-v4-flash:deepseek"]
+  == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-v4-pro:deepseek"]
 ' "$TMP_ROOT/atlas-team.json" >/dev/null \
   || fail 'eligible model projection is incorrect'
 jq -e '
   .models[]
-  | select(.slug == "deepseek-v4-flash:deepseek")
+  | select(.slug == "deepseek-v4-pro:deepseek")
   | .default_reasoning_level == "max"
     and ([.supported_reasoning_levels[].effort] == ["low", "high", "max"])
 ' "$TMP_ROOT/atlas-team.json" >/dev/null \
@@ -61,10 +61,10 @@ if "$HELPER" --official "$TMP_ROOT/no-luna.json" --deepseek "$TMP_ROOT/deepseek.
   fail 'missing Luna unexpectedly passed'
 fi
 
-sed 's/deepseek-v4-flash:deepseek/deepseek\/deepseek-v4-flash/' \
+sed 's/deepseek-v4-pro:deepseek/deepseek\/deepseek-v4-pro/' \
   "$TMP_ROOT/deepseek.json" > "$TMP_ROOT/wrong-deepseek.json"
 if "$HELPER" --official "$TMP_ROOT/official.json" --deepseek "$TMP_ROOT/wrong-deepseek.json" --output "$TMP_ROOT/wrong-deepseek-output.json" >/dev/null 2>&1; then
-  fail 'deprecated DeepSeek slug unexpectedly passed'
+  fail 'upstream DeepSeek slug unexpectedly passed as a routed alias'
 fi
 
 jq '(.models[0].default_reasoning_level = "high")' \
