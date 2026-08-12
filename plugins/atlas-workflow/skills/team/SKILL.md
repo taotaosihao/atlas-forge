@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use the Atlas team flow with Codex native collaboration by default, while routing the equivalent DeepSeek Flash implementation and exploration candidates through Paseo.
+description: Use the Atlas team flow with Codex native collaboration by default and Paseo only when it is explicitly selected for a Team, lane, or dispatch.
 ---
 
 Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
@@ -85,16 +85,15 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 
 ## Backend Selection
 
-Team selection and backend selection are separate decisions. A request for `$atlas-workflow:team`, multiple agents, parallel work, specialist review, or a difficult task does not select Paseo for an ordinary lane.
+Team selection and backend selection are separate decisions. A request for `$atlas-workflow:team`, multiple agents, parallel work, specialist review, or a difficult task does not select Paseo.
 
 - Outside Team, stay with the main Codex unless Team materially reduces latency or risk.
-- Inside Team, default ordinary lanes to Codex native collaboration.
-- Treat the named DeepSeek Flash implementation and exploration alternatives as the standing exception: route them through Paseo's direct `deepseek` provider, never through native `spawn_agent`. This exception does not select Paseo for Luna, Sol, Terra, browser, review, verification, or any unrelated lane.
-- For any other Paseo use, require an explicit user or operator choice scoped to the Team, a lane, or one dispatch. Resolve backend and fallback policy independently in this order: dispatch, lane, Team, then `backend=native` and `fallback_policy=codex`.
+- Inside Team, default to Codex native collaboration, including the provider-bound DeepSeek Flash implementation and exploration profiles.
+- Select Paseo only from an explicit user or operator choice scoped to the Team, a lane, or one dispatch. Resolve backend and fallback policy independently in this order: dispatch, lane, Team, then `backend=native` and `fallback_policy=codex`.
 - A review-lane Paseo choice does not transfer to implementation. A Team-level Paseo choice may be overridden by an explicit native lane or dispatch.
 - `no-fallback` is an explicit opt-out and normalizes to `fallback_policy=none`; otherwise an operational Paseo failure falls back to Codex in the same logical lane.
 - Preserve the resolved backend, policy, authority, goal, paths, and mutation permissions when work starts. Later configuration changes do not rewrite an active dispatch.
-- Before resolving a Paseo provider, read `~/.paseo/orchestration-preferences.json`. Resolve Atlas DeepSeek implementation from `providers.atlas_deepseek_impl` and exploration from `providers.atlas_deepseek_research`; both must equal the live exact route `deepseek/deepseek-v4-flash:deepseek`. A missing or different value makes that DeepSeek candidate unavailable without changing other Paseo role preferences.
+- Never read or apply Paseo orchestration preferences. Atlas owns routing; Paseo only manages an explicitly selected runtime lifecycle.
 
 When durable Team state has audit or handoff value, use the v2 Team ledger commands to record controller-attested selection, dispatch, attempt, admission, fallback, and convergence. A free-form provider summary or the presence of Paseo is not proof that Paseo was selected.
 
@@ -117,7 +116,7 @@ wave policy above. Tightly coupled changes keep one writable owner; multiple
 writers require disjoint path ownership, an integration owner, and no overlapping
 writer lease. Agent completion is evidence, not controller admission.
 
-## Paseo Lanes
+## Explicit Paseo Lanes
 
 Only after a Team/lane/dispatch has resolved to Paseo:
 
@@ -128,24 +127,6 @@ Only after a Team/lane/dispatch has resolved to Paseo:
 - Resolve a provider-specific mode that satisfies the lane. If the live capability exposes only a display label or no callable mode ID, treat the Paseo path as unavailable; do not guess `full-access`, `bypass`, `bypassPermissions`, `yolo`, or any other ID. The direct `claude` provider uses the explicit exception below.
 - Runtime permission does not grant workflow authority. Review/discuss stays read-only; writable execution still requires explicit user authorization, owned and forbidden paths, acceptance, verification, and a stop condition.
 - Prompts carry repository instructions, scope, authority, expected evidence, and stop conditions.
-
-### Atlas DeepSeek Flash Route
-
-Use Paseo for every selected Atlas DeepSeek Flash implementation or exploration candidate:
-
-- Require `paseo provider ls --json` to report the direct provider `deepseek` as available. Require `paseo provider models deepseek --json` to report the exact model `deepseek-v4-flash:deepseek`, the exact thinking option `max`, and a callable provider-specific mode.
-- Always launch with `--provider deepseek --model deepseek-v4-flash:deepseek --thinking max`. Never use the generic `zenmux` provider, a native custom-agent profile, `auto` thinking, or a lower effort as a substitute.
-- Use the live callable `full-access` mode only for an explicitly authorized writable implementation lane. Use the live callable `auto` mode for read-only exploration and repeat the read-only authority, forbidden writes, acceptance input, and stop condition in the dispatch packet. If the task requires a technically enforced read-only sandbox rather than workflow-level read-only authority, select the native Luna explorer instead.
-- Launch in the current checkout with an explicit `--cwd`; do not create a Paseo worktree unless the user separately authorizes one. Set a stable title and operation ID or labels when the control surface supports them, then bind the exact returned agent ID to the reserved attempt.
-- Give the Paseo candidate the same self-contained goal, authority, owned and forbidden paths, canonical brief, acceptance criteria, checks, report contract, and stop condition that the equivalent Luna candidate would receive. Provider choice never expands authority.
-- Treat provider/model/thinking/mode discovery and successful agent creation as preflight only. Call the route usable only after the assigned agent receives the task and completes the meaningful tool/check behavior required by its role; a text reply is not a complete tool-loop check.
-- If a DeepSeek Paseo agent returns `Invalid assistant message: content or tool_calls must be set`, treat that exact agent history as terminal. Do not use `paseo send` on it. Prove it quiesced, preserve useful diff and untracked evidence for a writer, then use at most one fresh Paseo attempt or the recorded Luna/main fallback.
-
-The launch shape is:
-
-```bash
-paseo run --provider deepseek --model deepseek-v4-flash:deepseek --thinking max --mode <auto|full-access> --cwd <checkout> --title <stable-title> --background "<self-contained-packet>"
-```
 
 ### Claude Manual-Only Gate
 
@@ -176,29 +157,41 @@ Claude-family models are never eligible for automatic routing or model recommend
 
 The root Codex session keeps its active model, `model_provider`, authentication,
 and catalog unchanged. Atlas never changes the root provider merely to make a
-DeepSeek lane available. Luna, Sol, Terra, browser, review, and verification
-roles remain native. A selected DeepSeek alternative is an external Paseo
-attempt and must not be sent through native `spawn_agent`.
+DeepSeek lane available. A DeepSeek route is child-local: only the selected
+`atlas-sdd-explorer-deepseek` or `atlas-sdd-implementer-deepseek` profile may
+bind `model_provider = "zenmux"` and `deepseek-v4-flash:deepseek`.
 
 - A `model` override is not a provider switch. Never send
   `deepseek-v4-flash:deepseek` through the built-in `explorer` or `implementer`
-  role or through any native custom-agent profile. A ChatGPT-account model
-  override, a discovered legacy DeepSeek profile, or the root model catalog is
-  not authorization to bypass the Paseo route.
-- Keep checked-in native DeepSeek profiles and the isolated catalog as manual
-  compatibility and diagnostic surfaces only. Team does not select them. If
-  the Paseo route is unavailable, fail closed to Luna or main-only according to
-  the lane fallback instead of retrying DeepSeek through the inherited provider.
+  role, or through a profile whose effective provider is not ZenMux.
+- If the host exposes model/reasoning overrides but cannot select the
+  provider-bound custom profile, classify the DeepSeek route as unavailable at
+  the provider-routing layer and fail closed to Luna or main-only according to
+  the lane's fallback rule. Do not retry the same model through the inherited
+  provider.
+- Every Atlas DeepSeek profile and catalog route uses the exact `max` effort.
+  Never lower native `spawn_agent` dispatches to `high`, `medium`, or another
+  compatibility value. If the current host rejects `max`, classify that exact
+  profile/effort route as host-unavailable and follow the lane fallback policy
+  without rewriting the configured effort.
+- A DeepSeek child is admitted only when fresh child metadata proves
+  `model_provider = "zenmux"` and the exact routed model is
+  `deepseek-v4-flash:deepseek`; a ChatGPT-account unsupported-model response or
+  an effective `openai` provider is a failed DeepSeek route, not successful
+  inference. Preserve the same packet and disclose the lost perspective on
+  fallback.
 
 Before the first native fan-out, inspect the model-visible `spawn_agent` schema and require `agent_type`, `model`, `reasoning_effort`, and `fork_turns`. This is a capability check, not authorization to spawn.
 
 - If any required field is absent, classify the native surface as `schema-restricted`, do not start a generic or inherited child, disclose that exact routing is unavailable, and continue main-only.
 - If the tool returns a reserved-schema mismatch such as `Function '...' is reserved for use by this model and must match the configured schema`, stop new fan-out and return the exact error plus the version-sensitive MultiAgentV2 remediation to the user. Do not mutate user config or restart a runtime unless the current request explicitly authorizes those operations.
 - `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
-- Native Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`. OpenAI custom-agent files take precedence over explicit spawn values, so pinning any of those fields would silently defeat either the default-saving or all-Sol quality matrix. Every native dispatch therefore supplies the exact model and reasoning values explicitly.
+- The saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`. OpenAI custom-agent files take precedence over explicit spawn values, so pinning any of those fields would silently defeat either the default-saving or all-Sol quality matrix. The provider-bound DeepSeek equivalent profiles are the explicit exception and must match their checked-in `zenmux`/model/`max` policy exactly. Every native dispatch supplies the exact model and reasoning values explicitly.
 - Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
 - A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
-- Native child creation or provider metadata alone does not prove usable routing. Admission requires the child to receive the task-specific acceptance input and complete the task's meaningful tool/check loop under the expected read-only or writable authority.
+- For either native DeepSeek custom role, write that exact packet through stdin to the stable logical-role slot `atlas-native-agent-inbox put atlas_sdd_explorer` or `atlas-native-agent-inbox put atlas_sdd_implementer` before calling `spawn_agent`, and also pass the same packet as `message`. The inbox is a narrow compatibility transport for hosts that omit the task message or expose its dynamic payload only as OpenAI-encrypted content to a custom provider; it does not create or run the child and is not a Paseo fallback. The helper accepts only a packet slot matching `[a-z0-9_]+`, refuses overwrite, stores no credentials, and requires the Codex home, inbox, and packet modes to remain 700, 700, and 600 respectively.
+- The equivalent profile reads only its own stable logical-role slot, and only when the native task message is absent or has an empty visible Payload plus encrypted content. A host that delivers plaintext remains authoritative and does not use the compatibility packet. An occupied slot blocks another affected dispatch of the same logical role, so DeepSeek explorer attempts and DeepSeek implementer attempts are serialized independently until the host delivers custom-provider assignments normally; a Luna peer with a normal plaintext message may still run concurrently. After the attempt is terminal and quiesced, delete the corresponding role slot. For a follow-up turn on an affected host, first delete the old packet, put the complete follow-up packet into the same role slot, and then call `followup_task`. If packet creation, exact-slot retrieval, or cleanup cannot be proven, fail the DeepSeek route closed instead of guessing or scanning the inbox.
+- Child creation, provider metadata, or the inbox `get` alone does not prove usable routing. Admission requires the child to receive the task-specific acceptance input and complete the task's meaningful tool/check loop under the expected read-only or writable authority. Report the assignment-transport layer separately from provider/model admission.
 - A local `model_catalog_json` can describe a custom model and its normal multi-agent eligibility metadata to Codex, but it cannot bypass the host/model allowlist, entitlement checks, or add missing fields to the model-visible `spawn_agent` schema. Treat a host rejection as unavailable exact routing, not as a catalog problem that Atlas can override.
 - When the current official catalog still marks `gpt-5.6-luna` below MultiAgentV2, the user-authorized installed configuration may point its root `model_catalog_json` at the output of `atlas-team-model-catalog`. The helper preserves every official entry, promotes only the exact Luna entry to `multi_agent_version=v2` when needed, and appends the verified `deepseek-v4-flash:deepseek` entry as v2. It never edits the official cache, carries credentials, or changes host schema code. Regenerate the projection after the official model cache or DeepSeek catalog changes, then start a new task; existing tasks do not hot-reload the allowlist.
 
@@ -208,7 +201,7 @@ Before the first exact Atlas dispatch, run:
 workflow/bin/atlas-agent-model-policy check
 ```
 
-This check validates the checked-in default-saving dispatch policy and requires every native profile to remain model/provider-unpinned. It does not prove billing or inference metadata. In default saving mode, the resolved policy and explicit dispatch values must agree on model and reasoning effort.
+This check validates the checked-in default-saving policy/profile projection, including the provider-bound DeepSeek equivalent profiles. It does not prove billing or inference metadata. In default saving mode, the resolved profile and the explicit dispatch values must agree on model and reasoning effort.
 
 ### Default Saving Mode
 
@@ -218,21 +211,23 @@ Default to saving mode. Use the following exact-routing matrix only after staffi
 | --- | --- | --- | --- | --- |
 | Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `high` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
+| Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
 | Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `max` | `none` |
 | Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
 | Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `xhigh` | `none` |
 | Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `max` | `none` |
+| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-flash:deepseek` | `max` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
 #### Luna And DeepSeek Flash Implementation
 
-The native `atlas-sdd-implementer` and the Paseo DeepSeek Flash attempt are alternative implementations of the same logical writable implementation role. Give either candidate the same goal, execution authority, owned and forbidden paths, canonical brief, acceptance criteria, required checks, commit policy, stop condition, and `IMPLEMENTER_REPORT_JSON` contract. Provider or model choice never grants write authority.
+`atlas-sdd-implementer` and `atlas-sdd-implementer-deepseek` are native alternative implementations of the same logical writable implementation role. Give either candidate the same goal, execution authority, owned and forbidden paths, canonical brief, acceptance criteria, required checks, commit policy, stop condition, and `IMPLEMENTER_REPORT_JSON` contract. Their profiles preserve the exact same developer instructions and inherit the same host/task sandbox semantics; provider or model choice never grants write authority.
 
-DeepSeek Flash supports the official `low` / `high` / `max` capability set. Atlas always selects Paseo thinking `max`. Do not use compatibility aliases such as `medium`, `xhigh`, or `auto`, and never downshift to `high` when Paseo rejects `max`; classify the exact route as unavailable instead.
+DeepSeek Flash supports the official `low` / `high` / `max` capability set. Atlas always selects `max` for both the isolated ZenMux catalog and Codex-native DeepSeek child profiles. Do not use compatibility aliases such as `medium`, `xhigh`, or `auto`, and never downshift to `high` when the host rejects `max`; classify the exact route as unavailable instead.
 
-- For a single implementation dispatch, honor an exact user-selected candidate only when its current writable route is available. Otherwise use Luna by default; choose DeepSeek Flash only after the exact Paseo provider, model, `max`, `full-access` mode, assignment delivery, tool loop, and required write/check behavior have passed under the implementer role. A provider listing, agent creation, or standalone text reply does not prove the writable route.
+- For a single implementation dispatch, honor an exact user-selected candidate only when its current writable route is available. Otherwise use Luna by default; choose DeepSeek Flash only after the exact ZenMux alias, custom profile, host admission, assignment delivery, tool loop, and required write/check behavior have passed under the implementer role. Direct-profile inference or a standalone tool call does not prove the native writable child route.
 - Keep one writer for a tightly coupled implementation lane. Never send the same writable packet to both Luna and DeepSeek, and never use duplicate writers in one shared checkout as implementation cross-validation. Use independent read-only exploration, review, or verification to cross-check implementation evidence.
 - Run Luna and DeepSeek implementers concurrently only for explicitly authorized, genuinely independent lanes with disjoint owned paths, a named integration owner, and the applicable lease/quiescence boundary. Model diversity alone does not justify a second writer.
 - Before retrying or falling back from either implementer to the other, prove the predecessor writer is quiesced, preserve its diff and untracked evidence, and keep the same goal, authority, paths, acceptance, and checks. If writer state or ownership is uncertain, stop instead of starting the replacement.
@@ -240,10 +235,10 @@ DeepSeek Flash supports the official `low` / `high` / `max` capability set. Atla
 
 #### Luna And DeepSeek Flash Exploration
 
-The native `atlas-sdd-explorer` and the Paseo DeepSeek Flash attempt are alternative implementations of the same logical read-only exploration role. They receive the same lane goal, authority, forbidden paths, acceptance input, verification request, stop condition, and expected evidence shape. The Paseo prompt must preserve read-only authority even though the direct provider's `auto` mode is not an enforced Codex read-only sandbox; when enforced read-only isolation is required, select Luna. Provider or model choice never changes mutation authority.
+`atlas-sdd-explorer` and `atlas-sdd-explorer-deepseek` are native alternative implementations of the same logical read-only exploration role. They receive the same lane goal, authority, forbidden paths, acceptance input, verification request, stop condition, and expected evidence shape. Their profiles preserve the same read-only sandbox and developer-instruction semantics; provider or model choice never changes mutation authority.
 
 - For a single exploration dispatch, honor an exact user-selected candidate when it is currently available. Otherwise use Luna by default; choose DeepSeek Flash only when a current availability preflight passed and the lane explicitly values a non-OpenAI perspective. Do not use catalog order, price, an inferred slug, or a prior successful text reply as the selector.
-- DeepSeek Flash is currently available only when the Atlas-specific Paseo preference resolves to `deepseek/deepseek-v4-flash:deepseek`, the live direct provider is available, its model capability contains `deepseek-v4-flash:deepseek` with `max`, and the assigned Paseo agent completes the task's meaningful tool/check loop. Do not substitute the generic `zenmux` provider or a native Codex custom profile. A plain completion proves inference only.
+- DeepSeek Flash is currently available only when the live ZenMux `/models` response contains the exact non-deprecated upstream ID `deepseek/deepseek-v4-flash`, the Codex catalog maps the exact routed alias `deepseek-v4-flash:deepseek`, the custom profile is discovered, and the current host admits that exact provider/model route. Do not substitute either identifier for the other at its boundary. A plain completion proves inference only; claim full agent/tool-loop availability only after the assigned agent completes at least one tool call under the expected role and authority.
 - Luna availability likewise requires profile discovery and host admission of the exact `atlas-sdd-explorer` / `gpt-5.6-luna` / `max` route. Do not infer availability solely from the parent model or catalog presence.
 - Dispatch both candidates only when the user explicitly requests both perspectives or independent cross-validation materially reduces a concrete risk. This is a per-lane decision, never a default fan-out. Start both from the same self-contained packet and keep their results independent until both first-round reports are complete.
 - The main Codex compares evidence, identifies agreement and material disagreement, verifies disputed facts when feasible, and makes the final synthesis. Do not decide by majority, silently merge incompatible claims, or let one agent broaden the other's authority.

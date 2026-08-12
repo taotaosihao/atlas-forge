@@ -246,23 +246,21 @@ atlas-team-model-catalog
 ```
 
 The helper preserves the official catalog, promotes only the exact Luna entry
-to v2 when necessary, and retains the isolated native DeepSeek catalog entry
-`deepseek-v4-flash:deepseek` for manual diagnostics. It writes
+to v2 when necessary, and appends the isolated native DeepSeek catalog entry
+`deepseek-v4-flash:deepseek` as v2. It writes
 `~/.codex/model-catalogs/atlas-team.json` atomically with mode 600 and never
 modifies `models_cache.json`. The user-level `model_catalog_json` must point to
 that output. The isolated entry must declare the official `low`, `high`, and
 `max` efforts exactly once and set `default_reasoning_level` to `max`.
 Regenerate it whenever either input catalog changes. Catalog
 metadata remains subject to the host's model allowlist, entitlement, and tool
-schema checks, and it does not authorize Atlas Team to dispatch DeepSeek through
-native `spawn_agent`.
-
-Atlas Team routes a selected DeepSeek implementation or exploration candidate
-through Paseo's direct provider instead. The Atlas-specific Paseo preference
-must resolve to `deepseek/deepseek-v4-flash:deepseek`; live discovery must expose
-provider `deepseek`, model `deepseek-v4-flash:deepseek`, thinking `max`, and the
-required callable mode. Luna remains native, the root provider remains
-unchanged, and the DeepSeek alternative is never a default fixed fan-out.
+schema checks. Atlas selects the provider-bound
+`atlas-sdd-implementer-deepseek` or `atlas-sdd-explorer-deepseek` custom profile
+for a native DeepSeek lane and supplies the exact routed model, `max` reasoning,
+and `fork_turns="none"` to `spawn_agent`; a bare model override on an inherited
+role is not a provider switch. Luna remains the default native candidate, the
+root provider remains unchanged, and the DeepSeek alternative is never a
+default fixed fan-out.
 
 Record a Team run. The backend defaults to Codex native subagents when
 `--backend` is omitted. Any explicit Team-level backend selection, including

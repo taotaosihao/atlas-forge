@@ -2,6 +2,7 @@
 
 - 状态：已实施并完成独立复审与源码级门禁；未安装、刷新或发布
 - 日期：2026-08-09
+- DeepSeek 原生路由修订：2026-08-13
 - 工作类型：implementation
 - 交付目标：product_increment
 - 权威范围：`$atlas-workflow:clarify` 与已选择 `$atlas-workflow:team` 后的 controller 默认调度策略、对应用户说明、模板和合同测试
@@ -23,7 +24,7 @@ Team 一旦被选择，不再以 main-first 串行探索作为默认；controlle
 
 ### COMPATIBILITY
 
-保留现有 exact model routing、Paseo/DeepSeek 例外、single-writer/lease、fallback/quiescence、record-only compatibility 和 product release certification 全部边界。
+保留现有 exact model routing、原生 DeepSeek provider-bound profile、显式 Paseo、single-writer/lease、fallback/quiescence、record-only compatibility 和 product release certification 全部边界。
 
 ## 2. 非目标
 
@@ -31,8 +32,8 @@ Team 一旦被选择，不再以 main-first 串行探索作为默认；controlle
 2. 不新增 `parallel_required`、`frontier_status` 或其他 ledger/schema 字段。
 3. 不实现读取 execution plan 并自动创建 actor 的 runtime scheduler、daemon 或 Team-independent lease runtime。
 4. 不让 `team-record-finalize` 因 zero-dispatch 失败，不废弃 `effective_backend=none` 和 record-only compatibility。
-5. 不改变 agent profiles、默认 saving matrix、显式 quality mode、root host model/provider 或 Claude manual-only gate。
-6. 不默认双派 Luna 与 DeepSeek，不通过 native `spawn_agent` 派发 DeepSeek。
+5. 除本次恢复既有 DeepSeek provider-bound 原生 profile 与 saving matrix 备选行外，不改变其他 agent profiles、saving/quality 路由、root host model/provider 或 Claude manual-only gate。
+6. 不默认双派 Luna 与 DeepSeek；DeepSeek 仅通过 provider-bound custom profile 使用 native `spawn_agent`，不通过 inherited role 的裸 model override 派发。
 7. 不修改 release Profile、adapter、fact schema、receipt 或 `release_decision` authority。
 8. 不刷新真实 plugin cache、marketplace、workflow runtime 或 agent runtime，不修改或运行 Multica。
 
@@ -113,8 +114,8 @@ child_count = min(ready_independent_clusters, host_available_child_slots, 3)
 ## 7. 模型与 backend 不变量
 
 - native roles 继续使用当前 checked-in saving matrix，并显式设置 `fork_turns="none"`。
-- DeepSeek Flash implementation/exploration 只经 Paseo direct `deepseek/deepseek-v4-flash:deepseek`、thinking `max`；不通过 native `spawn_agent`。
-- 非 DeepSeek Paseo 继续要求用户或 operator 的范围化显式选择。
+- DeepSeek Flash implementation/exploration 使用 provider-bound `atlas-sdd-implementer-deepseek` / `atlas-sdd-explorer-deepseek` 原生 profile、`deepseek-v4-flash:deepseek` 和 reasoning `max`；通过 native `spawn_agent` 派发。
+- Paseo 继续要求用户或 operator 的范围化显式选择，不读取 orchestration preferences 代替 controller 决策。
 - quality mode 仅在用户明确要求时启用，不因并行默认自动切换全 Sol。
 - schema-restricted、profile mismatch、reserved schema mismatch 和 confirmed cost anomaly 继续 fail closed；不能用 generic/inherited child 补位。
 
