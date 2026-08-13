@@ -39,6 +39,8 @@ make_agents() {
 make_catalog "$TMP_ROOT/5.6.json" 5.6
 make_agents "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode planning-review --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode saving --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode quality --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
   --catalog "$TMP_ROOT/5.6.json" \
@@ -48,13 +50,17 @@ node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode quality \
   --catalog "$TMP_ROOT/5.6.json" \
   --policy "$ROOT/.codex/agents/model-policy.json" \
   --agents-dir "$ROOT/.codex/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode saving \
+  --catalog "$TMP_ROOT/5.6.json" \
+  --policy "$ROOT/.codex/agents/model-policy.json" \
+  --agents-dir "$ROOT/.codex/agents"
 while IFS= read -r role; do
   git -C "$ROOT" ls-files --error-unmatch ".codex/agents/$role.toml" >/dev/null
-done < <(node -e 'const policy=require(process.argv[1]); process.stdout.write(`${[...Object.keys(policy.roles), ...Object.keys(policy.equivalent_roles || {})].sort().join("\n")}\n`)' "$ROOT/.codex/agents/model-policy.json")
+done < <(node -e 'const policy=require(process.argv[1]); process.stdout.write(`${[...new Set([...Object.keys(policy.roles), ...Object.keys(policy.planning_review_roles), ...Object.keys(policy.quality_roles), ...Object.keys(policy.equivalent_roles || {})])].sort().join("\n")}\n`)' "$ROOT/.codex/agents/model-policy.json")
 
 node -e '
   const policy=require(process.argv[1]);
-  if (policy.schema_version !== 1) throw new Error(`expected schema v1, found ${policy.schema_version}`);
+  if (policy.schema_version !== 2 || policy.default_mode !== "planning-review") throw new Error(`expected schema v2 planning-review default`);
   for (const [role, equivalentTo] of [["atlas-sdd-planner-deepseek", "atlas-sdd-planner"], ["atlas-sdd-reviewer-deepseek", "atlas-sdd-reviewer"]]) {
     const entry=policy.equivalent_roles?.[role];
     if (!entry || entry.equivalent_to !== equivalentTo || entry.model !== "deepseek-v4-pro:deepseek" || entry.model_provider !== "zenmux" || entry.reasoning_effort !== "max" || entry.sandbox_mode !== "read-only") {
@@ -66,6 +72,12 @@ node -e '
 make_catalog "$TMP_ROOT/6.1.json" 6.1
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.1.json" --agents-dir "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/6.1.json" \
+  | jq -e '.family == "6.1" and .mode == "planning-review"
+    and ([.roles[].model] | unique) == ["gpt-6.1-sol"]
+    and ([.roles["atlas-sdd-reviewer", "atlas-sdd-phase-reviewer"].model_reasoning_effort] | unique) == ["xhigh"]
+    and .roles["atlas-sdd-planner"].model_reasoning_effort == "max"
+    and (.roles | has("atlas-sdd-implementer") | not)' >/dev/null
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/6.1.json" \
   | jq -e '.family == "6.1" and .mode == "saving"
     and .roles["atlas-sdd-reviewer"].model_reasoning_effort == "max"
     and .roles["atlas-sdd-planner"].model_reasoning_effort == "high"
@@ -81,10 +93,29 @@ node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode quality --cata
     and ([.roles["atlas-sdd-verifier", "atlas-sdd-browser-verifier"].model_reasoning_effort] | unique) == ["medium"]
     and .roles["atlas-sdd-explorer"].model_reasoning_effort == "high"' >/dev/null
 
+jq '.planning_review_roles["atlas-sdd-reviewer"].capability = "balanced"' \
+  "$ROOT/.codex/agents/model-policy.json" > "$TMP_ROOT/low-tier-planning-review-policy.json"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve \
+  --catalog "$TMP_ROOT/5.6.json" \
+  --policy "$TMP_ROOT/low-tier-planning-review-policy.json" >/dev/null 2>&1; then
+  echo "expected a low-tier planning-review policy to fail closed" >&2
+  exit 1
+fi
+
+jq 'del(.default_mode)' "$ROOT/.codex/agents/model-policy.json" \
+  > "$TMP_ROOT/missing-default-policy.json"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve \
+  --catalog "$TMP_ROOT/5.6.json" \
+  --policy "$TMP_ROOT/missing-default-policy.json" >/dev/null 2>&1; then
+  echo "expected schema v2 without a planning-review default to fail closed" >&2
+  exit 1
+fi
+
 cp -R "$TMP_ROOT/agents" "$TMP_ROOT/agents-pinned-native"
 printf 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"\n' \
   >> "$TMP_ROOT/agents-pinned-native/atlas-sdd-implementer.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
+  --mode saving \
   --catalog "$TMP_ROOT/5.6.json" \
   --agents-dir "$TMP_ROOT/agents-pinned-native" >/dev/null 2>&1; then
   echo "expected a native profile model pin to fail closed" >&2
@@ -95,6 +126,7 @@ cp -R "$TMP_ROOT/agents" "$TMP_ROOT/agents-divergent-equivalent"
 printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "medium"\nsandbox_mode = "read-only"\ndeveloper_instructions = """different role"""\n' \
   > "$TMP_ROOT/agents-divergent-equivalent/atlas-sdd-explorer-deepseek.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
+  --mode saving \
   --catalog "$TMP_ROOT/5.6.json" \
   --agents-dir "$TMP_ROOT/agents-divergent-equivalent" >/dev/null 2>&1; then
   echo "expected divergent equivalent-role instructions to fail closed" >&2
@@ -149,7 +181,9 @@ for equivalent_role in atlas-sdd-planner-deepseek atlas-sdd-reviewer-deepseek; d
 done
 
 make_catalog "$TMP_ROOT/incomplete.json" 5.8 no
-if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/incomplete.json" >/dev/null 2>&1; then
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/incomplete.json" \
+  | jq -e '.mode == "planning-review" and ([.roles[].model] | unique) == ["gpt-5.8-sol"]' >/dev/null
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/incomplete.json" >/dev/null 2>&1; then
   echo "expected an incomplete latest family to fail closed" >&2
   exit 1
 fi

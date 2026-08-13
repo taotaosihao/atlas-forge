@@ -11,19 +11,21 @@ Keep three decisions independent:
 
 - `staffing_mode` is `main` or `team` and answers whether extra agents are
   useful.
-- `model_policy` is the current host model, default saving routing after a
-  useful lane has been admitted, or an explicitly requested quality route.
+- `model_policy` is the current host model, the default frontier route for
+  planning and plan/contract review, implementation-only saving routing after
+  execute authority, or an explicitly requested per-lane override.
 - `release_mode` is `product_increment` or `product_release` and answers the
   acceptance level; only explicit formal certification, `release-ready`, or
   `certified` intent selects `product_release`.
 
-Do not create Team just to obtain Saving Mode. Team does not imply quality mode,
-and quality mode does not require Team. The main Codex keeps the current host
-model; Atlas does not rewrite the root host model. Saving/quality selection is a
-per-task or per-lane dispatch choice and is not persisted as workflow state. A
-lane may choose its own model within the admitted policy, but cannot change the
-goal, authority, paths, or acceptance. The Claude-family manual exact-model gate
-remains unchanged.
+Do not create Team just to obtain a model route. Team does not imply saving or
+quality mode, and either model choice does not require Team. The main Codex
+keeps the current host model; Atlas does not rewrite the root host model.
+Planning/review, implementation-saving, quality, and exact-override selection is
+a per-task or per-lane dispatch choice and is not persisted as workflow state.
+A lane may choose its own model within the admitted policy, but cannot change
+the goal, authority, paths, or acceptance. The Claude-family manual exact-model
+gate remains unchanged.
 
 Choose a path lease from actual write-conflict risk, separately from staffing:
 
@@ -121,8 +123,11 @@ discussion is unavailable, fail Cross closed.
 The default pair is an OpenAI `atlas-sdd-implementer` on Saving Luna `max` and
 a DeepSeek `atlas-sdd-reviewer-deepseek` on `deepseek-v4-pro:deepseek` / `max`.
 When the user explicitly selects a DeepSeek writer, pair
-`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer` on Saving
-Terra `max`. Both reviewer profiles are hard `sandbox_mode = "read-only"`.
+`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer` on Sol
+`xhigh`. Both reviewer profiles are hard `sandbox_mode = "read-only"`. Cross
+Execute keeps this reviewer high-tier because its mandatory pre-review examines
+the real brief and contract before implementation starts; the implementation
+stage does not require a downgrade merely because Saving is allowed there.
 
 Before a writer starts, the selected reviewer must complete a meaningful
 read-only pre-review of the real brief, repository, owned scope, acceptance
@@ -256,7 +261,7 @@ Before the first native fan-out, inspect the model-visible `spawn_agent` schema 
 - If any required field is absent, classify the native surface as `schema-restricted`, do not start a generic or inherited child, disclose that exact routing is unavailable, and continue main-only.
 - If the tool returns a reserved-schema mismatch such as `Function '...' is reserved for use by this model and must match the configured schema`, stop new fan-out and return the exact error plus the version-sensitive MultiAgentV2 remediation to the user. Do not mutate user config or restart a runtime unless the current request explicitly authorizes those operations.
 - `task_name` names the child task; it does not select a custom agent. Select the checked-in custom profile only with `agent_type`.
-- The saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`. OpenAI custom-agent files take precedence over explicit spawn values, so pinning any of those fields would silently defeat either the default-saving or all-Sol quality matrix. The provider-bound DeepSeek equivalent profiles are the explicit exception and must match their checked-in `zenmux`/model/`max` policy exactly. Every native dispatch supplies the exact model and reasoning values explicitly.
+- The planning-review/saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`. OpenAI custom-agent files take precedence over explicit spawn values, so pinning any of those fields would silently defeat the stage-aware matrices. The provider-bound DeepSeek equivalent profiles are the explicit exception and must match their checked-in `zenmux`/model/`max` policy exactly. Every native dispatch supplies the exact model and reasoning values explicitly.
 - Every custom-role spawn sets `fork_turns="none"`. Omitting it defaults to a full-history fork, which is incompatible with exact role/model/reasoning overrides on affected MultiAgentV2 versions.
 - A fresh child receives a self-contained dispatch packet containing the lane goal, authority, owned and forbidden paths, necessary decisions and context, acceptance, verification commands, stop conditions, and expected output. Do not rely on inherited parent history.
 - For any native DeepSeek custom role, write that exact packet through stdin to the stable logical-role slot `atlas-native-agent-inbox put atlas_sdd_planner`, `atlas-native-agent-inbox put atlas_sdd_reviewer`, `atlas-native-agent-inbox put atlas_sdd_explorer`, or `atlas-native-agent-inbox put atlas_sdd_implementer` before calling `spawn_agent`, and also pass the same packet as `message`. The inbox is a narrow compatibility transport for hosts that omit the task message or expose its dynamic payload only as OpenAI-encrypted content to a custom provider; it does not create or run the child and is not a Paseo fallback. The helper accepts only a packet slot matching `[a-z0-9_]+`, refuses overwrite, stores no credentials, and requires the Codex home, inbox, and packet modes to remain 700, 700, and 600 respectively.
@@ -265,31 +270,69 @@ Before the first native fan-out, inspect the model-visible `spawn_agent` schema 
 - A local `model_catalog_json` can describe a custom model and its normal multi-agent eligibility metadata to Codex, but it cannot bypass the host/model allowlist, entitlement checks, or add missing fields to the model-visible `spawn_agent` schema. Treat a host rejection as unavailable exact routing, not as a catalog problem that Atlas can override.
 - When the current official catalog still marks `gpt-5.6-luna` below MultiAgentV2, the user-authorized installed configuration may point its root `model_catalog_json` at the output of `atlas-team-model-catalog`. The helper preserves every official entry, promotes only the exact Luna entry to `multi_agent_version=v2` when needed, and appends the verified `deepseek-v4-pro:deepseek` entry as v2. It never edits the official cache, carries credentials, or changes host schema code. Regenerate the projection after the official model cache or DeepSeek catalog changes, then start a new task; existing tasks do not hot-reload the allowlist.
 
-Before the first exact Atlas dispatch, run:
+Before a planning or plan/contract-review dispatch, run the fail-safe default:
 
 ```bash
 workflow/bin/atlas-agent-model-policy check
 ```
 
-This check validates the checked-in default-saving policy/profile projection, including the provider-bound DeepSeek equivalent profiles. It does not prove billing or inference metadata. In default saving mode, the resolved profile and the explicit dispatch values must agree on model and reasoning effort.
+This resolves `planning-review` and rejects low-tier native routes. During an
+authorized implementation Execute only, validate the lower-cost matrix with
+`workflow/bin/atlas-agent-model-policy check --mode saving`. An explicitly
+requested all-Sol implementation route uses `--mode quality`. These checks
+validate the checked-in policy/profile projection, including applicable
+provider-bound DeepSeek equivalent profiles. They do not prove billing or
+inference metadata. The resolved profile and explicit dispatch values must
+agree on model and reasoning effort.
 
-### Default Saving Mode
+### Default Planning And Contract Review Mode
 
-Default to saving mode. Use the following exact-routing matrix only after staffing has established that the lane is useful:
+Before implementation Execute authority, default every admitted planning and
+formal plan/contract-review lane to a frontier model. The no-argument policy
+check resolves this matrix:
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning | `atlas-sdd-planner` | `gpt-5.6-sol` | `high` | `none` |
-| Planning (ZenMux alternative) | `atlas-sdd-planner-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
+| Planning or replanning | `atlas-sdd-planner` | `gpt-5.6-sol` | `max` | `none` |
+| Formal plan or contract review | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `xhigh` | `none` |
+| Additional independent plan or contract review | `atlas-sdd-reviewer` | `gpt-5.6-sol` | `xhigh` | `none` |
+
+Sol is the current checked-in native frontier route. Cross Plan's exact
+DeepSeek V4 Pro planner/reviewer profiles are also high-tier routes. Fable or
+another high-tier model may replace a named lane only when a current user or
+operator explicitly selects the exact provider/model route and that route is
+available and admitted. The same exact per-lane authority may explicitly choose
+a lower model, but Atlas never infers that exception from cost, task simplicity,
+or the existence of Saving mode. An unavailable requested model fails that
+exact route closed; it does not fall back to Terra, Luna, or another low-tier
+route for planning or contract review.
+
+Use the formal `atlas-sdd-phase-reviewer` for the final review of a plan or
+implementation contract. The routine `atlas-sdd-reviewer` remains available for
+an additional independent high-tier read-only review, but its Terra route below
+is an implementation-slice route only.
+
+### Implementation-Stage Saving Mode
+
+Saving mode is available only after explicit user implementation authority has
+entered Execute. It may reduce cost for implementation work and implementation
+evidence loops; it must never author or review a plan or contract, and it must
+never be inferred for Discuss. Use this exact-routing matrix only after staffing
+has independently established that the lane is useful:
+
+| Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
+| --- | --- | --- | --- | --- |
+| Implementation replanning | `atlas-sdd-planner` | `gpt-5.6-sol` | `high` | `none` |
+| Implementation replanning (ZenMux alternative) | `atlas-sdd-planner-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
 | Routine implementation | `atlas-sdd-implementer` | `gpt-5.6-luna` | `max` | `none` |
 | Routine implementation (ZenMux alternative) | `atlas-sdd-implementer-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
-| Routine review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `max` | `none` |
-| Routine review (ZenMux alternative) | `atlas-sdd-reviewer-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
-| Command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
+| Implementation slice review | `atlas-sdd-reviewer` | `gpt-5.6-terra` | `max` | `none` |
+| Implementation slice review (ZenMux alternative) | `atlas-sdd-reviewer-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
+| Implementation command or business verification | `atlas-sdd-verifier` | `gpt-5.6-terra` | `high` | `none` |
 | Completed phase or final integration judgment | `atlas-sdd-phase-reviewer` | `gpt-5.6-sol` | `medium` | `none` |
-| Substantial Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `xhigh` | `none` |
-| Read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `max` | `none` |
-| Read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
+| Implementation Playwright or visual interaction verification | `atlas-sdd-browser-verifier` | `gpt-5.6-luna` | `xhigh` | `none` |
+| Implementation read-heavy exploration | `atlas-sdd-explorer` | `gpt-5.6-luna` | `max` | `none` |
+| Implementation read-heavy exploration (ZenMux alternative) | `atlas-sdd-explorer-deepseek` | `deepseek-v4-pro:deepseek` | `max` | `none` |
 
 A small clear task defaults to the main Codex. Use a subagent only when concrete evidence shows that delegation or specialist review materially lowers risk or latency. The matrix determines how an admitted lane is spawned; it does not require a fixed role set or agent count.
 
@@ -305,9 +348,16 @@ DeepSeek V4 Pro supports the configured `low` / `high` / `max` capability set. A
 - Before retrying or falling back from either implementer to the other, prove the predecessor writer is quiesced, preserve its diff and untracked evidence, and keep the same goal, authority, paths, acceptance, and checks. If writer state or ownership is uncertain, stop instead of starting the replacement.
 - If the host admits the model but omits the assignment payload, tools, or write semantics for the child, classify that exact layer as unavailable and disclose it. Do not interpret child creation, an idle response, or direct-provider success as completed implementation routing.
 
-#### Luna And DeepSeek V4 Pro Exploration
+#### Luna And DeepSeek V4 Pro Implementation Exploration
 
-`atlas-sdd-explorer` and `atlas-sdd-explorer-deepseek` are native alternative implementations of the same logical read-only exploration role. They receive the same lane goal, authority, forbidden paths, acceptance input, verification request, stop condition, and expected evidence shape. Their profiles preserve the same read-only sandbox and developer-instruction semantics; provider or model choice never changes mutation authority.
+During an authorized implementation Execute, `atlas-sdd-explorer` and
+`atlas-sdd-explorer-deepseek` are native alternative implementations of the
+same logical read-only exploration role. They receive the same lane goal,
+authority, forbidden paths, acceptance input, verification request, stop
+condition, and expected evidence shape. Their profiles preserve the same
+read-only sandbox and developer-instruction semantics; provider or model choice
+never changes mutation authority. Planning and contract discovery instead use
+the frontier planning-review matrix unless an exact per-lane override exists.
 
 - For a single exploration dispatch, honor an exact user-selected candidate when it is currently available. Otherwise use Luna by default; choose DeepSeek V4 Pro only when a current availability preflight passed and the lane explicitly values a non-OpenAI perspective. Do not use catalog order, price, an inferred slug, or a prior successful text reply as the selector.
 - DeepSeek V4 Pro is currently available only when the live ZenMux `/models` response contains the exact non-deprecated upstream ID `deepseek/deepseek-v4-pro`, the Codex catalog maps the exact routed alias `deepseek-v4-pro:deepseek`, the custom profile is discovered, and the current host admits that exact provider/model route. Do not substitute either identifier for the other at its boundary. A plain completion proves inference only; claim full agent/tool-loop availability only after the assigned agent completes at least one tool call under the expected role and authority.
@@ -317,11 +367,24 @@ DeepSeek V4 Pro supports the configured `low` / `high` / `max` capability set. A
 - If one candidate fails before producing useful evidence because its provider, model, auth, catalog, schema, quota, or tool loop is unavailable, disclose the failed layer. A single-candidate lane may retry the same packet once on the other currently available candidate; a requested dual-perspective lane reports the lost perspective rather than pretending fallback preserved independent cross-validation. Useful but conflicting output is not an availability failure and must be synthesized as disagreement.
 - If neither exact route is available, continue main-only and disclose the missing perspective. Never spawn a generic or inherited child as a substitute.
 
-Use the Sol phase-reviewer only for a completed phase/final integration result where extra judgment is valuable, when explicitly requested, or after a non-mechanical review/verification failure whose cause remains unclear. Formatting, import, typo, port, network, credential, and other mechanical or environmental failures stay on the ordinary reviewer/verifier path. Browser evidence reaches the phase-reviewer only when final or phase acceptance benefits from extra judgment; routine UI smoke and regression checks stay with the reviewer/verifier selected by the current mode.
+Use the Sol phase-reviewer by default for formal plan or contract review, and
+also for a completed phase/final integration result where extra judgment is
+valuable, when explicitly requested, or after a non-mechanical implementation
+review/verification failure whose cause remains unclear. During implementation,
+formatting, import, typo, port, network, credential, and other mechanical or
+environmental failures stay on the ordinary reviewer/verifier path. Browser
+evidence reaches the phase-reviewer only when final or phase acceptance benefits
+from extra judgment; routine implementation UI smoke and regression checks stay
+with the reviewer/verifier selected by the implementation mode.
 
-### Explicit Quality Mode
+### Explicit Quality Mode For Implementation
 
-Enter quality mode only when the user explicitly requests quality mode, all-Sol routing, or an equivalent higher-quality routing choice for the current Team or named lanes. Do not infer it from task difficulty, a failed check, reviewer disagreement, or available budget, and never automatically enable quality mode. The explicit choice does not persist into later tasks.
+Planning and plan/contract review already default to high-tier routing. During
+implementation, enter quality mode only when the user explicitly requests
+quality mode, all-Sol routing, or an equivalent higher-quality routing choice
+for the current Team or named lanes. Do not infer an all-Sol implementation
+route from task difficulty, a failed check, reviewer disagreement, or available
+budget. The explicit choice does not persist into later tasks.
 
 Before the first quality-mode dispatch, run `workflow/bin/atlas-agent-model-policy check --mode quality` against the same current catalog and unpinned native profiles.
 
@@ -337,7 +400,10 @@ In quality mode, keep the same `agent_type`, `fork_turns="none"`, staffing rules
 | Browser or visual verification | `atlas-sdd-browser-verifier` | `gpt-5.6-sol` | `medium` | `none` |
 | Exploration | `atlas-sdd-explorer` | `gpt-5.6-sol` | `high` | `none` |
 
-The model difference between the default saving policy and this table is an intentional, user-authorized override. Outside that explicit override, if the dispatch, policy, model, or reasoning values mismatch, do not spawn until the checked-in configuration is reconciled.
+The model difference between implementation Saving mode and this table is an
+intentional, user-authorized override. Outside that explicit override, if the
+dispatch, policy, model, or reasoning values mismatch, do not spawn until the
+checked-in configuration is reconciled.
 
 Visible runtime metadata is optional disclosure, not a daily audit gate. When the tool or UI does not expose trustworthy model evidence, state that billing-level model verification was not performed; do not claim the billing model is verified and do not add persistent runtime-log parsing solely for this workflow. If expensive inheritance or cost loss is confirmed, stop new fan-out, perform only minimal read-only diagnosis, and fall back to main-only. Ask the user only when remediation needs configuration, runtime, installation, log upload, upstream issue, release, or another mutation outside current authority.
 
@@ -348,12 +414,13 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
 | `routine-implementation` | `default-luna-or-explicit-available-deepseek-single-writer` | `implicit-quality-model-or-default-dual-writer` |
 | `implementation-fallback` | `same-authority-takeover-after-writer-quiescence` | `overlapping-or-uncertain-writer-takeover` |
-| `routine-review-verify` | `default-terra-high-reviewer-or-verifier` | `implicit-quality-model` |
-| `hard-to-reverse-direction` | `default-sol-medium-planner` | `automatic-quality-upgrade` |
+| `plan-or-contract-review` | `default-sol-xhigh-formal-reviewer-or-explicit-exact-override` | `implicit-terra-luna-or-saving-route` |
+| `implementation-review-verify` | `default-terra-high-reviewer-or-verifier` | `saving-route-before-execute-authority` |
+| `hard-to-reverse-direction` | `default-sol-max-planner` | `implicit-low-tier-planner` |
 | `completed-phase-extra-judgment` | `default-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
-| `browser-heavy` | `default-luna-high-browser-verifier` | `implicit-quality-model` |
-| `exploration-single` | `luna-or-deepseek-by-live-availability-and-explicit-route` | `default-dual-fanout` |
-| `exploration-cross-check` | `same-input-dual-dispatch-when-risk-reduced-or-explicit` | `different-authority-or-implicit-fanout` |
+| `implementation-browser-heavy` | `default-luna-high-browser-verifier` | `low-tier-browser-route-before-execute-authority` |
+| `implementation-exploration-single` | `luna-or-deepseek-by-live-availability-and-explicit-route` | `default-dual-fanout-or-pre-execute-saving` |
+| `implementation-exploration-cross-check` | `same-input-dual-dispatch-when-risk-reduced-or-explicit` | `different-authority-or-implicit-fanout` |
 | `quality-mode-explicit` | `all-sol-with-role-specific-reasoning` | `implicit-or-automatic-quality` |
 | `schema-restricted` | `main-only; disclose-routing-unavailable` | `generic-inherited-fanout` |
 | `profile-mismatch` | `block-spawn; reconcile-policy-profile` | `spawn-with-mismatched-model` |

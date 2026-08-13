@@ -163,8 +163,9 @@ If real checks passed but recorder/evidence collection failed, report
 block. This result does not create `release_decision`, `certified`, or
 release-ready evidence and cannot substitute for the strict path below.
 
-Choose staffing (`main`/`team`), model policy (host/default-saving/explicit
-quality), path lease, and release mode independently. Main-only single writers
+Choose staffing (`main`/`team`), model policy
+(host/default-frontier-planning-review/implementation-saving/explicit exact or
+quality override), path lease, and release mode independently. Main-only single writers
 and read-only/review/verifier work do not need a lease. One isolated
 product-increment Team writer without fallback, takeover, or external concurrency
 does not require one by default. Concurrent writers, fallback/takeover, uncertain

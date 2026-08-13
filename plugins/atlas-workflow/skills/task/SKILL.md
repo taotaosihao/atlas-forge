@@ -75,14 +75,18 @@ weaken the fail-closed `product_release` path.
 ## Independent Staffing, Lease, And Model Choices
 
 Keep three decisions separate: `staffing_mode` (`main` or `team`) answers whether
-extra agents are useful; `model_policy` answers which current host/default-saving
-or explicitly requested quality route to use; `release_mode` answers
-`product_increment` versus `product_release`. Saving Mode does not justify
-creating a Team, Team does not imply quality mode, and none of these choices
-changes the target, authority, paths, or acceptance. The main Codex uses the
-current host model; Atlas does not rewrite the root host model. Saving/quality
-selection is per task or lane and is not persisted as workflow state. The
-Claude-family manual exact-model gate remains unchanged.
+extra agents are useful; `model_policy` answers which current host,
+default-frontier planning/review, implementation-only saving, or explicitly
+requested exact/quality route to use; `release_mode` answers `product_increment`
+versus `product_release`. A model route does not justify creating a Team, Team
+does not imply saving or quality mode, and none of these choices changes the
+target, authority, paths, or acceptance. The main Codex uses the current host
+model; Atlas does not rewrite the root host model. Model selection is per task
+or lane and is not persisted as workflow state. Planning and plan/contract
+review default to a frontier model; only an explicitly specified lane may
+override that default, and low-tier Saving routes are otherwise limited to an
+authorized implementation Execute. The Claude-family manual exact-model gate
+remains unchanged.
 
 Choose a path lease from actual write-conflict risk, independently of Team:
 

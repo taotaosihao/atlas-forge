@@ -1,5 +1,6 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "default_mode": "planning-review",
   "family": {
     "slug_pattern": "^gpt-(\\d+)\\.(\\d+)-",
     "selection": "latest"
@@ -17,6 +18,11 @@
     "atlas-sdd-verifier": { "capability": "balanced", "reasoning_effort": "high" },
     "atlas-sdd-browser-verifier": { "capability": "fast", "reasoning_effort": "xhigh" },
     "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "max" }
+  },
+  "planning_review_roles": {
+    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },
+    "atlas-sdd-phase-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },
+    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "max" }
   },
   "quality_roles": {
     "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },

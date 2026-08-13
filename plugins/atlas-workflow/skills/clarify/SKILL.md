@@ -97,11 +97,15 @@ blocks. This path never creates release evidence for, or weakens the fail-closed
 `product_release` path.
 
 Keep `staffing_mode` (`main` or `team`), `model_policy` (current host,
-default-saving, or explicitly requested quality), and `release_mode`
-(`product_increment` or `product_release`) as independent decisions. Do not
-create Team just to obtain Saving Mode; Team does not imply quality mode; the
-main Codex's root host model is not rewritten; and saving/quality choices do not
-persist as workflow state. The Claude-family manual exact-model gate remains.
+default-frontier planning/review, implementation-only saving, or explicitly
+requested exact/quality route), and `release_mode` (`product_increment` or
+`product_release`) as independent decisions. Do not create Team just to obtain
+a model route; Team does not imply saving or quality mode; the main Codex's root
+host model is not rewritten; and model choices do not persist as workflow
+state. Planning and plan/contract review default to a frontier model; only an
+explicitly specified lane may override that default, and low-tier Saving routes
+are otherwise limited to an authorized implementation Execute. The
+Claude-family manual exact-model gate remains.
 
 Choose path lease from write-conflict risk, not Team membership: main-only single
 writers and read-only/review/verifier work need no lease; one isolated

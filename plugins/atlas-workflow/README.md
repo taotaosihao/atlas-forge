@@ -79,27 +79,30 @@ child. Host configuration and restart require explicit user authority.
 
 Native Team model routing is downstream of staffing, not a reason to create
 staffing. A small clear task stays on the main Codex; after a Team or subagent
-lane is independently justified, Saving mode is the non-persistent default and
-routes implementation, browser verification, and exploration to Luna, routine
-review and verification to Terra, and planning/phase judgment to Sol. Quality
-mode is a separate per-Team or per-lane choice that activates only when the user
-explicitly requests it and routes admitted roles to Sol with their configured
-reasoning effort. Neither mode rewrites the root host model, persists saving or
-quality into workflow state, or changes the lane's goal, paths, authority, or
-acceptance. Both modes use explicit spawn fields and `fork_turns="none"`; neither
-relies on a global default subagent model.
+lane is independently justified, planning and formal plan/contract review use
+the non-persistent `planning-review` frontier route by default. The current
+native mapping uses Sol, including `xhigh` formal review; an explicitly selected
+and admitted Fable or another high-tier exact route may replace a named lane.
+Only an explicit user/operator per-lane selection may choose a lower model
+before implementation. Saving mode is available only after explicit Execute
+authority and routes implementation, its browser verification and exploration
+to Luna, and implementation-slice review and verification to Terra. Quality
+mode remains an explicit all-Sol implementation choice. None of these modes
+rewrites the root host model, persists into workflow state, or changes the
+lane's goal, paths, authority, or acceptance. Every mode uses explicit spawn
+fields and `fork_turns="none"`; none relies on a global default subagent model.
 
-The saving/quality Atlas custom-agent profiles intentionally leave `model`,
-`model_reasoning_effort`, and `model_provider` unset. Codex gives values pinned in
-a custom-agent file precedence over explicit spawn values, which would otherwise
-silently disable either Saving mode or all-Sol Quality mode. The provider-bound
-DeepSeek equivalent profiles are the explicit exception and must match their
-checked-in ZenMux/model/`max` policy. The model-policy checker resolves the
-Saving matrix from the current catalog, rejects routing pins on saving/quality
-profiles, and validates the pinned equivalent profiles; each admitted native
-dispatch must supply its exact matrix values explicitly. Run
-`atlas-agent-model-policy check --mode quality` before an all-Sol dispatch to
-validate the Sol role matrix and its reasoning levels against that same catalog.
+The planning-review/saving/quality Atlas custom-agent profiles intentionally
+leave `model`, `model_reasoning_effort`, and `model_provider` unset. Codex gives
+values pinned in a custom-agent file precedence over explicit spawn values,
+which would otherwise silently disable the stage-aware matrices. The
+provider-bound DeepSeek equivalent profiles are the explicit exception and must
+match their checked-in ZenMux/model/`max` policy. The model-policy checker uses
+`planning-review` when `--mode` is omitted, rejects routing pins, and validates
+the applicable pinned equivalent profiles; each admitted native dispatch must
+supply its exact matrix values explicitly. Run `atlas-agent-model-policy check
+--mode saving` only for authorized implementation Execute, and use `--mode
+quality` before an explicitly selected all-Sol implementation dispatch.
 
 The root-session provider is also unchanged. DeepSeek V4 Pro is a child-local
 ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
@@ -122,17 +125,19 @@ disjoint path ownership with an integration owner and the applicable
 lease/quiescence boundary. A writable fallback starts only after the previous
 writer is proven quiesced and its diff/untracked evidence is preserved.
 
-For read-heavy exploration, the native
+For read-heavy implementation exploration, the native
 `atlas-sdd-explorer-deepseek` / `deepseek-v4-pro:deepseek` route is an
 availability-gated alternative to Luna with the same read-only role contract.
 Its upstream ZenMux `/models` identity remains
 `deepseek/deepseek-v4-pro`; Atlas validates both boundaries and never guesses
-or interchanges the identifiers. Atlas keeps Luna as the ordinary
-single-dispatch default, selects DeepSeek only for an explicit non-OpenAI
-perspective after a live route preflight, and dispatches both only when
-independent cross-checking materially lowers a named risk or the user
-explicitly requests it. Dual dispatch is never a fixed fan-out; the main Codex
-reconciles evidence and discloses any lost provider perspective.
+or interchanges the identifiers. During Execute, Atlas keeps Luna as the
+ordinary single-dispatch default, selects DeepSeek only for an explicit
+non-OpenAI perspective after a live route preflight, and dispatches both only
+when independent cross-checking materially lowers a named risk or the user
+explicitly requests it. Planning and contract discovery stays on the frontier
+planning-review route unless an exact per-lane override exists. Dual dispatch
+is never a fixed fan-out; the main Codex reconciles evidence and discloses any
+lost provider perspective.
 
 The DeepSeek profiles keep provider metadata in the managed custom-agent files
 but obtain authentication through `atlas-zenmux-bearer-token`, which reads the

@@ -18,7 +18,7 @@ function readJson(file, label) {
 }
 
 function parseArgs(argv) {
-  const args = { command: 'check', mode: 'saving' };
+  const args = { command: 'check' };
   if (argv[0] && !argv[0].startsWith('--')) args.command = argv.shift();
   while (argv.length) {
     const flag = argv.shift();
@@ -28,7 +28,9 @@ function parseArgs(argv) {
     args[flag.slice(2).replace('-', '_')] = argv.shift();
   }
   if (!['check', 'resolve'].includes(args.command)) fail(`unknown command ${args.command}`);
-  if (!['saving', 'quality'].includes(args.mode)) fail(`unknown mode ${args.mode}`);
+  if (args.mode && !['planning-review', 'saving', 'quality'].includes(args.mode)) {
+    fail(`unknown mode ${args.mode}`);
+  }
   return args;
 }
 
@@ -47,9 +49,24 @@ function resolvePolicy(catalog, policy, mode) {
 
   const latestFamily = models.map((model) => model.family).sort(compareFamily).at(-1);
   const latest = models.filter((model) => compareFamily(model.family, latestFamily) === 0);
+  const rolePolicy = mode === 'planning-review'
+    ? policy.planning_review_roles
+    : mode === 'quality'
+      ? policy.quality_roles
+      : policy.roles;
+  if (!rolePolicy || typeof rolePolicy !== 'object') fail(`policy lacks ${mode} roles`);
+  if (mode === 'planning-review') {
+    const lowTierRole = Object.entries(rolePolicy)
+      .find(([, profile]) => profile.capability !== 'frontier');
+    if (lowTierRole) {
+      fail(`planning-review role ${lowTierRole[0]} must use frontier capability`);
+    }
+  }
+  const requiredCapabilities = new Set(Object.values(rolePolicy).map((profile) => profile.capability));
   const capabilityModels = {};
 
   for (const [capability, rule] of Object.entries(policy.capabilities)) {
+    if (!requiredCapabilities.has(capability)) continue;
     const pattern = new RegExp(rule.description_pattern, 'i');
     const matches = latest.filter((model) => pattern.test(model.description || ''));
     if (matches.length !== 1) {
@@ -58,8 +75,6 @@ function resolvePolicy(catalog, policy, mode) {
     capabilityModels[capability] = matches[0];
   }
 
-  const rolePolicy = mode === 'quality' ? policy.quality_roles : policy.roles;
-  if (!rolePolicy || typeof rolePolicy !== 'object') fail(`policy lacks ${mode} roles`);
   const roles = {};
   for (const [role, profile] of Object.entries(rolePolicy)) {
     const model = capabilityModels[profile.capability];
@@ -106,7 +121,13 @@ const catalogFile = path.resolve(args.catalog || path.join(os.homedir(), '.codex
 const policyFile = path.resolve(args.policy || path.join(managedAgentsDir, 'model-policy.json'));
 const agentsDir = path.resolve(args.agents_dir || managedAgentsDir);
 const policy = readJson(policyFile, 'policy');
-const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy, args.mode);
+if (![1, 2].includes(policy.schema_version)) fail(`unsupported policy schema ${policy.schema_version}`);
+if (policy.schema_version === 2 && policy.default_mode !== 'planning-review') {
+  fail('policy schema v2 must default to planning-review');
+}
+const mode = args.mode || policy.default_mode || 'saving';
+if (!['planning-review', 'saving', 'quality'].includes(mode)) fail(`unknown default mode ${mode}`);
+const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy, mode);
 
 if (args.command === 'resolve') {
   const { capabilities: _capabilities, ...publicResolved } = resolved;
@@ -135,7 +156,7 @@ for (const role of Object.keys(resolved.roles)) {
 const equivalentRoles = policy.equivalent_roles || {};
 for (const [role, expected] of Object.entries(equivalentRoles)) {
   const baselineExpected = resolved.roles[expected.equivalent_to];
-  if (!baselineExpected) fail(`${role} references unknown equivalent role ${expected.equivalent_to}`);
+  if (!baselineExpected) continue;
 
   let actual;
   let baseline;
@@ -163,5 +184,8 @@ for (const [role, expected] of Object.entries(equivalentRoles)) {
   }
 }
 
-const roleCount = Object.keys(resolved.roles).length + Object.keys(equivalentRoles).length;
+const equivalentRoleCount = Object.values(equivalentRoles)
+  .filter((expected) => resolved.roles[expected.equivalent_to])
+  .length;
+const roleCount = Object.keys(resolved.roles).length + equivalentRoleCount;
 process.stdout.write(`atlas-agent-model-policy: ok family=${resolved.family} mode=${resolved.mode} roles=${roleCount}\n`);

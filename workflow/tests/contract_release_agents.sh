@@ -31,6 +31,7 @@ assert.match(contents.get("implementer"), /do not manufacture facts, receipts, o
 assert.match(contents.get("reviewer"), /put any missing proof in cannot_verify_from_diff/);
 assert.match(contents.get("reviewer"), /never translate APPROVED/);
 assert.match(contents.get("phase-reviewer"), /terminal-sweep dependency closure/);
+assert.match(contents.get("phase-reviewer"), /formal plan or contract review/);
 assert.match(contents.get("verifier"), /arbitrary successful command, cached result, or mismatched candidate/);
 assert.match(contents.get("browser-verifier"), /screenshots, a happy path, or visual judgment alone do not prove formal release readiness/);
 

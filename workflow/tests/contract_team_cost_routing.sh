@@ -43,12 +43,13 @@ const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
   'routine-implementation': ['default-luna-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
   'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
-  'routine-review-verify': ['default-terra-high-reviewer-or-verifier', 'implicit-quality-model'],
-  'hard-to-reverse-direction': ['default-sol-medium-planner', 'automatic-quality-upgrade'],
+  'plan-or-contract-review': ['default-sol-xhigh-formal-reviewer-or-explicit-exact-override', 'implicit-terra-luna-or-saving-route'],
+  'implementation-review-verify': ['default-terra-high-reviewer-or-verifier', 'saving-route-before-execute-authority'],
+  'hard-to-reverse-direction': ['default-sol-max-planner', 'implicit-low-tier-planner'],
   'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
-  'browser-heavy': ['default-luna-high-browser-verifier', 'implicit-quality-model'],
-  'exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout'],
-  'exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
+  'implementation-browser-heavy': ['default-luna-high-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
+  'implementation-exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
+  'implementation-exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
   'quality-mode-explicit': ['all-sol-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
   'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
   'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
@@ -141,7 +142,8 @@ assert_has "$TEAM" 'The default pair is an OpenAI' 'Cross Execute has an OpenAI 
 assert_has "$TEAM" '`atlas-sdd-implementer` on Saving Luna `max`' 'Cross Execute defaults to Luna writer'
 assert_has "$TEAM" '`atlas-sdd-reviewer-deepseek` on `deepseek-v4-pro:deepseek` / `max`' 'Cross Execute defaults to DeepSeek reviewer'
 assert_has "$TEAM" 'explicitly selects a DeepSeek writer' 'Cross Execute supports an explicit DeepSeek writer'
-assert_has "$TEAM" '`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer`' 'Cross Execute swaps to Terra for a DeepSeek writer'
+assert_has "$TEAM" '`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer` on Sol\s+`xhigh`' 'Cross Execute pairs a DeepSeek writer with a high-tier OpenAI reviewer'
+assert_has "$TEAM" 'mandatory pre-review examines\s+the real brief and contract' 'Cross Execute contract pre-review cannot downgrade to Terra'
 assert_has "$TEAM" 'meaningful\s+read-only pre-review' 'Cross Execute pre-reviews before writer startup'
 assert_has "$TEAM" 'Each\s+execute slice has exactly one implementer' 'Cross Execute keeps one writer per slice'
 assert_has "$TEAM" 'Actionable current-goal repair\s+findings go back to the original implementer' 'Cross repair follows the original writer'
@@ -158,21 +160,30 @@ assert_has "$TEAM" '`zenmux` identifies the transport/provider' 'Cross distingui
 assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_planner.*before calling `spawn_agent`' 'Cross stages the planner logical-role slot before spawn'
 assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*before calling `spawn_agent`' 'Cross stages the reviewer logical-role slot before spawn'
 
-assert_has "$TEAM" 'Default Saving Mode' 'saving mode is visibly the default'
-assert_has "$TEAM" 'only after staffing has established that the lane is useful' 'saving mode follows staffing rather than creating Team'
+assert_has "$TEAM" 'Default Planning And Contract Review Mode' 'planning and contract review high-tier default is visible'
+assert_has "$TEAM" 'no-argument policy\s+check resolves this matrix' 'no-argument model policy defaults to planning-review'
+assert_has "$TEAM" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'formal plan or contract review defaults to Sol xhigh'
+assert_has "$TEAM" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'additional plan or contract review defaults to Sol xhigh'
+assert_has "$TEAM" 'Fable or\s+another high-tier model[\s\S]*explicitly selects the exact provider/model route' 'Fable or another high-tier route requires an exact selection'
+assert_has "$TEAM" 'same exact per-lane authority may explicitly choose\s+a lower model' 'an explicit lane selection may override the high-tier default'
+assert_has "$TEAM" 'does not fall back to Terra, Luna, or another low-tier\s+route for planning or contract review' 'unavailable advanced review route cannot degrade to a low-tier model'
+assert_has "$TEAM" 'Implementation-Stage Saving Mode' 'saving mode is explicitly implementation-scoped'
+assert_has "$TEAM" 'only after explicit user implementation authority has\s+entered Execute' 'saving mode requires implementation Execute authority'
+assert_has "$TEAM" 'must never author or review a plan or contract' 'saving mode cannot review a plan or contract'
+assert_has "$TEAM" 'only after staffing\s+has independently established that the lane is useful' 'saving mode follows staffing rather than creating Team'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
 assert_has "$TEAM" 'atlas-sdd-implementer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro implementation always uses max'
 assert_has "$TEAM" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro planning always uses max'
 assert_has "$TEAM" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
 assert_has "$TEAM" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
 assert_has "$TEAM" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
-assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*max.*none' 'routine review defaults to Terra max'
+assert_has "$TEAM" 'Implementation slice review.*atlas-sdd-reviewer.*gpt-5\.6-terra.*max.*none' 'implementation slice review defaults to Terra max'
 assert_has "$TEAM" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro review always uses max'
-assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
-assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'planning defaults to Sol high'
+assert_has "$TEAM" 'Implementation command or business verification.*atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'implementation verification defaults to Terra high'
+assert_has "$TEAM" 'Implementation replanning.*atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'implementation replanning remains on Sol high'
 
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
-assert_has "$TEAM" 'mechanical or environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
+assert_has "$TEAM" 'mechanical or\s+environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
 assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*xhigh.*none' 'browser-heavy work defaults to Luna xhigh'
@@ -188,7 +199,7 @@ assert_has "$TEAM" 'same self-contained packet' 'dual cross-check uses identical
 assert_has "$TEAM" 'main Codex compares evidence' 'controller synthesizes model disagreement'
 assert_has "$TEAM" 'cannot bypass the host/model allowlist' 'catalog cannot bypass host admission'
 assert_has "$TEAM" 'atlas-team-model-catalog' 'Team documents the allowlist catalog projection'
-assert_has "$TEAM" 'saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`' 'saving and quality profiles cannot shadow explicit routing'
+assert_has "$TEAM" 'planning-review/saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`' 'stage-aware profiles cannot shadow explicit routing'
 assert_has "$TEAM" 'provider-bound DeepSeek equivalent profiles are the explicit exception' 'DeepSeek profiles preserve child-local provider routing'
 assert_has "$AGENTS/atlas-sdd-explorer.toml" 'sandbox_mode = "read-only"' 'Luna explorer has an explicit read-only sandbox'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek explorer has an explicit read-only sandbox'
@@ -219,7 +230,7 @@ assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'command = "atlas-zenmu
 assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek implementer does not copy credentials'
 assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" '^sandbox_mode\s*=' 'DeepSeek implementer does not override Luna authority inheritance'
 assert_has "$TEAM" 'Explicit Quality Mode' 'quality mode is separately defined'
-assert_has "$TEAM" 'explicitly requests.*quality mode' 'quality mode requires an explicit user request'
+assert_has "$TEAM" 'explicitly requests\s+quality mode' 'quality mode requires an explicit user request'
 assert_has "$TEAM" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'quality implementation routes to Sol medium'
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality review routes to Sol xhigh'
@@ -227,21 +238,23 @@ assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-sol.*medium.*none' 'quality ver
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality phase review routes to Sol xhigh'
 assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-sol.*medium.*none' 'quality browser verification routes to Sol medium'
 assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-sol.*high.*none' 'quality exploration routes to Sol high'
-assert_has "$TEAM" 'never automatically enable quality mode' 'quality mode is never activated automatically'
+assert_has "$TEAM" 'Do not infer an all-Sol implementation\s+route' 'quality implementation mode is never activated automatically'
 assert_has "$TEAM" 'atlas-agent-model-policy check --mode quality' 'quality mode validates the all-Sol dispatch matrix'
 assert_has "$TEAM" 'staffing_mode' 'staffing is an independent decision'
 assert_has "$TEAM" 'model_policy' 'model policy is an independent decision'
 assert_has "$TEAM" 'release_mode' 'release mode is an independent decision'
-assert_has "$TEAM" 'Do not create Team just to obtain Saving Mode' 'saving mode does not create Team'
-assert_has "$TEAM" 'Team does not imply quality mode' 'Team does not imply quality mode'
+assert_has "$TEAM" 'Do not create Team just to obtain a model route' 'model routing does not create Team'
+assert_has "$TEAM" 'Team does not imply saving or\s+quality mode' 'Team does not imply a model mode'
 assert_has "$TEAM" 'does not rewrite the root host model' 'Atlas does not rewrite the host model'
-assert_has "$TEAM" 'Saving/quality selection' 'saving and quality are not persisted'
+assert_has "$TEAM" 'not persisted as workflow state' 'model selection is not persisted'
 assert_has "$TEAM" 'Main-only single writers' 'single writers do not require a lease'
 assert_has "$TEAM" 'does not require a lease by default' 'isolated product increment writer has no default lease'
 assert_has "$TEAM" 'does not enter execution-vnext or acquire a durable' 'quick writer avoids durable execution-vnext attempt'
 assert_has "$TEAM" 'Formal `product_release` execution continues to use the existing execution-vnext' 'strict release lease remains'
 assert_has "$README" 'Staffing, Team, path lease, model choice, and release mode are independent' 'README keeps decisions orthogonal'
 assert_has "$README" 'root host model' 'README protects host model'
+assert_has "$README" 'planning and formal plan/contract review use[\s\S]*planning-review[\s\S]*frontier route by default' 'README documents the high-tier planning-review default'
+assert_has "$README" 'Saving mode is available only after explicit Execute\s+authority' 'README limits saving mode to implementation Execute'
 assert_has "$AGENTS/atlas-sdd-browser-verifier.toml" 'would benefit from extra judgment, recommend routing' 'final Sol browser review remains conditional'
 assert_lacks "$AGENTS/atlas-sdd-browser-verifier.toml" 'require the controller to route' 'browser evidence cannot force Sol review'
 
@@ -266,7 +279,7 @@ assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'empty visible Payload plu
 assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'atlas-native-agent-inbox get atlas_sdd_reviewer' 'DeepSeek reviewer uses only its stable logical-role slot'
 assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek reviewer cannot scan other role packets'
 assert_has "$TEAM" '`task_name`.*does not select' 'task name is not treated as a custom-agent selector'
-assert_has "$TEAM" 'Outside that explicit override.*mismatch.*do not spawn' 'unexpected dispatch and policy mismatch blocks spawn'
+assert_has "$TEAM" 'Outside that explicit override[\s\S]*mismatch[\s\S]*do not spawn' 'unexpected dispatch and policy mismatch blocks spawn'
 assert_lacks "$TEAM" 'reasonable available fallback and disclose it' 'unavailable exact profile cannot use a generic fallback'
 assert_lacks "$TEAM" 'default_subagent_model' 'team does not require a global default subagent model'
 assert_lacks "$TEAM" 'session JSONL' 'team does not require strict session-log auditing'
