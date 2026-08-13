@@ -108,14 +108,66 @@ assert_has "$TEAM" 'Never lower native.*to `high`' 'DeepSeek never silently down
 assert_has "$TEAM" 'Select Paseo only from an explicit user or operator choice' 'Paseo remains explicit after native DeepSeek routing'
 assert_has "$TEAM" 'Never read or apply Paseo orchestration preferences' 'Paseo preferences do not override controller routing'
 
+assert_has "$TEAM" 'Cross v1.*generation-local.*controller-enforced.*non-crash-resumable' 'Cross v1 keeps generation-local controller-only state'
+assert_has "$TEAM" 'non-certification-gate' 'Cross v1 is not a certification gate'
+assert_has "$TEAM" '`atlas-sdd-planner` at `gpt-5\.6-sol` / `high`' 'Cross Plan defaults to OpenAI Sol high'
+assert_has "$TEAM" '`atlas-sdd-planner-deepseek` at `deepseek-v4-pro:deepseek` / `max`' 'Cross Plan defaults to DeepSeek planner max'
+assert_has "$TEAM" 'same self-contained packet' 'Cross Plan sends an identical packet'
+assert_has "$TEAM" 'fork_turns="none"' 'Cross Plan uses no history fork'
+assert_has "$TEAM" 'followup_task.*original planner runtime id' 'Cross Plan sends disputes to the original planner'
+assert_has "$TEAM" 'cross-plan-perspective-missing' 'Cross Plan records a missing DeepSeek perspective'
+assert_has "$TEAM" 'highest convergence outcome is' 'Cross Plan caps degraded consensus'
+node - "$TEAM" <<'NODE'
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[2], 'utf8');
+const section = source.match(/### Cross Plan\n\n([\s\S]*?)\n\n### Cross Execute/);
+if (!section) throw new Error('missing parseable Cross Plan section');
+const plan = section[1];
+if (!/two OpenAI planner\s+runtime ids that are different actors/.test(plan)) {
+  throw new Error('Cross Plan degradation must use two different OpenAI planner runtime actors');
+}
+if (!/Record `cross-plan-perspective-missing`/.test(plan)) {
+  throw new Error('Cross Plan degradation must record cross-plan-perspective-missing');
+}
+const degraded = plan.match(/If the exact DeepSeek route is unavailable,[\s\S]*?fail Cross closed\./)?.[0] || '';
+if (!/highest convergence outcome is\s+`CONSENSUS_WITH_RESERVATIONS`/.test(degraded)) {
+  throw new Error('Cross Plan degradation must cap the outcome at CONSENSUS_WITH_RESERVATIONS');
+}
+if (/highest convergence outcome is\s+`(?:CONSENSUS|HUMAN_DECISION_REQUIRED)`/.test(degraded)) {
+  throw new Error('Cross Plan degradation must not claim another highest outcome');
+}
+NODE
+assert_has "$TEAM" 'The default pair is an OpenAI' 'Cross Execute has an OpenAI default writer'
+assert_has "$TEAM" '`atlas-sdd-implementer` on Saving Luna `max`' 'Cross Execute defaults to Luna writer'
+assert_has "$TEAM" '`atlas-sdd-reviewer-deepseek` on `deepseek-v4-pro:deepseek` / `max`' 'Cross Execute defaults to DeepSeek reviewer'
+assert_has "$TEAM" 'explicitly selects a DeepSeek writer' 'Cross Execute supports an explicit DeepSeek writer'
+assert_has "$TEAM" '`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer`' 'Cross Execute swaps to Terra for a DeepSeek writer'
+assert_has "$TEAM" 'meaningful\s+read-only pre-review' 'Cross Execute pre-reviews before writer startup'
+assert_has "$TEAM" 'Each\s+execute slice has exactly one implementer' 'Cross Execute keeps one writer per slice'
+assert_has "$TEAM" 'Actionable current-goal repair\s+findings go back to the original implementer' 'Cross repair follows the original writer'
+assert_has "$TEAM" 'rereview\s+always goes back to the original reviewer' 'Cross rereview follows the original reviewer'
+assert_has "$TEAM" 'route/profile,' 'Cross route drift is named'
+assert_has "$TEAM" 'fails Cross closed' 'Cross actor or route drift fails closed'
+assert_has "$TEAM" 'explicitly switch to ordinary Saving Team' 'Saving fallback requires explicit user choice'
+assert_has "$TEAM" 'must not be reported as Cross' 'Saving fallback is not Cross success'
+assert_has "$TEAM" 'no Paseo fallback, Claude or Fable' 'Cross runtime excludes Paseo, Claude, and Fable'
+assert_has "$TEAM" 'cryptographic provider or billing attestation' 'Cross does not claim billing attestation'
+assert_has "$TEAM" 'release-certification authority' 'Cross does not grant release certification'
+assert_has "$TEAM" 'suffix identifies the model supplier' 'Cross names the DeepSeek supplier suffix'
+assert_has "$TEAM" '`zenmux` identifies the transport/provider' 'Cross distinguishes ZenMux transport from supplier'
+assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_planner.*before calling `spawn_agent`' 'Cross stages the planner logical-role slot before spawn'
+assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*before calling `spawn_agent`' 'Cross stages the reviewer logical-role slot before spawn'
+
 assert_has "$TEAM" 'Default Saving Mode' 'saving mode is visibly the default'
 assert_has "$TEAM" 'only after staffing has established that the lane is useful' 'saving mode follows staffing rather than creating Team'
 assert_has "$TEAM" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
 assert_has "$TEAM" 'atlas-sdd-implementer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro implementation always uses max'
+assert_has "$TEAM" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro planning always uses max'
 assert_has "$TEAM" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
 assert_has "$TEAM" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
 assert_has "$TEAM" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
 assert_has "$TEAM" 'atlas-sdd-reviewer.*gpt-5\.6-terra.*max.*none' 'routine review defaults to Terra max'
+assert_has "$TEAM" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro review always uses max'
 assert_has "$TEAM" 'atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'verification defaults to Terra high'
 assert_has "$TEAM" 'atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'planning defaults to Sol high'
 
@@ -126,6 +178,8 @@ assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade 
 assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*xhigh.*none' 'browser-heavy work defaults to Luna xhigh'
 assert_has "$TEAM" 'atlas-sdd-explorer.*gpt-5\.6-luna.*max.*none' 'exploration defaults to Luna max'
 assert_has "$TEAM" 'atlas-sdd-explorer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro exploration always uses max'
+assert_has "$TEAM" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek planner is present in the native matrix'
+assert_has "$TEAM" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek reviewer is present in the native matrix'
 assert_has "$TEAM" 'Atlas always selects `max`' 'DeepSeek V4 Pro native profiles use max explicitly'
 assert_has "$TEAM" 'configured `low` / `high` / `max` capability set' 'DeepSeek catalog preserves the configured effort set'
 assert_has "$TEAM" 'same logical read-only exploration role' 'Luna and DeepSeek preserve one logical responsibility'
@@ -142,6 +196,22 @@ assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" '^model_provider = "zenmux
 assert_lacks "$AGENTS/atlas-sdd-explorer.toml" '^model_provider = "zenmux"$' 'Luna explorer does not inherit the DeepSeek provider'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek agent reuses isolated credential helper'
 assert_lacks "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek agent does not copy credentials'
+assert_has "$AGENTS/atlas-sdd-planner.toml" 'sandbox_mode = "read-only"' 'Luna planner has an explicit read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-reviewer.toml" 'sandbox_mode = "read-only"' 'Luna reviewer has an explicit read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" '^model_provider = "zenmux"$' 'DeepSeek planner binds ZenMux locally'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" '^model = "deepseek-v4-pro:deepseek"$' 'DeepSeek planner binds the exact routed model'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" '^model_reasoning_effort = "max"$' 'DeepSeek planner preserves max effort'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" '^model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"$' 'DeepSeek planner uses the isolated catalog'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek planner has a hard read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek planner reuses isolated credential helper'
+assert_lacks "$AGENTS/atlas-sdd-planner-deepseek.toml" 'experimental_bearer_token' 'DeepSeek planner does not copy credentials'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" '^model_provider = "zenmux"$' 'DeepSeek reviewer binds ZenMux locally'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" '^model = "deepseek-v4-pro:deepseek"$' 'DeepSeek reviewer binds the exact routed model'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" '^model_reasoning_effort = "max"$' 'DeepSeek reviewer preserves max effort'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" '^model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"$' 'DeepSeek reviewer uses the isolated catalog'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek reviewer has a hard read-only sandbox'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'command = "atlas-zenmux-bearer-token"' 'DeepSeek reviewer reuses isolated credential helper'
+assert_lacks "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'experimental_bearer_token' 'DeepSeek reviewer does not copy credentials'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'IMPLEMENTER_REPORT_JSON' 'DeepSeek implementer preserves the implementer output contract'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" '^model_provider = "zenmux"$' 'DeepSeek implementer binds ZenMux locally'
 assert_lacks "$AGENTS/atlas-sdd-implementer.toml" '^model_provider = "zenmux"$' 'Luna implementer does not inherit the DeepSeek provider'
@@ -189,6 +259,12 @@ assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'atlas-native-agent-inbox 
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'atlas-native-agent-inbox get atlas_sdd_implementer' 'DeepSeek implementer uses only its stable logical-role slot'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek explorer cannot scan other role packets'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek implementer cannot scan other role packets'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek planner has the encrypted-payload bootstrap'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" 'atlas-native-agent-inbox get atlas_sdd_planner' 'DeepSeek planner uses only its stable logical-role slot'
+assert_has "$AGENTS/atlas-sdd-planner-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek planner cannot scan other role packets'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek reviewer has the encrypted-payload bootstrap'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'atlas-native-agent-inbox get atlas_sdd_reviewer' 'DeepSeek reviewer uses only its stable logical-role slot'
+assert_has "$AGENTS/atlas-sdd-reviewer-deepseek.toml" 'Never list the inbox, read another role' 'DeepSeek reviewer cannot scan other role packets'
 assert_has "$TEAM" '`task_name`.*does not select' 'task name is not treated as a custom-agent selector'
 assert_has "$TEAM" 'Outside that explicit override.*mismatch.*do not spawn' 'unexpected dispatch and policy mismatch blocks spawn'
 assert_lacks "$TEAM" 'reasonable available fallback and disclose it' 'unavailable exact profile cannot use a generic fallback'

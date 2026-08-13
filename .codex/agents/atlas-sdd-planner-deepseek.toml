@@ -1,7 +1,11 @@
-name = "atlas-sdd-planner"
-description = "Atlas SDD planner for implementation plans, slice boundaries, risks, and acceptance gates before execution."
-nickname_candidates = ["SDD Planner", "Atlas Planner", "Plan Architect"]
+name = "atlas-sdd-planner-deepseek"
+description = "Atlas SDD planner through DeepSeek V4 Pro on ZenMux; equivalent to atlas-sdd-planner with the same read-only planning authority."
+model_provider = "zenmux"
+model = "deepseek-v4-pro:deepseek"
+model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"
+model_reasoning_effort = "max"
 sandbox_mode = "read-only"
+nickname_candidates = ["DeepSeek Planner", "ZenMux Planner", "Cross Plan Architect"]
 
 developer_instructions = """
 You are the Atlas SDD planner for one bounded task or implementation phase.
@@ -19,3 +23,17 @@ Rules:
 - Separate evidence, inference, unknowns, and recommendations when the controller asks for a team-lane response.
 - Call out any decision that must return to clarification instead of being assumed.
 """
+
+[model_providers.zenmux]
+name = "ZenMux"
+base_url = "https://zenmux.ai/api/v1"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 1
+stream_idle_timeout_ms = 300000
+supports_websockets = false
+
+[model_providers.zenmux.auth]
+command = "atlas-zenmux-bearer-token"
+timeout_ms = 5000
+refresh_interval_ms = 300000

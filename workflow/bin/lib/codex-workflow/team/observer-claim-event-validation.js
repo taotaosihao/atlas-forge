@@ -681,8 +681,8 @@ function validateTeamStart(event, previous, next, previousState) {
   }
   const generation = previous?.schema_version === 2 ? Number(previous.generation || 0) + 1 : 1;
   const artifactDir = previousState?.artifact_dir || "";
-  const decision = `${artifactDir}/team/decision.md`.replace(/^\//, "");
-  const staffing = `${artifactDir}/team/staffing.md`.replace(/^\//, "");
+  const decision = `${artifactDir}/team/decision.md`;
+  const staffing = `${artifactDir}/team/staffing.md`;
   const expected = createTeamRun({
     previous: previous || {},
     mode: event.data.mode,
@@ -995,8 +995,7 @@ function validateLoopEvent(event, previous, next) {
 
 function validateTopLevelTeamEvent(event, previous, next, previousState) {
   const allowed = new Set();
-  const canonicalDecision = `${previousState?.artifact_dir || ""}/team/decision.md`
-    .replace(/^\//, "");
+  const canonicalDecision = `${previousState?.artifact_dir || ""}/team/decision.md`;
   if (event.kind === "team.stopped") {
     if (!ACTIVE_TEAM_STATUSES.has(previous.status)) {
       throw new Error(`team.stopped cannot transition terminal Team status: ${previous.status}`);

@@ -31,11 +31,38 @@ implementer_expected=$'goal: prove implementer slot\nauthority: isolated role'
 [[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get deepseek_probe)" == "$expected" ]] \
   || fail 'probe packet changed while implementer slot was present'
 
+printf '%s\n' 'goal: prove planner slot' 'authority: read-only planning' \
+  | CODEX_HOME="$TMP_ROOT" "$HELPER" put atlas_sdd_planner >/dev/null
+planner_expected=$'goal: prove planner slot\nauthority: read-only planning'
+[[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get atlas_sdd_planner)" == "$planner_expected" ]] \
+  || fail 'planner packet did not round-trip'
+
+printf '%s\n' 'goal: prove reviewer slot' 'authority: read-only review' \
+  | CODEX_HOME="$TMP_ROOT" "$HELPER" put atlas_sdd_reviewer >/dev/null
+reviewer_expected=$'goal: prove reviewer slot\nauthority: read-only review'
+[[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get atlas_sdd_reviewer)" == "$reviewer_expected" ]] \
+  || fail 'reviewer packet did not round-trip'
+[[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get atlas_sdd_planner)" == "$planner_expected" ]] \
+  || fail 'planner packet changed while reviewer slot was present'
+
 CODEX_HOME="$TMP_ROOT" "$HELPER" delete atlas_sdd_implementer >/dev/null
 [[ ! -e "$TMP_ROOT/atlas-native-agent-inbox/atlas_sdd_implementer.md" ]] \
   || fail 'implementer packet was not deleted'
 [[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get deepseek_probe)" == "$expected" ]] \
   || fail 'probe packet did not survive implementer deletion'
+
+CODEX_HOME="$TMP_ROOT" "$HELPER" delete atlas_sdd_planner >/dev/null
+[[ ! -e "$TMP_ROOT/atlas-native-agent-inbox/atlas_sdd_planner.md" ]] \
+  || fail 'planner packet was not deleted'
+[[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get atlas_sdd_reviewer)" == "$reviewer_expected" ]] \
+  || fail 'reviewer packet did not survive planner deletion'
+
+if printf 'replacement\n' | CODEX_HOME="$TMP_ROOT" "$HELPER" put atlas_sdd_reviewer >/dev/null 2>&1; then
+  fail 'existing reviewer packet was overwritten'
+fi
+CODEX_HOME="$TMP_ROOT" "$HELPER" delete atlas_sdd_reviewer >/dev/null
+[[ ! -e "$TMP_ROOT/atlas-native-agent-inbox/atlas_sdd_reviewer.md" ]] \
+  || fail 'reviewer packet was not deleted'
 
 if printf 'replacement\n' | CODEX_HOME="$TMP_ROOT" "$HELPER" put deepseek_probe >/dev/null 2>&1; then
   fail 'existing packet was overwritten'

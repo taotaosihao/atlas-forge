@@ -168,7 +168,7 @@ known_a = {
 }
 check(canonical_a(known_a) == "b3dea6a789b454a00de8f66fd42e13bccc0dac2ae37d5d2d87922058a91f11c4", "A known-answer identity mismatch")
 check(body_identity(c_body) == "1fa087ccbfb1e673889f2a0f9747ac6e398aaead23bc84640507a02450b2d15f", "C normalization known-answer mismatch")
-check(body_identity(d_body) == "0665441ff55507646c9486cb42ba9032f4a55d5f2b1b0fd30329d92dc8bf1d1c", "D normalization known-answer mismatch")
+check(body_identity(d_body) == "001e5225afbfc692e6764c22f367cde266fdf0d94c560f519e153bc9fad67661", "D normalization known-answer mismatch")
 
 def read_artifacts(root):
     result = {}

@@ -1,7 +1,11 @@
-name = "atlas-sdd-reviewer"
-description = "Atlas SDD reviewer for routine read-only slice review. Use by default unless a phase review or another profile is explicitly requested."
-nickname_candidates = ["SDD Reviewer", "Atlas Reviewer", "Slice Reviewer"]
+name = "atlas-sdd-reviewer-deepseek"
+description = "Atlas SDD reviewer through DeepSeek V4 Pro on ZenMux; equivalent to atlas-sdd-reviewer with the same read-only review authority."
+model_provider = "zenmux"
+model = "deepseek-v4-pro:deepseek"
+model_catalog_json = "~/.codex/model-catalogs/zenmux-deepseek.json"
+model_reasoning_effort = "max"
 sandbox_mode = "read-only"
+nickname_candidates = ["DeepSeek Reviewer", "ZenMux Reviewer", "Cross Review Auditor"]
 
 developer_instructions = """
 You are the Atlas SDD reviewer for one routine implementation slice.
@@ -19,3 +23,17 @@ Rules:
 - New verdicts must use review-verdict schema_version 2. Give every issue a verdict-local unique safe finding_id. Encode each cannot_verify_from_diff entry as {"gap_id":"<safe-id>","description":"<evidence gap>"}. Do not emit disposition, basis, authority_refs, repair_status, goal_ref, or controller decisions; those belong to the controller.
 - Final output must contain exactly one REVIEW_VERDICT_JSON fenced JSON block that satisfies the Atlas SDD review-verdict contract.
 """
+
+[model_providers.zenmux]
+name = "ZenMux"
+base_url = "https://zenmux.ai/api/v1"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 1
+stream_idle_timeout_ms = 300000
+supports_websockets = false
+
+[model_providers.zenmux.auth]
+command = "atlas-zenmux-bearer-token"
+timeout_ms = 5000
+refresh_interval_ms = 300000

@@ -79,7 +79,7 @@ assert_has 'otherwise[[:space:]]+stop and report the blocker' 'unsafe main-only 
 assert_has '[Dd]isclose[[:space:]]+which independent[[:space:]]+perspective was unavailable' 'main-only fallback discloses the missing perspective'
 assert_has 'result degraded to[[:space:]]+main-only' 'fallback identifies whether the result degraded to main-only'
 assert_has 'never report the degraded result as completed multi-agent[[:space:]]+clarification' 'degraded fallback cannot claim completed multi-agent clarification'
-assert_has 'product_release.*execution-v3|execution-v3.*product_release' 'release execution remains execution-v3'
+assert_has 'product_release.*execution-vnext|execution-vnext.*product_release' 'release execution remains execution-vnext'
 assert_has 'immutable Profile|immutable.*Profile' 'release keeps an immutable Profile'
 assert_has 'terminal.*(release|certification).*slice|final.*sweep' 'release keeps a terminal final sweep'
 assert_has 'completion-derived.*release_decision|release_decision.*completion-derived' 'only completion-derived release decision is authoritative'

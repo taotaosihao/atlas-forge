@@ -13,7 +13,7 @@ const path = require("node:path");
 const root = process.argv[2];
 const rel = (...parts) => path.join(root, ...parts);
 const read = (...parts) => fs.readFileSync(rel(...parts), "utf8");
-const invariant = "Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.";
+const invariant = "Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.";
 
 const skillFiles = {
   task: ["plugins", "atlas-workflow", "skills", "task", "SKILL.md"],
@@ -57,17 +57,17 @@ assert.match(text.task, /do not initialize workflow merely to log it/);
 assert.match(text.task, /promotion to a usable product increment requires fresh `product_increment` authoring/);
 assert.match(text.clarify, /Team just to obtain Saving Mode/);
 assert.match(text.clarify, /For the default[\s\S]*`product_increment` path[\s\S]*do not create a[\s\S]*workflow task/);
-assert.match(text.team, /does not enter execution-v3 or acquire a durable/);
+assert.match(text.team, /does not enter execution-vnext or acquire a durable/);
 assert.match(text.team, /Main-only single writers.*no lease requirement/s);
 assert.match(text.team, /release_mode=product_increment/);
 
-assert.match(text.task, /route its execution and certification through Team execution-v3/);
+assert.match(text.task, /route its execution and certification through Team execution-vnext/);
 assert.match(text.task, /Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal/);
 assert.match(text.task, /When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`/);
 assert.match(text.task, /target_delivery_authority_ref.*controller-recordable `user-message:` or `operator-input:`/s);
 assert.match(text.task, /project-phase-report <task-id> <phase-id>/);
-assert.match(text.clarify, /semantics v4/);
-assert.match(text.clarify, /execution-plan schema version 2/);
+assert.match(text.clarify, /semantics v6/);
+assert.match(text.clarify, /execution-plan schema version 4/);
 assert.match(text.clarify, /terminal release-certification slice/);
 assert.match(text.clarify, /whenever an authorized `product_release` target reaches execution or certification/);
 assert.match(text.clarify, /Planning or review that directly authors or gates a named externally usable candidate retains `product_release`/);
@@ -77,7 +77,7 @@ assert.match(text.team, /recomputes typed facts from raw inputs/);
 assert.match(text.team, /missing workflow-bound producer provenance makes the fact `cannot_verify`/);
 assert.match(text.team, /target_delivery_authority_ref.*controller-recordable `user-message:` or `operator-input:`/s);
 assert.match(text.team, /project-phase-report <task-id> <phase-id>/);
-assert.match(text.team, /release-bearing `execution-v3` admission and completion require the hash-bound `work_type=implementation`/);
+assert.match(text.team, /Release-bearing `execution-vnext` admission and completion require the hash-bound `work_type=implementation`/);
 assert.match(text.team, /Never convert an inadmissible sweep into a derived `cannot_verify` decision/);
 assert.match(text.design, /only the four typed formal Web UI facts/);
 assert.match(text.design, /do not write `certified`/);

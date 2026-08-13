@@ -317,7 +317,7 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
       kind: input.kind,
       occurred_at: occurredAt,
       local_day: eventLocalDay(occurredAt),
-      local_utc_offset_minutes: -new Date(occurredAt).getTimezoneOffset(),
+      local_utc_offset_minutes: -new Date(occurredAt).getTimezoneOffset() || 0,
       consistency: {
         authority: "event",
         projection: "replayable",

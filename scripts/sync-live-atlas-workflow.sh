@@ -78,7 +78,9 @@ ATLAS_AGENT_NAMES=(
   atlas-sdd-implementer-deepseek.toml
   atlas-sdd-phase-reviewer.toml
   atlas-sdd-planner.toml
+  atlas-sdd-planner-deepseek.toml
   atlas-sdd-reviewer.toml
+  atlas-sdd-reviewer-deepseek.toml
   atlas-sdd-verifier.toml
   model-policy.json
 )

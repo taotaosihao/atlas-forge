@@ -292,7 +292,7 @@ lease; one isolated product-increment Team writer without fallback, takeover, or
 external concurrency does not require one by default. Concurrent writers,
 fallback/takeover, uncertain quiescence, or an external shared writer require
 non-overlapping ownership plus the existing lease/quiescence boundary. Strict
-`product_release` execution-v3 lease and admission remain unchanged; Atlas does
+`product_release` execution-vnext lease and admission remain unchanged; Atlas does
 not build a general lease runtime for the quick path.
 
 When formal release intent is explicit, `MVP`, `Beta`, limited release, GA, and
@@ -310,15 +310,15 @@ authoring/admission until an exact dedicated Profile exists; report their
 release-readiness assessment as `cannot_verify` without inventing a completion
 decision or relabeling the product.
 
-A newly authored `product_release` uses contract semantics v4, execution-plan
-schema version 2, brief schema version 3, and Team execution-v3. Every Profile
+A newly authored `product_release` uses contract semantics v6, execution-plan
+schema version 4, brief schema version 4, and Team execution-vnext. Every Profile
 check runs in one terminal slice that depends on all implementation slices and
 binds the same final source, artifact, surface inventory, config, runtime, and
 data candidate. Official digest-pinned adapters recompute typed facts from raw
 evidence; passing commands, screenshots, design approval, Business Acceptance,
 or agent/reviewer approval cannot write the decision.
 
-Brief v3 and persistent execution authority also bind the contract's exact
+Brief v4 and persistent execution authority also bind the contract's exact
 `work_type`. Planning and review may continue to govern a `product_release` in
 Team discuss mode, but release-bearing execution and completion require the
 hash-bound value `implementation`; no other work type can derive a release

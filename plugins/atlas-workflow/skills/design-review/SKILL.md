@@ -17,7 +17,7 @@ An ordinary design-fidelity review is not automatically a `product_release`. Whe
 
 Its report, verdict, screenshots, hashes, and adapter consistency are still claims, not trusted producer provenance. Without a workflow-bound producer receipt tied to the immutable candidate, the release fact is `cannot_verify`.
 
-Release-readiness invariant: only a Team execution-v3 product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
 
 Follow this loop:
 

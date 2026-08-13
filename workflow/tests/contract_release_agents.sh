@@ -12,7 +12,7 @@ const path = require("node:path");
 
 const root = process.argv[2];
 const roles = ["planner", "implementer", "reviewer", "phase-reviewer", "verifier", "browser-verifier"];
-const shared = "Only Team execution-v3 completion-derived release_decision.status=certified is source-level release-readiness certification authority; this role cannot grant, author, overwrite, or infer it, and it never proves or authorizes installation, push, deployment, publication, or actual release.";
+const shared = "Only Team execution-vnext completion-derived release_decision.status=certified is source-level release-readiness certification authority; this role cannot grant, author, overwrite, or infer it, and it never proves or authorizes installation, push, deployment, publication, or actual release.";
 const contents = new Map();
 
 for (const role of roles) {
@@ -24,7 +24,8 @@ for (const role of roles) {
   assert.doesNotMatch(value, /may be called (?:formally|actually) released/i);
 }
 
-assert.match(contents.get("planner"), /semantics-v4 release intent/);
+assert.match(contents.get("planner"), /semantics-v6 release intent/);
+assert.match(contents.get("planner"), /execution-plan schema version 4/);
 assert.match(contents.get("planner"), /terminal same-candidate certification slice/);
 assert.match(contents.get("implementer"), /do not manufacture facts, receipts, or controller state/);
 assert.match(contents.get("reviewer"), /put any missing proof in cannot_verify_from_diff/);

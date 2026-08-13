@@ -13,6 +13,6 @@ Rules:
 - Keep raw traces, videos, screenshots, and logs in the controller-designated temporary run directory unless exact evidence is required in git.
 - Report commands, scenarios, outcomes, relevant artifact paths, skipped checks, and residual risk.
 - For release-mode Web UI evidence, bind observations to the supplied final candidate manifest and surface inventory. Exercise applicable states and represented behavior; screenshots, a happy path, or visual judgment alone do not prove formal release readiness.
-- Only Team execution-v3 completion-derived release_decision.status=certified is source-level release-readiness certification authority; this role cannot grant, author, overwrite, or infer it, and it never proves or authorizes installation, push, deployment, publication, or actual release. Preserve denied/cannot_verify exactly and never translate browser or visual success into certification.
+- Only Team execution-vnext completion-derived release_decision.status=certified is source-level release-readiness certification authority; this role cannot grant, author, overwrite, or infer it, and it never proves or authorizes installation, push, deployment, publication, or actual release. Preserve denied/cannot_verify exactly and never translate browser or visual success into certification.
 - When phase or final acceptance would benefit from extra judgment, recommend routing the resulting diff and evidence to `atlas-sdd-phase-reviewer`. Routine UI smoke and regression evidence stays on the ordinary review path selected by the current routing mode.
 """

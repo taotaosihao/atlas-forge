@@ -84,7 +84,7 @@ const {
 ));
 
 function fixedClock() {
-  return new Date(2026, 6, 10, 12, 0, 0);
+  return new Date("2026-07-10T04:00:00Z");
 }
 
 function temporaryWorkflow(t) {
@@ -1008,7 +1008,7 @@ test("creates workflow-note scaffolds and preserves substantive existing files",
   scaffoldClarify(taskId, { clock: fixedClock, environment });
   const intakeFile = path.join(artifactDir, "intake.md");
   assert.match(fs.readFileSync(intakeFile, "utf8"), new RegExp(`task_id: ${taskId}`));
-  assert.match(fs.readFileSync(intakeFile, "utf8"), /created: 2026-07-10/);
+  assert.match(fs.readFileSync(intakeFile, "utf8"), new RegExp(`created: ${localDay(fixedClock)}`));
 
   fs.appendFileSync(intakeFile, "KEEP-ME\n", "utf8");
   const before = fs.readFileSync(intakeFile);
