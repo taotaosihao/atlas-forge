@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { CommandError, commandOptions } = require("../core/command-runtime");
 const { mutateTaskRuntime } = require("../core/task-mutation");
-const { taskArtifactDir } = require("../core/paths");
+const { claudePluginCacheCandidates, taskArtifactDir } = require("../core/paths");
 const {
   requireOpenExecutionTask,
   requireTaskFile,
@@ -18,6 +18,7 @@ function pluginCandidates(environment, paths) {
     environment.ATLAS_WORKFLOW_PLUGIN_ROOT,
     path.join(paths.codeHome, "plugins", "atlas-workflow"),
     path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+    ...claudePluginCacheCandidates(environment),
   ].filter(Boolean);
 }
 

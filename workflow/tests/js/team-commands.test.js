@@ -5654,6 +5654,32 @@ test("required perspective admission requires an independently bound actor", (t)
     "--dispatch=perspective-dispatch", "--disposition=admitted",
     "--admitted-attempts=controller-perspective",
   ]), /required perspective must be produced by an independently bound actor/);
+
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=main-claude-perspective-reserve", "--action=reserve",
+    "--dispatch=perspective-dispatch", "--attempt=main-claude-perspective",
+    "--launch-operation-id=launch-main-claude-perspective", "--perspective=security",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=main-claude-perspective-bind", "--action=bind",
+    "--attempt=main-claude-perspective", "--launch-operation-id=launch-main-claude-perspective",
+    "--runtime-agent-id=main-claude",
+  ]);
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=main-claude-perspective-terminal", "--action=terminal",
+    "--attempt=main-claude-perspective", "--outcome=succeeded",
+  ]);
+  writeEvidence(paths, taskId, "team/main-claude-perspective-quiesced.json");
+  invokeControl(runAttemptRecord, parseAttemptArgs, environment, [
+    taskId, "--operation-id=main-claude-perspective-quiesce", "--action=quiesced",
+    "--attempt=main-claude-perspective",
+    "--evidence-refs=team/main-claude-perspective-quiesced.json",
+  ]);
+  assert.throws(() => invokeControl(runDispatchRecord, parseDispatchArgs, environment, [
+    taskId, "--operation-id=main-claude-perspective-dispose", "--action=dispose",
+    "--dispatch=perspective-dispatch", "--disposition=admitted",
+    "--admitted-attempts=main-claude-perspective",
+  ]), /required perspective must be produced by an independently bound actor/);
 });
 
 test("writer lease, trusted retry, and atomic writable fallback preserve ownership", (t) => {

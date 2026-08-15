@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Locates the real Atlas workflow hook script from a Claude Code plugin install
+# (where ${CLAUDE_PLUGIN_ROOT} is an isolated cache copy with no sibling
+# workflow/ directory) and execs it, forwarding stdin untouched. Hooks must
+# never block a session: any resolution failure exits 0 silently instead of
+# erroring.
+set -uo pipefail
+
+HOOK_NAME="${1:-}"
+if [[ -z "$HOOK_NAME" ]]; then
+  exit 0
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+CANDIDATES=(
+  "${ATLAS_WORKFLOW_ROOT:-}/hooks/$HOOK_NAME"
+  "${CODEX_WORKFLOW_ROOT:-}/hooks/$HOOK_NAME"
+  "$SCRIPT_DIR/../../../workflow/hooks/$HOOK_NAME"
+  "$HOME/.codex/workflow/hooks/$HOOK_NAME"
+)
+
+for candidate in "${CANDIDATES[@]}"; do
+  [[ -n "$candidate" ]] || continue
+  if [[ -x "$candidate" ]]; then
+    exec "$candidate"
+  fi
+done
+
+exit 0

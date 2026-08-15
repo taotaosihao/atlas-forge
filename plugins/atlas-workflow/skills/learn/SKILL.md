@@ -5,6 +5,10 @@ description: Use the legacy Atlas learning flow to save a manual archival lesson
 
 Use the local learning helper only when a user explicitly wants a legacy Atlas lesson file. MemPalace is the default long-term memory and semantic recall layer.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:learn`; Claude Code invokes it as `/learn` or by calling the `learn` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。

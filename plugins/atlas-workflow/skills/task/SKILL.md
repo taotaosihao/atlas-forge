@@ -5,6 +5,10 @@ description: Use the Atlas task flow for bounded work.
 
 Use the local task helper for bounded implementation, diagnosis, or maintenance.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:task`; Claude Code invokes it as `/task` or by calling the `task` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+
 ## Language
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors where that improves accuracy.

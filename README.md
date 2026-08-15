@@ -129,6 +129,28 @@ state and are not stored in this repository.
 Start a new Codex thread after updating. Plugin skills are loaded when a thread
 starts.
 
+## Claude Code Install
+
+`atlas-workflow` also installs into Claude Code as an additive second host —
+Codex behavior is unchanged either way. The repo root
+`.claude-plugin/marketplace.json` and `plugins/atlas-workflow/.claude-plugin/plugin.json`
+are the Claude-facing manifests; they carry the same skills, plus Claude-native
+`commands/`, `agents/`, and `hooks/` that the Codex manifest does not need.
+
+Add the local marketplace and install the plugin from a checkout:
+
+```bash
+claude plugin marketplace add /path/to/atlas-forge
+claude plugin install atlas-workflow@atlas-forge
+```
+
+Start a new Claude Code session so skills, the six `/task`, `/team`, `/clarify`,
+`/intake`, `/finish`, `/cw` commands, and the `atlas-sdd-*` agents are loaded.
+The remaining nine skills are reachable by name through Claude Code's own skill
+discovery; they do not have dedicated slash commands. See
+[`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
+for the full host-parity scope and boundaries.
+
 ## Development Workflow
 
 For local development, edit plugin, workflow, or native agent source in this
@@ -228,8 +250,15 @@ atlas-forge/
     bin/
     skills/
     multica-sdlc/
+  .claude-plugin/marketplace.json
   plugins/
     atlas-workflow/
+      .codex-plugin/
+      .claude-plugin/
+      agents/
+      commands/
+      hooks/
+      skills/
     mempalace-codex-plugin/
     multica-sdlc/
   scripts/

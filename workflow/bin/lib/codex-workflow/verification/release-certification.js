@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { taskArtifactDir } = require("../core/paths");
+const { claudePluginCacheCandidates, taskArtifactDir } = require("../core/paths");
 const { readAuthoritativeEvents } = require("../core/event-store");
 const { taskEventFile } = require("../core/task-mutation");
 const {
@@ -269,6 +269,7 @@ function pluginCandidates(environment, paths) {
     environment?.ATLAS_WORKFLOW_PLUGIN_ROOT,
     paths?.codeHome && path.join(paths.codeHome, "plugins", "atlas-workflow"),
     path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+    ...claudePluginCacheCandidates(environment || {}),
   ].filter(Boolean);
 }
 

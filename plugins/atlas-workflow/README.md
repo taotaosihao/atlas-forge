@@ -2,6 +2,19 @@
 
 This directory is the source for the local `Atlas Workflow` plugin.
 
+## Dual-Host Layout
+
+This plugin installs into both Codex and Claude Code from the same tree, additively:
+
+- `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` are separate manifests for each host; their `version` fields are kept in sync by `scripts/bump-plugin-cachebuster.sh`.
+- `skills/` is shared verbatim — `SKILL.md` frontmatter (`name` + `description`) is already host-neutral.
+- `commands/` (6 files) and `agents/` (7 files) exist only for Claude Code; Codex uses `$atlas-workflow:<name>` skill invocation and `.codex/agents/*.toml` instead, both unchanged.
+- `hooks/hooks.json` exists only for Claude Code and forwards to the same `workflow/hooks/{pre,post}-tool-use` scripts Codex installs directly via `~/.codex/hooks.json`, through the `claude-hook-launcher` path-resolution shim in `scripts/`.
+
+Codex behavior is unchanged by any of this; see
+[`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](../../docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
+for the full scope.
+
 ## What It Exposes
 
 After the plugin is installed, these entrypoints are available:
@@ -378,7 +391,11 @@ primitive used by the update command.
 
 ## Layout
 
-- `.codex-plugin/plugin.json`: plugin metadata
+- `.codex-plugin/plugin.json`: Codex plugin metadata
+- `.claude-plugin/plugin.json`: Claude Code plugin metadata
+- `agents/*.md`: Claude Code agent definitions, mapped from `.codex/agents/*.toml` (DeepSeek/ZenMux custom-provider variants have no Claude Code equivalent and are not mapped)
+- `commands/*.md`: Claude Code slash commands for the 6 highest-frequency entrypoints (task, team, clarify, intake, finish, cw); the remaining skills are reachable by name through Claude Code's own skill discovery
+- `hooks/hooks.json`: Claude Code hook registration; forwards to `workflow/hooks/*` via `scripts/claude-hook-launcher`
 - `skills/cw/SKILL.md`: bounded Atlas workflow entry
 - `skills/task/SKILL.md`: bounded task entry
 - `skills/office-hours/SKILL.md`: upstream product judgment entry

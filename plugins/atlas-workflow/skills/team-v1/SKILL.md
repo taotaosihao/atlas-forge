@@ -11,6 +11,10 @@ lane processes. Use it only when the user explicitly asks for legacy behavior,
 explicitly accepts legacy behavior, or when you need to reproduce/debug old
 `team-start` / `team-loop` behavior.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:team-v1`; on Claude Code it is reachable as `/team-v1` or the `team-v1` skill, but its lane processes shell out to `codex exec` and require a Codex CLI on `PATH` — this legacy backend is Codex-only regardless of which host loaded the skill. On Claude Code, prefer `$atlas-workflow:team` (native collaboration, host-neutral) instead of this legacy entrypoint.
+
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。

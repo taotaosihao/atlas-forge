@@ -1,0 +1,29 @@
+{
+  "description": "Atlas workflow risk-pattern and failure-capture hooks for Bash tool calls.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/claude-hook-launcher\" pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/claude-hook-launcher\" post-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

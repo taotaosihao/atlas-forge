@@ -5,6 +5,10 @@ description: Use the Atlas team flow with Codex native collaboration by default 
 
 Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:team`; Claude Code invokes it as `/team` or by calling the `team` skill directly. "The main Codex" below refers to the current host's root/main session regardless of host — on Claude Code that is the main Claude Code session. See `## Codex Native Collaboration` and the paired `## Claude Native Collaboration` section below for the host-specific dispatch tool mapping; the backend, staffing, and release rules in this file apply identically to both hosts.
+
 ## Independent Staffing, Model, Release, And Lease Decisions
 
 Keep three decisions independent:
@@ -188,6 +192,24 @@ Team default. Do not impose a fixed role set or agent count beyond the bounded
 wave policy above. Tightly coupled changes keep one writable owner; multiple
 writers require disjoint path ownership, an integration owner, and no overlapping
 writer lease. Agent completion is evidence, not controller admission.
+
+## Claude Native Collaboration
+
+On Claude Code, native collaboration uses Claude's own dispatch tools instead of Codex's `spawn_agent`/`collaboration.*` surface. This is the same `backend=native` concept as the Codex section above — Team's `native`/`paseo` backend distinction is host-agnostic; only the concrete tool calls differ:
+
+| Semantic action | Codex tool | Claude Code tool |
+| --- | --- | --- |
+| Spawn a bounded lane | `spawn_agent` | `Agent` |
+| Send info without a new turn | `collaboration.send_message` | `SendMessage` |
+| Reuse an idle agent for a follow-up | `collaboration.followup_task` | `SendMessage` (to the same agent name or id) |
+| Wait for live work | `collaboration.wait_agent` | `TaskOutput` |
+| Inspect current capacity and status | `collaboration.list_agents` | `TaskList` / `TaskGet` |
+| Stop work that should no longer continue | `collaboration.interrupt_agent` | `TaskStop` |
+
+- `Agent`'s `subagent_type` selects one of the checked-in profiles under `plugins/atlas-workflow/agents/*.md` (the Claude-side equivalents of the native Codex `.codex/agents/*.toml` roles). Only the plain planner/explorer/reviewer/phase-reviewer/implementer/verifier/browser-verifier profiles exist on this host; the DeepSeek-on-ZenMux equivalents are Codex-only custom-provider routes and have no Claude Code counterpart.
+- The same staffing, model-independence, path-lease, and release rules from `## Independent Staffing, Model, Release, And Lease Decisions` above apply unchanged; dispatching through `Agent` instead of `spawn_agent` does not relax any of them.
+- Do not copy the Codex-specific `atlas-native-agent-inbox` compatibility transport described in the Native Exact Model Routing section below — that exists only to recover a task payload hidden behind OpenAI-encrypted custom-provider content on affected Codex hosts. Claude Code's `Agent`/`SendMessage` deliver the prompt as plain text; there is no equivalent problem to work around.
+- When a main-session self-bind needs an explicit `runtime_agent_id` sentinel for `required_perspective` bookkeeping, use `main-claude` (the Claude-side counterpart of Codex's `main-codex`/`controller` sentinels).
 
 ## Explicit Paseo Lanes
 

@@ -5,6 +5,10 @@ description: Use the Atlas local workflow helper for bounded work.
 
 `$atlas-workflow:cw` is the compatibility entrypoint for local bounded work. Follow `$atlas-workflow:task` as the authoritative execution policy instead of maintaining a second copy of routing, artifact, Team, review, commit, and completion rules.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:cw`; Claude Code invokes it as `/cw` or by calling the `cw` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+
 Additional local guidance:
 
 - Reuse a relevant `doing` task from `~/.codex/workflow/bin/codex-workflow list`; create/start one only when needed.

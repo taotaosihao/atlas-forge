@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { taskArtifactDir } = require("../core/paths");
+const { claudePluginCacheCandidates, taskArtifactDir } = require("../core/paths");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -11,6 +11,7 @@ function pluginCandidates(environment, paths) {
     environment.ATLAS_WORKFLOW_PLUGIN_ROOT,
     path.join(paths.codeHome, "plugins", "atlas-workflow"),
     path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+    ...claudePluginCacheCandidates(environment),
   ].filter(Boolean);
 }
 

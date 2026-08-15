@@ -1,0 +1,23 @@
+{
+  "name": "atlas-forge",
+  "owner": {
+    "name": "Local Atlas",
+    "email": "local-atlas@example.invalid"
+  },
+  "metadata": {
+    "description": "Atlas Forge workflow plugins for Claude Code.",
+    "version": "0.1.0+codex.20260813144419"
+  },
+  "plugins": [
+    {
+      "name": "atlas-workflow",
+      "description": "Atlas workflow plugin for bounded local work with native Team coordination and explicit Paseo lanes.",
+      "version": "0.1.0+codex.20260813144419",
+      "author": {
+        "name": "Local Atlas",
+        "email": "local-atlas@example.invalid"
+      },
+      "source": "./plugins/atlas-workflow"
+    }
+  ]
+}

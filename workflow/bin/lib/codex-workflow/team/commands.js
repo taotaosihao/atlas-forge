@@ -704,6 +704,13 @@ const DIRECT_PROVIDER_MODEL_FAMILIES = new Map([
   ["glm", "non-claude"],
   ["kimi", "non-claude"],
   ["openai", "non-claude"],
+  // grok/xai are family classification only, not supplier admission: no Paseo
+  // provider exists for either today. See skills/team/SKILL.md's note on the
+  // DeepSeek/ZenMux recipe not implying a future Grok/Kimi route — a new
+  // supplier still requires its own independently verified model, transport,
+  // auth, and capability before this entry authorizes any routing.
+  ["grok", "non-claude"],
+  ["xai", "non-claude"],
 ]);
 
 function directProviderModelFamily(provider) {

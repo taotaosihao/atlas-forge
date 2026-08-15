@@ -17,6 +17,10 @@ Treat this as a flow-and-surface MVP. Do not expand it into brand exploration, a
 Design System, a component registry, a high-fidelity prototype, a complete WCAG
 audit, or a responsive matrix.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:product-design`; Claude Code invokes it as `/product-design` or by calling the `product-design` skill directly. The other `$atlas-workflow:<name>` references below follow the same pattern per host.
+
 ## Route the request
 
 - Keep product value, target user, or investment scope questions in

@@ -1029,7 +1029,7 @@ function disposeDispatch(teamInput, input) {
       }
       if (dispatch.required_perspective
         && (!attempt.runtime_agent_id
-          || /^(main-codex|controller)(?:$|[-:/.])/i.test(attempt.runtime_agent_id))) {
+          || /^(main-codex|main-claude|controller)(?:$|[-:/.])/i.test(attempt.runtime_agent_id))) {
         throw new RegistryError(
           `required perspective must be produced by an independently bound actor: ${attemptId}`,
         );

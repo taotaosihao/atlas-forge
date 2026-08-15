@@ -4,7 +4,7 @@ const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { CommandError } = require("../core/command-runtime");
-const { taskArtifactDir } = require("../core/paths");
+const { claudePluginCacheCandidates, taskArtifactDir } = require("../core/paths");
 const { StableFileError, stableFileSnapshot, stableJsonSnapshot } = require("../core/stable-file");
 const { locateRequestedContract } = require("./contract-locator");
 
@@ -15,6 +15,7 @@ function pluginCandidates(environment, paths) {
     environment.ATLAS_WORKFLOW_PLUGIN_ROOT,
     paths.codeHome && path.join(paths.codeHome, "plugins", "atlas-workflow"),
     path.join(path.resolve(__dirname, "../../../../.."), "plugins", "atlas-workflow"),
+    ...claudePluginCacheCandidates(environment),
   ].filter(Boolean);
 }
 

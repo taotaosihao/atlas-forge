@@ -5,6 +5,10 @@ description: Use the Atlas design-review flow for design fidelity or formal Web 
 
 Use the Atlas design-review flow for this request.
 
+## Host Note
+
+Codex invokes this flow as `$atlas-workflow:design-review`; Claude Code invokes it as `/design-review` or by calling the `design-review` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。

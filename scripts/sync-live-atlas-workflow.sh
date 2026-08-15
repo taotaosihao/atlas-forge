@@ -88,6 +88,7 @@ ATLAS_COMMAND_NAMES=(
   atlas-native-agent-inbox
   atlas-plugin-integrity
   atlas-team-model-catalog
+  atlas-workflow
   atlas-zenmux-bearer-token
   codex-design-review
   codex-refresh-local-plugin

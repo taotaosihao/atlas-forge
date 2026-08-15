@@ -1,5 +1,6 @@
 "use strict";
 
+const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
@@ -8,10 +9,13 @@ function moduleWorkflowRoot() {
 }
 
 function workflowRoot(environment = process.env) {
-  return environment.CODEX_WORKFLOW_ROOT || moduleWorkflowRoot();
+  return environment.ATLAS_WORKFLOW_ROOT || environment.CODEX_WORKFLOW_ROOT || moduleWorkflowRoot();
 }
 
 function codexHomeRoot(environment = process.env) {
+  if (environment.ATLAS_HOME_ROOT) {
+    return environment.ATLAS_HOME_ROOT;
+  }
   if (environment.CODEX_HOME_ROOT) {
     return environment.CODEX_HOME_ROOT;
   }
@@ -63,7 +67,46 @@ function taskArtifactDirRelative(paths, taskId) {
   return relativeToCodeHome(paths, taskArtifactDir(paths, taskId));
 }
 
+/**
+ * Installed Claude Code plugin cache layout: `<claude-config-dir>/plugins/cache/<marketplace>/<plugin>/<version>`.
+ * Returns version directories across every cached marketplace, `.in_use`-marked versions first,
+ * so callers scanning for a plugin-owned file can prefer the active install.
+ */
+function claudePluginCacheCandidates(environment = process.env, pluginName = "atlas-workflow") {
+  const claudeConfigDir = environment.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+  const cacheRoot = path.join(claudeConfigDir, "plugins", "cache");
+  let marketplaces;
+  try {
+    marketplaces = fs.readdirSync(cacheRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const candidates = [];
+  for (const marketplace of marketplaces) {
+    if (!marketplace.isDirectory()) continue;
+    const pluginDir = path.join(cacheRoot, marketplace.name, pluginName);
+    let versions;
+    try {
+      versions = fs.readdirSync(pluginDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    const versionDirs = versions
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(pluginDir, entry.name));
+    versionDirs.sort((a, b) => {
+      const aInUse = fs.existsSync(path.join(a, ".in_use"));
+      const bInUse = fs.existsSync(path.join(b, ".in_use"));
+      if (aInUse === bInUse) return 0;
+      return aInUse ? -1 : 1;
+    });
+    candidates.push(...versionDirs);
+  }
+  return candidates;
+}
+
 module.exports = {
+  claudePluginCacheCandidates,
   codexHomeRoot,
   moduleWorkflowRoot,
   relativeToCodeHome,
