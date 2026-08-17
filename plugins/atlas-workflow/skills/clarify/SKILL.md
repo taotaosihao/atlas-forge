@@ -41,20 +41,27 @@ fan-out, main Codex freezes the minimal Goal, non-goals, authority, and
 acceptance draft. Task size, file count, a short request, or a non-tiny label do
 not by themselves justify a child lane.
 
-- Add a read-only child only when an independent evidence domain or specialist
-  perspective has a concrete consumer and is expected to materially reduce
-  critical-path latency or a named current risk. Do not create a child merely to
-  satisfy a process default or obtain another opinion.
+- An explicit user request for multiple agents or reviewers authorizes
+  multi-agent staffing but does not expand scope. It waives only the need to
+  prove material latency or current-risk value; every child still needs the
+  frozen Goal/current-required reference, consumer, ready input, bounded evidence
+  domain or owned/forbidden paths, expected output, authority, and stop condition.
+- Without such an explicit request, add a read-only child only when an independent
+  evidence domain or specialist perspective has a concrete consumer and is
+  expected to materially reduce critical-path latency or a named current risk.
+  Do not create a child merely to satisfy a process default or obtain another
+  opinion when the user did not request multi-agent staffing.
 - Admit a candidate lane only when it has a frozen Goal or controller-admitted
   `current-required` reference, an explicit consumer, ready input, a read-only
   evidence domain or explicit owned/forbidden paths, structured expected output,
-  authority and a stop condition, and the concrete latency/risk benefit above.
-  Duplicate lanes are coalesced; dependency-not-ready lanes are deferred.
+  authority and a stop condition, plus the concrete latency/risk benefit above
+  when staffing was not explicitly requested. Duplicate lanes are coalesced;
+  dependency-not-ready lanes are deferred.
   Unavailable exact spawn schema/profile/model/reasoning/backend routes and
   confirmed cost anomalies fail closed rather than creating substitute fan-out.
-- When two or more independently justified, ready, non-duplicate child lanes
-  exist, they may run in parallel. A Clarify wave has at most three child lanes:
-  `child_count = min(ready justified lanes, host available child slots, 3)`.
+- When two or more admitted, ready, non-duplicate child lanes exist, they may
+  run in parallel. A Clarify wave has at most three child lanes:
+  `child_count = min(ready admitted lanes, host available child slots, 3)`.
   This is a controller policy, not a runtime scheduler invariant, and the soft
   wave cap is not a completion or stop condition.
 - The main Codex is the sole canonical scope/artifact writer and final
@@ -62,8 +69,8 @@ not by themselves justify a child lane.
   or write project documents; conflicts are resolved by evidence, not by vote.
 - If an admitted child cannot start, times out, becomes unavailable, or returns
   no usable output, continue main-only when doing so remains safe; otherwise stop
-  and report the blocker. Disclose which independently justified perspective was
-  unavailable and never report a degraded main-only result as completed
+  and report the blocker. Disclose which admitted perspective was unavailable
+  and never report a degraded main-only result as completed
   multi-agent clarification or independent review. `record-only` and
   `effective_backend=none` remain compatibility outcomes, not parallel evidence.
 

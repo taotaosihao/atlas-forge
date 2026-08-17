@@ -1067,6 +1067,12 @@ test("creates a non-authoritative phase sentinel and rejects unsafe phase ids", 
     assert.match(text, new RegExp(`task_id: ${taskId}`));
     assert.match(text, /phase_id: phase-4a/);
   }
+  const checklist = fs.readFileSync(path.join(phaseDir, "gate-checklist.md"), "utf8");
+  assert.match(
+    checklist,
+    /Concrete current risk controls, when applicable, are bound to named acceptance or edge-case evidence/,
+  );
+  assert.doesNotMatch(checklist, /hard safety gate|safety-gate evidence/i);
   const report = fs.readFileSync(path.join(phaseDir, "phase-review-report.md"), "utf8");
   assert.match(report, /Canonical 状态：未投影/);
   assert.match(report, /不能作为验收或 release 证据/);

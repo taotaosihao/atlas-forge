@@ -46,12 +46,15 @@ specialist/reviewer materially serve those needs; otherwise stay with the main
 Codex. Multiple files, behavior changes, and task complexity do not by
 themselves require Team.
 
-Clarify is main-only by default. It creates a read-only child only when an
-independent evidence domain or specialist perspective has a concrete consumer
+Clarify is main-only by default. An explicit user request for multiple agents or
+reviewers authorizes multi-agent staffing without expanding scope; it waives only
+the latency/risk-value proof, not Goal, consumer, input, output, authority, or
+stop-condition boundaries. Without such a request, a read-only child still needs
+an independent evidence domain or specialist perspective with a concrete consumer
 and material latency/risk value; task size, file count, a short request, or a
-non-tiny label do not justify fan-out by themselves. When two or more such
-independently justified lanes are ready, Clarify may dispatch them in parallel
-with at most three child lanes in a wave. Once Team is selected, the controller
+non-tiny label do not justify fan-out by themselves. When two or more admitted,
+ready lanes exist, Clarify may dispatch them in parallel with at most three child
+lanes in a wave. Once Team is selected, the controller
 dispatches the admitted ready frontier in bounded waves with
 `child_count = min(ready independent lanes, host available child slots, 4)`.
 The soft wave caps are not completion or stop conditions. These are controller

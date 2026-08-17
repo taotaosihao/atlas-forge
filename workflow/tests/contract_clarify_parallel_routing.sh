@@ -37,12 +37,17 @@ assert_has 'Before\s+brownfield discovery(?:\s+or any optional\s+fan-out)?,\s+ma
 assert_has 'Clarify is main-only by default' 'Clarify defaults to the main Codex'
 assert_has 'Task size, file count, a short request, or a non-tiny label do\s+not by themselves justify a child lane' 'task complexity does not auto-create a child'
 assert_lacks 'non-tiny Clarify,?\s+the default is `main \+ at least one read-only child\s+lane`' 'non-tiny Clarify must not auto-create a child'
-assert_has 'independent evidence domain or specialist\s+perspective has a concrete consumer' 'optional child needs a concrete consumer'
-assert_has 'materially reduce\s+critical-path latency or a named current risk' 'optional child needs latency or risk value'
-assert_has 'two or more independently justified, ready, non-duplicate child lanes' 'parallel Clarify requires independently justified lanes'
-assert_has 'may run in parallel' 'independently justified lanes may fan out concurrently'
+assert_has 'explicit user request for multiple agents or reviewers authorizes\s+multi-agent staffing but does not expand scope' 'explicit multi-agent request authorizes staffing without scope expansion'
+assert_has 'waives only the need to\s+prove material latency or current-risk value' 'explicit request waives only the latency/risk value proof'
+for required_boundary in 'Goal/current-required reference' consumer 'ready input' 'expected output' authority 'stop condition'; do
+  assert_has "$required_boundary" "explicit request preserves lane boundary: $required_boundary"
+done
+assert_has 'Without such an explicit request, add a read-only child only when an independent\s+evidence domain or specialist perspective has a concrete consumer' 'optional child without user request needs a concrete consumer'
+assert_has 'materially reduce critical-path latency or a named current risk' 'optional child without user request needs latency or risk value'
+assert_has 'two or more admitted, ready, non-duplicate child lanes' 'parallel Clarify requires admitted lanes'
+assert_has 'may\s+run in parallel' 'admitted lanes may fan out concurrently'
 assert_has 'Clarify wave has at most three child lanes' 'Clarify child wave has a maximum of three'
-assert_has 'child_count = min\(ready justified lanes, host available child slots, 3\)' 'Clarify wave uses its three-child bounded width'
+assert_has 'child_count = min\(ready admitted lanes, host available child slots, 3\)' 'Clarify wave uses its three-child bounded width'
 assert_has 'soft\s+wave cap is not a completion or stop condition' 'wave cap is not a completion or stop condition'
 assert_lacks 'child_count = min\(ready independent lanes, host available child slots, 4\)' 'Team four-child cap must not widen a Clarify wave'
 
@@ -51,7 +56,7 @@ assert_has 'Admit a candidate lane only when' 'lane admission rule is explicit'
 for lane_field in Goal consumer 'ready input' authority 'structured expected output' 'stop condition'; do
   assert_has "$lane_field" "lane admission records $lane_field"
 done
-assert_has 'concrete latency/risk benefit|materially reduce.*latency|named current risk' 'lane admission requires a latency or named-risk benefit'
+assert_has 'concrete latency/risk benefit above\s+when staffing was not explicitly requested' 'lane admission requires latency/risk value only without explicit staffing request'
 assert_has '[Dd]uplicate.*lane|coalesce.*duplicate|non-duplicative' 'duplicate lanes are coalesced rather than fanned out'
 assert_has 'dependency.*not.*ready|dependencies.*ready.*before|defer.*not.*ready' 'dependency-not-ready lanes are deferred'
 
@@ -80,7 +85,7 @@ for failure_mode in 'cannot start' 'times out' 'becomes unavailable' 'no usable 
   assert_has "$failure_mode" "child failure mode is explicit: $failure_mode"
 done
 assert_has 'otherwise stop\s+and report the blocker' 'unsafe main-only fallback stops instead of degrading silently'
-assert_has '[Dd]isclose[[:space:]]+which independently justified perspective was\s+unavailable' 'main-only fallback discloses the missing perspective'
+assert_has '[Dd]isclose[[:space:]]+which admitted perspective was unavailable' 'main-only fallback discloses the missing perspective'
 assert_has 'never report a degraded main-only result as completed\s+multi-agent clarification' 'degraded fallback cannot claim completed multi-agent clarification'
 assert_has 'product_release.*execution-vnext|execution-vnext.*product_release' 'release execution remains execution-vnext'
 assert_has 'immutable Profile|immutable.*Profile' 'release keeps an immutable Profile'
@@ -96,11 +101,11 @@ const fs = require('fs');
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const prompts = manifest.interface.defaultPrompt.join('\n');
 const required = [
-  [/Clarify 默认 main-only；有明确消费者且能降延迟\/风险才建 child/, 'Clarify defaults main-only and justifies optional children'],
-  [/Team: bounded ready waves/, 'selected Team keeps bounded ready-frontier waves'],
+  [/Clarify main-only；显式多Agent\/reviewer不扩scope，仅豁免延迟\/风险证明/, 'explicit multi-agent request authorizes staffing without scope expansion'],
+  [/否则consumer\+降延迟\/风险才建child/, 'Clarify justifies optional children without an explicit request'],
+  [/Team bounded waves/, 'selected Team keeps bounded ready-frontier waves'],
   [/Task\/CW不自动进Team/, 'Task/CW do not auto-upgrade to Team'],
-  [/model\/lease\/release 独立/, 'decision axes remain independent'],
-  [/Certified 非发布/, 'certification remains distinct from actual release'],
+  [/Certified≠发布/, 'certification remains distinct from actual release'],
 ];
 for (const [pattern, label] of required) {
   if (!pattern.test(prompts)) throw new Error(`manifest prompt missing: ${label}`);

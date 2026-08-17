@@ -15,9 +15,7 @@ artifact_category: phase_conclusion
 | First-code guard classification recorded when non-tiny implementation work is in scope | conditional | pending |  |
 | First implementation diff completed before gate/evidence expansion | conditional | pending |  |
 | Contract/scanner/fixture/evidence-only preparation stayed within the allowed phase budget | conditional | pending |  |
-| Hard safety gates remain acceptance/release blockers after the first code slice | conditional | pending |  |
+| Concrete current risk controls, when applicable, are bound to named acceptance or edge-case evidence | conditional | pending |  |
 | Product/UI gate classification recorded when user-facing UI/product work is in scope | conditional | pending |  |
 | Served UI entrypoint evidence uses real served document and app assets | conditional | pending |  |
 | Synthetic/headless evidence is not counted as UI/product acceptance by itself | conditional | pending |  |
-| Correctly labeled safety-gate evidence remains separate from UI/product acceptance | conditional | pending |  |
-| Served UI evidence does not replace hard safety-gate evidence | conditional | pending |  |

@@ -71,6 +71,33 @@ run_vnext_new_authoring_valid() {
   pass "$label"
 }
 
+run_vnext_strict_valid() {
+  local label="$1" file="$2" authority_slice="$3" semantics_version="$4"
+  case_paths
+  if ! "$BIN" --strict --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"; then
+    show_failure "$label"
+  fi
+  grep -q '^implementation_contract_lint: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q "^semantics_version: $semantics_version$" "$CASE_STDOUT" || show_failure "$label"
+  [[ ! -s "$CASE_STDERR" ]] || show_failure "$label"
+  pass "$label"
+}
+
+run_vnext_new_authoring_invalid() {
+  local label="$1" file="$2" authority_slice="$3" semantics_version="$4" expected_code="$5" status
+  case_paths
+  set +e
+  "$BIN" --strict --new-authoring --file "$file" --authority-slice "$authority_slice" >"$CASE_STDOUT" 2>"$CASE_STDERR"
+  status=$?
+  set -e
+  [[ "$status" -eq 1 ]] || show_failure "$label (expected rc 1, got $status)"
+  grep -q '^implementation_contract_lint: false$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q '^new_authoring: true$' "$CASE_STDOUT" || show_failure "$label"
+  grep -q "^semantics_version: $semantics_version$" "$CASE_STDOUT" || show_failure "$label"
+  grep -q "^ERROR $expected_code " "$CASE_STDERR" || show_failure "$label"
+  pass "$label"
+}
+
 run_old_new_authoring_invalid() {
   local label="$1" file="$2" status
   case_paths
@@ -356,6 +383,20 @@ run_vnext_new_authoring_valid \
   "$FIXTURE_ROOT/valid/scope-admission-v5.md" \
   "$GOAL_ONLY_SLICE" \
   5
+v5_legacy_safety="$TMP_ROOT/scope-admission-v5-legacy-safety.md"
+sed '/^product_ui_not_applicable_reason:/a required_safety_gates: none' \
+  "$FIXTURE_ROOT/valid/scope-admission-v5.md" > "$v5_legacy_safety"
+run_vnext_strict_valid \
+  'historical semantics v5 may still read the legacy safety field' \
+  "$v5_legacy_safety" \
+  "$GOAL_ONLY_SLICE" \
+  5
+run_vnext_new_authoring_invalid \
+  'new semantics v5 authoring rejects the legacy safety field even when it says none' \
+  "$v5_legacy_safety" \
+  "$GOAL_ONLY_SLICE" \
+  5 \
+  LEGACY_FIELD_NOT_ALLOWED
 
 release_v6_contract="$TMP_ROOT/scope-admission-v6.md"
 node - "$ATLAS_FORGE_ROOT" "$FIXTURE_ROOT/valid/required-ui.md" "$release_v6_contract" <<'NODE'
@@ -425,6 +466,7 @@ const plan = {
 };
 const gates = fs.readFileSync(source, "utf8")
   .replace("# Valid implementation with served UI", "# Scope admission v6 contract")
+  .replace(/^- required_safety_gates:.*\n/m, "")
   .replace(/^- first_code_slice: .*$/m, `- first_code_slice: ${plan.slices[0].slice_id}`)
   .replace(
     /^- first_code_verification: .*$/m,
@@ -491,6 +533,20 @@ run_vnext_new_authoring_valid \
   "$release_v6_contract" \
   "$GOAL_ONLY_SLICE" \
   6
+v6_legacy_safety="$TMP_ROOT/scope-admission-v6-legacy-safety.md"
+sed '/^product_ui_not_applicable_reason:/a required_safety_gates: browser network boundary and credential isolation' \
+  "$release_v6_contract" > "$v6_legacy_safety"
+run_vnext_strict_valid \
+  'historical semantics v6 may still read a substantive legacy safety field' \
+  "$v6_legacy_safety" \
+  "$GOAL_ONLY_SLICE" \
+  6
+run_vnext_new_authoring_invalid \
+  'new semantics v6 authoring rejects the legacy safety field even when substantive' \
+  "$v6_legacy_safety" \
+  "$GOAL_ONLY_SLICE" \
+  6 \
+  LEGACY_FIELD_NOT_ALLOWED
 
 run_semantic_invalid \
   'full v5 lint rejects a plan-valid contract with an invalid authoring envelope' \

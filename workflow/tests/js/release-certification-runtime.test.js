@@ -175,7 +175,6 @@ function releaseContractMarkdown(taskId, intent, plan) {
     "- browser_entrypoint: http://127.0.0.1:4173/release",
     "- served_ui_validation_action: page.route('/api/**', route => route.fulfill({json: fixture})); never fulfill the main document or app bundle; page.goto(entrypoint); complete the primary flow and verify the saved result.",
     "- ui_data_mode: API fixture data served behind the real application document and assets",
-    "- required_safety_gates: browser network boundary, credential isolation, and release authority checks",
     "- allowed_headless_only_until: contract authoring validation",
     "- stop_if_no_ui_by_phase: release implementation",
     "",

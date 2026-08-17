@@ -1445,6 +1445,16 @@ function validateContractText(content, {
       "newly authored contracts must use contract_semantics_version: 5 or 6",
     )]
     : [];
+  const legacySafetyField = parsed.fields.get("required_safety_gates");
+  const legacyFieldDiagnostics = newAuthoring && legacySafetyField
+    ? [makeDiagnostic(
+      "ERROR",
+      "LEGACY_FIELD_NOT_ALLOWED",
+      legacySafetyField.key,
+      legacySafetyField.line,
+      "required_safety_gates is historical read compatibility only; new v5/v6 authoring must omit it and bind concrete current risk controls to acceptance or edge-case evidence when applicable",
+    )]
+    : [];
   const authority = authoritySlices.length > 0
     ? loadAuthoritySlices(authoritySlices, {
       root: explicitWorkflowRoot,
@@ -1454,6 +1464,7 @@ function validateContractText(content, {
   const diagnostics = sortDiagnostics([
     ...taskDiagnostics,
     ...versionDiagnostics,
+    ...legacyFieldDiagnostics,
     ...(version.value === "6"
       ? validateVersionSix(
         content,
