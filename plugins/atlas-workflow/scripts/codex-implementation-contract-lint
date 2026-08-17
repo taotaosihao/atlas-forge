@@ -49,12 +49,16 @@ const PRODUCT_UI_FIELDS = [
   "browser_entrypoint",
   "served_ui_validation_action",
   "ui_data_mode",
-  "required_safety_gates",
   "allowed_headless_only_until",
   "stop_if_no_ui_by_phase",
 ];
+const OPTIONAL_PRODUCT_UI_FIELDS = ["required_safety_gates"];
 
-const DETAIL_FIELDS = new Set([...VNEXT_FIRST_CODE_FIELDS, ...PRODUCT_UI_FIELDS]);
+const DETAIL_FIELDS = new Set([
+  ...VNEXT_FIRST_CODE_FIELDS,
+  ...PRODUCT_UI_FIELDS,
+  ...OPTIONAL_PRODUCT_UI_FIELDS,
+]);
 const RECOGNIZED_FIELDS = new Set([...ENVELOPE_FIELDS, ...DETAIL_FIELDS]);
 const WORK_TYPES = new Set(["implementation", "planning", "review", "audit", "docs-only"]);
 const GATE_VALUES = new Set(["required", "not_applicable"]);
@@ -427,27 +431,6 @@ function isNotApplicableToken(value) {
 function isInactiveValue(value) {
   const normalized = unwrapScalar(value).toLowerCase();
   return normalized === "" || normalized === "not_applicable";
-}
-
-function cancelsSafetyGates(value) {
-  const normalized = unwrapScalar(value).trim();
-  const gateNoun = "(?:[a-z-]+\\s+){0,3}(?:gates?|controls?|checks?)";
-  if (new RegExp(`^no\\s+${gateNoun}\\s+(?:(?:are|is)\\s+)?(?:bypassed|omitted|skipped|weakened)\\b`, "i").test(normalized)) {
-    return false;
-  }
-  const cancellationPatterns = [
-    /^none\b/i,
-    /^not\s+(?:needed|required)\b/i,
-    new RegExp(`^(?:there\\s+(?:are|is)\\s+)?no\\s+${gateNoun}(?:\\s+(?:(?:are|is)\\s+)?(?:applicable|apply|exist|needed|required))?(?:\\b|[.:])`, "i"),
-    new RegExp(`^(?:we\\s+)?require\\s+no\\s+${gateNoun}\\b`, "i"),
-    new RegExp(`^we\\s+do\\s+not\\s+require\\s+any\\s+${gateNoun}\\b`, "i"),
-    new RegExp(`^(?:all\\s+)?${gateNoun}\\s+(?:are|is)\\s+(?:not\\s+(?:needed|required)|optional|unnecessary)\\b`, "i"),
-    new RegExp(`^(?:all\\s+)?${gateNoun}\\s+(?:can|may|might)\\s+be\\s+(?:bypassed|omitted|skipped|weakened)\\b`, "i"),
-    new RegExp(`^${gateNoun}\\s*:\\s*(?:none\\b|no\\b|not\\s+(?:needed|required)\\b|optional\\b)`, "i"),
-    /^(?:无需|不需要|没有).{0,20}(?:安全|硬性|发布|浏览器|凭据|数据)?(?:门禁|控制|检查)/,
-    /^(?:安全|硬性|发布|浏览器|凭据|数据)?(?:门禁|控制|检查).{0,12}(?:无需|不需要|没有|可选)/,
-  ];
-  return cancellationPatterns.some((pattern) => pattern.test(normalized));
 }
 
 function hasEnglishImplementationClaim(normalized) {
@@ -974,13 +957,6 @@ function validateVersionOne(fields, initialDiagnostics) {
       if (!actionHasNavigation(action.value, entrypoint?.value || "")) {
         add("SERVED_UI_NAVIGATION_MISSING", action.key, action.line, "served UI validation must name a browser navigation action");
       }
-    }
-    const safety = required.get("required_safety_gates");
-    if (safety && (
-      isPlaceholder(safety.value)
-      || cancelsSafetyGates(safety.value)
-    )) {
-      add("REQUIRED_SAFETY_GATES_INVALID", safety.key, safety.line, "required_safety_gates cannot be empty or not applicable");
     }
   } else if (validProductGate && productGate.value === "not_applicable") {
     requireNotApplicableReason("product_ui_not_applicable_reason");

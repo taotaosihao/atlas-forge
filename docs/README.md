@@ -13,8 +13,9 @@
 | [Workflow helper README](../workflow/README.md) | `codex-workflow` 命令、artifact 和 helper 使用边界 |
 | [Atlas Workflow plugin README](../plugins/atlas-workflow/README.md) | Atlas skill 入口和合同概览；source/cache 路径以项目约束为准 |
 | [Atlas 3D Harness v0.1 接入合同](atlas-3d-harness.md) | 当前 source checkout 与冻结本机 Mac 上的 3D thin facade、输入信任、bridge、CLI、evidence、compare、安全和限制 |
-| [Atlas 快速产品通道与后续框架债务修订方案](atlas-workflow/20260803-001-atlas-rapid-product-path/implementation-plan.md) | 当前快速产品路由、path lease 与模型路由轻量解耦、严格发布兼容边界，以及延期/不做事项的权威 backlog；首批已实施并完成源码级验证，尚未安装、刷新或发布 |
-| [Atlas Clarify 与 Team 有界并行默认策略实施方案](atlas-workflow/20260809-001-atlas-clarify-team-bounded-parallel/implementation-plan.md) | 当前 Clarify 与已选择 Team 后的 controller-level bounded-parallel 默认策略、兼容边界、实施 ownership、验收与验证计划；不建立 runtime scheduler，不扩大普通 Task/CW 入口 |
+| [Atlas 默认轻量化方案](atlas-workflow/20260817-001-atlas-default-lightweight/implementation-plan.md) | 当前普通工作默认行为：Clarify 默认 main-only，child 只按明确消费者与延迟/风险价值启用；ordinary Product/UI contract 不再要求独立 `required_safety_gates` 字段；第一阶段源码已实施并完成专项与正式 release authoring/admission 回归，尚未刷新安装态或运行 live-host 行为 smoke |
+| [Atlas 快速产品通道与后续框架债务修订方案](atlas-workflow/20260803-001-atlas-rapid-product-path/implementation-plan.md) | 保留 product_increment/product_release、path lease 与模型路由解耦及延期债务 backlog；普通工作默认 staffing/safety 行为以 2026-08-17 默认轻量化方案为准 |
+| [Atlas Clarify 与 Team 有界并行默认策略实施方案](atlas-workflow/20260809-001-atlas-clarify-team-bounded-parallel/implementation-plan.md) | 保留已选择 Team 后的 bounded-ready-wave 策略与兼容边界；Clarify 的“非 tiny 自动 child”规则已由 2026-08-17 默认轻量化方案取代 |
 | [Atlas Team Paseo 显式启用与 Codex 连续降级实施方案](atlas-workflow/20260720-011-atlas-team-paseo-codex/implementation-plan.md) | Team 默认 Codex、Paseo 局部 opt-in、Claude model 仅人工指定、运行故障 fallback、多角色审查收敛与实施接管的当前开发目标；实现前以源码和测试的现状行为为准 |
 | [Atlas Workflow 支持 Claude Code（双宿主并存）实施方案](atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md) | Claude Code 插件清单/市场、skills 宿主中性化、运行时路径中立、hooks、7 个原生 agents 映射、Team 原生协作按宿主拆分、6 个 Claude commands、Grok provider family 预置的当前实施范围；Codex 行为保持逐字节不变 |
 | [发布完整性与治理 bundle](atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/README.md) | 当前 Atlas release integrity、semantic lint 和治理合同及 phase evidence |

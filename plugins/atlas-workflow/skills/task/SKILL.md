@@ -26,14 +26,14 @@ Write workflow artifacts, project documents, and user-facing summaries in Chines
 
 ## Parallel Routing Boundary
 
-The bounded-parallel controller policy belongs to non-tiny Clarify and to a
-Team after the request has been routed to Team. Ordinary `$atlas-workflow:task`
+Clarify is main-only by default; bounded child fan-out is available only after
+an independent evidence domain or specialist perspective has a concrete consumer
+and material latency/risk value. Team keeps its bounded-parallel controller
+policy after the request has been routed to Team. Ordinary `$atlas-workflow:task`
 and `$atlas-workflow:cw` remain bounded main/lightweight routes and do not
-automatically upgrade to Team because a task has multiple files, complexity, or
-potentially independent work. Task/CW do not create Clarify child lanes or use
-the Team `child_count` wave rule unless the request is routed to the relevant
-flow; all existing authority, model, lease, and release boundaries remain in
-force.
+automatically upgrade to Clarify fan-out or Team because a task has multiple
+files, complexity, or potentially independent work. All existing authority,
+model, lease, and release boundaries remain in force.
 
 ## Release Target Routing
 

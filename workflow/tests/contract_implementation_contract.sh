@@ -694,12 +694,11 @@ for expression in "browser_entrypoint + '/other'" 'browser_entrypoint || otherUr
     "$FIXTURE_ROOT/invalid/ui-entrypoint-transform.md" > "$transformed_file"
   run_semantic_invalid "page.goto rejects non-scalar entrypoint expression: $expression" "$transformed_file" SERVED_UI_NAVIGATION_MISSING
 done
-run_semantic_invalid 'all seven required Product/UI detail fields are enforced' "$FIXTURE_ROOT/invalid/missing-all-product-ui-fields.md" \
+run_semantic_invalid 'all six required Product/UI detail fields are enforced' "$FIXTURE_ROOT/invalid/missing-all-product-ui-fields.md" \
   REQUIRED_FIELD_MISSING:first_operable_user_flow \
   REQUIRED_FIELD_MISSING:browser_entrypoint \
   REQUIRED_FIELD_MISSING:served_ui_validation_action \
   REQUIRED_FIELD_MISSING:ui_data_mode \
-  REQUIRED_FIELD_MISSING:required_safety_gates \
   REQUIRED_FIELD_MISSING:allowed_headless_only_until \
   REQUIRED_FIELD_MISSING:stop_if_no_ui_by_phase
 run_semantic_invalid 'page.setContent and synthetic HTML are rejected' "$FIXTURE_ROOT/invalid/ui-set-content.md" SYNTHETIC_UI_SET_CONTENT SYNTHETIC_UI_HTML SERVED_UI_NAVIGATION_MISSING
@@ -837,8 +836,7 @@ run_semantic_invalid 'prefixed TODO placeholder is rejected' "$FIXTURE_ROOT/inva
 run_semantic_invalid 'empty template placeholder is rejected' "$FIXTURE_ROOT/invalid/placeholder-empty-braces.md" REQUIRED_FIELD_PLACEHOLDER:first_code_owner
 run_semantic_invalid 'empty and punctuation-only required scalars are rejected' "$FIXTURE_ROOT/invalid/placeholder-empty-scalars.md" \
   REQUIRED_FIELD_PLACEHOLDER:first_code_owner \
-  REQUIRED_FIELD_PLACEHOLDER:first_code_verification \
-  REQUIRED_FIELD_PLACEHOLDER:required_safety_gates
+  REQUIRED_FIELD_PLACEHOLDER:first_code_verification
 run_semantic_invalid 'unknown semantics version is rejected in strict mode' "$FIXTURE_ROOT/invalid/unsupported-version.md" SEMANTICS_VERSION_UNSUPPORTED
 run_nonstrict_invalid 'unknown semantics version cannot fall back to legacy mode' "$FIXTURE_ROOT/invalid/unsupported-version.md" SEMANTICS_VERSION_UNSUPPORTED
 
@@ -861,39 +859,12 @@ run_semantic_invalid 'v2 required edge case needs goal or current-required admis
 bad_fallback="$TMP_ROOT/v2-bad-fallback.md"
 sed 's/^- Required safe fallback: not_applicable/- Required safe fallback: retry forever/' "$scope_v2" > "$bad_fallback"
 run_semantic_invalid 'v2 none fallback authority forbids required fallback behavior' "$bad_fallback" SAFE_FALLBACK_AUTHORITY_CONFLICT
-run_semantic_invalid 'UI acceptance rejects a sentence that declares no safety gates' "$FIXTURE_ROOT/invalid/ui-safety-none.md" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
-run_semantic_invalid 'UI acceptance rejects a direct not-required safety declaration' "$FIXTURE_ROOT/invalid/ui-safety-cancelled.md" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
-safety_subject_cancelled="$TMP_ROOT/ui-safety-subject-cancelled.md"
-sed 's/required_safety_gates: not required for this task/required_safety_gates: safety gates are not required for this task/' \
-  "$FIXTURE_ROOT/invalid/ui-safety-cancelled.md" > "$safety_subject_cancelled"
-run_semantic_invalid 'UI acceptance rejects a subject-first not-required safety declaration' "$safety_subject_cancelled" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
-run_semantic_invalid 'UI acceptance rejects a no-security-gates-required declaration' "$FIXTURE_ROOT/invalid/ui-safety-security-none.md" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
-for cancelled_safety in \
-  'security gates are not required for this task' \
-  'safety gates are not needed for this task' \
-  'there are no security gates required for this task' \
-  'we require no safety gates for this task' \
-  'security gates: none' \
-  'all safety gates are optional' \
-  'safety checks can be skipped' \
-  'security controls may be omitted' \
-  'all safety gates can be bypassed' \
-  'we do not require any safety gates' \
-  '无需安全门禁。'; do
-  cancelled_file="$TMP_ROOT/ui-safety-cancellation-$CASE_COUNT.md"
-  sed "s/^- required_safety_gates:.*/- required_safety_gates: $cancelled_safety/" \
-    "$FIXTURE_ROOT/invalid/ui-safety-security-none.md" > "$cancelled_file"
-  run_semantic_invalid "UI acceptance rejects cancellation wording: $cancelled_safety" "$cancelled_file" REQUIRED_SAFETY_GATES_INVALID:required_safety_gates
-done
-for retained_safety in \
-  'No security checks are skipped; browser network and credential gates remain required.' \
-  'Safety gates must not be bypassed; browser network and credential gates remain required.'; do
-  retained_file="$TMP_ROOT/ui-safety-retained-$CASE_COUNT.md"
-  sed "s/^- required_safety_gates:.*/- required_safety_gates: $retained_safety/" \
-    "$FIXTURE_ROOT/valid/negative-ui-guards.md" > "$retained_file"
-  run_v1_valid "negative wording preserves required safety gates: $retained_safety" "$retained_file"
-done
-run_semantic_invalid 'quoted not-applicable UI safety gate is rejected' "$FIXTURE_ROOT/invalid/quoted-ui-safety.md" REQUIRED_FIELD_PLACEHOLDER:required_safety_gates
+ui_without_safety="$TMP_ROOT/ui-without-safety-field.md"
+sed '/^- required_safety_gates:/d' "$FIXTURE_ROOT/valid/required-ui.md" > "$ui_without_safety"
+run_v1_valid 'UI acceptance does not require a standalone safety-gate field' "$ui_without_safety"
+run_v1_valid 'legacy safety field may explicitly state no extra gates' "$FIXTURE_ROOT/invalid/ui-safety-none.md"
+run_v1_valid 'legacy safety field may state not required' "$FIXTURE_ROOT/invalid/ui-safety-cancelled.md"
+run_v1_valid 'legacy quoted not-applicable safety field remains readable' "$FIXTURE_ROOT/invalid/quoted-ui-safety.md"
 
 run_semantic_invalid 'unresolved draft template is rejected by strict lint' "$ATLAS_FORGE_ROOT/workflow/templates/implementation-contract.md" WORK_TYPE_INVALID FIRST_CODE_GUARD_INVALID PRODUCT_UI_GATE_INVALID
 

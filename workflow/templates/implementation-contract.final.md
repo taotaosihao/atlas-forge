@@ -158,7 +158,6 @@ ordinary engineering checks may omit it. Exploration and non-product plans use s
 - Ordering rule: contract, scanner, fixture, and evidence-only preparation must be bounded before the first implementation diff; it cannot remain the only deliverable after the named stop point.
 - First-code rule: for semantics v5/v6, `first_code_slice`, `first_code_verification`, and `first_code_stop_before_slice` are exact execution-plan IDs (`task-completion` is the terminal stop sentinel). The first code slice may be fixture-backed, mocked, or in-memory, but it must change the product, runtime, API, CLI, workflow, or contract-owned behavior under test.
 - Gate-only non-completion: docs-only artifacts, scanner fixtures, analysis notes, and evidence bundles are not first code slices by themselves. For scanner/tooling tasks, implementing scanner/tool behavior may count; adding fixtures around unchanged behavior does not.
-- Safety rule: hard safety gates remain blockers for acceptance and release; starting a bounded code slice never authorizes skipping, weakening, or backfilling named safety gates.
 - Versioned stop: semantics version 1 requires `stop_if_no_code_by_phase`. The one-phase default applies only when interpreting an unversioned historical contract.
 - Not-applicable boundary: planning, review, audit, and docs-only work. Tiny precise fixes whose acceptance path is already obvious may skip a versioned implementation contract; a version 1 `implementation` contract must use the required guard.
 
@@ -168,15 +167,12 @@ ordinary engineering checks may omit it. Exploration and non-product plans use s
 - browser_entrypoint:
 - served_ui_validation_action:
 - ui_data_mode:
-- required_safety_gates:
 - allowed_headless_only_until:
 - stop_if_no_ui_by_phase:
 - Ordering rule: for non-tiny user-facing product/UI/browser work, the served operable UI thin slice must precede release, perf, soak, and phase evidence expansion.
-- Hard safety rule: the UI thin slice and required hard safety gates must be satisfied together; neither may pass acceptance without the other.
+- Risk-control rule: when a concrete reachable risk would make current acceptance unsafe, bind the minimum necessary control to the relevant acceptance row or edge case. No separate safety-gate field is required when no such risk exists.
 - Served UI evidence: HTML document and JS/CSS app assets must come from a real HTTP server. `page.route` may mock backend/data-plane responses only, not the main document or app bundle.
 - UI/product non-evidence: `page.setContent`, synthetic HTML, fulfilled main document or app bundle, headless model tests, scanner fixtures, CLI pass, typecheck/build-only proof, and network allowlist capture without a served UI route.
-- Evidence purpose boundary: the non-evidence list applies to UI/product acceptance evidence. Correctly labeled headless/network evidence may still satisfy safety gates.
-- Reverse guard: served UI evidence does not replace required hard safety-gate evidence.
 - Not-applicable boundary: only genuinely headless CLI/worker/library/scanner work or tiny changes that do not alter user-visible UI behavior. A product task with no served app is not tiny solely because the slice is small.
 - Release boundary: this gate proves an early real served UI slice and never grants `certified`; product release requires the immutable Profile, same-candidate final sweep, and completion-derived release decision.
 

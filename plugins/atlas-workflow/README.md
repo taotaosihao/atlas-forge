@@ -46,20 +46,22 @@ specialist/reviewer materially serve those needs; otherwise stay with the main
 Codex. Multiple files, behavior changes, and task complexity do not by
 themselves require Team.
 
-Clarify and Team use a bounded-parallel controller policy. A non-tiny Clarify
-defaults to `main + at least one read-only child lane`; when two or more
-independent, ready, non-duplicate unknown clusters have explicit consumers,
-the controller dispatches them in parallel (the first Clarify wave has at most
-three child lanes). Once Team is selected, the controller dispatches the
-admitted ready frontier in bounded waves with
+Clarify is main-only by default. It creates a read-only child only when an
+independent evidence domain or specialist perspective has a concrete consumer
+and material latency/risk value; task size, file count, a short request, or a
+non-tiny label do not justify fan-out by themselves. When two or more such
+independently justified lanes are ready, Clarify may dispatch them in parallel
+with at most three child lanes in a wave. Once Team is selected, the controller
+dispatches the admitted ready frontier in bounded waves with
 `child_count = min(ready independent lanes, host available child slots, 4)`.
-The soft wave cap is not a completion or stop condition. This is controller
-policy, not a runtime scheduler invariant. Tiny work, duplicate lanes,
+The soft wave caps are not completion or stop conditions. These are controller
+policies, not runtime scheduler invariants. Duplicate lanes,
 dependency-not-ready inputs, unavailable exact routes, and confirmed cost
-anomalies fail closed; the main Codex remains the sole canonical writer and
-final synthesizer. `record-only` and `effective_backend=none` remain valid
-compatibility outcomes but are not parallel evidence. Ordinary `$atlas-workflow:task`
-and `$atlas-workflow:cw` do not auto-upgrade to Team.
+anomalies do not create substitute fan-out; the main Codex remains the sole
+canonical writer and final synthesizer. `record-only` and
+`effective_backend=none` remain compatibility outcomes but are not parallel
+evidence. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not
+auto-upgrade to Clarify fan-out or Team.
 
 Inside `$atlas-workflow:team`, Codex native collaboration is the default.
 Paseo is an explicit, local opt-in for a whole Team, one lane, or one dispatch;

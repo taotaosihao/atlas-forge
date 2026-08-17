@@ -34,48 +34,38 @@ also requires explicit current-user Flow Approval. If any check fails, route to
 backend, migration, CLI, no-interaction, and tiny precise work does not require a
 Design Handoff.
 
-## Clarify Bounded-Parallel Default
+## Clarify Main-Only Default
 
-Clarify uses a controller policy, not a runtime scheduler invariant. Before
-brownfield discovery, main Codex freezes the minimal Goal, non-goals, authority,
-and acceptance draft before any fan-out. Tiny means one exact goal, one owner,
-one primary evidence domain, and one verification path with no independent
-safety, data, permission, compatibility, migration, or release unknown; when
-that classification is unclear, treat the request as non-tiny.
+Clarify is main-only by default. Before brownfield discovery or any optional
+fan-out, main Codex freezes the minimal Goal, non-goals, authority, and
+acceptance draft. Task size, file count, a short request, or a non-tiny label do
+not by themselves justify a child lane.
 
-- For non-tiny Clarify, the default is `main + at least one read-only child lane`:
-  the main Codex keeps the canonical scope outline while a child gathers
-  bounded evidence. If two or more independent, ready, non-duplicate unknown
-  clusters with explicit consumers exist, dispatch them in parallel. The first
-  Clarify wave has at most three child lanes.
+- Add a read-only child only when an independent evidence domain or specialist
+  perspective has a concrete consumer and is expected to materially reduce
+  critical-path latency or a named current risk. Do not create a child merely to
+  satisfy a process default or obtain another opinion.
 - Admit a candidate lane only when it has a frozen Goal or controller-admitted
   `current-required` reference, an explicit consumer, ready input, a read-only
   evidence domain or explicit owned/forbidden paths, structured expected output,
-  authority and a stop condition, and a reason tied to critical-path time or a
-  named risk. Duplicate lanes are coalesced rather than fanned out; dependency-not-ready
-  lanes are deferred until ready. Outputs without a current consumer, uncertain
-  writer/lease/quiescence ownership, unavailable exact spawn
-  schema/profile/model/reasoning/backend routes, and confirmed cost anomaly
-  cases fail closed rather than creating fan-out.
-- The main Codex is the sole canonical scope/artifact writer and final synthesizer.
-  Child findings cannot expand the Goal, create workflow artifacts, or write
-  project documents; conflicts are resolved by evidence, not by vote.
-- Use the Clarify wave rule
-  `child_count = min(ready independent lanes, host available child slots, 3)`.
-  Recompute the frontier after synthesis and continue with another wave while
-  admitted lanes are ready; the soft wave cap is not a completion or stop
-  condition. The Team controller's separate soft cap of `4` does not widen a
-  Clarify wave.
+  authority and a stop condition, and the concrete latency/risk benefit above.
+  Duplicate lanes are coalesced; dependency-not-ready lanes are deferred.
+  Unavailable exact spawn schema/profile/model/reasoning/backend routes and
+  confirmed cost anomalies fail closed rather than creating substitute fan-out.
+- When two or more independently justified, ready, non-duplicate child lanes
+  exist, they may run in parallel. A Clarify wave has at most three child lanes:
+  `child_count = min(ready justified lanes, host available child slots, 3)`.
+  This is a controller policy, not a runtime scheduler invariant, and the soft
+  wave cap is not a completion or stop condition.
+- The main Codex is the sole canonical scope/artifact writer and final
+  synthesizer. Child findings cannot expand the Goal, create workflow artifacts,
+  or write project documents; conflicts are resolved by evidence, not by vote.
 - If an admitted child cannot start, times out, becomes unavailable, or returns
-  no usable output, continue main-only only when doing so remains safe; otherwise
-  stop and report the blocker. In either case, disclose which independent
-  perspective was unavailable and whether the result degraded to main-only;
-  never report the degraded result as completed multi-agent clarification or
-  independent review. Exact-route failures remain fail closed:
-  do not substitute a generic or inherited child. This bounded-parallel policy
-  does not add a runtime scheduler, ledger field, or schema; record-only
-  compatibility remains valid and `effective_backend=none` is not evidence of parallel
-  completion.
+  no usable output, continue main-only when doing so remains safe; otherwise stop
+  and report the blocker. Disclose which independently justified perspective was
+  unavailable and never report a degraded main-only result as completed
+  multi-agent clarification or independent review. `record-only` and
+  `effective_backend=none` remain compatibility outcomes, not parallel evidence.
 
 ## Release Intent
 
@@ -197,8 +187,9 @@ ceremony. If durable state is justified or an existing task is already relevant:
      `not_applicable`
    - when `Product/UI gate` is required, the contract must name
      `first_operable_user_flow`, `browser_entrypoint`,
-     `served_ui_validation_action`, `ui_data_mode`, `required_safety_gates`,
-     `allowed_headless_only_until`, and `stop_if_no_ui_by_phase`
+     `served_ui_validation_action`, `ui_data_mode`,
+     `allowed_headless_only_until`, and `stop_if_no_ui_by_phase`; do not add a
+     separate safety-gate field when no concrete reachable risk requires one
    - served UI evidence must open a real app entrypoint whose HTML document and
      JS/CSS assets are served by a real HTTP server; synthetic HTML,
      `page.setContent`, fulfilled main documents, fulfilled app bundles,
@@ -206,11 +197,11 @@ ceremony. If durable state is justified or an existing task is already relevant:
      allowlist capture without a served UI route do not satisfy UI/product
      acceptance by themselves
    - the UI thin slice must precede release, perf, soak, and phase evidence
-     expansion, while hard safety gates must be satisfied together with the UI
-     slice and must not be skipped, weakened, or backfilled
-   - the non-evidence list applies to UI/product acceptance evidence; correctly
-     labeled headless/network evidence may still satisfy safety gates, and
-     served UI evidence never replaces required hard safety-gate evidence
+     expansion
+   - when a concrete reachable safety/data/permission risk would make current
+     acceptance unsafe, bind the minimum necessary control to the relevant
+     acceptance row or edge case; do not create a standalone safety checklist
+     merely because the task has a Product/UI gate
    - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final executable contract body
    - when authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose
    - review severity, `required_fix`, affected rows, and remediation prose do not grant scope; for SDD v2, every validated controller finding with `disposition: current-required` remains an executable requirement whether `repair_status` is `open` or `resolved`, while only `open` findings block or create repair feedback
