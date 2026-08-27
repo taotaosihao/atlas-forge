@@ -89,6 +89,8 @@ field.
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors when accuracy benefits.
 
+Keep user-facing replies and summaries in plain, conversational language. Do not surface internal process jargon such as `canonical scope source`, `staffing_mode`, `release_mode`, or `frozen Goal` to the user; explain the idea in everyday Chinese first (for example “本次范围以哪份文档为准”), adding the original term in parentheses only when it is genuinely needed.
+
 ## Cross v1 · Codex-Native Cross-Model Recipe
 
 Cross v1 is a **generation-local, controller-enforced, non-crash-resumable,

@@ -12,6 +12,7 @@ Codex invokes this flow as `$atlas-workflow:design-review`; Claude Code invokes 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
+- 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
 - 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
@@ -66,4 +67,4 @@ Follow this loop:
 11. Before reporting success, verify with real commands and tools. Do not claim design fidelity based only on “looks right”. In release mode, report each formal fact as `passed`, `failed`, or `cannot_verify`; do not write `certified`.
 12. When the review work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`. Review-task completion is not product-release certification.
 13. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
-14. In the final reply, include the task id, generic verdict path, canonical raw-input path and candidate identity when release mode was active, verification commands and results, and any remaining fidelity risks. Mention a release decision only when a separate Team completion-derived record was supplied, and quote its status exactly.
+14. In the final reply, include the task id, the verdict file path, the release raw-input file path and candidate identity when release mode was active, verification commands and results, and any remaining fidelity risks. State these in plain Chinese (for example “评审结论写在 `<verdict.json path>`”) instead of surfacing internal terms such as `generic verdict` or `canonical raw adapter input`. Mention a release decision only when a separate Team completion-derived record was supplied, and quote its status exactly.

@@ -21,6 +21,10 @@ audit, or a responsive matrix.
 
 Codex invokes this flow as `$atlas-workflow:product-design`; Claude Code invokes it as `/product-design` or by calling the `product-design` skill directly. The other `$atlas-workflow:<name>` references below follow the same pattern per host.
 
+## Language
+
+Write the four artifacts and user-facing summaries in Chinese by default, preserving commands, paths, identifiers, APIs, proper nouns, and quoted errors. Keep replies plain and conversational: do not surface internal process jargon such as `canonical scope source` or `frozen Goal` to the user; explain the idea in everyday Chinese first, adding the original term in parentheses only when genuinely needed.
+
 ## Route the request
 
 - Keep product value, target user, or investment scope questions in
