@@ -16,9 +16,11 @@ approval_ref: ""
 ## 2. Capability truth
 
 For every primary visible capability, record the user and prerequisite, real
-side effect or durable result, success feedback, failure recovery, and allowed
-claim. Hide, disable with an explanation, or mark unavailable anything outside
-scope.
+authoritative path or explicitly approved feasible bounded side-effect plan,
+durable result, success feedback, failure recovery, and allowed claim. Mocks may
+replace data/responses but cannot invent capability. Hide, disable with an
+explanation, or mark unavailable anything outside scope; keep this document
+draft when API, permission, or safety boundaries conflict.
 
 ## 3. Surface responsibility and low-fidelity structure
 
@@ -28,6 +30,8 @@ action, exit, information hierarchy, and at most one ASCII floorplan.
 - Target form factor / primary viewport:
 - Minimum adaptation, overflow, or primary-action-position rule (or
   `desktop-only` / `not applicable` with reason):
+- Baseline or reused reference, with rationale:
+- Final candidate commit and actual entrypoint (when Baseline applies):
 
 ## 4. Necessary states and recovery
 
@@ -51,3 +55,4 @@ Record 3–7 visible acceptance steps, refresh/re-entry, failure recovery, and a
 flow-changing blocker. Gate 2 requires no blocking open question.
 
 - Blocking open questions: none
+- Operated steps and user confirmation reference (when Baseline applies):

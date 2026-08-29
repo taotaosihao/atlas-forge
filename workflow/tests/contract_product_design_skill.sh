@@ -71,6 +71,7 @@ for field in status context_ref scenario_ref flow_ref context_identity scenario_
 done
 
 adapter="$skill_root/references/method-adapter.md"
+design_review="$skills_root/design-review/SKILL.md"
 rg -q 'fixed key order' "$adapter"
 rg -q 'UTF-8 canonical JSON followed by one LF' "$adapter"
 rg -q 'approved_context_identity' "$adapter"
@@ -87,6 +88,69 @@ rg -q 'scope-change' "$adapter"
 rg -q 'product_increment' "$skill_root/SKILL.md"
 rg -q 'must omit release-intent, v4, immutable Profile, release' "$skill_root/SKILL.md"
 rg -q '证据采集：降级' "$skill_root/SKILL.md"
+
+/usr/bin/python3 - "$skill_root/SKILL.md" "$adapter" "$d_template" "$design_review" <<'PY'
+import pathlib, sys, yaml
+
+paths = map(pathlib.Path, sys.argv[1:])
+skill, adapter, d_template, review = (path.read_text(encoding="utf-8") for path in paths)
+skill_flat, adapter_flat, d_flat, review_flat = (" ".join(text.split()) for text in (skill, adapter, d_template, review))
+
+def check(condition, message): assert condition, message
+
+baseline = skill.split("### Route an operable Baseline only when needed", 1)[1].split("## Create and validate E", 1)[0]
+baseline_flat = " ".join(baseline.split())
+for phrase in (
+    "Reuse current A/C/D/E from the same task", "existing pages, UI components and code, optional", "direct reuse, a small adaptation, composition of existing",
+    "A Baseline is required when any one of these is true", "new primary journey or substantive surface", "Information hierarchy, state expression, or error recovery",
+    "No approved real page can be reused directly", "text, sketches, or an AI candidate cannot express", "Skip it only when all three are true",
+    "one bounded, single-writer direct Task", "sole pre-E implementation exception", "final page shells, components, and source files",
+    "existing mock/fixture/adapter, existing", "page-specific adjustment, design-semantics", "D sections 3 and 7", "Only then request the existing",
+):
+    check(phrase in skill_flat, f"Product Design UX contract phrase missing: {phrase}")
+for phrase in ("When a Baseline is required, keep D draft", "edits to the exact product paths, starting the local runtime, and creating a local candidate commit", "ask once for that bounded implementation authority and stop", "Web requires a real HTTP server", "non-Web requires the real application/window", "Do not connect real write side effects", "first freeze an isolatable exact candidate commit", "then start the actual entrypoint from that commit"):
+    check(phrase in baseline_flat, f"bounded Baseline rule missing: {phrase}")
+check(baseline_flat.index("first freeze an isolatable exact candidate commit") < baseline_flat.index("then start the actual entrypoint from that commit"), "candidate commit must precede entrypoint start")
+triggers = baseline.split("A Baseline is required when any one of these is true:", 1)[1].split("Skip it only when", 1)[0]
+check(len([line for line in triggers.splitlines() if line[:1].isdigit()]) == 4, "Baseline must have exactly four trigger items")
+skip = "Skip it only when all three are true: a stable reference exists, the adaptation is local and known, and the critical journey, hierarchy, primary action, and recovery remain unchanged."
+check(skip in baseline_flat, "Baseline skip must preserve exactly three simultaneous clauses")
+
+for phrase in (
+    "authoritative only for artifact structure, identity, approval binding, invalidation, and handoff validation", "`SKILL.md` is authoritative for operational routing, including Baseline trigger/skip/sequence",
+    "Mocks may replace data and responses but never create capability", "only implementation allowed before valid E",
+    "Every other implementation route still requires valid E", "Design approval itself grants no implementation or commit authority",
+    "At convergence, apply the final design decisions once",
+):
+    check(phrase in adapter_flat, f"method adapter UX contract phrase missing: {phrase}")
+check("A Baseline is required when" not in adapter_flat, "adapter duplicates the Baseline decision tree")
+
+for phrase in (
+    "authoritative path or explicitly approved feasible bounded side-effect plan", "Baseline or reused reference, with rationale",
+    "Final candidate commit and actual entrypoint", "Operated steps and user confirmation reference",
+):
+    check(phrase in d_flat, f"D Baseline binding missing: {phrase}")
+parts = d_template.split("---\n", 2)
+check(len(parts) == 3, "D template frontmatter malformed")
+check(list(yaml.safe_load(parts[1])) == [
+    "status", "context_ref", "scenario_ref", "approved_context_identity", "approved_scenario_identity",
+    "approved_flow_identity", "source_refs", "approval_ref",
+], "D template schema changed")
+
+for phrase in (
+    "read the approved D and E", "form factor/viewport, states,", "Mark mobile not applicable when D", "Review the current candidate by default",
+    "historical Baseline only for a named dispute", "real browser cannot operate the entrypoint, keep the review non-passing", "Only the literal value `passed`",
+    "Missing, unknown, unparsable, or any other value", "task `done`, build/test results, and screenshots cannot",
+):
+    check(phrase in review_flat, f"Design Review truth phrase missing: {phrase}")
+
+for text, phrase in (
+    (skill, "Baseline is required only when all"), (skill, "Skip it when any"),
+    (skill, "third design approval"), (adapter, "A Baseline is required when"),
+    (review, "task `done` permits"), (review, "screenshots can infer"),
+):
+    check(phrase not in text, f"opposite UX rule present: {phrase}")
+PY
 
 /usr/bin/python3 - "$adapter" "$a_template" "$c_template" "$d_template" "$e_template" <<'PY'
 import copy
@@ -168,7 +232,7 @@ known_a = {
 }
 check(canonical_a(known_a) == "b3dea6a789b454a00de8f66fd42e13bccc0dac2ae37d5d2d87922058a91f11c4", "A known-answer identity mismatch")
 check(body_identity(c_body) == "1fa087ccbfb1e673889f2a0f9747ac6e398aaead23bc84640507a02450b2d15f", "C normalization known-answer mismatch")
-check(body_identity(d_body) == "001e5225afbfc692e6764c22f367cde266fdf0d94c560f519e153bc9fad67661", "D normalization known-answer mismatch")
+check(body_identity(d_body) == "5e10b8c1f287fa12e869f2a49b9e4bebda0ee72430b28ab83b864a710cf9fdf1", "D normalization known-answer mismatch")
 
 def read_artifacts(root):
     result = {}
