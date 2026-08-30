@@ -5,8 +5,11 @@ ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../..
 BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-implementation-contract-lint"
 BRIEF_BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-brief"
 FIXTURE_ROOT="$ATLAS_FORGE_ROOT/test/fixtures/implementation-contract"
+CLARIFY="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+CONTRACT_AUTHORING="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/references/contract-authoring.md"
 CURRENT_AUTHORITY="$ATLAS_FORGE_ROOT/docs/atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/implementation-contract.final.md"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-implementation-contract.XXXXXX")"
+TMP_ROOT="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$TMP_ROOT")"
 trap 'rm -rf -- "$TMP_ROOT"' EXIT
 
 PASS_COUNT=0
@@ -384,7 +387,9 @@ run_vnext_new_authoring_valid \
   "$GOAL_ONLY_SLICE" \
   5
 v5_legacy_safety="$TMP_ROOT/scope-admission-v5-legacy-safety.md"
-sed '/^product_ui_not_applicable_reason:/a required_safety_gates: none' \
+sed '/^product_ui_not_applicable_reason:/a\
+required_safety_gates: none
+' \
   "$FIXTURE_ROOT/valid/scope-admission-v5.md" > "$v5_legacy_safety"
 run_vnext_strict_valid \
   'historical semantics v5 may still read the legacy safety field' \
@@ -398,11 +403,13 @@ run_vnext_new_authoring_invalid \
   5 \
   LEGACY_FIELD_NOT_ALLOWED
 
-release_v6_contract="$TMP_ROOT/scope-admission-v6.md"
-node - "$ATLAS_FORGE_ROOT" "$FIXTURE_ROOT/valid/required-ui.md" "$release_v6_contract" <<'NODE'
-const fs = require("fs");
-const path = require("path");
-const [root, source, target] = process.argv.slice(2);
+# Fill both real templates instead of validating a version string or substituting
+# an unrelated known-good contract. Keep the template's envelope and plan shape.
+node - "$ATLAS_FORGE_ROOT" "$TMP_ROOT" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const [root, output] = process.argv.slice(2);
 const {
   releasePlanBinding,
   releaseRequirementProjection,
@@ -411,130 +418,158 @@ const {
   loadBundledProfile,
   profileBinding,
 } = require(path.join(root, "plugins/atlas-workflow/contracts/release-certification/validators/profile.js"));
-const digest = (character) => `sha256:${character.repeat(64)}`;
+const planFence = /```atlas-execution-plan\+json\n([\s\S]*?)\n```/g;
+function fill(text, field, value) {
+  const pattern = new RegExp("^((?:- )?" + field + ":)[^\\n]*$", "gm");
+  assert.equal([...text.matchAll(pattern)].length, 1, "template field: " + field);
+  return text.replace(pattern, (_, prefix) => prefix + (value ? " " + value : ""));
+}
+function replaceOnce(text, before, after) {
+  assert.equal(text.split(before).length, 2, "template location: " + before);
+  return text.replace(before, after);
+}
+function replacePlan(text, plan) {
+  return text.replace(planFence, () => "```atlas-execution-plan+json\n" + JSON.stringify(plan, null, 2) + "\n```");
+}
 const profile = loadBundledProfile("web-ui-v1");
 const binding = profileBinding(profile);
-const intent = {
-  schema_version: 1,
-  target_delivery_class: "product_release",
-  target_delivery_authority_ref: "user-message:v6-fixture",
-  release_stage: "mvp",
-  surface_inventory: { ref: "REQ-1", sha256: digest("a") },
-  surface_kinds: ["web_ui"],
-  release_profile_refs: [{ profile_ref: profile.profile_id, profile_sha256: binding.profile_sha256 }],
-  release_claim_refs: ["REQ-1"],
-  audience_refs: ["REQ-1"],
-  critical_outcome_refs: ["REQ-1"],
-};
-const plan = {
-  schema_version: 4,
-  size_policy: { policy_id: "atlas-slice-size-v2" },
-  release: releasePlanBinding(intent),
-  slices: [{
-    slice_id: "release-vnext",
-    objective: "Implement and certify the governed Web UI candidate.",
-    depends_on: [],
-    keeper_outputs: ["release:web-ui-v1:evidence"],
-    owned_paths: ["product/release/**"],
-    forbidden_paths: ["plugins/multica-sdlc/**"],
-    acceptance_refs: ["REQ-1"],
-    risk_class: "critical",
-    failure_domain: "release-certification",
-    rollback_boundary: "one governed logical commit",
-    estimate: {
-      estimated_changed_files: 2,
-      estimated_net_loc: 200,
-      target_p90_minutes: 90,
-      serial_dependency_depth: 0,
-      independent_vertical_count: 1,
-    },
-    budget: {
-      max_changed_files: 4,
-      max_loc: 400,
-      max_wall_clock_minutes: 120,
-      max_required_checks: profile.requirements.length,
-    },
-    checks: profile.requirements.map((requirement) => ({
-      check_id: `release-${requirement.dimension}`,
-      gate_class: requirement.check_definition.allowed_gate_classes[0],
-      command: `atlas-release-collect ${requirement.requirement_id}`,
-      final_only: true,
-      cache_policy: "fresh-executed",
-      release_requirement: releaseRequirementProjection(profile, binding, requirement),
-    })),
-  }],
-};
-const gates = fs.readFileSync(source, "utf8")
-  .replace("# Valid implementation with served UI", "# Scope admission v6 contract")
-  .replace(/^- required_safety_gates:.*\n/m, "")
-  .replace(/^- first_code_slice: .*$/m, `- first_code_slice: ${plan.slices[0].slice_id}`)
-  .replace(
-    /^- first_code_verification: .*$/m,
-    `- first_code_verification: ${plan.slices[0].checks[0].check_id}`,
-  )
-  .replace(
-    /^- allowed_contract_gate_only_until:/m,
-    "- first_code_stop_before_slice: task-completion\n- allowed_contract_gate_only_until:",
-  )
-  .replace(
-    "contract_semantics_version: 1",
-    [
-      "task_id: fixture",
-      "contract_semantics_version: 6",
-      "finding_scope_admission: controller_current_required_only",
-      "safe_fallback_authority: none",
-    ].join("\n"),
-  );
-const contract = [
-  gates,
-  "",
-  "## Release Intent",
-  "",
-  "```atlas-release-intent+json",
-  JSON.stringify(intent, null, 2),
-  "```",
-  "",
-  "## Execution Plan",
-  "",
-  "```atlas-execution-plan+json",
-  JSON.stringify(plan, null, 2),
-  "```",
-  "",
-  "## Acceptance Criteria",
-  "",
-  "| ID | Criterion | Required | Verification | Authority |",
-  "|----|-----------|----------|--------------|-----------|",
-  "| AC-VNEXT | Preserve the governed release goal. | yes | structural lint | goal:REQ-1 |",
-  "",
-  "## Edge Cases",
-  "",
-  "| Case | Expected behavior | Required | Admission |",
-  "|------|-------------------|----------|-----------|",
-  "| Optional review suggestion | Keep it out of executable scope. | no | optional |",
-  "",
-  "## Failure And Stop Conditions",
-  "",
-  "- Stop and ask the user when: current authority cannot be established.",
-  "- Treat the task as failed when: a required validation row fails.",
-  "- Required safe fallback: not_applicable",
-  "- Optional fallback notes: retain non-required suggestions in finding provenance.",
-  "",
-  "## Finding Provenance",
-  "",
-  "| Finding ID | Disposition | Source | Follow-up |",
-  "|------------|-------------|--------|-----------|",
-  "| finding-vnext | visible-follow-up | review-verdict.json | Track outside this contract. |",
-  "",
-].join("\n");
-fs.writeFileSync(target, contract);
+const uiFields = [
+  "first_operable_user_flow", "browser_entrypoint", "served_ui_validation_action",
+  "ui_data_mode", "allowed_headless_only_until", "stop_if_no_ui_by_phase",
+];
+const uiFixture = fs.readFileSync(path.join(root, "test/fixtures/implementation-contract/valid/required-ui.md"), "utf8");
+for (const flavor of ["draft", "final"]) {
+  const filename = flavor === "draft" ? "implementation-contract.md" : "implementation-contract.final.md";
+  let contract = fs.readFileSync(path.join(root, "workflow/templates", filename), "utf8");
+  assert.match(contract, /^contract_semantics_version: 5$/m);
+  assert.doesNotMatch(contract, /^```atlas-release-intent\+json$/m);
+  const matches = [...contract.matchAll(planFence)];
+  assert.equal(matches.length, 1);
+  const plan = JSON.parse(matches[0][1]);
+  assert.equal(plan.schema_version, 3);
+  assert.ok(!Object.hasOwn(plan, "release"));
+  assert.equal(plan.slices.length, 1);
+  const slice = plan.slices[0];
+  assert.equal(slice.checks.length, 1);
+  assert.ok(!Object.hasOwn(slice.checks[0], "release_requirement"));
+  slice.slice_id = "slice-template-" + flavor + "-v5";
+  slice.objective = "Implement bounded workflow behavior and its contract validation.";
+  slice.keeper_outputs = ["event:" + slice.slice_id + ":complete"];
+  slice.owned_paths = ["plugins/atlas-workflow/scripts/codex-implementation-contract-lint"];
+  slice.forbidden_paths = ["plugins/multica-sdlc/**"];
+  slice.acceptance_refs = ["REQ-1"];
+  slice.checks[0].check_id = "check-template-" + flavor;
+  slice.checks[0].command = "bash workflow/tests/contract_implementation_contract.sh";
+  const fields = {
+    task_id: "fixture",
+    title: "Filled " + flavor + " template",
+    created: "2026-08-31",
+    work_type: "implementation",
+    first_code_guard: "required",
+    product_ui_gate: "not_applicable",
+    product_ui_not_applicable_reason: "This bounded workflow implementation changes no user interface.",
+    first_code_slice: slice.slice_id,
+    first_code_slice_kind: "workflow",
+    first_code_owner: "workflow-owner",
+    first_code_verification: slice.checks[0].check_id,
+    first_code_stop_before_slice: "task-completion",
+    allowed_contract_gate_only_until: "contract authoring validation",
+    stop_if_no_code_by_phase: "implementation admission",
+    gate_parallelization_or_deferral_plan: "Run bounded lint alongside the implementation checks.",
+    Goal: "Implement and validate the bounded workflow change.",
+    "Non-goals": "No installation, release, or unrelated runtime changes.",
+    "Files or surfaces likely affected": slice.owned_paths[0],
+    "User-visible behavior": "The existing command validates the authored workflow contract.",
+    "Stop and ask the user when": "Current authority cannot be established.",
+    "Treat the task as failed when": "A required validation row fails.",
+    "Optional fallback notes": "Keep unrelated suggestions outside executable scope.",
+  };
+  if (flavor === "final") Object.assign(fields, { workflow_id: "fixture", finalized: "2026-08-31" });
+  for (const [field, value] of Object.entries(fields)) contract = fill(contract, field, value);
+  contract = replaceOnce(contract, "| AC-1 |  | yes |  | goal:<requirement-ref> |",
+    "| REQ-1 | Preserve the authorized workflow behavior. | yes | Run the contract check. | goal:REQ-1 |");
+  contract = replaceOnce(contract, "| V-1 |  |  |  | `evidence/phase-review-report.md` |",
+    "| V-1 | Workflow contract | bash workflow/tests/contract_implementation_contract.sh | Exit 0 | `evidence/phase-review-report.md` |");
+  contract = replaceOnce(contract, "|  |  | no | optional |",
+    "| Unrelated suggestion | Record as a follow-up. | no | optional |");
+  contract = replaceOnce(contract, "|  | visible-follow-up |  |  |",
+    "| finding-optional | visible-follow-up | review | Outside the current goal. |");
+  contract = replacePlan(contract, plan);
+  assert.doesNotMatch(contract, /\{\{[A-Z_]+\}\}/);
+  fs.writeFileSync(path.join(output, "template-" + flavor + "-v5.md"), contract);
+
+  // Explicit formal-release selection transforms this same filled template,
+  // projecting the real bundled Profile rather than hardcoding its requirements.
+  const intent = {
+    schema_version: 1,
+    target_delivery_class: "product_release",
+    target_delivery_authority_ref: "user-message:template-" + flavor,
+    release_stage: "mvp",
+    surface_inventory: { ref: "REQ-1", sha256: "sha256:" + "a".repeat(64) },
+    surface_kinds: ["web_ui"],
+    release_profile_refs: [{ profile_ref: profile.profile_id, profile_sha256: binding.profile_sha256 }],
+    release_claim_refs: ["REQ-1"],
+    audience_refs: ["REQ-1"],
+    critical_outcome_refs: ["REQ-1"],
+  };
+  plan.schema_version = 4;
+  plan.release = releasePlanBinding(intent);
+  slice.slice_id = "release-template-" + flavor;
+  slice.objective = "Implement and certify the governed Web UI candidate.";
+  slice.keeper_outputs = ["release:web-ui-v1:evidence"];
+  slice.owned_paths = ["product/release/**"];
+  slice.risk_class = "critical";
+  slice.failure_domain = "release-certification";
+  slice.budget.max_required_checks = profile.requirements.length;
+  slice.checks = profile.requirements.map(requirement => ({
+    check_id: "release-" + requirement.dimension,
+    gate_class: requirement.check_definition.allowed_gate_classes[0],
+    command: "atlas-release-collect " + requirement.requirement_id,
+    final_only: true,
+    cache_policy: "fresh-executed",
+    release_requirement: releaseRequirementProjection(profile, binding, requirement),
+  }));
+  for (const [field, value] of Object.entries({
+    contract_semantics_version: "6",
+    product_ui_gate: "required",
+    product_ui_not_applicable_reason: "",
+    first_code_slice: slice.slice_id,
+    first_code_slice_kind: "product",
+    first_code_owner: "editor-runtime-owner",
+    first_code_verification: slice.checks[0].check_id,
+    Goal: "Implement and certify the governed Web UI candidate.",
+    "Files or surfaces likely affected": slice.owned_paths[0],
+    "User-visible behavior": "The served editor saves a document and retains it after refresh.",
+  })) contract = fill(contract, field, value);
+  for (const field of uiFields) {
+    const value = uiFixture.match(new RegExp("^- " + field + ": (.+)$", "m"));
+    assert.ok(value, "served UI fixture field: " + field);
+    contract = fill(contract, field, value[1]);
+  }
+  contract = replaceOnce(contract,
+    "| REQ-1 | Preserve the authorized workflow behavior. | yes | Run the contract check. | goal:REQ-1 |",
+    "| REQ-1 | Save and refresh the served editor result on the governed candidate. | yes | Profile-bound final sweep. | goal:REQ-1 |");
+  contract = replaceOnce(contract,
+    "| V-1 | Workflow contract | bash workflow/tests/contract_implementation_contract.sh | Exit 0 | `evidence/phase-review-report.md` |",
+    "| V-1 | Governed candidate | " + slice.checks[0].command + " | Profile-bound fact | `evidence/phase-review-report.md` |");
+  contract = replacePlan(contract, plan);
+  contract = replaceOnce(contract, "## Release Intent\n", "## Release Intent\n\n```atlas-release-intent+json\n"
+    + JSON.stringify(intent, null, 2) + "\n```\n");
+  fs.writeFileSync(path.join(output, "template-" + flavor + "-v6.md"), contract);
+}
 NODE
-run_vnext_new_authoring_valid \
-  'new authoring accepts canonical semantics v6 with execution-plan v4' \
-  "$release_v6_contract" \
-  "$GOAL_ONLY_SLICE" \
-  6
+for flavor in draft final; do
+  for semantics in 5 6; do
+    run_vnext_new_authoring_valid \
+      "filled $flavor template passes strict new-authoring semantics v$semantics" \
+      "$TMP_ROOT/template-$flavor-v$semantics.md" "$GOAL_ONLY_SLICE" "$semantics"
+  done
+done
+release_v6_contract="$TMP_ROOT/template-draft-v6.md"
 v6_legacy_safety="$TMP_ROOT/scope-admission-v6-legacy-safety.md"
-sed '/^product_ui_not_applicable_reason:/a required_safety_gates: browser network boundary and credential isolation' \
+sed '/^product_ui_not_applicable_reason:/a\
+required_safety_gates: browser network boundary and credential isolation
+' \
   "$release_v6_contract" > "$v6_legacy_safety"
 run_vnext_strict_valid \
   'historical semantics v6 may still read a substantive legacy safety field' \
@@ -572,7 +607,10 @@ pass 'brief builder rejects the same full-lint-invalid v5 contract before artifa
 
 for vnext_case in \
   "5|slice-vnext|$FIXTURE_ROOT/valid/scope-admission-v5.md" \
-  "6|release-vnext|$release_v6_contract"; do
+  "5|slice-template-draft-v5|$TMP_ROOT/template-draft-v5.md" \
+  "5|slice-template-final-v5|$TMP_ROOT/template-final-v5.md" \
+  "6|release-template-draft|$release_v6_contract" \
+  "6|release-template-final|$TMP_ROOT/template-final-v6.md"; do
   IFS='|' read -r semantics_version slice_id contract_file <<<"$vnext_case"
   case_paths
   if ! node "$BRIEF_BIN" \
@@ -946,22 +984,22 @@ run_usage_invalid 'duplicate new authoring is a usage error' CLI_USAGE --strict 
 
 for template in implementation-contract.md implementation-contract.final.md; do
   file="$ATLAS_FORGE_ROOT/workflow/templates/$template"
-  grep -q '^contract_semantics_version: 4$' "$file"
-  grep -q '^```atlas-release-intent+json$' "$file"
+  grep -q '^contract_semantics_version: 5$' "$file"
+  ! grep -q '^```atlas-release-intent+json$' "$file"
   grep -q '^```atlas-execution-plan+json$' "$file"
-  grep -q '^  "schema_version": 2,$' "$file"
-  grep -q '^  "release": {$' "$file"
-  grep -q '^          "release_requirement": {$' "$file"
-  grep -q 'Exploration and non-product plans use schema version 1' "$file"
+  grep -q '^  "schema_version": 3,$' "$file"
+  ! grep -q '^  "release": {$' "$file"
+  ! grep -q '^          "release_requirement": {$' "$file"
+  grep -q 'Historical semantics-v3 / plan v1 and semantics-v4 / plan v2 remain read-only' "$file"
   grep -q 'A `product_increment`' "$file"
-  grep -q 'uses ordinary semantics-v3' "$file"
-  grep -q 'omit this' "$file"
+  grep -q 'uses ordinary semantics-v5' "$file"
+  grep -q 'omits the' "$file"
   grep -q '`atlas-release-intent+json` section' "$file"
   grep -q 'no `release` object' "$file"
   grep -q 'Do not create a `release_decision`' "$file"
   grep -q 'Do not add a fourth release-intent' "$file"
   grep -q '^finding_scope_admission: controller_current_required_only$' "$file"
-  grep -q '^safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>$' "$file"
+  grep -q '^safe_fallback_authority: none$' "$file"
   grep -q '^work_type: implementation | planning | review | audit | docs-only$' "$file"
   grep -q '^first_code_not_applicable_reason:$' "$file"
   grep -q '^product_ui_not_applicable_reason:$' "$file"
@@ -978,33 +1016,34 @@ for template in implementation-contract.md implementation-contract.final.md; do
   grep -q '^## Finding Provenance$' "$file"
 done
 grep -q 'Versioned implementation contract strict lint passed' "$ATLAS_FORGE_ROOT/workflow/templates/gate-checklist.md"
-grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q -- '--strict --new-authoring' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'new authoring requires semantics v5, or semantics v6 for `product_release`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Freeze the smallest user-visible Goal before brownfield discovery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Discovery cannot rewrite the frozen Goal' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Select one canonical scope source' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'author that contract as the canonical source instead of first creating a duplicate `clarify.md`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'promote the finalized implementation contract to the sole canonical scope source and reduce `clarify.md` to links plus non-duplicated background' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'Create a repo docs bundle, `contract-index.md`, staffing file, or durable evidence index only when explicit handoff, audit, release' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'two directories above the containing skill directory' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
-grep -q 'do not append old contract text, rejected requirements, or review notes' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint' "$CONTRACT_AUTHORING"
+grep -q -- '--authority-slice <canonical-sdd-slice-dir>' "$CONTRACT_AUTHORING"
+grep -q -- '--strict --new-authoring' "$CONTRACT_AUTHORING"
+grep -q 'new authoring requires semantics v5, or semantics v6 for `product_release`' "$CONTRACT_AUTHORING"
+grep -q 'Before brownfield discovery or any fan-out, freeze the smallest user-visible Goal' "$CLARIFY"
+grep -q 'Discovery or review cannot expand the Goal' "$CLARIFY"
+grep -q 'binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence' "$CONTRACT_AUTHORING"
+grep -q 'Keep one useful scope document' "$CLARIFY"
+rg -Uq 'Do not mirror scope into\s+`context.md`, `spec.md`, `decision.md` or a repo bundle' "$CLARIFY"
+grep -q 'is already established, author that contract directly' "$CLARIFY"
+rg -Uq 'Promote a finalized contract in place of an\s+earlier `clarify.md`, reducing the latter to links and non-duplicated background' "$CONTRACT_AUTHORING"
+rg -Uq 'Create `contract-index.md` or a repo bundle only when handoff, audit, release or\s+existing project authority actually requires it' "$CONTRACT_AUTHORING"
+grep -q 'two directories above the containing' "$CLARIFY"
+grep -q 'implementation-contract.final.md.*clean rewrite of the final agreed requirements' "$CONTRACT_AUTHORING"
+grep -q 'do not append old contract text, rejected requirements, or review notes' "$CONTRACT_AUTHORING"
 for contract_authoring_skill in task clarify team team-v1; do
   contract_authoring_file="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/$contract_authoring_skill/SKILL.md"
+  if [[ "$contract_authoring_skill" == clarify ]]; then contract_authoring_file="$CONTRACT_AUTHORING"; fi
   grep -q 'authority-backed facts determine an environment, status, verification level, or conclusion' "$contract_authoring_file"
   grep -q 'state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case' "$contract_authoring_file"
   grep -q 'replace it in place.*do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose' "$contract_authoring_file"
 done
 grep -q 'the goal neutral, place the condition once in the existing contract structure' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md"
-grep -q 'every validated controller finding with `disposition: current-required` remains an executable requirement' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'every validated controller finding with `disposition: current-required` remains an executable requirement' "$CONTRACT_AUTHORING"
 grep -q 'every validated controller resolution with `disposition: current-required` remains part of the current delivery' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/SKILL.md"
 grep -q 'validated controller resolution is the sole finding-scope authority' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
 grep -q 'repeated `--authority-slice`' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
-grep -q 'strict lint can validate attribution without interpreting natural language' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/clarify/SKILL.md"
+grep -q 'strict lint can validate attribution without interpreting natural language' "$CONTRACT_AUTHORING"
 grep -q 'every validated controller finding with `disposition: current-required` remains projected into executable requirements' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team-v1/SKILL.md"
 pass 'templates and authoring skills adopt required-only scope admission and strict semantic lint'
 

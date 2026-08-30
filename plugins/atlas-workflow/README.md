@@ -46,15 +46,20 @@ specialist/reviewer materially serve those needs; otherwise stay with the main
 Codex. Multiple files, behavior changes, and task complexity do not by
 themselves require Team.
 
-Clarify is main-only by default. An explicit user request for multiple agents or
-reviewers authorizes multi-agent staffing without expanding scope; it waives only
-the latency/risk-value proof, not Goal, consumer, input, output, authority, or
-stop-condition boundaries. Without such a request, a read-only child still needs
-an independent evidence domain or specialist perspective with a concrete consumer
-and material latency/risk value; task size, file count, a short request, or a
-non-tiny label do not justify fan-out by themselves. When two or more admitted,
-ready lanes exist, Clarify may dispatch them in parallel with at most three child
-lanes in a wave. Once Team is selected, the controller
+Clarify reads current context and approved decisions, then fills only real
+execution gaps. Larger tasks with material engineering tradeoffs automatically
+use read-only engineering perspectives before contract authoring. Roles adapt to
+the decision; long-term evolution and current delivery are a common pair, not a
+fixed committee. Independent options and direct peer responses inform the main
+agent's choice without expanding the user goal. Short requests, file counts and
+repetitive bulk changes do not by themselves require deliberation or new artifacts.
+Explicit collaboration requests remain honored within the existing Goal,
+consumer, input, output, authority and stop-condition boundaries. Clarify keeps
+at most three ready child lanes per wave and one canonical writer; contract and
+collaboration details are loaded from its plugin-local references only when needed.
+Existing design approvals are reused only while their same-task identity bindings
+remain valid; missing bindings stay non-executable rather than triggering a full
+redesign or inferred approval. Once Team is selected, the controller
 dispatches the admitted ready frontier in bounded waves with
 `child_count = min(ready independent lanes, host available child slots, 4)`.
 The soft wave caps are not completion or stop conditions. These are controller

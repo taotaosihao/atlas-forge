@@ -18,6 +18,8 @@ const invariant = "Release-readiness invariant: only a Team execution-vnext prod
 const skillFiles = {
   task: ["plugins", "atlas-workflow", "skills", "task", "SKILL.md"],
   clarify: ["plugins", "atlas-workflow", "skills", "clarify", "SKILL.md"],
+  clarifyContract: ["plugins", "atlas-workflow", "skills", "clarify", "references", "contract-authoring.md"],
+  clarifyCollaboration: ["plugins", "atlas-workflow", "skills", "clarify", "references", "collaboration.md"],
   design: ["plugins", "atlas-workflow", "skills", "design-review", "SKILL.md"],
   team: ["plugins", "atlas-workflow", "skills", "team", "SKILL.md"],
   business: ["plugins", "atlas-workflow", "skills", "team", "references", "business-acceptance.md"],
@@ -29,12 +31,22 @@ const implementationTemplates = [
   read("workflow", "templates", "implementation-contract.final.md"),
 ];
 
-for (const name of ["task", "clarify", "design", "team"]) {
+for (const name of ["task", "design", "team"]) {
   assert.ok(text[name].includes(invariant), `${name} must carry the shared release invariant`);
   assert.doesNotMatch(text[name], /may be called (?:formally|actually) released/i);
 }
 
-for (const name of ["task", "clarify", "team"]) {
+// Clarify loads Team's release rules only on the formal branch. Check that
+// delegation separately instead of requiring the whole release tutorial inline.
+assert.match(text.clarify, /Only explicit formal certification[\s\S]*before authoring or handing off that path read/);
+assert.match(text.clarify, /\[Team's release rules\]\(\.\.\/team\/SKILL.md\)/);
+assert.match(text.clarifyContract, /\[Team's current release rules\]\(\.\.\/\.\.\/team\/SKILL.md\)/);
+assert.match(text.clarifyContract, /before authoring or execution: supported Profile and trusted-producer limits/);
+assert.match(text.clarifyContract, /Only completion-derived `release_decision.status=certified`/);
+assert.match(text.clarifyContract, /never proves or authorizes installation, push, deployment/);
+assert.match(text.clarifyContract, /Unsupported surfaces fail authoring\/admission/);
+assert.match(text.clarifyContract, /without inventing a completion `release_decision`/);
+for (const name of ["task", "team"]) {
   assert.match(text[name], /MVP.*Beta/s, `${name} must preserve the stage-quality floor`);
   assert.match(text[name], /pure Web UI/, `${name} must state the v1 surface boundary`);
   assert.match(text[name], /exact `web_ui` \+ `api` \+ `worker` \+ `database` \+ `external_integration` combination/, `${name} must state the exact integrated authoring boundary`);
@@ -55,10 +67,11 @@ assert.match(text.task, /path lease from actual write-conflict risk/);
 assert.match(text.task, /must omit release-intent, v4, immutable Profile/);
 assert.match(text.task, /do not initialize workflow merely to log it/);
 assert.match(text.task, /promotion to a usable product increment requires fresh `product_increment` authoring/);
-assert.match(text.clarify, /Team just to obtain[\s\S]*a model route/);
-assert.match(text.clarify, /Planning and plan\/contract review default to a frontier model/);
-assert.match(text.clarify, /low-tier Saving routes[\s\S]*authorized implementation Execute/);
-assert.match(text.clarify, /For the default[\s\S]*`product_increment` path[\s\S]*do not create a[\s\S]*workflow task/);
+assert.match(text.clarify, /does not require a full Team execution\s+workflow/);
+assert.match(text.clarifyCollaboration, /planning\/contract-review\s+preflight/);
+assert.match(text.clarifyCollaboration, /perspectives do not select\s+implementation Saving merely because the enclosing task has execute authority/);
+assert.match(text.clarify, /one-line request with complete context needs no fixed checklist[\s\S]*new workflow artifacts/);
+assert.match(text.clarifyContract, /failed, unrun or unknown real checks still block/);
 assert.match(text.team, /does not enter execution-vnext or acquire a durable/);
 assert.match(text.team, /Main-only single writers.*no lease requirement/s);
 assert.match(text.team, /release_mode=product_increment/);
@@ -68,11 +81,11 @@ assert.match(text.task, /Direct Task work may implement or verify only a contrib
 assert.match(text.task, /When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`/);
 assert.match(text.task, /target_delivery_authority_ref.*controller-recordable `user-message:` or `operator-input:`/s);
 assert.match(text.task, /project-phase-report <task-id> <phase-id>/);
-assert.match(text.clarify, /semantics v6/);
-assert.match(text.clarify, /execution-plan schema version 4/);
-assert.match(text.clarify, /terminal release-certification slice/);
-assert.match(text.clarify, /whenever an authorized `product_release` target reaches execution or certification/);
-assert.match(text.clarify, /Planning or review that directly authors or gates a named externally usable candidate retains `product_release`/);
+assert.match(text.clarifyContract, /semantics v6/);
+assert.match(text.clarifyContract, /execution-plan schema version 4/);
+assert.match(text.clarifyContract, /terminal release-certification slice/);
+assert.match(text.clarifyContract, /An explicit `product_release` must follow/);
+assert.match(text.clarifyContract, /Planning or review that directly authors or gates a named externally usable\s+candidate retains an already authorized `product_release` target/);
 assert.match(text.task, /planning or review that directly authors or gates a named externally usable candidate retains `product_release`/);
 assert.match(text.team, /Planning or review that directly authors or gates a named externally usable candidate retains `product_release`/);
 assert.match(text.team, /recomputes typed facts from raw inputs/);
@@ -109,7 +122,7 @@ const profileDimensions = [
   "accessibility-quality",
   "security-operability",
 ];
-for (const name of ["task", "clarify", "team"]) {
+for (const name of ["task", "clarify", "clarifyContract", "team"]) {
   assert.deepEqual(
     profileDimensions.filter((dimension) => text[name].includes(`\`${dimension}\``)),
     [],

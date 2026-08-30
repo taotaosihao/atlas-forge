@@ -63,6 +63,14 @@ sections in template order.
 
 ## Approval binding and fail-closed handoff
 
+Business decisions and their current machine binding are distinct. Reuse an
+unchanged, valid same-task approval; organizing approved prose into artifacts
+must not add semantics or manufacture approval. Reformatting the semantic body
+can change its identity even when the business intent seems unchanged. When
+binding evidence is missing, identify that gap and keep the handoff non-executable;
+do not infer approval or restart the entire product design merely because files
+were missing. Changed semantics require the affected current approval.
+
 Gate 1 approves the complete current C semantics. Reuse it only when the current
 explicit evidence covers the unchanged `content_identity`; otherwise clear
 `approval_ref` and set C to draft.
@@ -73,6 +81,9 @@ D identities. At approval, write all three into D:
 - `approved_context_identity`
 - `approved_scenario_identity`
 - `approved_flow_identity`
+
+Reuse Gate 2 only when its current explicit approval still covers all three
+unchanged identities and no blocking question or known conflict remains.
 
 For `product_release`, Gate 2 must be an explicit approval by the current user.
 Agent judgment, tests, silence, historical similarity, and generic permission to

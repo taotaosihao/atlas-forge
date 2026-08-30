@@ -145,7 +145,8 @@ epoch; direct/unbound verification remains blocked on the stable direct boundary
 Use `product_increment` for an MVP, Beta, internal test/dogfood, or small-scope
 public beta when the request does not explicitly ask for formal release
 certification, `release-ready`, or `certified`. It is a routing/reporting term,
-not a release-intent schema branch: ordinary semantics-v3/lightweight contracts
+not a release-intent schema branch: newly authored ordinary semantics-v5 / plan-v3
+or lightweight contracts
 must omit release intent, immutable Profile binding, terminal certification
 slices, release receipts, and release decisions. Direct Task or the main Codex is
 the default; Team is chosen only for an independent collaboration or review
@@ -170,17 +171,18 @@ and read-only/review/verifier work do not need a lease. One isolated
 product-increment Team writer without fallback, takeover, or external concurrency
 does not require one by default. Concurrent writers, fallback/takeover, uncertain
 quiescence, or external shared writers require non-overlapping ownership plus the
-existing lease/quiescence boundary. Strict `product_release` execution-v3 lease
+existing lease/quiescence boundary. Strict `product_release` execution-vnext lease
 and admission remain unchanged; no general lease runtime is added here.
 
 ### Product release verification
 
-For a valid `product_release`, contract semantics v4 binds either the immutable
+For a newly authored `product_release`, contract semantics v6 binds either the immutable
 pure-Web `web-ui-v1` Profile or, for strict authoring and admission, the
 immutable exact mixed-surface `integrated-app-v1` Profile. Execution-plan
-schema version 2 projects every bound Profile requirement into one terminal
-certification slice, and brief schema version 3 carries the exact policy
-identities into Team execution-v3. The public CLI in this release does not
+schema version 4 projects every bound Profile requirement into one terminal
+certification slice, and brief schema version 4 carries the exact policy
+identities into Team execution-vnext. Historical semantics v3/v4 with plan v1/v2
+remain read-only compatibility, not new-authoring alternatives. The public CLI in this release does not
 register a trusted producer for `integrated-app-v1`; without a separately
 delivered workflow-bound host producer, structurally passing mixed-surface
 facts are recomputed but downgraded to `cannot_verify`.

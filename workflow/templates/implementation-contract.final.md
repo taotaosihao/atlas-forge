@@ -7,9 +7,9 @@ contract_status: final
 current_authoritative_contract: ./implementation-contract.final.md
 created: {{CREATED}}
 finalized: {{FINALIZED}}
-contract_semantics_version: 4
+contract_semantics_version: 5
 finding_scope_admission: controller_current_required_only
-safe_fallback_authority: none | goal:<requirement-ref> | current-required:<finding_id>
+safe_fallback_authority: none
 work_type: implementation | planning | review | audit | docs-only
 first_code_guard: required | not_applicable
 first_code_not_applicable_reason:
@@ -19,76 +19,60 @@ product_ui_not_applicable_reason:
 ## Release Intent
 
 Choose the target deliberately. A `product_increment` (MVP, Beta, internal
-test/dogfood, or small-scope public beta without explicit formal certification)
-uses ordinary semantics-v3: set `contract_semantics_version: 3` and omit this
-entire `atlas-release-intent+json` section, every Profile/release binding, and
+test/dogfood, or small-scope public beta without explicit formal certification),
+`exploration`, or `non_product` uses ordinary semantics-v5. The default below
+omits the `atlas-release-intent+json` section, every Profile/release binding, and
 the terminal release-certification slice. Do not create a `release_decision`.
 
 Only an explicit formal certification, `release-ready`, or `certified` request
-uses the strict `product_release` branch below with semantics v4. Exploration
-and non-product use their own strict fields. Do not add a fourth release-intent
-schema branch for `product_increment`.
+uses `product_release`: set `contract_semantics_version: 6`, add exactly one
+canonical `atlas-release-intent+json` block and use execution-plan schema version 4.
+Do not add a fourth release-intent schema branch for `product_increment`.
 
-For a product release that will enter execution, bind the exact controller-recordable `user-message:` or `operator-input:` authorization that will be supplied to Team start. `goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority for either Profile.
+For a product release that will enter execution, bind the exact controller-recordable
+`user-message:` or `operator-input:` authorization supplied to Team start, for example
+`"target_delivery_authority_ref": "user-message:<message-id>"`.
+`goal:` and `current-required:` remain valid authoring references but are not resolvable release-execution authority for either Profile.
 
+For a pure Web UI release use release-intent schema version 1 and Profile `web-ui-v1`.
 For strict mixed-surface authoring/admission, use schema version 2, Profile `integrated-app-v1`, and the exact ordered surface set `web_ui`, `api`, `worker`, `database`, `external_integration`. Obtain `profile_sha256` from the bundled Profile through `loadBundledProfile()` plus `profileBinding()` and project all 12 immutable requirements exactly once. The public CLI does not register this Profile's trusted producer in this release, so a structurally passing final sweep remains `cannot_verify` unless the host separately supplies a workflow-bound trusted producer.
-
-```atlas-release-intent+json
-{
-  "schema_version": 1,
-  "target_delivery_class": "product_release",
-  "target_delivery_authority_ref": "user-message:<message-id>",
-  "release_stage": "mvp",
-  "surface_inventory": {
-    "ref": "<acceptance-ref>",
-    "sha256": "sha256:<64-lowercase-hex>"
-  },
-  "surface_kinds": ["web_ui"],
-  "release_profile_refs": [
-    {
-      "profile_ref": "web-ui-v1",
-      "profile_sha256": "sha256:<bundled-profile-digest>"
-    }
-  ],
-  "release_claim_refs": ["<acceptance-ref>"],
-  "audience_refs": ["<acceptance-ref>"],
-  "critical_outcome_refs": ["<acceptance-ref>"]
-}
-```
 
 ## Execution Plan
 
-For `product_increment`, use an ordinary semantics-v3 plan: schema version 1,
-no `release` object, and no `release_requirement` checks. The increment plan
-must omit the release-intent block, Profile binding, and terminal
-release-certification slice. For `product_release`, use schema version 2 and
-project every bound Profile requirement exactly once. Repeat the
-`release_requirement` check shape below for the complete immutable Profile;
-ordinary engineering checks may omit it. Exploration and non-product plans use schema version 1 and omit both `release` and `release_requirement`.
+All newly authored ordinary contracts use semantics v5 and execution-plan schema
+version 3: no `release` object and no `release_requirement` checks. Use the actual
+bounded implementation and acceptance locations instead of the example values below.
+
+For `product_release`, semantics v6 uses execution-plan schema version 4. Bind
+`release` with `releasePlanBinding(intent)` and project every immutable Profile
+requirement with `releaseRequirementProjection(profile, binding, requirement)`.
+Place those final-only, fresh-executed checks in one terminal release-certification
+slice that transitively depends on every other executable slice.
+
+Historical semantics-v3 / plan v1 and semantics-v4 / plan v2 remain read-only
+compatibility, not new-authoring alternatives.
 
 ```atlas-execution-plan+json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "size_policy": {
     "policy_id": "atlas-slice-size-v2"
-  },
-  "release": {
-    "target_delivery_class": "product_release",
-    "intent_sha256": "sha256:<release-intent-digest>",
-    "profile_ref": "web-ui-v1",
-    "profile_sha256": "sha256:<bundled-profile-digest>",
-    "check_definition_set_sha256": "sha256:<check-definition-set-digest>",
-    "requirement_refs": ["<every-immutable-profile-requirement-ref>"]
   },
   "slices": [
     {
       "slice_id": "slice-001",
       "objective": "Replace with the bounded slice objective.",
       "depends_on": [],
-      "keeper_outputs": ["event:slice-001:complete"],
-      "owned_paths": ["path/to/owned/**"],
+      "keeper_outputs": [
+        "event:slice-001:complete"
+      ],
+      "owned_paths": [
+        "path/to/owned/**"
+      ],
       "forbidden_paths": [],
-      "acceptance_refs": ["AC-1"],
+      "acceptance_refs": [
+        "AC-1"
+      ],
       "risk_class": "medium",
       "failure_domain": "bounded-slice",
       "rollback_boundary": "one logical commit",
@@ -108,29 +92,10 @@ ordinary engineering checks may omit it. Exploration and non-product plans use s
       "checks": [
         {
           "check_id": "slice-contract",
-          "gate_class": "<profile-allowed-gate-class>",
-          "command": "replace-with-a-reproducible-collector-command",
-          "final_only": true,
-          "cache_policy": "fresh-executed",
-          "release_requirement": {
-            "profile_ref": "web-ui-v1",
-            "profile_sha256": "sha256:<bundled-profile-digest>",
-            "requirement_ref": "<profile-requirement-ref>",
-            "requirement_sha256": "sha256:<requirement-digest>",
-            "dimension": "<profile-dimension>",
-            "required": true,
-            "waiver_policy": "never",
-            "definition_ref": "<check-definition-ref>",
-            "definition_sha256": "sha256:<check-definition-digest>",
-            "collector_adapter_ref": "<collector-adapter-ref>@<version>",
-            "collector_adapter_sha256": "sha256:<collector-adapter-digest>",
-            "fact_schema_ref": "<fact-schema-ref>@<version>",
-            "fact_schema_sha256": "sha256:<fact-schema-digest>",
-            "evaluator_ref": "<evaluator-ref>@<version>",
-            "evaluator_sha256": "sha256:<evaluator-digest>",
-            "pass_rule_sha256": "sha256:<pass-rule-digest>",
-            "required_candidate_components": ["source", "artifact", "surface_inventory", "config", "runtime", "data"]
-          }
+          "gate_class": "contract",
+          "command": "replace-with-a-reproducible-verification-command",
+          "final_only": false,
+          "cache_policy": "identity-bound"
         }
       ]
     }

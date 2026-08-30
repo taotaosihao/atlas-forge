@@ -28,10 +28,11 @@ Keep user-facing replies and summaries in plain, conversational language. Do not
 
 ## Parallel Routing Boundary
 
-Clarify is main-only by default; bounded child fan-out is available only after
-an independent evidence domain or specialist perspective has a concrete consumer
-and material latency/risk value. Team keeps its bounded-parallel controller
-policy after the request has been routed to Team. Ordinary `$atlas-workflow:task`
+Clarify uses the current context and only fills real execution gaps. Larger tasks
+with material engineering tradeoffs automatically use read-only perspectives
+before contract authoring; roles follow the decision, not a fixed roster. Its
+bounded collaboration follows the Clarify skill. Team keeps its bounded-parallel
+controller policy after the request has been routed to Team. Ordinary `$atlas-workflow:task`
 and `$atlas-workflow:cw` remain bounded main/lightweight routes and do not
 automatically upgrade to Clarify fan-out or Team because a task has multiple
 files, complexity, or potentially independent work. All existing authority,

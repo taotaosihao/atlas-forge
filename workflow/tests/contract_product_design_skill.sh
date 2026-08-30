@@ -177,11 +177,8 @@ def split_document(path):
     return metadata, parts[2]
 
 def write_document(path, metadata, body):
-    path.write_text(
-        "---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + body,
-        encoding="utf-8",
-        newline="\n",
-    )
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write("---\n" + yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True) + "---\n" + body)
 
 def canonical_a(metadata):
     keys = ("designed_feature_target", "allowed_claims", "critical_object", "data_profile")
@@ -368,10 +365,15 @@ rg -q 'direction is chosen.*scenario or user-operable flow is not approved' "$of
 rg -q 'direction is chosen.*primary scenario or surface flow is not approved' "$brainstorm"
 rg -q 'direction is chosen.*user-visible feature.*primary scenario or user-operable flow lacks current approval' "$task"
 rg -q 'same task' "$clarify"
-rg -U -q 'Recompute current A.*C[[:space:]]+`content_identity`, and D' "$clarify"
-rg -q 'D to store all three approved identities' "$clarify"
+rg -U -q 'recomputing current A `context_identity`,\s+C `content_identity` and D flow identity' "$clarify"
+rg -U -q 'D to store\s+all three approved identities' "$clarify"
 rg -q 'current C and D approval references' "$clarify"
-rg -q 'require no blocker' "$clarify"
+rg -q 'and no blocker' "$clarify"
+rg -q 'With valid current approval and unchanged bindings, reuse the design without reopening it' "$clarify"
+rg -q 'keep the handoff non-executable instead of redesigning the whole feature' "$clarify"
+rg -q 'For new or changed semantics, return only the affected decision' "$clarify"
+rg -q 'Business decisions and their current machine binding are distinct' "$adapter"
+node --test "$ATLAS_FORGE_ROOT/workflow/tests/js/product-design-handoff-reuse.test.js"
 for path in "$office" "$brainstorm" "$task" "$clarify"; do
   rg -qi 'backend' "$path" || fail "missing backend negative route in $path"
   rg -q 'CLI' "$path" || fail "missing CLI negative route in $path"

@@ -1,240 +1,123 @@
 ---
 name: clarify
-description: Use the Atlas clarify flow to convert a chosen direction into execution-ready context and spec artifacts.
+description: Clarify execution boundaries for a chosen direction, reusing approved decisions and comparing engineering options when material tradeoffs remain.
 ---
 
-Use the Atlas clarify flow for this request.
+# Clarify
+
+Turn chosen user outcomes into the missing execution boundaries: what to change,
+what to leave alone, the necessary engineering decisions, and reachable acceptance.
+Keep the user's goal and authority stable while allowing the implementation to change.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:clarify`; Claude Code invokes it as `/clarify` or by calling the `clarify` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:clarify`; Claude Code invokes it as `/clarify` or by calling the `clarify` skill directly. For CLI commands, prefer `atlas-workflow` on `PATH`, falling back to `~/.codex/workflow/bin/codex-workflow`.
 
 ## 输出语言
 
-- 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
-- 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
-- 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
-- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+默认用通俗中文编写实质内容和回复，保留准确的命令、路径、标识符与模板字段。
+内部编排、合同版本与身份摘要留在必要的工程材料中，不进入用户界面或常规回复。
+不要把工作流骨架、空栏目或调试说明当作交付内容。
 
-This is the execution clarification layer:
+## Route by the actual gap
 
-- Use `$atlas-workflow:office-hours` when product value, user, or scope is still unsettled.
-- Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the solution shape still needs options and tradeoffs.
-- Use `$atlas-workflow:product-design` when the direction is chosen for a user-visible feature but no current executable Design Handoff exists.
-- Use `$atlas-workflow:clarify` when the direction and user-visible flow have current approval and the task needs explicit non-goals, decision boundaries, acceptance criteria, and verification before execution.
+- Use `$atlas-workflow:office-hours` for unsettled product value, user, or investment scope.
+- Use `$atlas-workflow:brainstorm` when the product direction or overall solution shape still needs exploration.
+- Use `$atlas-workflow:product-design` when a chosen user-visible feature still lacks an approved scenario or flow. Missing handoff files alone do not mean the business design is undecided; use the reuse rules below.
+- Keep engineering alternatives within an approved outcome in Clarify. Do not freeze the main agent's first implementation idea as a requirement.
+- Clear, bounded work with adequate context can go directly to `$atlas-workflow:task` after implementation authority exists; task size or file count does not require a planning process.
 
-## Product Design admission
+## Clarify only what is missing
 
-For a user-visible feature, accept `E-design-handoff.md` only from the same task
-and fail closed before clarification. Recompute current A `context_identity`, C
-`content_identity`, and D flow identity using the Product Design adapter. Require
-E to match all three, require D to store all three approved identities, require
-current C and D approval references, and require no blocker. A `product_release`
-also requires explicit current-user Flow Approval. If any check fails, route to
-`$atlas-workflow:product-design`; do not copy A, C, or D into Clarify. Pure
-backend, migration, CLI, no-interaction, and tiny precise work does not require a
-Design Handoff.
+1. Read the request, current conversation, existing decisions and relevant artifacts before asking questions. Reuse the current task and source of scope when they already exist.
+2. Before brownfield discovery or any fan-out, freeze the smallest user-visible Goal, non-goals, authority and acceptance draft from that evidence. Preserve requirement meanings, not just their IDs; delivery labels are not the product behavior. Engineering assumptions remain revisable.
+3. Check the relevant current code, call paths and dependencies. Discovery or review cannot expand the Goal: admit a non-Goal requirement only through the existing controller `current-required` rules when the selected contract uses them; keep unrelated improvements as follow-ups.
+4. Ask one blocking question only when an unresolved choice changes behavior, scope, data, safety, permissions or acceptance and cannot be learned from available evidence. A short request or uncertain tiny/non-tiny label is not itself such a choice. Use ordinary dialogue when structured question tools are unavailable.
+5. State only the missing boundaries, material assumptions and engineering decisions needed for this task. Prefer the minimum complete implementation, including necessary safety and quality; do not add a framework, state matrix or roadmap without a current need.
+6. Make acceptance command-verifiable or user-visible, with legal, reachable prerequisites. Do not invent an unauthorized write path to construct a test state, treat mocks as real capabilities, or report unknown data as a real value.
 
-## Clarify Main-Only Default
+A one-line request with complete context needs no fixed checklist, repeated
+restatement, extra questions or new workflow artifacts. Output length follows
+the actual decisions, not the length of the request.
 
-Clarify is main-only by default. Before brownfield discovery or any optional
-fan-out, main Codex freezes the minimal Goal, non-goals, authority, and
-acceptance draft. Task size, file count, a short request, or a non-tiny label do
-not by themselves justify a child lane.
+## Engineering perspectives when useful
 
-- An explicit user request for multiple agents or reviewers authorizes
-  multi-agent staffing but does not expand scope. It waives only the need to
-  prove material latency or current-risk value; every child still needs the
-  frozen Goal/current-required reference, consumer, ready input, bounded evidence
-  domain or owned/forbidden paths, expected output, authority, and stop condition.
-- Without such an explicit request, add a read-only child only when an independent
-  evidence domain or specialist perspective has a concrete consumer and is
-  expected to materially reduce critical-path latency or a named current risk.
-  Do not create a child merely to satisfy a process default or obtain another
-  opinion when the user did not request multi-agent staffing.
-- Admit a candidate lane only when it has a frozen Goal or controller-admitted
-  `current-required` reference, an explicit consumer, ready input, a read-only
-  evidence domain or explicit owned/forbidden paths, structured expected output,
-  authority and a stop condition, plus the concrete latency/risk benefit above
-  when staffing was not explicitly requested. Duplicate lanes are coalesced;
-  dependency-not-ready lanes are deferred.
-  Unavailable exact spawn schema/profile/model/reasoning/backend routes and
-  confirmed cost anomalies fail closed rather than creating substitute fan-out.
-- When two or more admitted, ready, non-duplicate child lanes exist, they may
-  run in parallel. A Clarify wave has at most three child lanes:
-  `child_count = min(ready admitted lanes, host available child slots, 3)`.
-  This is a controller policy, not a runtime scheduler invariant, and the soft
-  wave cap is not a completion or stop condition.
-- The main Codex is the sole canonical scope/artifact writer and final
-  synthesizer. Child findings cannot expand the Goal, create workflow artifacts,
-  or write project documents; conflicts are resolved by evidence, not by vote.
-- If an admitted child cannot start, times out, becomes unavailable, or returns
-  no usable output, continue main-only when doing so remains safe; otherwise stop
-  and report the blocker. Disclose which admitted perspective was unavailable
-  and never report a degraded main-only result as completed
-  multi-agent clarification or independent review. `record-only` and
-  `effective_backend=none` remain compatibility outcomes, not parallel evidence.
+For a larger task with material engineering tradeoffs, automatically start
+read-only multi-perspective discussion before the contract is drafted. Briefly
+explain the decision and useful perspectives; do not ask for per-run permission.
+Examples include interacting modules, complex business states, data or permission
+boundaries, and choices with significantly different implementation or maintenance costs.
 
-## Release Intent
+Choose perspectives for that decision. Long-term evolution and current delivery
+are a common pair, not a fixed roster or a proxy for business/developer/test roles.
+Both propose complete options and may revise them; neither more architecture nor
+the smallest diff wins by default. Repetitive bulk work may benefit from parallel
+fact-finding without a stance debate. File count, request length and a non-tiny
+label alone do not justify discussion. Honor an explicit user collaboration request.
 
-- Classify the target separately from the current work type. Use `product_release` only when the request explicitly asks for formal release certification, `release-ready`, `certified`, or an equivalent source-level release conclusion. Planning or review that directly authors or gates a named externally usable candidate retains `product_release` only with that explicit intent; otherwise it routes to `product_increment`.
-- Use `product_increment` for an MVP, Beta, internal test/dogfood, or small-scope public beta when formal certification or release-ready intent was not requested. It is a routing/reporting term only: it does not add a release-intent schema branch, create a `release_decision`, bind an immutable Profile, or support a `certified`/release-ready claim. `MVP`, `Beta`, limited release, GA, and scaled operation describe scope or maturity; they do not by themselves select `product_release` or authorize demo-quality output.
-- An explicitly isolated spike/prototype/demo is `exploration`; only a standalone analysis, documentation, or review deliverable whose contract governs no release candidate is `non_product` with a substantive reason.
-- Release certification supports a pure Web UI with immutable Profile `web-ui-v1`. Strict contract authoring, admission, and structural recomputation support the exact `web_ui` + `api` + `worker` + `database` + `external_integration` combination with immutable Profile `integrated-app-v1`; the public CLI does not register its trusted producer in this release, so structurally passing mixed-surface facts remain `cannot_verify` unless a separately delivered workflow-bound host producer is present. API-only, worker-only, CLI, different mixed combinations, and unknown product surfaces must fail authoring/admission until an exact dedicated Profile exists; report their requested release conclusion as `cannot_verify` without inventing a completion `release_decision` or relabeling them as non-product.
+Before dispatch, read [references/collaboration.md](references/collaboration.md).
+Use existing native collaboration; this does not require a full Team execution
+workflow, a machine contract before discussion, a new role catalog or a scheduler.
 
-Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
+## Reuse design decisions without inventing approval
 
-For release-bearing execution, `target_delivery_authority_ref` must exactly match a current controller-recordable `user-message:` or `operator-input:` authorization; unresolved workflow references fail closed. Reports, raw files, hashes, stdout, and exit-zero commands remain claims until a workflow-bound producer supplies canonical provenance, otherwise the fact is `cannot_verify`.
+Pure backend, migration, CLI, no-interaction and tiny precise work need no Design
+Handoff. For a user-visible handoff, read the
+[Product Design adapter](../product-design/references/method-adapter.md) in full
+and use the current A/C/D/E from the same task:
 
-For `product_increment`, use the main Codex or the lightest applicable Task flow
-unless independent collaboration or review materially helps. The minimum real
-acceptance is a product start, the most important end-to-end user flow, related
-checks that actually ran and passed, no observed feature/data/permission/security
-blocker, and no unauthorized deployment, publication, shared-environment write,
-or irreversible operation. A small public beta additionally makes access,
-isolation, credential, rollback/close, and one real-entrypoint smoke explicit.
-If those real checks pass but recorder/evidence collection fails, report
-`证据采集：降级` with the reason; a failed, unrun, or unknown real check still
-blocks. This path never creates release evidence for, or weakens the fail-closed
-`product_release` path.
+- With valid current approval and unchanged bindings, reuse the design without reopening it.
+- When explicitly approved business content only lacks structure, organize only that content using the existing Product Design artifacts. Do not add missing business semantics, manufacture approval references or carry a stale identity forward. Formatting can change an identity: if a valid binding is still missing, report that specific gap and keep the handoff non-executable instead of redesigning the whole feature.
+- For new or changed semantics, return only the affected decision to Product Design and obtain the required current approval. Text, silence, tests and agent agreement are not approval.
 
-Keep `staffing_mode` (`main` or `team`), `model_policy` (current host,
-default-frontier planning/review, implementation-only saving, or explicitly
-requested exact/quality route), and `release_mode` (`product_increment` or
-`product_release`) as independent decisions. Do not create Team just to obtain
-a model route; Team does not imply saving or quality mode; the main Codex's root
-host model is not rewritten; and model choices do not persist as workflow
-state. Planning and plan/contract review default to a frontier model; only an
-explicitly specified lane may override that default, and low-tier Saving routes
-are otherwise limited to an authorized implementation Execute. The
-Claude-family manual exact-model gate remains.
+Accept `E-design-handoff.md` only after recomputing current A `context_identity`,
+C `content_identity` and D flow identity. Require E to match all three, D to store
+all three approved identities, current C and D approval references, and no blocker.
+A `product_release` also requires explicit current-user Flow Approval. If a check
+fails, report the exact missing or stale binding and route that gap to
+[Product Design](../product-design/SKILL.md); do not copy A/C/D into a second scope
+body or claim executable clarification while handoff admission is unresolved.
 
-Choose path lease from write-conflict risk, not Team membership: main-only single
-writers and read-only/review/verifier work need no lease; one isolated
-`product_increment` Team writer without fallback, takeover, or external writer
-does not require one by default; concurrent writers, fallback/takeover, uncertain
-quiescence, or shared-workspace writers require non-overlapping ownership plus
-the existing lease/quiescence boundary, and uncertainty stops new writers. Strict
-`product_release` execution-vnext lease and admission rules remain unchanged; do not
-build a general lease runtime for the quick path.
+## Keep one useful scope document
 
-## Short Request Clarification
+Create durable artifacts only for real tracking, recovery, handoff, audit or
+release value. When needed, run `codex-workflow list`, reuse a relevant `doing`
+task and its substantive scope document; create a task only when none fits.
+Record a non-obvious routing choice once, not a process diary.
 
-When clarifying a one-line or low-information request, explicitly turn the short
-request into an implementable plan before any coding starts. The clarification
-should include:
+Reuse an adequate issue, PRD, design or contract. If a new scope document is
+needed, use `codex-workflow scaffold-clarify <task-id>`; if machine-contract value
+is already established, author that contract directly. Do not mirror scope into
+`context.md`, `spec.md`, `decision.md` or a repo bundle to satisfy readiness.
 
-- Original request.
-- Restated requirement.
-- Critical feedback: ambiguity, risk, simpler alternative, rejected path, or stop condition.
-- Tiny escape decision, including why direct execution is or is not allowed.
-- Goal and non-goals.
-- Decision boundaries.
-- Acceptance criteria.
-- Verification plan.
-- Required documentation source: workflow artifacts, project doc, lightweight implementation contract, or an existing external issue, PRD, or design doc cited from the current artifact.
+Only when machine-checkable admission, cross-session handoff, audit or release
+value requires an implementation contract, read
+[references/contract-authoring.md](references/contract-authoring.md) in full.
+Multi-role discussion alone does not require a machine contract. Once selected,
+its required fields, authority bindings and validation remain mandatory.
 
-Non-tiny work must have auditable documentation before code changes. Existing
-external issues, PRDs, or design docs may count as equivalent evidence only when
-the current artifact cites them and fills missing acceptance, verification, risk,
-and stop-condition gaps. If tiny classification is uncertain, ask one short
-question before coding.
+All references resolve relative to this loaded plugin, not the target project's
+checkout. `ATLAS_WORKFLOW_PLUGIN_ROOT` is two directories above the containing
+skill directory; do not assume an Atlas Forge checkout in the current directory.
 
-Follow this loop only when durable tracking, recovery, handoff, audit, or an
-existing relevant task materially serves the request. For the default
-`product_increment` path, use direct/light clarification and do not create a
-workflow task, recorder-backed completion, or route-decision solely to obtain
-ceremony. If durable state is justified or an existing task is already relevant:
+## Converge and hand off
 
-1. Run `~/.codex/workflow/bin/codex-workflow list`.
-2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
-3. For nontrivial execution clarification, record routing evidence:
-   - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent clarify --risk <low|medium|high> --decision use --reason "<why boundaries must be locked>"`
-   - If office-hours or brainstorm is intentionally skipped because the direction is already chosen, record a separate skip reason only when that choice is non-obvious.
-4. Read any existing `workflow/artifacts/<task-id>/context.md`, `decision.md`, `spec.md`, or `analysis.md` before writing new boundaries.
-5. Freeze the smallest user-visible Goal before brownfield discovery. Give each required outcome a stable requirement ref, state stable product/domain/capability language before delivery labels in concise goals and execution briefs, and do not use discovery, review wording, or generic completeness language to broaden it. Task, Gate, phase, slice, and acceptance labels remain delivery metadata rather than the only identity of the product behavior.
-6. Collect brownfield facts after the Goal is frozen. Classify every discovered item as `goal:<requirement-ref>`, controller-resolved `current-required:<finding_id>`, or non-executable `follow-up`. Discovery cannot rewrite the frozen Goal; only a validated controller resolution can admit a non-Goal finding into the current delivery.
-7. Ask one blocking question only when a missing fact would make the spec unsafe. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block when `AskUserQuestion` or `request_user_input` is unavailable.
-8. Select one canonical scope source. Reuse a substantive existing issue, PRD, design, or contract when it already contains the locked scope. When implementation-contract value is already known, author that contract as the canonical source instead of first creating a duplicate `clarify.md`; otherwise run `~/.codex/workflow/bin/codex-workflow scaffold-clarify <task-id>` and make `workflow/artifacts/<task-id>/clarify.md` canonical. Do not create or update `context.md`, `spec.md`, `decision.md`, or a repo document merely to mirror the same scope. Any necessary supporting note must cite the canonical source instead of repeating it.
-9. Keep the canonical scope source compact but execution-ready:
-   - Goal and stable requirement refs
-   - Non-goals and decision boundaries
-   - Accepted assumptions
-   - Acceptance criteria and verification
-   - Critical feedback and stop conditions
-10. Make acceptance criteria command-verifiable or user-visible.
-11. Create an implementation contract only when machine-checkable scope admission, cross-session handoff, audit, or release value justifies it. When a contract is required:
-   - if `clarify.md` was previously canonical, promote the finalized implementation contract to the sole canonical scope source and reduce `clarify.md` to links plus non-duplicated background; do not retain two scope bodies
-   - whether `workflow/templates/implementation-contract.md` should be filled before coding
-   - whether the project docs bundle should include `contract-index.md` and `implementation-contract.final.md`
-   - which acceptance criteria become required validation rows
-   - which commands, browser paths, API calls, CLI invocations, or runtime targets must produce phase conclusion evidence
-   - where raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, debug JSONL, API dumps, port status, and intermediate repair output should live as temporary run artifacts outside git by default
-   - what failure or ambiguity should stop implementation and return to the user
-   - for non-tiny implementation work that could spend early phases on
-     contracts, scanners, fixtures, headless models, research, or evidence
-     before changing the requested behavior, whether `First-code guard` is
-     `required` or `not_applicable`
-   - when `First-code guard` is required, the contract must name
-     `first_code_slice`, `first_code_owner`, `first_code_verification`,
-     `first_code_stop_before_slice`,
-     `allowed_contract_gate_only_until`, `stop_if_no_code_by_phase`, and
-     `gate_parallelization_or_deferral_plan`
-   - for semantics v5/v6, the slice, verification, and stop values are exact
-     execution-plan IDs; use `task-completion` only when completion itself is
-     the declared stop rather than a later slice
-   - contract, scanner, fixture, and evidence-only preparation must be bounded
-     by phase or step; the first code slice may be fixture-backed, mocked, or
-     in-memory, but it must change the product, runtime, API, CLI, workflow, or
-     contract-owned behavior under test
-   - a semantics version 1 contract with a required First-code guard must name
-     `stop_if_no_code_by_phase`; the one-phase default for an omitted field
-     applies only when interpreting an unversioned historical contract
-   - for non-tiny user-facing product, frontend, dashboard, editor, player,
-     browser, GUI, or site work, whether `Product/UI gate` is `required` or
-     `not_applicable`
-   - when `Product/UI gate` is required, the contract must name
-     `first_operable_user_flow`, `browser_entrypoint`,
-     `served_ui_validation_action`, `ui_data_mode`,
-     `allowed_headless_only_until`, and `stop_if_no_ui_by_phase`; do not add a
-     separate safety-gate field when no concrete reachable risk requires one
-   - served UI evidence must open a real app entrypoint whose HTML document and
-     JS/CSS assets are served by a real HTTP server; synthetic HTML,
-     `page.setContent`, fulfilled main documents, fulfilled app bundles,
-     headless model tests, scanner fixtures, build-only proof, and network
-     allowlist capture without a served UI route do not satisfy UI/product
-     acceptance by themselves
-   - the UI thin slice must precede release, perf, soak, and phase evidence
-     expansion
-   - when a concrete reachable safety/data/permission risk would make current
-     acceptance unsafe, bind the minimum necessary control to the relevant
-     acceptance row or edge case; do not create a standalone safety checklist
-     merely because the task has a Product/UI gate
-   - when an implementation contract is finalized after review, write `implementation-contract.final.md` as a clean rewrite of the final agreed requirements; do not append old contract text, rejected requirements, or review notes into the final executable contract body
-   - when authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose
-   - review severity, `required_fix`, affected rows, and remediation prose do not grant scope; for SDD v2, every validated controller finding with `disposition: current-required` remains an executable requirement whether `repair_status` is `open` or `resolved`, while only `open` findings block or create repair feedback
-   - a safety, data-integrity, or permission finding may become `current-required` only when its controller resolution binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence, and a substantive reason explaining why omission blocks or makes that acceptance unsafe; machine validation checks these bindings, not the truth of the prose
-   - project those admitted findings only into Goal, Acceptance, Completion, Edge Cases, or Required safe fallback; retain `visible-follow-up` and `informational` findings only in `Finding Provenance` or follow-up records
-   - in semantics-v2 contracts, mark required acceptance and edge-case rows with `goal:<requirement-ref>` or `current-required:<finding_id>` so strict lint can validate attribution without interpreting natural language
-   - newly authored ordinary contracts use semantics v5, retain the complete semantics-v2 authoring and authority rules, and add exactly one canonical execution-plan schema v3 `atlas-execution-plan+json` fenced block; every executable slice must declare its dependency DAG, keeper outputs, owned/forbidden paths, acceptance ownership, risk/failure/rollback boundaries, positive size budget, and structured checks; semantics v3 is read-only compatibility
-   - a newly authored `product_release` contract must use semantics v6, include exactly one canonical `atlas-release-intent+json` block, bind the immutable Profile by digest, use execution-plan schema version 4, and place every Profile check in one terminal release-certification slice that transitively depends on every other executable slice; reference the Profile instead of copying its dimension policy into prompts or prose; semantics v4 is read-only compatibility
-   - use `atlas-slice-size-v2`; every slice must declare `estimated_changed_files`, `estimated_net_loc`, `target_p90_minutes`, `serial_dependency_depth`, and `independent_vertical_count`; the declared dependency depth must equal the plan DAG depth, while estimates above any budget, serial depth above two, more than one independent vertical, or a repository-broad path such as `src/**` or `.` require split or a named, unexpired `size_exception` containing `authority_ref`, `expires_at`, `reason`, and non-empty `compensating_controls`; an exception never downgrades a permanent gate or converts cached, imported, or skipped evidence into a pass
-   Keep this lightweight for local Atlas work; do not require a Multica-style multi-agent contract unless the user explicitly asks for Multica handoff.
-12. Create a repo docs bundle, `contract-index.md`, staffing file, or durable evidence index only when explicit handoff, audit, release, or existing project-document authority requires it. A non-tiny task, a review finding, or the mere presence of an implementation contract is not sufficient reason. Keep one canonical scope body and use links from supporting artifacts.
-13. Self-review the canonical scope source before reporting:
-   - no placeholders such as `TBD` or `TODO`
-   - no contradictory or mirrored scope in supporting artifacts
-   - assumptions are labelled
-   - acceptance criteria match the verification plan
-   - resolve `ATLAS_WORKFLOW_PLUGIN_ROOT` from this loaded `SKILL.md`: it is two directories above the containing skill directory; do not assume the target project's current working directory contains an Atlas Forge checkout
-   - for a newly authored final contract, run `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --new-authoring --file <implementation-contract.final.md> --authority-slice <canonical-sdd-slice-dir>` and repeat `--authority-slice` for every slice whose goal or `current-required` authority is cited; new authoring requires semantics v5, or semantics v6 for `product_release`; the lint must validate the complete authoring envelope and gates, release intent when applicable, execution plan, exact contract/task identity, goal refs, and finding refs against those canonical artifacts before the contract is execution-ready. `codex-team-brief` must receive the same bounded, duplicate-free authority set, reuse the same full semantic result, and bind its sorted canonical paths plus the current `brief.json`, `brief.md`, optional evidence, paired verdict/resolution, and task-global constraints digests into brief schema v4; any drift before output must produce no executable brief
-   - semantics-v1 final contracts continue to use `node "$ATLAS_WORKFLOW_PLUGIN_ROOT/scripts/codex-implementation-contract-lint" --strict --file <implementation-contract.final.md>`
-14. Run `codex-workflow ready` only when the chosen canonical workflow already uses its requested artifact set; do not create mirrored `context.md` or `spec.md` solely to satisfy readiness. A newly authored implementation contract must pass the strict new-authoring lint above before it is execution-ready. Clarification may define a future release decision but must never claim the candidate is certified.
-15. Use `$atlas-workflow:team` when the task should go through multi-agent discussion or promotion before execution, and whenever an authorized `product_release` target reaches execution or certification. Team uses Codex native collaboration by default. Use Paseo only when the user or operator explicitly selects it for the Team, lane, or dispatch; review and implementation do not inherit one another's Paseo selection, and operational fallback never grants execute authority.
-16. In the final reply, include the task id, the single document that locks the scope, locked assumptions, verification plan, and only the supporting artifacts that materially exist. State these in plain Chinese (for example “本次范围以 `workflow/artifacts/<task-id>/clarify.md` 为准”) instead of surfacing internal terms such as `canonical scope source`.
+Compare final clauses with the user's original intent, approved decisions and
+discussion results. Finish when meanings are stable, implementation and
+dependencies have concrete locations, acceptance is reachable, and delivery-changing
+disagreements are resolved. Do not wait for a fixed round count or unanimous preference.
+Report a real evidence gap when further discussion cannot resolve it.
 
-Hard rules:
+Return the necessary decisions, remaining assumptions, verification and the one
+scope document/task id when they exist. Do not list nonexistent supporting artifacts.
+Run `codex-workflow ready` only for an already chosen artifact set; readiness and
+structural lint do not prove semantic fidelity or successful implementation.
 
-- Do not re-open product strategy or design exploration unless execution safety depends on it.
-- Do not implement code from this skill unless the user explicitly changes the request to implementation after the spec is locked.
-- Keep exploratory or unstable notes outside the canonical scope source; do not mirror an execution-ready scope into a repo bundle unless handoff, audit, release, or existing project authority requires it.
+Clarify does not authorize coding, commit, installation, deployment or release.
+Enter Task only after an explicit implementation request. MVP/Beta/internal or
+small public beta without formal certification remains `product_increment`.
+Only explicit formal certification, `release-ready` or `certified` intent selects
+`product_release`; before authoring or handing off that path read
+[Team's release rules](../team/SKILL.md) and retain its exact approval, Profile
+and execution-vnext admission. No clarification, review or passing checks may
+claim `release_decision.status=certified` or authorize an external release.
