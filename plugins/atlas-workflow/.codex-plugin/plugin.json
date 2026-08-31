@@ -1,6 +1,6 @@
 {
   "name": "atlas-workflow",
-  "version": "0.1.0+codex.20260817034943",
+  "version": "0.1.0+codex.20260831032918",
   "description": "Atlas workflow plugin for bounded local Codex work with Codex-native team coordination and explicit Paseo lanes.",
   "author": {
     "name": "Local Atlas",
@@ -55,7 +55,7 @@
     "defaultPrompt": [
       "\u751f\u6210\u9879\u76ee\u6587\u6863\u3001workflow artifacts \u548c\u7528\u6237\u603b\u7ed3\u65f6\u9ed8\u8ba4\u4f7f\u7528\u4e2d\u6587\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00\u3002\u4ef7\u503c/\u7528\u6237\u672a\u5b9a\u8fdb Office Hours\uff0c\u65b9\u6848\u672a\u5b9a\u8fdb Brainstorm\uff1b\u65b9\u5411\u5df2\u5b9a\u4f46\u573a\u666f/\u6d41\u7a0b\u672a\u6279\u51c6\u8fdb Product Design\u3002",
       "MVP/Beta/internal/small-beta without formal certification = product_increment; formal release-ready/certified = product_release.",
-      "Clarify只补实际缺口；复杂且有实质取舍时自动多工程视角讨论，角色按需变化；不扩scope；Team bounded waves；Task/CW不自动进Team；Certified≠发布。"
+      "Clarify\u53ea\u8865\u5b9e\u9645\u7f3a\u53e3\uff1b\u590d\u6742\u4e14\u6709\u5b9e\u8d28\u53d6\u820d\u65f6\u81ea\u52a8\u591a\u5de5\u7a0b\u89c6\u89d2\u8ba8\u8bba\uff0c\u89d2\u8272\u6309\u9700\u53d8\u5316\uff1b\u4e0d\u6269scope\uff1bTeam bounded waves\uff1bTask/CW\u4e0d\u81ea\u52a8\u8fdbTeam\uff1bCertified\u2260\u53d1\u5e03\u3002"
     ],
     "brandColor": "#0F766E"
   }
