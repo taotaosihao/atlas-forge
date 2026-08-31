@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-implementation-contract-lint"
 BRIEF_BIN="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/scripts/codex-team-brief"
 FIXTURE_ROOT="$ATLAS_FORGE_ROOT/test/fixtures/implementation-contract"
@@ -1054,9 +1055,9 @@ grep -q '^implementation_contract_lint: true$' "$TMP_ROOT/non-repo-cwd.stdout"
 [[ ! -s "$TMP_ROOT/non-repo-cwd.stderr" ]] || show_failure 'installed plugin root command emitted diagnostics'
 pass 'plugin-root-resolved lint runs outside the Atlas Forge checkout cwd'
 
-authority_before="$(sha256sum "$CURRENT_AUTHORITY")"
+authority_before="$(sha256 "$CURRENT_AUTHORITY")"
 "$BIN" --strict --file "$CURRENT_AUTHORITY" >"$TMP_ROOT/read-only.stdout" 2>"$TMP_ROOT/read-only.stderr"
-authority_after="$(sha256sum "$CURRENT_AUTHORITY")"
+authority_after="$(sha256 "$CURRENT_AUTHORITY")"
 [[ "$authority_before" == "$authority_after" ]] || show_failure 'lint mutates the input contract'
 [[ ! -s "$TMP_ROOT/read-only.stderr" ]] || show_failure 'read-only lint emitted diagnostics'
 pass 'strict lint leaves the input contract byte-for-byte unchanged'

@@ -2,12 +2,16 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 BIN="$ATLAS_FORGE_ROOT/workflow/bin/codex-workflow"
 PLUGIN_SOURCE="$ATLAS_FORGE_ROOT/plugins/atlas-workflow"
-NODE_BIN_DIR="$(dirname "$(command -v node)")"
+NODE_BIN_DIR="$(test_command_dir node)"
+PYTHON_BIN_DIR="$(test_command_dir python3)"
+RG_BIN_DIR="$(test_command_dir rg)"
+BASH_BIN_DIR="$(test_command_dir bash)"
 REAL_GIT="$(command -v git)"
-BASE_PATH="$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
-TMP_ROOT="$(mktemp -d)"
+BASE_PATH="$NODE_BIN_DIR:$PYTHON_BIN_DIR:$RG_BIN_DIR:$BASH_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
+TMP_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
 mkdir -p "$TMP_ROOT/outputs"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -20,32 +24,9 @@ pass() {
 
 fail() {
   printf 'not ok - %s\n' "$1" >&2
+  [[ ! -s "${STDERR:-}" ]] || sed -n '1,40p' "$STDERR" >&2
+  [[ ! -s "${OUTPUT:-}" ]] || sed -n '1,80p' "$OUTPUT" >&2
   exit 1
-}
-
-fingerprint() {
-  local target="$1"
-  if [[ ! -e "$target" && ! -L "$target" ]]; then
-    printf 'missing\n'
-    return
-  fi
-  if [[ -f "$target" || -L "$target" ]]; then
-    {
-      stat -c '%F %a %s' "$target"
-      if [[ -L "$target" ]]; then readlink "$target"; else sha256sum "$target" | awk '{print $1}'; fi
-    } | sha256sum | awk '{print $1}'
-    return
-  fi
-  (
-    cd "$target"
-    find . -type d -printf 'd %m %p\n' | LC_ALL=C sort
-    find . -type f -print0 | LC_ALL=C sort -z \
-      | while IFS= read -r -d '' file; do
-          printf 'f %s %s ' "$(stat -c '%a' "$file")" "$file"
-          sha256sum "$file" | awk '{print $1}'
-        done
-    find . -type l -printf 'l %p -> %l\n' | LC_ALL=C sort
-  ) | sha256sum | awk '{print $1}'
 }
 
 set_manifest_version() {
@@ -188,7 +169,7 @@ setup_case() {
   printf '%s\n' '#!/usr/bin/env bash' 'printf invoked > "$PASEO_SENTINEL"' 'exit 99' > "$FAKE_BIN/fake-paseo"
   chmod 755 "$FAKE_BIN/fake-codex" "$FAKE_BIN/fake-paseo"
 
-  cp -a "$PLUGIN_SOURCE" "$SOURCE"
+  copy_atlas_fixture "$PLUGIN_SOURCE" "$SOURCE"
   set_manifest_version "$SOURCE" "$EXPECTED_VERSION"
   printf '%s\n' target > "$SOURCE/fixture-release.txt"
   mkdir -p "$(dirname "$LOCAL_CACHE")"
@@ -286,13 +267,19 @@ assert_read_only() {
   [[ ! -e "$CASE_ROOT/paseo-invoked" ]] || fail "$label invoked Paseo"
 }
 
+run_doctor() {
+  # macOS has no GNU timeout; bound the complete fixture process group.
+  run_isolated python3 "$ATLAS_FORGE_ROOT/workflow/tests/lib/run-with-timeout.py" \
+    15 "$BIN" doctor "$@"
+}
+
 run_strict_success() {
   local label="$1"
   shift
   local before rc
   before="$(fingerprint "$CASE_ROOT")"
   set +e
-  run_isolated timeout 15 "$BIN" doctor "$@" > "$OUTPUT" 2> "$STDERR"
+  run_doctor "$@" > "$OUTPUT" 2> "$STDERR"
   rc=$?
   set -e
   [[ "$rc" -eq 0 ]] || fail "$label returned $rc instead of 0"
@@ -307,7 +294,7 @@ run_strict_failure() {
   local before rc
   before="$(fingerprint "$CASE_ROOT")"
   set +e
-  run_isolated timeout 15 "$BIN" doctor --strict --json > "$OUTPUT" 2> "$STDERR"
+  run_doctor --strict --json > "$OUTPUT" 2> "$STDERR"
   rc=$?
   set -e
   [[ "$rc" -eq "$expected_rc" ]] || fail "$label returned $rc instead of $expected_rc"

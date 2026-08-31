@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 VERIFY="$ATLAS_FORGE_ROOT/scripts/verify-atlas-workflow-install.sh"
 UPDATE="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-marketplace"
 PLUGIN_SOURCE="$ATLAS_FORGE_ROOT/plugins/atlas-workflow"
@@ -13,7 +14,7 @@ case "$KEEP_TEST_TMP" in
     exit 2
     ;;
 esac
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-layout-fixture.XXXXXX")"
+TMP_ROOT="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/atlas-layout-fixture.XXXXXX")" && pwd -P)"
 OWNERSHIP_MARKER="$TMP_ROOT/.atlas-layout-fixture-owned"
 touch "$OWNERSHIP_MARKER"
 mkdir -p "$TMP_ROOT/outputs"
@@ -44,7 +45,7 @@ fail() {
   printf 'not ok - %s\n' "$1" >&2
   if [[ -n "${OUTPUT:-}" && -f "$OUTPUT" ]]; then
     printf 'diagnostic.report_path=%s\n' "$OUTPUT" >&2
-    printf 'diagnostic.report_sha256=%s\n' "$(sha256sum "$OUTPUT" | awk '{print $1}')" >&2
+    printf 'diagnostic.report_sha256=%s\n' "$(sha256 "$OUTPUT")" >&2
     node - "$OUTPUT" <<'NODE' >&2 || true
 const fs = require("fs");
 const file = process.argv[2];
@@ -71,31 +72,6 @@ visit(value, "");
 NODE
   fi
   exit 1
-}
-
-fingerprint() {
-  local target="$1"
-  if [[ ! -e "$target" && ! -L "$target" ]]; then
-    printf 'missing\n'
-    return
-  fi
-  if [[ -f "$target" || -L "$target" ]]; then
-    {
-      stat -c '%F %a %s' "$target"
-      if [[ -L "$target" ]]; then readlink "$target"; else sha256sum "$target" | awk '{print $1}'; fi
-    } | sha256sum | awk '{print $1}'
-    return
-  fi
-  (
-    cd "$target"
-    find . -type d -printf 'd %m %p\n' | LC_ALL=C sort
-    find . -type f -print0 | LC_ALL=C sort -z \
-      | while IFS= read -r -d '' file; do
-          printf 'f %s %s ' "$(stat -c '%a' "$file")" "$file"
-          sha256sum "$file" | awk '{print $1}'
-        done
-    find . -type l -printf 'l %p -> %l\n' | LC_ALL=C sort
-  ) | sha256sum | awk '{print $1}'
 }
 
 assert_fingerprint() {
@@ -227,7 +203,7 @@ setup_case() {
     "$CASE_TMP" "$GIT_TEMPLATE_ROOT"
   touch "$GIT_CONFIG_FILE"
   chmod 700 "$XDG_RUNTIME_ROOT"
-  cp -a "$PLUGIN_SOURCE" "$REPO/plugins/atlas-workflow"
+  copy_atlas_fixture "$PLUGIN_SOURCE" "$REPO/plugins/atlas-workflow"
   write_marketplace "$REPO/.agents/plugins/marketplace.json"
   run_fixture_git -C "$REPO" init -q -b main
 
@@ -282,7 +258,7 @@ scope_fingerprint() {
     fingerprint "$HOME_ROOT/.agents"
     fingerprint "$AGENTS_ROOT"
     fingerprint "$BIN_ROOT"
-  } | sha256sum | awk '{print $1}'
+  } | sha256
 }
 
 run_verify() {

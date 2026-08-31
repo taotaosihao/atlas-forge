@@ -2,8 +2,12 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-NODE_BIN_DIR="$(dirname "$(command -v node)")"
-BASE_PATH="$NODE_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
+NODE_BIN_DIR="$(test_command_dir node)"
+PYTHON_BIN_DIR="$(test_command_dir python3)"
+RG_BIN_DIR="$(test_command_dir rg)"
+BASH_BIN_DIR="$(test_command_dir bash)"
+BASE_PATH="$NODE_BIN_DIR:$PYTHON_BIN_DIR:$RG_BIN_DIR:$BASH_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
 KEEP_TEST_TMP="${KEEP_TEST_TMP:-0}"
 DEFAULT_LAYOUT_SUITE="$ATLAS_FORGE_ROOT/workflow/tests/integration_atlas_plugin_layout.sh"
 LAYOUT_SUITE="${ATLAS_HOST_LAYOUT_SUITE:-$DEFAULT_LAYOUT_SUITE}"
@@ -22,7 +26,7 @@ if [[ "$LAYOUT_SUITE" != "$DEFAULT_LAYOUT_SUITE" && "${ATLAS_CONTRACT_TESTING:-0
   printf 'ATLAS_HOST_LAYOUT_SUITE override requires ATLAS_CONTRACT_TESTING=1\n' >&2
   exit 2
 fi
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-host-contract.XXXXXX")"
+TMP_ROOT="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/atlas-host-contract.XXXXXX")" && pwd -P)"
 OWNERSHIP_MARKER="$TMP_ROOT/.atlas-host-contract-owned"
 touch "$OWNERSHIP_MARKER"
 
@@ -105,14 +109,14 @@ run_labeled_suite() {
   local stderr_file="$OUTPUT_ROOT/$label.stderr"
   local suite_sha_before suite_sha_after stdout_sha stderr_sha rc
 
-  suite_sha_before="$(sha256sum "$suite" | awk '{print $1}')"
+  suite_sha_before="$(sha256 "$suite")"
   set +e
   run_isolated bash "$suite" > "$stdout_file" 2> "$stderr_file"
   rc=$?
   set -e
-  suite_sha_after="$(sha256sum "$suite" | awk '{print $1}')"
-  stdout_sha="$(sha256sum "$stdout_file" | awk '{print $1}')"
-  stderr_sha="$(sha256sum "$stderr_file" | awk '{print $1}')"
+  suite_sha_after="$(sha256 "$suite")"
+  stdout_sha="$(sha256 "$stdout_file")"
+  stderr_sha="$(sha256 "$stderr_file")"
   if [[ "$rc" -ne 0 || "$suite_sha_before" != "$suite_sha_after" ]]; then
     printf 'not ok - %s\n' "$label" >&2
     printf 'diagnostic.label=%s\n' "$label" >&2
@@ -144,7 +148,7 @@ require_suite_output() {
     printf 'diagnostic.label=%s\n' "$label" >&2
     printf 'diagnostic.path=%s\n' "$file" >&2
     printf 'diagnostic.expected_output=%s\n' "$pattern" >&2
-    printf 'diagnostic.actual_stdout_sha256=%s\n' "$(sha256sum "$file" | awk '{print $1}')" >&2
+    printf 'diagnostic.actual_stdout_sha256=%s\n' "$(sha256 "$file")" >&2
     return 1
   fi
 }

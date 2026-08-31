@@ -2,10 +2,13 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 ORIGINAL_HOME="$HOME"
-NODE_BIN_DIR="$(dirname "$(command -v node)")"
-RG_BIN_DIR="$(dirname "$(command -v rg)")"
-BASE_PATH="$NODE_BIN_DIR:$RG_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
+NODE_BIN_DIR="$(test_command_dir node)"
+PYTHON_BIN_DIR="$(test_command_dir python3)"
+RG_BIN_DIR="$(test_command_dir rg)"
+BASH_BIN_DIR="$(test_command_dir bash)"
+BASE_PATH="$NODE_BIN_DIR:$PYTHON_BIN_DIR:$RG_BIN_DIR:$BASH_BIN_DIR:/usr/local/bin:/usr/bin:/bin"
 KEEP_TEST_TMP="${KEEP_TEST_TMP:-0}"
 
 case "$KEEP_TEST_TMP" in
@@ -16,11 +19,27 @@ case "$KEEP_TEST_TMP" in
     ;;
 esac
 
-command -v strace >/dev/null || {
-  printf 'repo contract requires strace for real-HOME read isolation\n' >&2
-  exit 1
-}
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/atlas-repo-contract.XXXXXX")"
+ISOLATION_BACKEND="$(uname -s)"
+case "$ISOLATION_BACKEND" in
+  Linux)
+    ISOLATION_BIN="$(command -v strace)" || {
+      printf 'repo contract requires strace for real-HOME read isolation on Linux\n' >&2
+      exit 1
+    }
+    ;;
+  Darwin)
+    ISOLATION_BIN=/usr/bin/sandbox-exec
+    [[ -x "$ISOLATION_BIN" ]] || {
+      printf 'repo contract requires sandbox-exec for real-HOME isolation on macOS\n' >&2
+      exit 1
+    }
+    ;;
+  *)
+    printf 'repo contract has no HOME isolation backend for %s\n' "$ISOLATION_BACKEND" >&2
+    exit 1
+    ;;
+esac
+TMP_ROOT="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/atlas-repo-contract.XXXXXX")" && pwd -P)"
 OWNERSHIP_MARKER="$TMP_ROOT/.atlas-repo-contract-owned"
 touch "$OWNERSHIP_MARKER"
 
@@ -68,10 +87,10 @@ touch "$GIT_CONFIG_FILE"
 printf '%s\n' stale-cache > "$HOME_ROOT/.codex/plugins/cache/atlas-forge/atlas-workflow/stale/sentinel"
 printf '%s\n' protected-agent > "$HOME_ROOT/.agents/private/sentinel"
 printf '%s\n' protected-ssh > "$HOME_ROOT/.ssh/sentinel"
-stale_before="$(sha256sum "$HOME_ROOT/.codex/plugins/cache/atlas-forge/atlas-workflow/stale/sentinel" \
+stale_before="$(sha256 "$HOME_ROOT/.codex/plugins/cache/atlas-forge/atlas-workflow/stale/sentinel" \
   "$HOME_ROOT/.agents/private/sentinel" "$HOME_ROOT/.ssh/sentinel")"
 
-cp -a "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$CODEX_ROOT/plugins/atlas-workflow"
+copy_atlas_fixture "$ATLAS_FORGE_ROOT/plugins/atlas-workflow" "$CODEX_ROOT/plugins/atlas-workflow"
 mkdir -p "$(dirname "$MARKETPLACE_FILE")"
 node - "$MARKETPLACE_FILE" <<'NODE'
 const fs = require("fs");
@@ -128,18 +147,33 @@ run_isolated() {
     "$@"
 }
 
+protected_paths=(
+  "$HOME_ROOT/.codex"
+  "$HOME_ROOT/.ssh"
+  "$ORIGINAL_HOME/.codex"
+  "$ORIGINAL_HOME/.agents"
+  "$ORIGINAL_HOME/.ssh"
+  "$ORIGINAL_HOME/.gnupg"
+  "$ORIGINAL_HOME/.gitconfig"
+  "$ORIGINAL_HOME/.config/git"
+)
+if [[ "$ISOLATION_BACKEND" == Darwin ]]; then
+  sandbox_profile="$TRACE_ROOT/home-isolation.sb"
+  sandbox_args=(-f "$sandbox_profile")
+  printf '(version 1)\n(allow default)\n' > "$sandbox_profile"
+  for index in "${!protected_paths[@]}"; do
+    sandbox_args+=(-D "protected$index=${protected_paths[$index]}")
+    printf '(deny file-read* file-write* (subpath (param "protected%s")) (with send-signal SIGKILL))\n' \
+      "$index" >> "$sandbox_profile"
+  done
+fi
+
 assert_trace_isolated() {
   local trace_file="$1" protected
-  local -a protected_paths=(
-    "$HOME_ROOT/.codex"
-    "$HOME_ROOT/.ssh"
-    "$ORIGINAL_HOME/.codex"
-    "$ORIGINAL_HOME/.agents"
-    "$ORIGINAL_HOME/.ssh"
-    "$ORIGINAL_HOME/.gnupg"
-    "$ORIGINAL_HOME/.gitconfig"
-    "$ORIGINAL_HOME/.config/git"
-  )
+  [[ -s "$trace_file" ]] || {
+    printf 'repo contract has no file-access trace: %s\n' "$trace_file" >&2
+    return 1
+  }
   for protected in "${protected_paths[@]}"; do
     if grep -F -- "$protected" "$trace_file" >/dev/null; then
       printf 'repo contract accessed protected HOME path: %s\n' "$protected" >&2
@@ -148,22 +182,48 @@ assert_trace_isolated() {
   done
 }
 
-run_traced() {
+run_guarded() {
   local label="$1"
   shift
   local trace_file="$TRACE_ROOT/$label.strace" rc
-  set +e
-  run_isolated strace -f -qq -e trace=%file -o "$trace_file" "$@"
-  rc=$?
-  set -e
-  assert_trace_isolated "$trace_file"
+  if [[ "$ISOLATION_BACKEND" == Darwin ]]; then
+    # Kernel denial is inherited by children; it is not a syscall audit log.
+    run_isolated "$ISOLATION_BIN" "${sandbox_args[@]}" "$@"
+    return $?
+  fi
+  if run_isolated "$ISOLATION_BIN" -f -qq -e trace=%file -o "$trace_file" "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  assert_trace_isolated "$trace_file" || return 1
   return "$rc"
 }
 
-printf 'repo-contract: workflow source behavior\n'
-run_traced workflow-source bash "$ATLAS_FORGE_ROOT/workflow/tests/contract.sh"
+# Verify the actual backend before running the suite, using only owned canaries.
+run_guarded isolation-allowed node -e 'require("fs").readFileSync(process.argv[1])' "$GIT_CONFIG_FILE"
+if run_guarded isolation-denied node -e 'require("fs").readFileSync(process.env.HOME + "/.ssh/sentinel")' \
+  > "$TRACE_ROOT/probe.stdout" 2> "$TRACE_ROOT/probe.stderr"; then
+  printf 'repo contract HOME isolation probe unexpectedly passed\n' >&2
+  exit 1
+else
+  probe_status=$?
+fi
+if [[ "$ISOLATION_BACKEND" == Darwin ]]; then
+  [[ "$probe_status" == 137 ]] || {
+    printf 'repo contract sandbox probe did not terminate protected access (exit %s)\n' "$probe_status" >&2
+    exit 1
+  }
+  printf 'repo-contract: HOME isolation verified with macOS sandbox enforcement\n'
+else
+  grep -Fq 'repo contract accessed protected HOME path:' "$TRACE_ROOT/probe.stderr"
+  printf 'repo-contract: HOME isolation verified with Linux strace audit\n'
+fi
 
-stale_after="$(sha256sum "$HOME_ROOT/.codex/plugins/cache/atlas-forge/atlas-workflow/stale/sentinel" \
+printf 'repo-contract: workflow source behavior\n'
+run_guarded workflow-source bash "$ATLAS_FORGE_ROOT/workflow/tests/contract.sh"
+
+stale_after="$(sha256 "$HOME_ROOT/.codex/plugins/cache/atlas-forge/atlas-workflow/stale/sentinel" \
   "$HOME_ROOT/.agents/private/sentinel" "$HOME_ROOT/.ssh/sentinel")"
 [[ "$stale_before" == "$stale_after" ]] || {
   printf 'repo contract changed stale real-HOME sentinels\n' >&2

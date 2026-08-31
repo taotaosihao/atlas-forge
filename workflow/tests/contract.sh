@@ -8,6 +8,9 @@ if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" != 1 && "${ATLAS_CONTRACT_LEGACY_HOST
   host_suite="$ATLAS_FORGE_ROOT/workflow/tests/contract_host_install.sh"
   bash -n "$repo_suite"
   bash -n "$host_suite"
+  # The wrapper regression tests must run outside strace (no nested ptrace).
+  printf 'suite: contract-test-portability\n'
+  node --test "$ATLAS_FORGE_ROOT/workflow/tests/contract_portability.test.js"
   printf 'suite: manifest-release-integrity\n'
   bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_atlas_plugin_integrity.sh"
   printf 'suite: repo-contract\n'

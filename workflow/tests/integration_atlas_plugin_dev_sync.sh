@@ -3,6 +3,7 @@ set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 UPDATE_SCRIPT="$ATLAS_FORGE_ROOT/scripts/update-atlas-workflow-plugin"
 SYNC_SCRIPT="$ATLAS_FORGE_ROOT/scripts/sync-live-atlas-workflow.sh"
 TMP_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
@@ -25,37 +26,6 @@ pass() {
 fail() {
   printf 'not ok - %s\n' "$1" >&2
   exit 1
-}
-
-fingerprint() {
-  local target="$1"
-
-  if [[ ! -e "$target" && ! -L "$target" ]]; then
-    printf 'missing\n'
-    return
-  fi
-
-  if [[ -f "$target" || -L "$target" ]]; then
-    sha256sum "$target" | awk '{print $1}'
-    return
-  fi
-
-  (
-    cd "$target"
-    find . -type d -print | LC_ALL=C sort | sed 's/^/dir /'
-    find . -type f -print0 \
-      | LC_ALL=C sort -z \
-      | while IFS= read -r -d '' file; do
-          printf 'file %s ' "$file"
-          sha256sum "$file" | awk '{print $1}'
-        done
-    find . -type l -print0 \
-      | LC_ALL=C sort -z \
-      | while IFS= read -r -d '' file; do
-          printf 'link %s -> %s\n' "$file" "$(readlink "$file")"
-        done
-    find . -type p -print | LC_ALL=C sort | sed 's/^/fifo /'
-  ) | sha256sum | awk '{print $1}'
 }
 
 assert_fingerprint() {

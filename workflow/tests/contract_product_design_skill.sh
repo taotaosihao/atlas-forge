@@ -26,7 +26,7 @@ for path in \
   test -f "$path" || fail "missing $path"
 done
 
-/usr/bin/python3 - "$skill_root/SKILL.md" <<'PY'
+python3 - "$skill_root/SKILL.md" <<'PY'
 import pathlib
 import sys
 import yaml
@@ -89,7 +89,7 @@ rg -q 'product_increment' "$skill_root/SKILL.md"
 rg -q 'must omit release-intent, v4, immutable Profile, release' "$skill_root/SKILL.md"
 rg -q '证据采集：降级' "$skill_root/SKILL.md"
 
-/usr/bin/python3 - "$skill_root/SKILL.md" "$adapter" "$d_template" "$design_review" <<'PY'
+python3 - "$skill_root/SKILL.md" "$adapter" "$d_template" "$design_review" <<'PY'
 import pathlib, sys, yaml
 
 paths = map(pathlib.Path, sys.argv[1:])
@@ -152,7 +152,7 @@ for text, phrase in (
     check(phrase not in text, f"opposite UX rule present: {phrase}")
 PY
 
-/usr/bin/python3 - "$adapter" "$a_template" "$c_template" "$d_template" "$e_template" <<'PY'
+python3 - "$adapter" "$a_template" "$c_template" "$d_template" "$e_template" <<'PY'
 import copy
 import hashlib
 import json
@@ -384,7 +384,7 @@ rg -q 'atlas-workflow:product-design' "$readme"
 rg -q 'flow-and-surface' "$readme"
 rg -q 'not a complete visual designer' "$readme"
 rg -q 'do not certify, install, deploy, publish, or release' "$readme"
-/usr/bin/python3 - "$manifest" <<'PY'
+python3 - "$manifest" <<'PY'
 import json
 import pathlib
 import re
@@ -405,7 +405,7 @@ if rg -q '\.source' "$skill_root/SKILL.md" "$adapter" "$skill_root/assets"; then
   fail "ordinary runtime resource references vendored source"
 fi
 
-/usr/bin/python3 - "$skill_root/vendor/wds/SOURCES.json" "$skill_root/vendor/wds" "7043b5a78c92e5e9859c0fba740177feb95a3b59954cc7d241d39fe0388b428c" <<'PY'
+python3 - "$skill_root/vendor/wds/SOURCES.json" "$skill_root/vendor/wds" "7043b5a78c92e5e9859c0fba740177feb95a3b59954cc7d241d39fe0388b428c" <<'PY'
 import hashlib
 import json
 import pathlib

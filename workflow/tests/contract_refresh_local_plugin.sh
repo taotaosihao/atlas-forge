@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ATLAS_FORGE_ROOT="${ATLAS_FORGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 BIN="$ATLAS_FORGE_ROOT/workflow/bin/codex-refresh-local-plugin"
 INTEGRITY_BIN="$ATLAS_FORGE_ROOT/workflow/bin/atlas-plugin-integrity"
 PLUGIN_SOURCE="$ATLAS_FORGE_ROOT/plugins/atlas-workflow"
-TMP_ROOT="$(mktemp -d)"
+TMP_ROOT="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 pass() {
@@ -15,30 +16,6 @@ pass() {
 fail() {
   printf 'not ok - %s\n' "$1" >&2
   exit 1
-}
-
-fingerprint() {
-  local target="$1"
-  if [[ ! -e "$target" && ! -L "$target" ]]; then
-    printf 'missing\n'
-    return
-  fi
-  if [[ -f "$target" || -L "$target" ]]; then
-    sha256sum "$target" | awk '{print $1}'
-    return
-  fi
-  (
-    cd "$target"
-    find . -type d -printf 'd %m %p\n' | LC_ALL=C sort
-    find . -type f -print0 | LC_ALL=C sort -z \
-      | while IFS= read -r -d '' file; do
-          printf 'f %s %s ' "$(stat -c '%a' "$file")" "$file"
-          sha256sum "$file" | awk '{print $1}'
-        done
-    find . -type l -printf 'l %p -> %l\n' | LC_ALL=C sort
-    find . -type p -printf 'p %p\n' | LC_ALL=C sort
-    find . -type s -printf 's %p\n' | LC_ALL=C sort
-  ) | sha256sum | awk '{print $1}'
 }
 
 assert_fingerprint() {
@@ -106,7 +83,7 @@ setup_case() {
 
   mkdir -p "$CASE_CODEX_ROOT/plugins" "$CASE_WORKFLOW_ROOT" "$CASE_AGENTS_HOME" \
     "$CASE_LOCAL_BIN" "$CASE_HOME/.agents" "$CASE_CODEX_HOME"
-  cp -a "$PLUGIN_SOURCE" "$CASE_SOURCE"
+  copy_atlas_fixture "$PLUGIN_SOURCE" "$CASE_SOURCE"
   mkdir -p "$CASE_SOURCE/bin"
   printf '%s\n' 'hidden fixture' > "$CASE_SOURCE/.hidden"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$CASE_SOURCE/bin/tool"
@@ -142,7 +119,7 @@ forbidden_fingerprint() {
     fingerprint "$CASE_HOME/.agents"
     fingerprint "$CASE_AGENTS_HOME"
     fingerprint "$CASE_LOCAL_BIN/multica-prd-submit"
-  } | sha256sum | awk '{print $1}'
+  } | sha256
 }
 
 managed_fingerprint() {
@@ -151,7 +128,7 @@ managed_fingerprint() {
     fingerprint "$CASE_HOME/.agents"
     fingerprint "$CASE_AGENTS_HOME"
     fingerprint "$CASE_LOCAL_BIN"
-  } | sha256sum | awk '{print $1}'
+  } | sha256
 }
 
 run_refresh() {
@@ -212,12 +189,12 @@ pass 'canonical replacement installs a verified exact copy'
 
 target_before="$(fingerprint "$CASE_TARGET")"
 code_root_before="$(fingerprint "$CASE_CODEX_ROOT")"
-target_inode_before="$(stat -c '%d:%i' "$CASE_TARGET")"
+target_inode_before="$(file_identity "$CASE_TARGET")"
 run_refresh atlas-workflow > "$CASE_OUTPUT"
 assert_json "$CASE_OUTPUT" true noop
 assert_fingerprint 'no-op target' "$CASE_TARGET" "$target_before"
 assert_fingerprint 'no-op CODEX_HOME_ROOT' "$CASE_CODEX_ROOT" "$code_root_before"
-[[ "$(stat -c '%d:%i' "$CASE_TARGET")" == "$target_inode_before" ]] \
+[[ "$(file_identity "$CASE_TARGET")" == "$target_inode_before" ]] \
   || fail 'no-op replaced the cache directory inode'
 assert_no_debris
 pass 'equal source and cache produce a true no-op'
@@ -485,7 +462,7 @@ setup_case sigterm-rollback
 mkdir -p "$CASE_TARGET"
 printf '%s\n' old-signal-cache > "$CASE_TARGET/old.txt"
 signal_target_before="$(fingerprint "$CASE_TARGET")"
-signal_inode_before="$(stat -c '%d:%i' "$CASE_TARGET")"
+signal_inode_before="$(file_identity "$CASE_TARGET")"
 signal_forbidden_before="$(forbidden_fingerprint)"
 HOME="$CASE_HOME" \
 CODEX_HOME="$CASE_CODEX_HOME" \
@@ -520,7 +497,7 @@ set -e
 [[ ! -s "$CASE_ROOT/stderr" ]]
 assert_json "$CASE_OUTPUT" false none REFRESH_INTERRUPTED
 assert_fingerprint 'SIGTERM restored target' "$CASE_TARGET" "$signal_target_before"
-[[ "$(stat -c '%d:%i' "$CASE_TARGET")" == "$signal_inode_before" ]] \
+[[ "$(file_identity "$CASE_TARGET")" == "$signal_inode_before" ]] \
   || fail 'SIGTERM rollback did not restore the original cache inode'
 [[ "$(forbidden_fingerprint)" == "$signal_forbidden_before" ]]
 assert_no_debris

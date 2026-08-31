@@ -411,6 +411,26 @@ the low-level cache primitive:
 ~/.codex/workflow/bin/codex-refresh-local-plugin atlas-workflow
 ```
 
+## 本地合同验证
+
+标准入口是 `bash workflow/tests/contract.sh`；也可单独运行
+`bash workflow/tests/contract_repo.sh` 和 `bash workflow/tests/contract_host_install.sh`。
+这些入口只验证仓库源码和临时安装布局，不调用真实 Codex CLI 或刷新已安装插件。
+
+依赖为 Node.js、Python 3.11+（`tomllib` 和 PyYAML）、Git、ripgrep、jq、rsync，以及 Atlas
+legacy 兼容测试所需的 Bash 4+。若默认 `python3` 仍是 macOS 系统的旧版本，需在
+本次命令的 `PATH` 中选择已有的兼容解释器；隔离入口会保留选定的 Python 目录，
+不会安装依赖或修改系统 Python。
+
+Linux 的仓库隔离仍使用 `strace` 文件访问审计；macOS 使用系统 `sandbox-exec`
+禁止受保护 HOME 路径的读写，并在运行套件前验证允许访问和拒绝访问的探针。
+macOS 的结果是内核阻止访问的证据，不是 Linux syscall 审计的替代日志。
+隔离后端缺失、不可用或探针未实际生效时，检查失败，不降级为无保护执行。
+
+`node --test workflow/tests/contract_portability.test.js` 覆盖跨平台指纹、目录权限、
+符号链接、子进程隔离及夹具复制边界；完整入口会在隔离套件外运行它，避免嵌套 ptrace。
+测试指纹复用 Node 标准库，不依赖 GNU `sha256sum`、`stat -c` 或 `find -printf`。
+
 ## Notes
 
 - Tasks live in `workflow/tasks/` as markdown files.

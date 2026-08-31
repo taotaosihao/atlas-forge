@@ -1,5 +1,6 @@
 # shellcheck shell=bash
 # Sourced by contract.sh. Requires TMP_ROOT, pass, and expect_fail.
+source "$(dirname "${BASH_SOURCE[0]}")/lib/portable.sh"
 
 previous_codex_workflow_root="$CODEX_WORKFLOW_ROOT"
 sdd_root="$TMP_ROOT/sdd-workflow"
@@ -578,10 +579,10 @@ ln -s "$TMP_ROOT/foreign-controller-resolution.json" "$controller_resolution_fil
 expect_fail "artifact lint rejects symlinked v2 controller authority" node "$artifact_lint_bin" --task fixture-v2-visible-follow-up --strict
 rm "$controller_resolution_file"
 cp "$TMP_ROOT/foreign-controller-resolution.json" "$controller_resolution_file"
-controller_before="$(sha256sum "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
+controller_before="$(sha256 "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
 printf '%s\n' '{"records":[],"evidence_gaps":[]}' > "$TMP_ROOT/controller-decisions-incomplete.json"
 expect_fail "controller helper rejects incomplete finding and gap coverage" node "$controller_resolution_bin" --task fixture-v2-visible-follow-up --slice slice-001 --decisions "$TMP_ROOT/controller-decisions-incomplete.json"
-controller_after="$(sha256sum "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
+controller_after="$(sha256 "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json")"
 test "$controller_before" = "$controller_after"
 duplicate_resolution="$TMP_ROOT/duplicate-controller-resolution.json"
 node - "$sdd_root/artifacts/fixture-v2-visible-follow-up/team/sdd/slices/slice-001/controller-resolution.json" "$duplicate_resolution" <<'NODE'

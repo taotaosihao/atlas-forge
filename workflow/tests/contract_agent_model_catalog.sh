@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/workflow/tests/lib/portable.sh"
 HELPER="$ROOT/workflow/bin/atlas-team-model-catalog"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -27,18 +28,18 @@ cat > "$TMP_ROOT/deepseek.json" <<'JSON'
 JSON
 chmod 600 "$TMP_ROOT/official.json" "$TMP_ROOT/deepseek.json"
 
-official_before="$(sha256sum "$TMP_ROOT/official.json")"
-deepseek_before="$(sha256sum "$TMP_ROOT/deepseek.json")"
+official_before="$(sha256 "$TMP_ROOT/official.json")"
+deepseek_before="$(sha256 "$TMP_ROOT/deepseek.json")"
 "$HELPER" \
   --official "$TMP_ROOT/official.json" \
   --deepseek "$TMP_ROOT/deepseek.json" \
   --output "$TMP_ROOT/atlas-team.json" >/dev/null
 
-[[ "$(stat -c '%a' "$TMP_ROOT/atlas-team.json")" == 600 ]] \
+[[ "$(file_mode "$TMP_ROOT/atlas-team.json")" == 600 ]] \
   || fail 'output catalog mode is not 600'
-[[ "$official_before" == "$(sha256sum "$TMP_ROOT/official.json")" ]] \
+[[ "$official_before" == "$(sha256 "$TMP_ROOT/official.json")" ]] \
   || fail 'official input catalog was modified'
-[[ "$deepseek_before" == "$(sha256sum "$TMP_ROOT/deepseek.json")" ]] \
+[[ "$deepseek_before" == "$(sha256 "$TMP_ROOT/deepseek.json")" ]] \
   || fail 'DeepSeek input catalog was modified'
 jq -e '.metadata.preserved == true' "$TMP_ROOT/atlas-team.json" >/dev/null \
   || fail 'official catalog metadata was not preserved'

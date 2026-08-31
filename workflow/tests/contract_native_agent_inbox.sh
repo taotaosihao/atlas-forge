@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/workflow/tests/lib/portable.sh"
 HELPER="$ROOT/workflow/bin/atlas-native-agent-inbox"
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -15,9 +16,9 @@ chmod 700 "$TMP_ROOT"
 printf '%s\n' 'goal: inspect one bounded path' 'authority: read-only' \
   | CODEX_HOME="$TMP_ROOT" "$HELPER" put deepseek_probe >/dev/null
 
-[[ "$(stat -c '%a' "$TMP_ROOT/atlas-native-agent-inbox")" == 700 ]] \
+[[ "$(file_mode "$TMP_ROOT/atlas-native-agent-inbox")" == 700 ]] \
   || fail 'inbox mode is not 700'
-[[ "$(stat -c '%a' "$TMP_ROOT/atlas-native-agent-inbox/deepseek_probe.md")" == 600 ]] \
+[[ "$(file_mode "$TMP_ROOT/atlas-native-agent-inbox/deepseek_probe.md")" == 600 ]] \
   || fail 'packet mode is not 600'
 expected=$'goal: inspect one bounded path\nauthority: read-only'
 [[ "$(CODEX_HOME="$TMP_ROOT" "$HELPER" get deepseek_probe)" == "$expected" ]] \
