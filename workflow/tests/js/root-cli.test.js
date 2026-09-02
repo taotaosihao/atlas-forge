@@ -31,6 +31,9 @@ const EXPECTED_ROUTES = {
   ],
   "./artifact/cli.js": [
     "checkpoint",
+    "decision-check",
+    "decision-conflict",
+    "decision-record",
     "product-progress",
     "project-phase-report",
     "prompt-bundle",
@@ -108,8 +111,8 @@ function temporaryLayout(t) {
   return { bin, environment, root };
 }
 
-test("routes exactly 50 migrated commands to their JavaScript domains", () => {
-  assert.equal(DIRECT_ROUTES.size, 50);
+test("routes exactly 53 migrated commands to their JavaScript domains", () => {
+  assert.equal(DIRECT_ROUTES.size, 53);
   for (const [modulePath, expected] of Object.entries(EXPECTED_ROUTES)) {
     const actual = [...DIRECT_ROUTES]
       .filter(([, route]) => route === modulePath)
@@ -166,6 +169,40 @@ test("runs a direct command when the legacy launcher is absent", (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
+});
+
+test("runs decision control through the public command", (t) => {
+  const { bin, environment } = temporaryLayout(t);
+  const publicBin = path.join(bin, "codex-workflow");
+  const created = spawnSync(
+    publicBin,
+    ["init-task", "Keep corrected design", "Old behavior cannot return"],
+    { encoding: "utf8", env: environment },
+  );
+  assert.equal(created.status, 0, created.stderr);
+  const taskId = created.stdout.trim();
+  const started = spawnSync(publicBin, ["start", taskId], {
+    encoding: "utf8",
+    env: environment,
+  });
+  assert.equal(started.status, 0, started.stderr);
+  const recorded = spawnSync(publicBin, [
+    "decision-record",
+    taskId,
+    "--id=corrected-design",
+    "--authority-ref=user-message:correction",
+    "--statement=follow the corrected design",
+    "--reject=restore the old design",
+  ], { encoding: "utf8", env: environment });
+  assert.equal(recorded.status, 0, recorded.stderr);
+  assert.match(recorded.stdout, /decision_id: corrected-design/);
+  const checked = spawnSync(publicBin, ["decision-check", taskId], {
+    encoding: "utf8",
+    env: environment,
+  });
+  assert.equal(checked.status, 0, checked.stderr);
+  assert.match(checked.stdout, /status: current/);
+  assert.match(checked.stdout, /rejected_behaviors: 1/);
 });
 
 test("execs the legacy launcher with its original exit code", (t) => {

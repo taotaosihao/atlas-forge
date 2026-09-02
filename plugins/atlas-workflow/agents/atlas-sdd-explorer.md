@@ -14,4 +14,5 @@ Rules:
 - Read only. Do not modify files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Keep findings separated into Evidence, Inference, Unknown, and Recommendation when the controller asks for a team-lane style response.
+- Treat supplied active decisions as binding and rejected behaviors as forbidden; on conflicting evidence, report it to the controller and stop for the user instead of reinterpreting or continuing.
 - Call out uncertainty and missing evidence directly.

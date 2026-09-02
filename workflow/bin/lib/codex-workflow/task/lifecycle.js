@@ -42,6 +42,11 @@ const {
 } = require("../team/execution-grant");
 const { assertCanonicalGrantArtifacts } = require("../team/scope-artifacts");
 const { inProgressVerificationClaims } = require("../verification/required-gates");
+const {
+  assertDecisionReadyFromEvents,
+  assertTeamDecisionFresh,
+  assertVerificationDecisionFresh,
+} = require("../artifact/decisions");
 
 class TaskLifecycleError extends Error {
   constructor(message) {
@@ -466,6 +471,14 @@ function completeTask(
       if (currentState.status !== "doing") {
         throw new TaskLifecycleError(`task must be doing before done: ${taskId}`);
       }
+      let decisionControl = null;
+      if (outcome === "succeeded") {
+        decisionControl = assertDecisionReadyFromEvents(events, taskId);
+        const currentTeam = currentState.active_team;
+        if (currentTeam?.schema_version === 2) {
+          assertTeamDecisionFresh(events, taskId, currentTeam, currentState);
+        }
+      }
       const pendingVerificationClaims = inProgressVerificationClaims(currentState);
       if (pendingVerificationClaims.length > 0) {
         throw new TaskLifecycleError(
@@ -512,6 +525,9 @@ function completeTask(
               `${verification.reasons.join("\n")}\n` +
               `run: codex-workflow verify ${taskId} -- <command...>`,
           );
+        }
+        if (!activeGrant) {
+          assertVerificationDecisionFresh(events, currentState, decisionControl);
         }
       }
       pauseFromEnvironment(environment, "CODEX_WORKFLOW_TEST_UPDATE_PAUSE_BEFORE_WRITE");

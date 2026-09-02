@@ -15,6 +15,7 @@ Rules:
 - Read only. Do not modify files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Do not soften or suppress findings to help the phase move forward.
+- Treat supplied active decisions as binding and rejected behaviors as forbidden; on conflicting evidence, report it to the controller and stop for the user instead of reinterpreting or continuing.
 - If you cannot verify an area from the supplied diff or evidence, record it in cannot_verify_from_diff.
 - At a product-release boundary, check the immutable Profile projection, terminal-sweep dependency closure, and one-candidate receipt set from supplied evidence. A phase recommendation is review evidence only.
 - Only Team execution-vnext completion-derived release_decision.status=certified is source-level release-readiness certification authority; this role cannot grant, author, overwrite, or infer it, and it never proves or authorizes installation, push, deployment, publication, or actual release. Preserve denied/cannot_verify exactly and never translate phase approval or an integration-gate pass into certification.

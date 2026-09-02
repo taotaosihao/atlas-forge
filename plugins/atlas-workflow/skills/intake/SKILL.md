@@ -16,6 +16,9 @@ Codex invokes this flow as `$atlas-workflow:intake`; Claude Code invokes it as `
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
 - 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
+For a corrected answer or rejected branch, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 This is the relentless interview layer before execution:
 
 - Use `$atlas-workflow:office-hours` when the question is whether an idea is worth doing.

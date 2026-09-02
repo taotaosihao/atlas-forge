@@ -8,6 +8,9 @@ description: Use the source-checkout-only Atlas 3D Harness to validate reviewed-
 Use the runtime in the same Atlas Forge source checkout. Treat this skill as an
 operator guide, not as an installer or a second evidence system.
 
+For a corrected or evidence-challenged design, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 ## Freeze the boundary first
 
 1. Resolve the repository root with `git rev-parse --show-toplevel` and require

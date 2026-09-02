@@ -50,6 +50,9 @@ Choose a path lease from actual write-conflict risk, separately from staffing:
 
 ## Bounded-Parallel Controller Policy
 
+For a corrected or evidence-challenged decision, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 Once Team is selected, the controller first freezes the admitted Goal and
 constructs dependency and ownership information, then dispatches the current
 ready frontier. At least one valid child lane runs in parallel with main

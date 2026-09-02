@@ -49,6 +49,9 @@ Write the four artifacts and user-facing summaries in Chinese by default, preser
 
 ## Prepare
 
+For a corrected or evidence-challenged design, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 1. Reuse the current Atlas task when one exists. Reuse current A/C/D/E from the
    same task; create only the artifacts that do not exist from the bundled
    templates.

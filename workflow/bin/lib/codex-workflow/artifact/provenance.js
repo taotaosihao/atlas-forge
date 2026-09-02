@@ -7,6 +7,10 @@ const { atomicWriteFile, atomicWriteJson } = require("../core/atomic-file");
 const { relativeToCodeHome } = require("../core/paths");
 const { timestampSeconds } = require("../task/runtime");
 const {
+  decisionFile,
+  readDecisionControl,
+} = require("./decisions");
+const {
   ArtifactError,
   appendLegacyRuntimeEvent,
   artifactFile,
@@ -285,7 +289,18 @@ function writePromptBundle(parsed, options = {}) {
   const skills = parsed.skills.map((value) =>
     oneLine(value, "skill", { allowEmpty: false }),
   );
-  const files = parsed.includes.map((raw) => {
+  prepareArtifactTask(paths, parsed.taskId, clock);
+  const decisionControl = readDecisionControl(paths, parsed.taskId);
+  const includes = [...parsed.includes];
+  if (decisionControl.has_records) {
+    const currentDecisions = decisionFile(paths, parsed.taskId);
+    if (!includes.some((raw) => (
+      path.resolve(cwd, expandUserPath(raw, environment)) === currentDecisions
+    ))) {
+      includes.push(currentDecisions);
+    }
+  }
+  const files = includes.map((raw) => {
     oneLine(raw, "include", { allowEmpty: false });
     const includeFile = path.resolve(cwd, expandUserPath(raw, environment));
     let stats;
@@ -300,7 +315,6 @@ function writePromptBundle(parsed, options = {}) {
     return { path: includeFile, sha256: sha256(includeFile), bytes: stats.size };
   });
 
-  prepareArtifactTask(paths, parsed.taskId, clock);
   const recordedAt = timestampSeconds(clock);
   const bundleFile = artifactFile(paths, parsed.taskId, "prompt-bundle.json");
   const provenanceFile = artifactFile(paths, parsed.taskId, "provenance.md");
@@ -311,6 +325,11 @@ function writePromptBundle(parsed, options = {}) {
     agent,
     files,
     skills,
+    decision_snapshot: decisionControl.has_records ? {
+      schema_version: 1,
+      revision: decisionControl.revision,
+      digest: decisionControl.digest,
+    } : null,
   });
   const sourcesFile = artifactFile(paths, parsed.taskId, "sources.jsonl");
   const sourceNote = fs.existsSync(sourcesFile)
@@ -376,6 +395,9 @@ function writePromptBundle(parsed, options = {}) {
     `${bundleId} for ${agent}`,
     clock,
   );
+  readDecisionControl(paths, parsed.taskId, {
+    expectedDigest: decisionControl.digest,
+  });
   return [
     `task_id: ${parsed.taskId}`,
     `bundle: ${bundleFile}`,

@@ -4708,6 +4708,11 @@ main() {
       shift
       node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" route-decision "$@"
       ;;
+    decision-record|decision-conflict|decision-check)
+      command="$1"
+      shift
+      node "$SCRIPT_DIR/lib/codex-workflow/artifact/cli.js" "$command" "$@"
+      ;;
     curated-packet)
       [[ $# -ge 2 ]] || { echo 'usage: codex-workflow curated-packet <task-id> --prd <file> --repo <path> --base <branch> --source <file>... [--skip "<reason>"] | codex-workflow curated-packet --lint <file>' >&2; exit 1; }
       shift
@@ -4810,7 +4815,7 @@ main() {
       cmd_team_loop "$@"
       ;;
     *)
-      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-authorize|team-grant|team-replan|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede|team-loop}' >&2
+      echo 'usage: codex-workflow {init-task|list|start|block|resume|done|archive|stale|show|ready|scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|handoff-envelope|result-ingest|route-decision|decision-record|decision-conflict|decision-check|curated-packet|checkpoint|source-snapshot|prompt-bundle|trace-promote|multica-feedback|feedback-cycle|lesson-candidate|learning-decision|gate-metric|gate-report|outcome-mark|outcome-report|learn|dream|recall|doctor|doctor --json|smoke|verify|self-test|install-hooks|team-authorize|team-grant|team-replan|team-start|team-record-start|team-record-finalize|team-loop-record|team-status|team-stop|team-promote|team-selection-record|team-lane-record|team-dispatch-record|team-attempt-record|team-fallback-record|team-slice-accept|team-slice-supersede|team-loop}' >&2
       exit 1
       ;;
   esac

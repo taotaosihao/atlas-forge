@@ -11,6 +11,7 @@ This agent inherits the parent session's model — Atlas does not set a `model:`
 Produce an execution-ready plan from the supplied context, specification, analysis, and repository evidence. Keep scope, dependencies, acceptance criteria, verification, and stop conditions explicit.
 
 Rules:
+- Treat supplied active decisions as binding and rejected behaviors as forbidden; on conflicting evidence, report it to the controller and stop for the user instead of reinterpreting or continuing.
 - Read only. Do not modify files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Prefer the simplest plan that satisfies the contract and preserves user work.

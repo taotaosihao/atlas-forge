@@ -68,6 +68,19 @@ revision, operation identity, previous-event link, payload digest, whole-record
 digest, and a replayable projection. Retrying the same operation and payload is
 idempotent; reusing an operation identity with different input is rejected.
 
+Record corrections as replacements:
+
+```bash
+~/.codex/workflow/bin/codex-workflow decision-record <task-id> --id <new-id> --authority-ref <user-message:ref|operator-input:ref> --statement "<current decision>" [--supersedes <old-id>]... [--reject "<old behavior>"]... [--resolves <conflict-id>]... [--operation-id <id>]
+~/.codex/workflow/bin/codex-workflow decision-conflict <task-id> --id <conflict-id> --decision <active-id> --reason "<conflict>" --evidence <path-or-ref> [--operation-id <id>]
+~/.codex/workflow/bin/codex-workflow decision-check <task-id>
+```
+
+The event stream projects active decisions, rejected behavior, and unresolved
+conflicts to `artifacts/<task-id>/decisions.md`. `prompt-bundle` includes that
+file and digest. Conflicts fail closed; a later correction makes older bundles,
+Team work, execution authority, and verification stale.
+
 Inspect projection consistency without changing files:
 
 ```bash

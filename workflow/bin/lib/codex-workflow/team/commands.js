@@ -12,6 +12,12 @@ const { relativeToCodeHome, resolvePaths, taskArtifactDir } = require("../core/p
 const { canonicalJson, readAuthoritativeEvents, sha256 } = require("../core/event-store");
 const { mutateTaskRuntime, taskEventFile } = require("../core/task-mutation");
 const {
+  assertDecisionReadyFromEvents,
+  assertExecutionGrantDecisionFresh,
+  assertPromptBundleDecisionSnapshot,
+  assertTeamDecisionFresh,
+} = require("../artifact/decisions");
+const {
   getTaskField,
   renderTaskFields,
   requireTaskFile,
@@ -287,12 +293,15 @@ function mutateV2Team(taskId, operationFn, options = {}) {
         operationId: options.operationId,
         data: options.operationData || {},
       },
-      ({ currentProjection, occurredAt }) => {
+      ({ currentProjection, events, occurredAt }) => {
         const currentState = currentProjection.state;
         if (options.requireDoingTask && currentState.status !== "doing") {
           throw new CommandError(`${options.eventKind || "Team control"} requires a doing task`);
         }
         const team = requireV2Team(paths, taskId, currentState);
+        if (options.requireCurrentDecisions) {
+          assertTeamDecisionFresh(events, taskId, team, currentState);
+        }
         if (team.mode === "execute") {
           authorityGuard = options.factualAuthorityReceipt
             ? () => assertCurrentExecuteTeamAuthorityIdentity(team, currentState)
@@ -352,9 +361,20 @@ function mutateV2Team(taskId, operationFn, options = {}) {
         clock,
         environment,
         expectedRevision: options.expectedRevision,
-        replayPostcondition: options.replayPostcondition || ((context) => {
+        replayPostcondition: (context) => {
           const replayTeam = context.existing.result?.team
             || context.existing.projection?.state?.active_team;
+          if (options.requireCurrentDecisions) {
+            assertTeamDecisionFresh(
+              context.events,
+              taskId,
+              replayTeam,
+              context.latest?.projection?.state || {},
+            );
+          }
+          if (options.replayPostcondition) {
+            return options.replayPostcondition(context);
+          }
           if (replayTeam?.mode === "execute") {
             return authorityReplayPostcondition({
               clock,
@@ -379,7 +399,7 @@ function mutateV2Team(taskId, operationFn, options = {}) {
             })(context);
           }
           return null;
-        }),
+        },
       },
     );
   });
@@ -464,12 +484,17 @@ function runRecordStart(parsed, options = {}) {
             ...requestIdentity,
           },
         },
-        ({ currentProjection, occurredAt, revision }) => {
+        ({ currentProjection, events, occurredAt, revision }) => {
           const eventClock = () => new Date(occurredAt);
           if (!currentProjection?.state) {
             throw new CommandError(`unknown task: ${parsed.taskId}`);
           }
           const state = JSON.parse(JSON.stringify(currentProjection.state));
+          const decisionControl = assertDecisionReadyFromEvents(
+            events,
+            parsed.taskId,
+          );
+          assertPromptBundleDecisionSnapshot(paths, parsed.taskId, decisionControl);
           const admission = admitTeamStart({
             authorizationRef: parsed.authorizationRef,
             briefPath: parsed.briefPath,
@@ -536,6 +561,7 @@ function runRecordStart(parsed, options = {}) {
               grantId: admission.grant_id,
               scopeDigest: admission.scope_digest,
             });
+            assertExecutionGrantDecisionFresh(state, decisionControl);
             scopeGuard = () => {
               const rebuilt = buildCanonicalScope({
                 authorizationRef: grant.authorization_provenance.ref,
@@ -584,8 +610,23 @@ function runRecordStart(parsed, options = {}) {
           }),
           clock,
           environment,
-          replayPostcondition: parsed.mode === "execute"
-            ? authorityReplayPostcondition({
+          replayPostcondition: (context) => {
+            const replayTeam = context.existing.result?.team
+              || context.existing.projection?.state?.active_team;
+            const currentState = context.latest?.projection?.state || {};
+            const currentDecisions = assertTeamDecisionFresh(
+              context.events,
+              parsed.taskId,
+              replayTeam,
+              currentState,
+            );
+            assertPromptBundleDecisionSnapshot(paths, parsed.taskId, currentDecisions);
+            if (parsed.mode !== "execute") {
+              return options.replayPostcondition
+                ? options.replayPostcondition(context)
+                : null;
+            }
+            return authorityReplayPostcondition({
               clock,
               grantId: parsed.grantId,
               requireUnexpired: true,
@@ -599,8 +640,8 @@ function runRecordStart(parsed, options = {}) {
                   taskId: parsed.taskId,
                 });
               },
-            })
-            : options.replayPostcondition,
+            })(context);
+          },
         },
       );
     } catch (error) {
@@ -878,6 +919,7 @@ function runLaneRecord(parsed, options = {}) {
     operationData: { ...parsed },
     eventKind: `team.lane.${parsed.action}`,
     requireDoingTask: parsed.action === "open",
+    requireCurrentDecisions: parsed.action === "open",
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `lane-${parsed.action}`, output.result) };
 }
@@ -909,6 +951,7 @@ function runDispatchRecord(parsed, options = {}) {
     operationData: { ...parsed },
     eventKind: `team.dispatch.${parsed.action}`,
     requireDoingTask: parsed.action === "open",
+    requireCurrentDecisions: parsed.action === "open",
   });
   return { exitCode: 0, lines: controlResultLines(parsed.taskId, `dispatch-${parsed.action}`, output.result) };
 }
@@ -1220,6 +1263,7 @@ function runObserveAttempt(parsed, options = {}) {
       operationId: launchIdentity.claim_operation_id,
       operationData: launchIdentity,
       eventKind: "team.attempt.observation.launch.claimed",
+      requireCurrentDecisions: true,
       requireDoingTask: true,
       requireUnexpiredAuthority: true,
       replayPostcondition: launchIdentity.grant_id
@@ -1281,6 +1325,16 @@ function runObserveAttempt(parsed, options = {}) {
         },
       };
     } else if (!reconciliationOnly && reconciliation.status === "missing") {
+      const launchEvents = readAuthoritativeEvents(
+        taskEventFile(paths, parsed.taskId),
+        parsed.taskId,
+      );
+      const launchState = launchEvents.at(-1).projection.state;
+      const launchTeam = requireV2Team(paths, parsed.taskId, launchState);
+      if (launchTeam.team_run_id !== existingTeam.team_run_id) {
+        throw new CommandError("Team generation changed before Paseo actor launch");
+      }
+      assertTeamDecisionFresh(launchEvents, parsed.taskId, launchTeam, launchState);
       observed = observer("run", args, observerOptions);
     } else {
       const reconciliationUuid = crypto.randomUUID();
@@ -1497,6 +1551,7 @@ function runAttemptRecord(parsed, options = {}) {
     operationData: { ...parsed, evidenceRefs },
     eventKind: `team.attempt.${parsed.action}`,
     requireDoingTask: parsed.action === "reserve",
+    requireCurrentDecisions: parsed.action === "reserve",
     requireExecutableFirstCode: parsed.action === "reserve",
     requireUnexpiredAuthority: parsed.action === "reserve",
     factualAuthorityReceipt: parsed.action === "resolve-launch",
@@ -1525,6 +1580,7 @@ function runFallbackRecord(parsed, options = {}) {
     operationId: parsed.operationId,
     operationData: { ...parsed, evidenceRefs },
     eventKind: "team.attempt.fallback",
+    requireCurrentDecisions: true,
     requireDoingTask: true,
     requireUnexpiredAuthority: true,
   });
@@ -1628,12 +1684,23 @@ function runRecordFinalize(parsed, options = {}) {
           staffing_file: path.resolve(parsed.staffingFile),
         },
       },
-      ({ currentProjection, occurredAt }) => {
+      ({ currentProjection, events, occurredAt }) => {
         const eventClock = () => new Date(occurredAt);
         const currentState = currentProjection.state;
         const currentTeam = currentState.active_team && typeof currentState.active_team === "object"
           ? JSON.parse(JSON.stringify(currentState.active_team))
           : {};
+        if (parsed.status === "complete") {
+          const decisionControl = assertDecisionReadyFromEvents(events, parsed.taskId);
+          if (currentTeam.schema_version !== 2 && decisionControl.has_records) {
+            throw new CommandError(
+              "legacy Team finalization cannot prove a current decision snapshot; start a v2 generation",
+            );
+          }
+          if (currentTeam.schema_version === 2) {
+            assertTeamDecisionFresh(events, parsed.taskId, currentTeam, currentState);
+          }
+        }
         if (currentTeam.schema_version === 2) {
           assertCurrentExecuteTeamAuthority(
             currentTeam, currentState, clock, environment, paths, parsed.taskId,
@@ -1718,10 +1785,22 @@ function runRecordFinalize(parsed, options = {}) {
         }),
         clock,
         environment,
-        replayPostcondition: options.replayPostcondition
-          || authoritySensitiveTeamReplayPostcondition(
-            clock, environment, paths, parsed.taskId,
-          ),
+        replayPostcondition: (context) => {
+          if (parsed.status === "complete") {
+            const replayTeam = context.existing.projection?.state?.active_team || {};
+            assertTeamDecisionFresh(
+              context.events,
+              parsed.taskId,
+              replayTeam,
+              context.latest?.projection?.state || {},
+            );
+          }
+          const postcondition = options.replayPostcondition
+            || authoritySensitiveTeamReplayPostcondition(
+              clock, environment, paths, parsed.taskId,
+            );
+          return postcondition(context);
+        },
       },
     );
   });
@@ -2208,15 +2287,24 @@ function runPromote(parsed, options = {}) {
             ...requestIdentity,
           },
         },
-        ({ currentProjection, occurredAt, revision }) => {
+        ({ currentProjection, events, occurredAt, revision }) => {
           const eventClock = () => new Date(occurredAt);
           const state = JSON.parse(JSON.stringify(currentProjection.state));
+          const decisionControl = assertDecisionReadyFromEvents(events, parsed.taskId);
+          assertPromptBundleDecisionSnapshot(paths, parsed.taskId, decisionControl);
           if (parsed.target === "execute" && state.status !== "doing") {
             throw new CommandError("execute Team promotion requires a doing task");
           }
           const activeTeam = state.active_team && typeof state.active_team === "object"
             ? state.active_team
             : {};
+          if (activeTeam.schema_version === 2) {
+            assertTeamDecisionFresh(events, parsed.taskId, activeTeam, state);
+          } else if (decisionControl.has_records) {
+            throw new CommandError(
+              "legacy Team promotion cannot prove a current decision snapshot; start a v2 generation",
+            );
+          }
           if (new Set(["execute", "finish"]).has(parsed.target)) {
             const pendingLaunchClaims = (activeTeam.observer_launch_claims || [])
               .filter((claim) => claim.status === "in_progress");
@@ -2290,6 +2378,7 @@ function runPromote(parsed, options = {}) {
               grantId: admission.grant_id,
               scopeDigest: admission.scope_digest,
             });
+            assertExecutionGrantDecisionFresh(state, decisionControl);
             scopeGuard = () => {
               const rebuilt = buildCanonicalScope({
                 authorizationRef: grant.authorization_provenance.ref,
@@ -2368,8 +2457,24 @@ function runPromote(parsed, options = {}) {
           }),
           clock,
           environment,
-          replayPostcondition: parsed.target === "execute"
-            ? authorityReplayPostcondition({
+          replayPostcondition: (context) => {
+            const replayTeam = context.existing.result?.team
+              || context.existing.projection?.state?.active_team;
+            const currentDecisions = assertTeamDecisionFresh(
+              context.events,
+              parsed.taskId,
+              replayTeam,
+              context.latest?.projection?.state || {},
+            );
+            assertPromptBundleDecisionSnapshot(paths, parsed.taskId, currentDecisions);
+            if (parsed.target !== "execute") {
+              const postcondition = options.replayPostcondition
+                || authoritySensitiveTeamReplayPostcondition(
+                  clock, environment, paths, parsed.taskId,
+                );
+              return postcondition(context);
+            }
+            return authorityReplayPostcondition({
               clock,
               grantId: parsed.grantId,
               requireUnexpired: true,
@@ -2383,10 +2488,8 @@ function runPromote(parsed, options = {}) {
                   taskId: parsed.taskId,
                 });
               },
-            })
-            : options.replayPostcondition || authoritySensitiveTeamReplayPostcondition(
-              clock, environment, paths, parsed.taskId,
-            ),
+            })(context);
+          },
         },
       );
     } catch (error) {

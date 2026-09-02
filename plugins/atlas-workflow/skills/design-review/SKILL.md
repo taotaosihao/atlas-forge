@@ -16,6 +16,9 @@ Codex invokes this flow as `$atlas-workflow:design-review`; Claude Code invokes 
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
 - 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
+For a corrected or evidence-challenged design, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 ## Release Boundary
 
 An ordinary design-fidelity review is not automatically a `product_release`. When the selected contract uses immutable Profile `web-ui-v1`, this flow may emit the Profile-bound formal Web UI facts assigned to the official adapter, but it never emits or upgrades a release decision.

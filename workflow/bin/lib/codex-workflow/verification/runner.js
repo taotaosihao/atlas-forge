@@ -45,6 +45,11 @@ const {
 } = require("../team/execution-grant");
 const { assertCanonicalGrantArtifacts } = require("../team/scope-artifacts");
 const { enforceFirstCodeBoundary } = require("../team/first-code");
+const {
+  assertDecisionReadyFromEvents,
+  assertExecutionGrantDecisionFresh,
+  assertTeamDecisionFresh,
+} = require("../artifact/decisions");
 
 const VERIFY_USAGE =
   "usage: codex-workflow verify <task-id> [--brief <brief.json> --slice-id <id> --check-id <id>] [--gate-class <id>] [--outcome passed|failed|blocked|skipped] [--trajectory reproduced|fixed|regressed|inconclusive|smoke-only] [--evaluator local-command|browser|human|multica-review|multica-e2e] [--failure-attribution code|test|env|data|dependency|missing-prereq|unknown] [--evidence <path-or-url>]... [--input <file>]... [--output <file>]... -- <command...>";
@@ -836,6 +841,16 @@ function runVerification(parsed, options = {}) {
     taskTitle = task.title;
   }
   requireOpenExecutionTask(latestTask, "verify");
+  const decisionControl = assertDecisionReadyFromEvents(observedEvents, parsed.taskId);
+  assertExecutionGrantDecisionFresh(latestState, decisionControl);
+  if (latestState.active_team?.schema_version === 2) {
+    assertTeamDecisionFresh(
+      observedEvents,
+      parsed.taskId,
+      latestState.active_team,
+      latestState,
+    );
+  }
   ensureTaskRuntimeScaffold(paths, parsed.taskId, taskTitle);
   const commandText = formatCommand(parsed.command).trimEnd();
   const captureIdentity = options.captureIdentity || captureVerificationIdentity;

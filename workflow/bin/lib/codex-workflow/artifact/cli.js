@@ -3,6 +3,17 @@
 const { TaskRepositoryError } = require("../task/repository");
 const { CHECKPOINT_USAGE, parseCheckpointArgs, writeCheckpoint } = require("./checkpoint");
 const {
+  DECISION_CHECK_USAGE,
+  DECISION_CONFLICT_USAGE,
+  DECISION_RECORD_USAGE,
+  checkDecisions,
+  parseDecisionCheckArgs,
+  parseDecisionConflictArgs,
+  parseDecisionRecordArgs,
+  recordDecision,
+  recordDecisionConflict,
+} = require("./decisions");
+const {
   PROMPT_USAGE,
   SOURCE_USAGE,
   parsePromptArgs,
@@ -36,6 +47,9 @@ const USAGE = {
   "project-phase-report": "usage: codex-workflow project-phase-report <task-id> <phase-id>",
   "product-progress": "usage: codex-workflow product-progress <task-id> [--json]",
   "route-decision": ROUTE_USAGE,
+  "decision-record": DECISION_RECORD_USAGE,
+  "decision-conflict": DECISION_CONFLICT_USAGE,
+  "decision-check": DECISION_CHECK_USAGE,
   checkpoint: CHECKPOINT_USAGE,
   "source-snapshot": SOURCE_USAGE,
   "prompt-bundle": PROMPT_USAGE,
@@ -92,6 +106,12 @@ function runPlanning(command, argv, environment = process.env) {
       return;
     }
     writeLines(writeRouteDecision(parsed, { environment }));
+  } else if (command === "decision-record") {
+    writeLines(recordDecision(parseDecisionRecordArgs(argv), { environment }));
+  } else if (command === "decision-conflict") {
+    writeLines(recordDecisionConflict(parseDecisionConflictArgs(argv), { environment }));
+  } else if (command === "decision-check") {
+    writeLines(checkDecisions(parseDecisionCheckArgs(argv), { environment }));
   } else if (command === "checkpoint") {
     writeLines(writeCheckpoint(parseCheckpointArgs(argv), { environment }));
   } else if (command === "source-snapshot") {
@@ -106,7 +126,7 @@ function main(argv) {
     const command = argv[0];
     if (!Object.hasOwn(USAGE, command)) {
       throw new ArtifactCliError(
-        "usage: codex-workflow {scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase}",
+        "usage: codex-workflow {scaffold-intake|scaffold-brainstorm|scaffold-clarify|scaffold-team|scaffold-phase|decision-record|decision-conflict|decision-check}",
       );
     }
     if (command.startsWith("scaffold-")) {

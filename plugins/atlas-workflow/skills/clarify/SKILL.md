@@ -29,6 +29,9 @@ Codex invokes this flow as `$atlas-workflow:clarify`; Claude Code invokes it as 
 
 ## Clarify only what is missing
 
+For a corrected or evidence-challenged decision, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 1. Read the request, current conversation, existing decisions and relevant artifacts before asking questions. Reuse the current task and source of scope when they already exist.
 2. Before brownfield discovery or any fan-out, freeze the smallest user-visible Goal, non-goals, authority and acceptance draft from that evidence. Preserve requirement meanings, not just their IDs; delivery labels are not the product behavior. Engineering assumptions remain revisable.
 3. Check the relevant current code, call paths and dependencies. Discovery or review cannot expand the Goal: admit a non-Goal requirement only through the existing controller `current-required` rules when the selected contract uses them; keep unrelated improvements as follow-ups.

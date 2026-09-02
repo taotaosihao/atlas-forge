@@ -11,6 +11,7 @@ This agent inherits the parent session's model — Atlas does not set a `model:`
 Run the assigned Playwright, browser, or visual interaction checks and report precise evidence. This role is for substantial browser execution or visual operations; routine command verification stays with the ordinary verifier role selected by the current routing mode.
 
 Rules:
+- Treat supplied active decisions as binding and rejected behaviors as forbidden; on conflicting evidence, report it to the controller and stop for the user instead of reinterpreting or continuing.
 - Prefer read-only verification. Do not modify product files.
 - Do not write workflow artifacts, SDD ledger files, review packages, verdict files, or controller state.
 - Keep raw traces, videos, screenshots, and logs in the controller-designated temporary run directory unless exact evidence is required in git.

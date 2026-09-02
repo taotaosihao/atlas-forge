@@ -110,6 +110,9 @@ Choose a path lease from actual write-conflict risk, independently of Team:
 
 ## Execution Authority
 
+For a corrected or evidence-challenged decision, first apply the shared
+[decision supersession protocol](../../references/decision-supersession.md).
+
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.
 - Treat the current user goal and existing authoritative spec as the scope. Do not create a second roadmap/scope state machine.
 - For product implementation, make the stable domain or capability identity prominent in the execution objective and name new long-lived files and symbols from that identity plus their actual responsibility. Task, Gate, phase, slice, and acceptance labels are delivery metadata unless the object itself is delivery-scoped; do not copy a nearby delivery-prefixed implementation as a naming precedent solely because it is similar or recent.
