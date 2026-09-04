@@ -339,6 +339,8 @@ function mutateTaskRuntime(paths, taskId, input, transition, options = {}) {
     if (event.event_digest !== authoritativeEventDigest(event)) {
       throw new TaskMutationError("authoritative event changed after its record digest was computed");
     }
+    require("../artifact/decisions")
+      .validateDecisionEventProjection([...events, event], paths);
     require("../team/execution-grant").validateAuthorityEventProjection([...events, event]);
     require("../verification/claim-event-validation")
       .validateVerificationClaimEventProjection([...events, event]);

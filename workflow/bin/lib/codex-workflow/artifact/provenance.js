@@ -328,7 +328,6 @@ function writePromptBundle(parsed, options = {}) {
     decision_snapshot: decisionControl.has_records ? {
       schema_version: 1,
       revision: decisionControl.revision,
-      digest: decisionControl.digest,
     } : null,
   });
   const sourcesFile = artifactFile(paths, parsed.taskId, "sources.jsonl");
@@ -396,7 +395,7 @@ function writePromptBundle(parsed, options = {}) {
     clock,
   );
   readDecisionControl(paths, parsed.taskId, {
-    expectedDigest: decisionControl.digest,
+    expectedRevision: decisionControl.revision,
   });
   return [
     `task_id: ${parsed.taskId}`,

@@ -3,7 +3,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { canonicalJson, readAuthoritativeEvents, sha256 } = require("../core/event-store");
+const { canonicalJson, readAuthoritativeEvents } = require("../core/event-store");
 const { taskArtifactDir } = require("../core/paths");
 const {
   materializeTaskProjection,
@@ -27,6 +27,13 @@ const DECISION_CHECK_USAGE =
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const AUTHORITY_REF = /^(user-message|operator-input):[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const DECISION_KINDS = new Set(["decision.recorded", "decision.conflict.recorded"]);
+const DECISION_GATED_KINDS = new Set([
+  "authority.grant.issued",
+  "authority.replanned",
+  "slice.accepted",
+  "task.completion.closed",
+  "verification.recorded",
+]);
 
 function unique(values) {
   return [...new Set(values)];
@@ -196,28 +203,34 @@ function validateConflictData(data) {
   };
 }
 
-function decisionDigest(taskId, revision, active, rejectedBehaviors, openConflicts) {
-  return sha256(canonicalJson({
-    schema_version: 1,
-    task_id: taskId,
-    revision,
-    active: active.map(({ decision_id, authority_ref, statement }) => ({
-      decision_id,
-      authority_ref,
-      statement,
-    })),
-    rejected_behaviors: rejectedBehaviors,
-    open_conflicts: openConflicts.map(({
-      conflict_id, decision_id, evidence_ref, reason,
-    }) => ({ conflict_id, decision_id, evidence_ref, reason })),
-  }));
+function activeRejectedBehaviors(decisions, activeIds) {
+  const rejected = new Map();
+  const add = (statement, activeId) => {
+    if (!rejected.has(statement)) rejected.set(statement, new Set());
+    rejected.get(statement).add(activeId);
+  };
+  for (const activeId of activeIds) {
+    const active = decisions.get(activeId);
+    const pending = [...active.supersedes];
+    const seen = new Set();
+    while (pending.length > 0) {
+      const ancestorId = pending.pop();
+      if (seen.has(ancestorId)) continue;
+      seen.add(ancestorId);
+      const ancestor = decisions.get(ancestorId);
+      if (!ancestor) throw new CommandError(`unknown superseded decision: ${ancestorId}`);
+      add(ancestor.statement, activeId);
+      pending.push(...ancestor.supersedes);
+    }
+    for (const statement of active.rejected_behaviors) add(statement, activeId);
+  }
+  return rejected;
 }
 
 function deriveDecisionControl(events, taskId) {
   const decisions = new Map();
   const activeIds = new Set();
   const conflicts = new Map();
-  const explicitRejected = [];
   let revision = 0;
 
   for (const event of events) {
@@ -233,6 +246,16 @@ function deriveDecisionControl(events, taskId) {
         if (!activeIds.has(supersededId)) {
           throw new CommandError(`cannot supersede inactive decision: ${supersededId}`);
         }
+      }
+      const rejectedBefore = activeRejectedBehaviors(decisions, activeIds);
+      const revivalLeaves = rejectedBefore.get(data.statement) || new Set();
+      const missingReversals = [...revivalLeaves]
+        .filter((activeId) => !data.supersedes.includes(activeId));
+      if (missingReversals.length > 0) {
+        throw new CommandError(
+          `rejected behavior cannot be reactivated without superseding current decision: ` +
+            missingReversals.join(", "),
+        );
       }
       for (const rejected of data.rejectedBehaviors) {
         const activeMatch = [...activeIds].find((id) => (
@@ -273,11 +296,12 @@ function deriveDecisionControl(events, taskId) {
         decision_id: data.decisionId,
         authority_ref: data.authorityRef,
         statement: data.statement,
+        supersedes: data.supersedes,
+        rejected_behaviors: data.rejectedBehaviors,
         recorded_revision: event.revision,
       };
       decisions.set(data.decisionId, decision);
       activeIds.add(data.decisionId);
-      explicitRejected.push(...data.rejectedBehaviors);
     } else {
       const data = validateConflictData(event.data);
       if (conflicts.has(data.conflictId)) {
@@ -301,24 +325,16 @@ function deriveDecisionControl(events, taskId) {
     .map((id) => decisions.get(id))
     .sort((left, right) => left.recorded_revision - right.recorded_revision);
   const activeStatements = new Set(active.map((decision) => decision.statement));
-  const rejectedBehaviors = unique([
-    ...[...decisions.values()]
-      .filter((decision) => !activeIds.has(decision.decision_id))
-      .map((decision) => decision.statement),
-    ...explicitRejected,
-  ]).filter((statement) => !activeStatements.has(statement));
+  const rejectedBehaviors = [...activeRejectedBehaviors(decisions, activeIds).keys()]
+    .filter((statement) => !activeStatements.has(statement));
   const openConflicts = [...conflicts.values()]
     .filter((conflict) => !conflict.resolved_by)
     .sort((left, right) => left.recorded_revision - right.recorded_revision);
-  const digest = revision === 0
-    ? ""
-    : decisionDigest(taskId, revision, active, rejectedBehaviors, openConflicts);
   return {
     schema_version: 1,
     task_id: taskId,
     has_records: revision > 0,
     revision,
-    digest,
     status: openConflicts.length > 0 ? "human-decision-required" : "current",
     active,
     rejected_behaviors: rejectedBehaviors,
@@ -351,7 +367,6 @@ function renderDecisionControl(control) {
     "",
     `- Task: \`${control.task_id}\``,
     `- Decision revision: ${control.revision}`,
-    `- Decision digest: \`${control.digest || "-"}\``,
     `- Gate: ${control.status}`,
     "",
     "## Active decisions",
@@ -379,15 +394,12 @@ function decisionFile(paths, taskId) {
 
 function assertDecisionReadyFromEvents(events, taskId, options = {}) {
   const control = deriveDecisionControl(events, taskId);
-  if (Object.hasOwn(options, "expectedDigest")) {
-    if (options.expectedDigest && !/^sha256:[a-f0-9]{64}$/.test(options.expectedDigest)) {
-      throw new CommandError(`invalid expected decision digest: ${options.expectedDigest}`);
-    }
-    if (control.digest !== options.expectedDigest) {
-      throw new CommandError(
-        `stale decision snapshot: expected ${options.expectedDigest}, current ${control.digest || "none"}`,
-      );
-    }
+  if (Object.hasOwn(options, "expectedRevision")
+    && control.revision !== options.expectedRevision) {
+    throw new CommandError(
+      `stale decision snapshot: expected revision ${options.expectedRevision}, ` +
+        `current ${control.revision}`,
+    );
   }
   if (control.open_conflicts.length > 0) {
     throw new CommandError(
@@ -424,7 +436,7 @@ function plainFileSha256(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
-function assertPromptBundleDecisionSnapshot(paths, taskId, control) {
+function assertPromptBundleDecisionSnapshot(paths, taskId, control, options = {}) {
   if (!control.has_records) return control;
   const bundleFile = path.join(taskArtifactDir(paths, taskId), "prompt-bundle.json");
   let bundle;
@@ -433,7 +445,7 @@ function assertPromptBundleDecisionSnapshot(paths, taskId, control) {
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new CommandError(
-        "current decisions require a prompt bundle; run prompt-bundle before Team start",
+        "current decisions require a prompt bundle; run prompt-bundle before continuing",
       );
     }
     throw new CommandError(`invalid prompt bundle: ${error.message}`);
@@ -445,7 +457,6 @@ function assertPromptBundleDecisionSnapshot(paths, taskId, control) {
   const expectedSnapshot = {
     schema_version: 1,
     revision: control.revision,
-    digest: control.digest,
   };
   if (canonicalJson(bundle.decision_snapshot) !== canonicalJson(expectedSnapshot)) {
     throw new CommandError(
@@ -459,7 +470,73 @@ function assertPromptBundleDecisionSnapshot(paths, taskId, control) {
       "prompt bundle does not include the current decisions artifact",
     );
   }
+  for (const requiredFile of options.requiredFiles || []) {
+    const resolved = path.resolve(requiredFile);
+    const required = bundle.files.find((entry) => entry?.path === resolved);
+    if (!required || required.sha256 !== plainFileSha256(resolved)) {
+      throw new CommandError(
+        `prompt bundle does not include the current required artifact: ${resolved}`,
+      );
+    }
+  }
   return control;
+}
+
+function assertDecisionBoundVerificationRecords(events, recordIds, control) {
+  for (const recordId of recordIds) {
+    const source = events.findLast((event) => (
+      event.kind === "verification.recorded" && event.data?.record_id === recordId
+    ));
+    if (!source || Number(source.data?.observed_revision || 0) < control.revision) {
+      throw new CommandError(
+        `stale verification: ${recordId || "missing record"} predates decision revision ` +
+          `${control.revision}; rerun verification against current decisions`,
+      );
+    }
+  }
+}
+
+function validateDecisionEventProjection(events, paths) {
+  const event = events.at(-1);
+  if (!event || !DECISION_GATED_KINDS.has(event.kind)) return;
+  if (event.kind === "task.completion.closed" && event.data?.outcome !== "succeeded") return;
+  const control = assertDecisionReadyFromEvents(events, event.task_id);
+  if (!control.has_records) return;
+  const state = event.projection?.state || {};
+  assertExecutionGrantDecisionFresh(state, control);
+  if (event.kind === "authority.grant.issued" || event.kind === "authority.replanned") {
+    assertPromptBundleDecisionSnapshot(paths, event.task_id, control, {
+      requiredFiles: [event.data?.brief_path],
+    });
+  }
+  const team = state.active_team;
+  if (team?.schema_version === 2
+    && new Set(["slice.accepted", "task.completion.closed", "verification.recorded"])
+      .has(event.kind)) {
+    assertTeamDecisionFresh(events, event.task_id, team, state);
+  }
+  if (event.kind === "verification.recorded") {
+    if (Number(event.data?.observed_revision || 0) < control.revision) {
+      throw new CommandError(
+        `stale verification: command observed revision ${event.data?.observed_revision || 0}, ` +
+          `current decision revision ${control.revision}`,
+      );
+    }
+  }
+  if (event.kind === "slice.accepted") {
+    assertDecisionBoundVerificationRecords(
+      events,
+      (event.result?.accepted?.verification_records || []).map((record) => record.record_id),
+      control,
+    );
+  }
+  if (event.kind === "task.completion.closed") {
+    assertDecisionBoundVerificationRecords(
+      events,
+      event.projection?.state?.completion?.verification_record_ids || [],
+      control,
+    );
+  }
 }
 
 function assertExecutionGrantDecisionFresh(state, control) {
@@ -557,7 +634,6 @@ function recordDecision(parsed, options = {}) {
         result: {
           decision_id: data.decisionId,
           revision: control.revision,
-          digest: control.digest,
           status: control.status,
         },
         legacy: [{ kind: "decision-record", detail: data.decisionId }],
@@ -566,13 +642,12 @@ function recordDecision(parsed, options = {}) {
     { ...options, clock },
   );
   const control = readDecisionControl(paths, parsed.taskId, {
-    expectedDigest: committed.result.digest,
+    expectedRevision: committed.result.revision,
   });
   return [
     `task_id: ${parsed.taskId}`,
     `decision_id: ${committed.result.decision_id}`,
     `decision_revision: ${control.revision}`,
-    `decision_digest: ${control.digest}`,
     `status: ${control.status}`,
     `artifact: ${decisionFile(paths, parsed.taskId)}`,
     ...(committed.replay ? ["replayed: true"] : []),
@@ -616,7 +691,6 @@ function recordDecisionConflict(parsed, options = {}) {
         result: {
           conflict_id: data.conflictId,
           revision: control.revision,
-          digest: control.digest,
           status: control.status,
         },
         legacy: [{ kind: "decision-conflict", detail: data.conflictId }],
@@ -631,7 +705,6 @@ function recordDecisionConflict(parsed, options = {}) {
     `task_id: ${parsed.taskId}`,
     `conflict_id: ${committed.result.conflict_id}`,
     `decision_revision: ${control.revision}`,
-    `decision_digest: ${control.digest}`,
     `status: ${control.status}`,
     `artifact: ${decisionFile(paths, parsed.taskId)}`,
     ...(committed.replay ? ["replayed: true"] : []),
@@ -645,7 +718,6 @@ function checkDecisions(parsed, options = {}) {
   return [
     `task_id: ${parsed.taskId}`,
     `decision_revision: ${control.revision}`,
-    `decision_digest: ${control.digest || "none"}`,
     `status: ${control.status}`,
     `active_decisions: ${control.active.length}`,
     `rejected_behaviors: ${control.rejected_behaviors.length}`,
@@ -662,6 +734,7 @@ module.exports = {
   assertPromptBundleDecisionSnapshot,
   assertTeamDecisionFresh,
   assertVerificationDecisionFresh,
+  validateDecisionEventProjection,
   checkDecisions,
   decisionFile,
   parseDecisionCheckArgs,

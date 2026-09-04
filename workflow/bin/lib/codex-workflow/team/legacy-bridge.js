@@ -6,6 +6,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { CommandError, commandOptions } = require("../core/command-runtime");
 const { readAuthoritativeEvents } = require("../core/event-store");
+const { assertDecisionReadyFromEvents } = require("../artifact/decisions");
 const {
   applyTaskProjection,
   materializeTaskProjection,
@@ -203,6 +204,12 @@ function runLegacyTeamCommand(argv, options = {}) {
   const { task } = validateTaskFile(taskFile);
   requireOpenExecutionTask(task, command);
   const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  const decisionControl = assertDecisionReadyFromEvents(events, taskId);
+  if (decisionControl.has_records) {
+    throw new CommandError(
+      "legacy team-start cannot bind recorded decisions; use team-record-start",
+    );
+  }
   const observedRevision = events.at(-1)?.revision || 0;
   const tempParent = environment.TMPDIR || os.tmpdir();
   fs.mkdirSync(tempParent, { recursive: true });

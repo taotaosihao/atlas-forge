@@ -8,10 +8,19 @@ const test = require("node:test");
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const WORKFLOW_ROOT = path.resolve(__dirname, "../..");
+const PUBLIC_BIN = path.join(WORKFLOW_ROOT, "bin", "codex-workflow");
 const TEMPLATE_DIR = path.join(WORKFLOW_ROOT, "templates");
 const { resolvePaths, taskArtifactDir } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/paths.js",
+));
+const { readAuthoritativeEvents } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/event-store.js",
+));
+const { mutateTaskRuntime, taskEventFile } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/core/task-mutation.js",
 ));
 const { completeTask, createTask, startTask } = require(path.join(
   WORKFLOW_ROOT,
@@ -47,6 +56,10 @@ const {
 const { parseVerifyArgs, runVerification } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/verification/runner.js",
+));
+const { runLegacyTeamCommand } = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/team/legacy-bridge.js",
 ));
 
 function fixedClock() {
@@ -120,7 +133,6 @@ test("a correction atomically replaces the old design and invalidates stale cons
     "--statement=reject pallet reuse in the business layer",
     "--operation-id=decision-initial",
   ]);
-  const firstDigest = first.find((line) => line.startsWith("decision_digest: ")).slice(17);
   const firstRevision = Number(
     first.find((line) => line.startsWith("decision_revision: ")).slice(19),
   );
@@ -170,7 +182,7 @@ test("a correction atomically replaces the old design and invalidates stale cons
   assert.match(rendered, /Rejected behavior — must not execute/);
   assert.match(rendered, /preserve existing business logic/);
   assert.throws(
-    () => readDecisionControl(paths, taskId, { expectedDigest: firstDigest }),
+    () => readDecisionControl(paths, taskId, { expectedRevision: firstRevision }),
     /stale decision snapshot/,
   );
   assert.throws(
@@ -295,12 +307,202 @@ test("review evidence that conflicts with an approved design requires a new user
     "utf8",
   ));
   const control = readDecisionControl(paths, taskId);
-  assert.equal(manifest.decision_snapshot.digest, control.digest);
   assert.ok(manifest.files.some((entry) => entry.path.endsWith("/decisions.md")));
   assert.deepEqual(control.open_conflicts, []);
   assert.deepEqual(control.active.map((item) => item.decision_id), [
     "confirmed-pose-resolution",
   ]);
+  assert.deepEqual(manifest.decision_snapshot, {
+    schema_version: 1,
+    revision: control.revision,
+  });
+});
+
+test("a rejected decision cannot revive implicitly but an explicit reversal is auditable", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Reject implicit decision revival");
+  record(environment, [
+    taskId,
+    "--id=old-design",
+    "--authority-ref=user-message:old-design",
+    "--statement=use the old design",
+    "--operation-id=old-design",
+  ]);
+  record(environment, [
+    taskId,
+    "--id=corrected-design",
+    "--authority-ref=user-message:corrected-design",
+    "--statement=use the corrected design",
+    "--supersedes=old-design",
+    "--operation-id=corrected-design",
+  ]);
+
+  assert.throws(() => record(environment, [
+    taskId,
+    "--id=implicit-revival",
+    "--authority-ref=user-message:implicit-revival",
+    "--statement=use the old design",
+    "--operation-id=implicit-revival",
+  ]), /cannot be reactivated without superseding current decision: corrected-design/);
+  assert.deepEqual(readDecisionControl(paths, taskId).active.map((item) => item.decision_id), [
+    "corrected-design",
+  ]);
+
+  record(environment, [
+    taskId,
+    "--id=explicit-reversal",
+    "--authority-ref=user-message:explicit-reversal",
+    "--statement=use the old design",
+    "--supersedes=corrected-design",
+    "--operation-id=explicit-reversal",
+  ]);
+  const reversed = readDecisionControl(paths, taskId);
+  assert.deepEqual(reversed.active.map((item) => item.decision_id), ["explicit-reversal"]);
+  assert.deepEqual(reversed.rejected_behaviors, ["use the corrected design"]);
+});
+
+test("legacy Team never starts with decisions or an unresolved decision conflict", (t) => {
+  const { environment } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Close legacy decision bypass");
+  record(environment, [
+    taskId,
+    "--id=current-design",
+    "--authority-ref=user-message:current-design",
+    "--statement=use the current design",
+    "--operation-id=current-design",
+  ]);
+  assert.throws(() => runLegacyTeamCommand([
+    "team-start", taskId, "review the design", "--mode=discuss",
+  ], { environment, legacyBin: "/usr/bin/true" }), /use team-record-start/);
+
+  conflict(environment, [
+    taskId,
+    "--id=design-conflict",
+    "--decision=current-design",
+    "--reason=review evidence conflicts with the design",
+    "--evidence=team/review/design-conflict.md",
+    "--operation-id=design-conflict",
+  ]);
+  assert.throws(() => runLegacyTeamCommand([
+    "team-start", taskId, "review the design", "--mode=discuss",
+  ], { environment, legacyBin: "/usr/bin/true" }), /HUMAN_DECISION_REQUIRED/);
+});
+
+test("verification cannot record a stale pass when a correction lands during the command", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Reject stale verification terminal");
+  record(environment, [
+    taskId,
+    "--id=design-v1",
+    "--authority-ref=user-message:design-v1",
+    "--statement=verify design v1",
+    "--operation-id=design-v1",
+  ]);
+
+  assert.throws(() => runVerification(parseVerifyArgs([
+    taskId,
+    "--",
+    PUBLIC_BIN,
+    "decision-record",
+    taskId,
+    "--id=design-v2",
+    "--authority-ref=user-message:design-v2",
+    "--statement=verify design v2",
+    "--supersedes=design-v1",
+    "--operation-id=design-v2",
+  ]), {
+    clock: fixedClock,
+    environment,
+    operationId: "verification-crossing-correction",
+    recordToken: "20260902T040000000000003",
+  }), /stale verification: command observed revision/);
+
+  const events = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId);
+  assert.equal(events.at(-1).kind, "decision.recorded");
+  assert.equal(events.at(-1).data.decision_id, "design-v2");
+  assert.equal(events.some((event) => (
+    event.kind === "verification.recorded"
+      && event.operation_id === "verification-crossing-correction"
+  )), false);
+});
+
+test("authoritative forward transitions fail closed on decision conflicts", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Gate every authoritative forward transition");
+  record(environment, [
+    taskId,
+    "--id=current-design",
+    "--authority-ref=user-message:current-design",
+    "--statement=use the current design",
+    "--operation-id=current-design",
+  ]);
+  conflict(environment, [
+    taskId,
+    "--id=blocking-conflict",
+    "--decision=current-design",
+    "--reason=review evidence requires a user decision",
+    "--evidence=team/review/blocking-conflict.md",
+    "--operation-id=blocking-conflict",
+  ]);
+  const before = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId).length;
+
+  for (const [kind, data] of [
+    ["authority.grant.issued", { brief_path: "/tmp/unused-brief" }],
+    ["authority.replanned", { brief_path: "/tmp/unused-brief" }],
+    ["slice.accepted", {}],
+    ["verification.recorded", { observed_revision: before }],
+    ["task.completion.closed", { outcome: "succeeded" }],
+  ]) {
+    assert.throws(() => mutateTaskRuntime(
+      paths,
+      taskId,
+      { kind, operationId: `blocked-${kind}`, data },
+      ({ currentProjection }) => ({ projection: currentProjection, result: {} }),
+      { clock: fixedClock, environment },
+    ), /HUMAN_DECISION_REQUIRED/);
+    assert.equal(readAuthoritativeEvents(taskEventFile(paths, taskId), taskId).length, before);
+  }
+});
+
+test("slice acceptance cannot cross a newer correction", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Reject stale Team acceptance");
+  record(environment, [
+    taskId,
+    "--id=design-v1",
+    "--authority-ref=user-message:design-v1",
+    "--statement=use design v1",
+    "--operation-id=design-v1",
+  ]);
+  bundle(environment, home, taskId);
+  runRecordStart(parseRecordStartArgs([
+    taskId,
+    "review design v1",
+    "--mode=discuss",
+    "--agents=1",
+    "--roles=reviewer",
+  ]), { clock: fixedClock, environment });
+  record(environment, [
+    taskId,
+    "--id=design-v2",
+    "--authority-ref=user-message:design-v2",
+    "--statement=use design v2",
+    "--supersedes=design-v1",
+    "--operation-id=design-v2",
+  ]);
+  const before = readAuthoritativeEvents(taskEventFile(paths, taskId), taskId).length;
+
+  assert.throws(() => mutateTaskRuntime(
+    paths,
+    taskId,
+    { kind: "slice.accepted", operationId: "stale-slice-acceptance", data: {} },
+    ({ currentProjection }) => ({
+      projection: currentProjection,
+      result: { accepted: { verification_records: [] } },
+    }),
+    { clock: fixedClock, environment },
+  ), /stale Team decision snapshot/);
+  assert.equal(readAuthoritativeEvents(taskEventFile(paths, taskId), taskId).length, before);
 });
 
 test("successful completion requires verification newer than the latest correction", (t) => {

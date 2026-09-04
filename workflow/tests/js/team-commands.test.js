@@ -47,6 +47,15 @@ const { reconcileTaskRuntime } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/reconcile.js",
 ));
+const {
+  parseDecisionConflictArgs,
+  parseDecisionRecordArgs,
+  recordDecision,
+  recordDecisionConflict,
+} = require(path.join(
+  WORKFLOW_ROOT,
+  "bin/lib/codex-workflow/artifact/decisions.js",
+));
 const { taskMutationLockFile } = require(path.join(
   WORKFLOW_ROOT,
   "bin/lib/codex-workflow/core/lock.js",
@@ -6300,6 +6309,73 @@ test("derived state injection cannot launder authority evidence or release field
   assert.ok(runGrant(parseGrantArgs([taskId]), { environment }).lines.includes(
     `scope_digest: ${grant.scope_digest}`,
   ));
+});
+
+test("decision conflicts block public authorize and replan without appending events", (t) => {
+  const first = temporaryWorkflow(t);
+  const firstTask = createFixtureTask(first.environment, "Decision-gated authorize");
+  const firstAdmission = executionBrief(first.paths, firstTask);
+  recordDecision(parseDecisionRecordArgs([
+    firstTask,
+    "--id=current-authority",
+    "--authority-ref=user-message:current-authority",
+    "--statement=authorize only the corrected scope",
+    "--operation-id=current-authority",
+  ]), { environment: first.environment });
+  recordDecisionConflict(parseDecisionConflictArgs([
+    firstTask,
+    "--id=authority-conflict",
+    "--decision=current-authority",
+    "--reason=the brief still contains superseded scope",
+    "--evidence=team/review/authority-conflict.md",
+    "--operation-id=authority-conflict",
+  ]), { environment: first.environment });
+  let before = authoritativeEvents(first.paths, firstTask).length;
+  assert.throws(() => issueExecutionGrant(
+    first.environment,
+    first.paths,
+    firstTask,
+    firstAdmission,
+  ), /HUMAN_DECISION_REQUIRED/);
+  assert.equal(authoritativeEvents(first.paths, firstTask).length, before);
+
+  const second = temporaryWorkflow(t);
+  const secondTask = createFixtureTask(second.environment, "Decision-gated replan");
+  const secondAdmission = executionBrief(second.paths, secondTask);
+  const oldGrant = issueExecutionGrant(
+    second.environment,
+    second.paths,
+    secondTask,
+    secondAdmission,
+  );
+  recordDecision(parseDecisionRecordArgs([
+    secondTask,
+    "--id=current-replan",
+    "--authority-ref=user-message:current-replan",
+    "--statement=replan only after resolving the correction",
+    "--operation-id=current-replan",
+  ]), { environment: second.environment });
+  recordDecisionConflict(parseDecisionConflictArgs([
+    secondTask,
+    "--id=replan-conflict",
+    "--decision=current-replan",
+    "--reason=the proposed replan conflicts with the correction",
+    "--evidence=team/review/replan-conflict.md",
+    "--operation-id=replan-conflict",
+  ]), { environment: second.environment });
+  const request = replanRequest(
+    second.environment,
+    second.paths,
+    secondTask,
+    secondAdmission,
+    oldGrant,
+  );
+  before = authoritativeEvents(second.paths, secondTask).length;
+  assert.throws(() => runReplan(request, {
+    cwd: secondAdmission.repo,
+    environment: second.environment,
+  }), /HUMAN_DECISION_REQUIRED/);
+  assert.equal(authoritativeEvents(second.paths, secondTask).length, before);
 });
 
 test("grant reducer is one-way and explicit replan is replay-safe but never revives superseded authority", (t) => {
