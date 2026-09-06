@@ -71,6 +71,15 @@ canonical writer and final synthesizer. `record-only` and
 evidence. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not
 auto-upgrade to Clarify fan-out or Team.
 
+Analyze, Office Hours, and Brainstorm first check whether persistence, recovery,
+audit, or handoff value justifies a task or artifact. When it does, reuse one
+current authoritative body and add only distinct records that the workflow
+actually needs; do not mirror the same material through `context.md`,
+`decision.md`, `spec.md`, and a repository bundle. A selected direction remains
+a hypothesis until its important premises have evidence. Compare only
+substantive alternatives, and ask worthwhile questions without waiting unless
+authority, high cost, or downstream validity requires it.
+
 Inside `$atlas-workflow:team`, Codex native collaboration is the default.
 Paseo is an explicit, local opt-in for a whole Team, one lane, or one dispatch;
 a review choice does not implicitly select Paseo for implementation. Backend
@@ -230,10 +239,11 @@ or consensus. Legacy artifacts retain their historical native/Paseo markers.
 Legacy entrypoint: use `$atlas-workflow:team-v1` only for compatibility, old
 flow debugging, or explicit user acceptance of the CLI-backed team behavior.
 Clear, low-risk, verifiable work may use `$atlas-workflow:task` directly even
-when it touches several files. Use `$atlas-workflow:intake` only for blocking
-intent/scope decisions and `$atlas-workflow:clarify` when a chosen direction
-still needs execution boundaries. A short request alone is not a reason to build
-a planning or artifact process.
+when it touches several files. Use `$atlas-workflow:intake` for an explicit
+interview/pressure-test or a material unresolved decision, and use
+`$atlas-workflow:clarify` when a chosen direction still needs execution
+boundaries. Request length, file count, a tiny label, or a single-file scope is
+not a general intake gate or a reason to build an artifact process.
 
 ## 输出语言
 
@@ -251,17 +261,25 @@ Use the upstream entries as separate layers, not one merged process:
 - `$atlas-workflow:product-design`: turn a chosen user-visible direction into an approved critical scenario and minimal flow-and-surface Design Handoff.
 - `$atlas-workflow:clarify`: lock a chosen direction into execution boundaries, acceptance criteria, and verification.
 
-They share the same task artifact directory:
+When persistence or handoff is useful, they may reuse the same task artifact
+directory, with each file serving a distinct current purpose:
 
 - `context.md`: facts, current state, source-of-truth files, assumptions, and risks
 - `decision.md`: product/design options, tradeoffs, recommendation, and rejected alternatives
 - `spec.md`: goal, non-goals, decision boundaries, acceptance criteria, and verification plan
 
+These are working records, not a required mirror set. Keep one current
+authoritative body for a decision and create a repository handoff only when its
+durable value is real.
+
 Product Design is the narrow layer between direction selection and execution
 clarification for user-visible features. It produces A/C/D/E artifacts covering
 one critical scenario, capability truth, surface responsibilities, necessary
 states, formal content/data behavior, three primary-flow accessibility baselines,
-and one conditional viewport rule. It is not a complete visual designer, Design
+and one conditional viewport rule. Its operable Baseline is chosen from the
+unresolved assumption, sufficient evidence, and observation that could change
+the design; a new page or lack of an approved page alone does not require real
+product coding. It is not a complete visual designer, Design
 System, WCAG certification, or responsive matrix. Route “critical scenario”,
 “user flow”, “screen flow”, “flow-and-surface”, and “Design Handoff” requests
 here when direction is already chosen; keep pure backend, migration, CLI, and
@@ -414,7 +432,7 @@ primitive used by the update command.
 - `skills/brainstorm/SKILL.md`: design exploration entry
 - `skills/analyze/SKILL.md`: read-only analysis entry
 - `skills/clarify/SKILL.md`: brownfield clarification entry
-- `skills/intake/SKILL.md`: grilling-style intake and plan stress-test entry
+- `skills/intake/SKILL.md`: targeted interview/pressure-test and plan stress-test entry
 - `skills/team/SKILL.md`: Codex-native Team entry with explicit local Paseo selection and operational Codex fallback
 - `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry

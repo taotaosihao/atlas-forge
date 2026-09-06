@@ -241,6 +241,121 @@
           "偷偷换成不合路由的通用代理、虚构讨论或声称独立多角色审查已经完成。"
         ]
       }
+    },
+    {
+      "case_id": "selected_direction_unproven_premise",
+      "scenario_input": {
+        "request": "确认弹窗方案已经选定，直接补齐实施边界。",
+        "context": [
+          "现有错误记录同时显示对象难以辨认，尚无证据证明确认弹窗是主要原因。",
+          "页面、对象标识和错误入口都可以先从当前代码与数据中只读核查。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "把已选方向作为待检验假设，先查支持或反驳关键前提，并记录什么观察会改变推荐。",
+          "继续不依赖该结论的事实核查；只有越权、高代价误判或后续成果会失效时才等待用户。"
+        ],
+        "should_not": [
+          "把方向已选当成前提已证，直接扩写实施方案或重新启动完整访谈。"
+        ]
+      }
+    },
+    {
+      "case_id": "valuable_nonblocking_question",
+      "scenario_input": {
+        "request": "梳理这个设置页的执行边界。",
+        "context": [
+          "页面偶尔查看还是每班连续操作会影响信息密度，但当前组件、入口和数据读取路径可以先查明。",
+          "这个问题值得问，却不涉及当前权限、数据安全或不可逆的高成本选择。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "提出或记录这个会改变推荐的问题，同时继续独立检查组件和验收路径。",
+          "明确它暂时不阻断后续低成本事实核查。"
+        ],
+        "should_not": [
+          "因为问题非阻断而完全忽略，或因此强制完整 grilling、停下所有独立工作。"
+        ]
+      }
+    },
+    {
+      "case_id": "low_fidelity_enough_no_real_baseline",
+      "scenario_input": {
+        "request": "为已选的新配置页整理字段顺序和保存反馈。",
+        "context": [
+          "这是成熟表单模式的局部字段调整，关键问题可由真实样例数据、静态布局和文字演练判断。",
+          "用户没有要求操作真实页面，焦点、连续操作和恢复行为也不是当前待验证问题。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "选择足以回答字段层级问题的文字/静态证据，并说明什么观察会改变选择。",
+          "不因新页面本身要求真实产品编码、启动运行或候选提交。"
+        ],
+        "should_not": [
+          "把新页面或缺少既有页面单独当成真实 Baseline 触发条件，或把静态材料说成产品已经可用。"
+        ]
+      }
+    },
+    {
+      "case_id": "real_baseline_needed",
+      "scenario_input": {
+        "request": "请让我操作真实页面，验证键盘焦点和失败恢复。",
+        "context": [
+          "结论依赖现有应用的真实焦点、连续操作和恢复行为，真实产品入口与本地启动方式已经明确。",
+          "本次授权只允许单 writer 制作 side-effect-free candidate，使用隔离 synthetic 数据，并要求先冻结候选再操作。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "保留 exact product path、local runtime、candidate commit、real entrypoint 和 synthetic isolation 保护，先操作候选再记录反馈。",
+          "根据操作观察区分页面调整、设计语义变化和实现偏差，再按现有 Gate 绑定收敛。"
+        ],
+        "should_not": [
+          "把 Baseline 操作或通过的测试说成真实业务功能可用，连接未授权写副作用，或用 detached screenshot/prototype 替代真实入口。"
+        ]
+      }
+    },
+    {
+      "case_id": "explicit_real_page_request_even_static_enough",
+      "scenario_input": {
+        "request": "请让我在真实页面上操作一次，确认这个配置页的字段顺序和保存反馈。",
+        "context": [
+          "字段层级可以由真实样例数据、静态布局和文字演练判断；当前没有焦点、连续操作或失败恢复问题。",
+          "用户明确要求可操作的真实页面/应用。该行为夹具只保存待观察路径，仍未运行模型回放。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "把用户明确要求真实可操作页面/应用作为独立 Baseline 触发，即使低保真材料在技术上足够；仍单独检查 exact product path、local runtime 和 candidate commit 等实施权限。",
+          "把真实页面操作与运行时行为结论分开；没有相应实施授权时保持受限，不擅自进入产品实施。"
+        ],
+        "should_not": [
+          "因为静态材料足够或没有 focus/recovery 问题而跳过真实 Baseline，或把用户的页面操作要求推断成代码/提交授权。"
+        ]
+      }
+    },
+    {
+      "case_id": "combined_gate_draft_without_gate1",
+      "scenario_input": {
+        "request": "把完整当前 C/D 一起呈现给用户审阅；Gate 1 尚未批准，继续补齐 D。",
+        "context": [
+          "当前 C/D 语义已经完整并准备一起呈现；批准 authority、identity、permission range 和 business outcome 已明确。",
+          "没有 Gate 1 拒绝、未知业务/权限安全规则、已知冲突、blocker 或必须先解决的高代价用户决定；C/D 必须继续保持 draft。",
+          "该行为夹具只保存待观察路径，仍未运行模型回放；批准前不得写 approval_ref、approved_* 或进入产品实施。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "仅为把完整当前 C/D 一起呈现给用户审阅而继续起草 D，并让 C/D 都保持 draft。",
+          "等当前明确回复后，才可把同一回复分别存为 C 与 D 的两个 approval binding；不能补造 identity、permission 或实施授权。"
+        ],
+        "should_not": [
+          "因为 Gate 1 尚未批准就无条件开始 D 或产品实施，或在批准前写 approved 绑定；遇到拒绝、未知、冲突、blocker 或高代价决定仍继续。"
+        ]
+      }
     }
   ]
 }

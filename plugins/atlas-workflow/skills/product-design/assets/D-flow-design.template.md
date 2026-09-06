@@ -30,8 +30,12 @@ action, exit, information hierarchy, and at most one ASCII floorplan.
 - Target form factor / primary viewport:
 - Minimum adaptation, overflow, or primary-action-position rule (or
   `desktop-only` / `not applicable` with reason):
-- Baseline or reused reference, with rationale:
+- Evidence level (text rehearsal, static layout, interaction prototype, real
+  Baseline, or reused reference), with rationale:
+- Unresolved assumption, evidence that tests it, and observation that would
+  change the design choice:
 - Final candidate commit and actual entrypoint (when Baseline applies):
+- Allowed engineering adjustments after handoff:
 
 ## 4. Necessary states and recovery
 
@@ -51,8 +55,12 @@ message strategies, and visible data-profile labeling/isolation.
 
 ## 7. Acceptance and open questions
 
-Record 3–7 visible acceptance steps, refresh/re-entry, failure recovery, and any
-flow-changing blocker. Gate 2 requires no blocking open question.
+展示建议：列出 3–7 个代表性可见步骤，帮助读者快速理解流程。完整验收
+义务仍须覆盖所有适用业务旅程、前置条件、refresh/re-entry、失败恢复、
+最终业务结果和 readback/export；步骤较多时用分组或引用表达，不能为满足
+3–7 的展示建议而截断义务。Gate 2 requires no blocking open question.
 
 - Blocking open questions: none
+- Applicable complete journey / durable result / readback:
+- Important unresolved items:
 - Operated steps and user confirmation reference (when Baseline applies):

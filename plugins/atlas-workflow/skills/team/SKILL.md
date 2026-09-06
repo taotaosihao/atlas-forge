@@ -335,9 +335,13 @@ exact route closed; it does not fall back to Terra, Luna, or another low-tier
 route for planning or contract review.
 
 Use the formal `atlas-sdd-phase-reviewer` for the final review of a plan or
-implementation contract. The routine `atlas-sdd-reviewer` remains available for
-an additional independent high-tier read-only review, but its Terra route below
-is an implementation-slice route only.
+implementation contract. Under the default planning-review matrix this is the
+GPT-6 Astra medium route and it keeps the existing `REVIEW_VERDICT_JSON`
+machine contract. The routine `atlas-sdd-reviewer` remains available for an
+additional independent high-tier read-only review, but its Terra route below
+is an implementation-slice route only. Ordinary engineering opinions belong
+outside formal admission; missing review material cannot silently downgrade a
+formal review to a prose response.
 
 ### Implementation-Stage Saving Mode
 
@@ -394,15 +398,17 @@ the frontier planning-review matrix unless an exact per-lane override exists.
 - If one candidate fails before producing useful evidence because its provider, model, auth, catalog, schema, quota, or tool loop is unavailable, disclose the failed layer. A single-candidate lane may retry the same packet once on the other currently available candidate; a requested dual-perspective lane reports the lost perspective rather than pretending fallback preserved independent cross-validation. Useful but conflicting output is not an availability failure and must be synthesized as disagreement.
 - If neither exact route is available, continue main-only and disclose the missing perspective. Never spawn a generic or inherited child as a substitute.
 
-Use the Sol phase-reviewer by default for formal plan or contract review, and
-also for a completed phase/final integration result where extra judgment is
-valuable, when explicitly requested, or after a non-mechanical implementation
-review/verification failure whose cause remains unclear. During implementation,
-formatting, import, typo, port, network, credential, and other mechanical or
-environmental failures stay on the ordinary reviewer/verifier path. Browser
+Use the Astra phase-reviewer by default for formal plan or contract review, and
+use the Sol phase-reviewer for a completed phase/final integration result where
+extra judgment is valuable, when explicitly requested, or after a
+non-mechanical implementation review/verification failure whose cause remains
+unclear. During implementation, formatting, import, typo, port, network,
+credential, and other mechanical or environmental failures stay on the
+ordinary reviewer/verifier path selected by the implementation mode. Browser
 evidence reaches the phase-reviewer only when final or phase acceptance benefits
 from extra judgment; routine implementation UI smoke and regression checks stay
-with the reviewer/verifier selected by the implementation mode.
+with the browser verifier or reviewer/verifier selected by the implementation
+mode and its configured effort.
 
 ### Explicit Quality Mode For Implementation
 
@@ -442,10 +448,10 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | `routine-implementation` | `default-luna-or-explicit-available-deepseek-single-writer` | `implicit-quality-model-or-default-dual-writer` |
 | `implementation-fallback` | `same-authority-takeover-after-writer-quiescence` | `overlapping-or-uncertain-writer-takeover` |
 | `plan-or-contract-review` | `default-astra-medium-formal-reviewer-or-explicit-exact-override` | `implicit-terra-luna-or-saving-route` |
-| `implementation-review-verify` | `default-terra-high-reviewer-or-verifier` | `saving-route-before-execute-authority` |
+| `implementation-review-verify` | `default-terra-reviewer-max-or-verifier-high` | `saving-route-before-execute-authority` |
 | `hard-to-reverse-direction` | `default-astra-high-planner` | `implicit-low-tier-planner` |
 | `completed-phase-extra-judgment` | `default-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
-| `implementation-browser-heavy` | `default-luna-high-browser-verifier` | `low-tier-browser-route-before-execute-authority` |
+| `implementation-browser-heavy` | `default-luna-xhigh-browser-verifier` | `low-tier-browser-route-before-execute-authority` |
 | `implementation-exploration-single` | `luna-or-deepseek-by-live-availability-and-explicit-route` | `default-dual-fanout-or-pre-execute-saving` |
 | `implementation-exploration-cross-check` | `same-input-dual-dispatch-when-risk-reduced-or-explicit` | `different-authority-or-implicit-fanout` |
 | `quality-mode-explicit` | `all-sol-with-role-specific-reasoning` | `implicit-or-automatic-quality` |
@@ -541,6 +547,11 @@ Generate canonical phase status with `codex-workflow project-phase-report <task-
 ## Deliberative Team Review
 
 For a substantive Team review, first define the actual review scope: the working tree, commit range, pull request, phase, or named files; the applicable goal and authoritative contract; and the evidence or checks already available.
+
+Formal plan or contract review keeps the existing machine consumer: the formal
+reviewer must receive the required materials and emit `REVIEW_VERDICT_JSON`.
+Ordinary review opinions may be supplied outside formal admission, but missing
+materials never authorize an automatic format downgrade.
 
 - Recommend complementary review perspectives and agent count from the actual task. There is no required council shape. Two or three perspectives are often useful, but this is guidance rather than a staffing gate. When the risk justifies it, include a perspective that owns the strongest evidence-backed counterargument or tradeoff instead of duplicating another general reviewer.
 - Let each selected reviewer form an independent first-round position before seeing the other reviewers' conclusions. Findings should state the affected path and line when applicable, the concrete evidence, impact, and recommendation; uncertainty belongs in an explicit evidence gap rather than a clean verdict.

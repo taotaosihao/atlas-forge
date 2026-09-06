@@ -21,29 +21,57 @@ For a corrected or evidence-challenged decision, first apply the shared
 
 Follow this loop:
 
-1. Run `~/.codex/workflow/bin/codex-workflow list`.
-2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
-3. Read the task file and the current artifact inputs before exploring:
+1. Decide whether persistence, recovery, audit, or handoff value justifies a
+   workflow record. A short read-only synthesis can stay in the current
+   response; do not create a task or artifact just because this entrypoint was
+   selected.
+2. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow list`,
+   reuse a relevant `doing` task, and create/start one only when no relevant
+   task exists. Keep one current authoritative analysis body for the result.
+3. Read only the current authoritative inputs needed before exploring. When a
+   workflow record is used, inspect its existing task and relevant artifacts:
    - `~/.codex/workflow/bin/codex-workflow show <task-id>`
    - `workflow/artifacts/<task-id>/context.md`
    - `workflow/artifacts/<task-id>/spec.md`
    - `workflow/artifacts/<task-id>/analysis.md`
+   Do not create parallel `context`, `spec`, decision, or repository-bundle
+   copies merely to mirror the same analysis.
 4. Keep this step read-only.
-5. Gather evidence from the real repo.
+5. Treat the selected direction as a current hypothesis, not proof of its
+   supporting premises. Gather existing facts that could change the
+   recommendation before settling it:
    - commands
    - file paths
    - call sites
    - config values
    - actual outputs
-6. Write `workflow/artifacts/<task-id>/analysis.md` with:
+6. When a durable record is useful, write or update the one current
+   `workflow/artifacts/<task-id>/analysis.md` with:
    - `## 证据`
    - `## 推断`
    - `## 未知项`
    - `## 综合排序`
+   Record the key assumption, the evidence that tests it, and what observation
+   would change the recommendation. Do not mirror the same conclusion into a
+   second workflow or repository document.
 7. Keep inference and unknown separate.
-8. If the boundary is still unclear, switch to `$atlas-workflow:clarify`.
-9. If discussion or staffing is the next step, switch to `$atlas-workflow:team`. Team uses Codex native collaboration by default. Use Paseo only when the user or operator explicitly selects it for the Team, lane, or dispatch; an operational Paseo failure follows the recorded Codex fallback policy without expanding scope or authority.
-10. Before claiming the analysis artifact is ready for clarification, team discussion, handoff, or execution planning, run:
+8. Route by the actual gap: switch to `$atlas-workflow:office-hours` when evidence challenges product value, the target user, or investment scope; switch to `$atlas-workflow:brainstorm` when the solution shape or choice is unsettled; and switch to `$atlas-workflow:clarify` when the direction still holds but execution boundaries remain unclear. When new evidence does not challenge the existing direction, keep it and do not redo exploration.
+9. Use `$atlas-workflow:team` only when a remaining gap explicitly requires bounded coordination and passes Team's admission rules. Ordinary discussion or a staffing consideration does not switch layers, create a formal Team run, or claim formal machine review. Team uses Codex native collaboration by default. Use Paseo only when the user or operator explicitly selects it for the Team, lane, or dispatch; an operational Paseo failure follows the recorded Codex fallback policy without expanding scope or authority.
+10. When a durable record is used, before calling the analysis material available as input for further
+    discussion or planning for a specific next step—clarification, an explicitly
+    admitted Team discussion, a real handoff, or execution planning—run:
     - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require analysis`
-11. If the artifact is intentionally partial or exploratory, do not claim execution readiness; report the remaining unknowns instead.
-12. In the final reply, include the task id, `analysis.md` path, evidence sources reviewed, readiness result if run, and remaining unknowns.
+    `ready` checks only that the named material is present as input for further
+    discussion or planning; it does not prove semantic sufficiency,
+    implementation authority, or execution readiness. If it is handed directly
+    to an implementer, cite the current authoritative scope's required behavior,
+    permissions, and applicable acceptance; when any are missing, name the
+    concrete gap instead of claiming implementation-ready.
+11. If a real handoff is requested, point to the current Goal, confirmed
+    decisions, and remaining gaps; label recommendations separately from
+    approvals and do not copy the scope or impose a fixed checklist. If the
+    artifact is intentionally partial or exploratory, do not claim execution
+    readiness; report the remaining unknowns instead.
+12. In the final reply, include the task id and `analysis.md` path only when a
+    durable record was used, then report evidence sources reviewed, readiness
+    result if run, and remaining unknowns.

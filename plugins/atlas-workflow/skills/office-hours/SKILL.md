@@ -24,13 +24,24 @@ This is the upstream product judgment layer:
 - Use `$atlas-workflow:office-hours` when the user is still deciding whether an idea is worth doing, who it serves, what problem it solves, or how broad the scope should be.
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring and the main question is what shape the solution should take.
 - Use `$atlas-workflow:product-design` when the direction is chosen for a user-visible feature but its primary scenario or user-operable flow is not approved.
-- Use `$atlas-workflow:clarify` when a current Design Handoff exists and only execution-ready boundaries are missing.
+- Use `$atlas-workflow:clarify` when the direction is settled and only execution boundaries are missing; pure backend, CLI, or no-interaction work needs no Design Handoff.
+
+Treat a chosen direction as a hypothesis with supporting assumptions still to
+check. Look up facts that could change the product recommendation before
+settling it. A question can be worth asking without stopping independent work;
+wait only when proceeding would overreach authority, make a high-cost choice on
+weak evidence, or invalidate the next result.
 
 Follow this loop:
 
-1. Run `~/.codex/workflow/bin/codex-workflow list`.
-2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
-3. For nontrivial idea intake, record the active route:
+1. Decide whether persistence, recovery, audit, or handoff value justifies a
+   workflow record. Keep a clear, self-contained judgment in the current
+   response when it does not.
+2. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow list`,
+   reuse a relevant `doing` task, and create/start one only when no relevant
+   task exists. Keep one current authoritative body for the product judgment;
+   do not mirror it into a repository bundle merely for handoff.
+3. For a durable nontrivial judgment, record the active route:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent office-hours --risk <low|medium|high> --decision use --reason "<why product judgment is needed>"`
 4. Recover local context first:
    - user brief and current conversation
@@ -41,7 +52,11 @@ Follow this loop:
    - problem or job to be done
    - proposed wedge or differentiator
    - what would make this worth building
-6. Ask forcing product questions one at a time. Prefer ordinary dialogue; use structured choice tools only when available and helpful. Do not block the flow when `AskUserQuestion` or `request_user_input` is unavailable.
+6. Ask product questions one at a time when the answer could change the
+   recommendation, and say whether the answer must block. Prefer ordinary
+   dialogue; use structured choice tools only when available and helpful. Do
+   not block independent fact-finding when `AskUserQuestion` or
+   `request_user_input` is unavailable.
 7. Challenge weak assumptions directly:
    - unclear user or buyer
    - vague pain
@@ -49,13 +64,16 @@ Follow this loop:
    - scope too large for one spec
    - no visible reason this must exist now
 8. If the idea is too broad, decompose it into smaller projects and choose the first slice before continuing.
-9. Write `workflow/artifacts/<task-id>/context.md` when enough facts are known:
+9. When a durable record is useful, write or update the current authoritative
+   body with:
    - current state
    - target user and use case
    - confirmed facts
    - assumptions
    - risks and unknowns
-10. Write or update `workflow/artifacts/<task-id>/decision.md`:
+10. Write or update a separate `workflow/artifacts/<task-id>/decision.md` only
+   when the workflow needs a distinct decision record; otherwise keep the
+   decision in the one current body. Include:
    - product thesis
    - why now
    - alternatives considered
@@ -65,16 +83,25 @@ Follow this loop:
 12. If the idea should proceed, recommend the next Atlas entry:
    - `$atlas-workflow:brainstorm` for solution shape and design options
    - `$atlas-workflow:product-design` when the direction is chosen but the user-visible scenario or flow is not approved
-   - `$atlas-workflow:clarify` only when a current Design Handoff already defines the user-visible scenario and flow and execution boundaries remain
-   - `$atlas-workflow:task` for a very small, already-scoped fix
-13. Run `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,decision` only if you are claiming the product decision artifacts are ready for the next execution-planning layer. For a pure early checkpoint, state that readiness was not claimed.
-14. In the final reply, include the task id, artifact paths, the strongest product judgment, readiness result if run, open questions, and the recommended next Atlas skill.
+   - `$atlas-workflow:clarify` when execution boundaries remain and no user-visible scenario or flow decision is missing
+   - `$atlas-workflow:task` for an already-scoped implementation
+13. When a durable workflow record is used for handoff, run
+    `~/.codex/workflow/bin/codex-workflow ready <task-id> --require <used-supported-kinds>`
+    with only its intended `context`, `spec`, `analysis`, or `decision` artifacts.
+    If the one authoritative body is elsewhere, use
+    `ready <task-id> --skip "<reason naming that body>"`; do not create copies
+    for the checker. Readiness does not prove semantic sufficiency or authority.
+14. In the final reply, include task and artifact paths only when a durable
+    record was used, then report the strongest product judgment, readiness
+    result if run, open questions, and the recommended next Atlas skill.
 
 Hard rules:
 
 - Do not turn every engineering task into office-hours. Use it only when product direction, user value, or scope is genuinely unsettled.
 - Do not write implementation code or modify project source during office-hours.
 - Keep confirmed facts separate from assumptions.
-- Do not run `route-decision` for a tiny precise fix that should have gone straight to `$atlas-workflow:task`.
+- Do not run `route-decision` or create a record merely because a request is
+  short, tiny, or spans a particular number of files. A clear implementation
+  request should go directly to `$atlas-workflow:task` or `$atlas-workflow:clarify`.
 - Keep artifacts in `workflow/artifacts/<task-id>/` unless the user explicitly asks for repo docs.
 - Keep pure backend, migration, CLI, and tiny precise changes out of Product Design; route them to Task or Clarify.

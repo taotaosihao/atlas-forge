@@ -45,6 +45,32 @@ test("unchanged approved A/C/D/E can be read repeatedly without rewriting approv
   assert.deepEqual(input, before);
 });
 
+test("one current user-message can bind the presented C and D separately", t => {
+  const input = fixture(t);
+  const combinedRef = "user-message:combined-cd-approval";
+  let combined = change(input, "scenario", text => text.replace(
+    'approval_ref: "user-message:scenario-approval"',
+    `approval_ref: "${combinedRef}"`,
+  ));
+  combined = change(combined, "flow", text => text.replace(
+    'approval_ref: "user-message:release"',
+    `approval_ref: "${combinedRef}"`,
+  ));
+  combined = change(combined, "handoff", text => text
+    .replace('scenario_approval_ref: "user-message:scenario-approval"', `scenario_approval_ref: "${combinedRef}"`)
+    .replace('flow_approval_ref: "user-message:release"', `flow_approval_ref: "${combinedRef}"`));
+
+  const result = validateDesignHandoffArtifacts(combined);
+  assert.equal(result.status, "approved");
+  assert.equal(result.scenario_approval_ref, combinedRef);
+  assert.equal(result.flow_approval_ref, combinedRef);
+  assert.match(combined.artifacts.flow.text, new RegExp(`approved_context_identity: "${result.context_identity}"`));
+  assert.match(combined.artifacts.flow.text, new RegExp(`approved_scenario_identity: "${result.scenario_identity}"`));
+  assert.match(combined.artifacts.flow.text, new RegExp(`approved_flow_identity: "${result.flow_identity}"`));
+  assert.match(combined.artifacts.handoff.text, new RegExp(`scenario_approval_ref: "${combinedRef}"`));
+  assert.match(combined.artifacts.handoff.text, new RegExp(`flow_approval_ref: "${combinedRef}"`));
+});
+
 test("identity-neutral whitespace normalization preserves existing approval", t => {
   const input = fixture(t);
   const normalized = change(input, "flow", text => text

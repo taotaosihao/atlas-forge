@@ -102,22 +102,46 @@ baseline = skill.split("### Route an operable Baseline only when needed", 1)[1].
 baseline_flat = " ".join(baseline.split())
 for phrase in (
     "Reuse current A/C/D/E from the same task", "existing pages, UI components and code, optional", "direct reuse, a small adaptation, composition of existing",
-    "A Baseline is required when any one of these is true", "new primary journey or substantive surface", "Information hierarchy, state expression, or error recovery",
-    "No approved real page can be reused directly", "text, sketches, or an AI candidate cannot express", "Skip it only when all three are true",
+    "An operable real Baseline is required when any one of these is true", "actual platform or application behavior", "explicitly asks to operate a real page or application",
+    "independent trigger even when text, static layout, or an isolated prototype could answer", "separately verify exact product-path, local-runtime, and local-candidate-commit authority",
+    "existing real entrypoint's focus", "Applicable acceptance requires a real interaction observation", "new page, a lack of an already approved page, or the fact that a direction was chosen does not",
+    "least costly evidence", "Skip it when the selected lower-fidelity evidence or stable reference answers",
     "one bounded, single-writer direct Task", "sole pre-E implementation exception", "final page shells, components, and source files",
-    "existing mock/fixture/adapter, existing", "page-specific adjustment, design-semantics", "D sections 3 and 7", "Only then request the existing",
+    "existing mock/fixture/adapter, existing", "synthetic`, `authorized_test`, and `mixed`", "page-specific adjustment, design-semantics", "D sections 3 and 7", "Only then request the existing",
 ):
     check(phrase in skill_flat, f"Product Design UX contract phrase missing: {phrase}")
 for phrase in ("When a Baseline is required, keep D draft", "edits to the exact product paths, starting the local runtime, and creating a local candidate commit", "ask once for that bounded implementation authority and stop", "Web requires a real HTTP server", "non-Web requires the real application/window", "Do not connect real write side effects", "first freeze an isolatable exact candidate commit", "then start the actual entrypoint from that commit"):
     check(phrase in baseline_flat, f"bounded Baseline rule missing: {phrase}")
 check(baseline_flat.index("first freeze an isolatable exact candidate commit") < baseline_flat.index("then start the actual entrypoint from that commit"), "candidate commit must precede entrypoint start")
-triggers = baseline.split("A Baseline is required when any one of these is true:", 1)[1].split("Skip it only when", 1)[0]
+check("explicitly asks to operate a real page or application, and the operation is needed" not in baseline_flat, "real-page request must be an independent Baseline trigger")
+triggers = baseline.split("An operable real Baseline is required when any one of these is true:", 1)[1].split("A new page,", 1)[0]
 check(len([line for line in triggers.splitlines() if line[:1].isdigit()]) == 4, "Baseline must have exactly four trigger items")
-skip = "Skip it only when all three are true: a stable reference exists, the adaptation is local and known, and the critical journey, hierarchy, primary action, and recovery remain unchanged."
+skip = "Skip it when the selected lower-fidelity evidence or stable reference answers the recorded question, the adaptation is local and known, and the critical journey, hierarchy, primary action, and recovery remain unchanged."
 check(skip in baseline_flat, "Baseline skip must preserve exactly three simultaneous clauses")
+
+c_section = skill.split("## Build A and C", 1)[1].split("## Build D and obtain Gate 2", 1)[0]
+d_section = skill.split("## Build D and obtain Gate 2", 1)[1].split("### Route an operable Baseline only when needed", 1)[0]
+combined_phrases = (
+    "constrained combined-gate drafting path", "complete current C and D are presented together",
+    "no rejection, known conflict, blocker, or high-cost user decision", "both C and D remain `draft`",
+    "no C/D `approval_ref`", "no D `approved_*` binding", "enter no product implementation",
+    "If a real Baseline needs code, use only the explicitly authorized D-draft Baseline exception",
+    "One current explicit reply may", "two separate approval bindings", "never manufacture missing identity or permission",
+)
+c_flat = " ".join(c_section.split()).lower()
+for phrase in combined_phrases:
+    check(phrase.lower() in c_flat, f"C combined-gate rule missing: {phrase}")
+for label, text, reference in (
+    ("D", d_section, "[Build A and C](#build-a-and-c)"),
+    ("adapter", adapter, "[Build A and C in `SKILL.md`](../SKILL.md#build-a-and-c)"),
+):
+    check(reference in text, f"{label} must reference the shared combined-gate conditions")
+for phrase in ("unknown business or permission/safety", "known conflict", "blocker"):
+    check(phrase.lower() in c_flat, f"C combined-gate stop condition missing: {phrase}")
 
 for phrase in (
     "authoritative only for artifact structure, identity, approval binding, invalidation, and handoff validation", "`SKILL.md` is authoritative for operational routing, including Baseline trigger/skip/sequence",
+    "One current explicit reply may cover the presented C and D", "two separate approval bindings for C and D",
     "Mocks may replace data and responses but never create capability", "only implementation allowed before valid E",
     "Every other implementation route still requires valid E", "Design approval itself grants no implementation or commit authority",
     "At convergence, apply the final design decisions once",
@@ -126,8 +150,8 @@ for phrase in (
 check("A Baseline is required when" not in adapter_flat, "adapter duplicates the Baseline decision tree")
 
 for phrase in (
-    "authoritative path or explicitly approved feasible bounded side-effect plan", "Baseline or reused reference, with rationale",
-    "Final candidate commit and actual entrypoint", "Operated steps and user confirmation reference",
+    "authoritative path or explicitly approved feasible bounded side-effect plan", "Evidence level (text rehearsal, static layout, interaction prototype, real Baseline, or reused reference)",
+    "Final candidate commit and actual entrypoint", "Allowed engineering adjustments after handoff", "展示建议", "完整验收", "readback/export", "Operated steps and user confirmation reference",
 ):
     check(phrase in d_flat, f"D Baseline binding missing: {phrase}")
 parts = d_template.split("---\n", 2)
@@ -229,7 +253,7 @@ known_a = {
 }
 check(canonical_a(known_a) == "b3dea6a789b454a00de8f66fd42e13bccc0dac2ae37d5d2d87922058a91f11c4", "A known-answer identity mismatch")
 check(body_identity(c_body) == "1fa087ccbfb1e673889f2a0f9747ac6e398aaead23bc84640507a02450b2d15f", "C normalization known-answer mismatch")
-check(body_identity(d_body) == "5e10b8c1f287fa12e869f2a49b9e4bebda0ee72430b28ab83b864a710cf9fdf1", "D normalization known-answer mismatch")
+check(body_identity(d_body) == "89093413afbcb79e301970d56f5d5e2ffd21d78046edfa1a4f2b4dd57c412bf6", "D normalization known-answer mismatch")
 
 def read_artifacts(root):
     result = {}

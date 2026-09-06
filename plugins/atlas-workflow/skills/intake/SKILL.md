@@ -3,7 +3,9 @@ name: intake
 description: Use the Atlas intake/grilling flow to stress-test a plan or design before building, especially when the user asks to grill, pressure-test, stress-test, interview, or resolve ambiguous intent, scope, stakeholders, constraints, success criteria, or decision boundaries.
 ---
 
-Use the Atlas intake flow in grilling mode for this request.
+Use the Atlas intake flow for an explicit interview or pressure-test, or when a
+material unresolved decision makes that work useful. A clear authorized
+implementation request enters its execution flow directly.
 
 ## Host Note
 
@@ -19,7 +21,8 @@ Codex invokes this flow as `$atlas-workflow:intake`; Claude Code invokes it as `
 For a corrected answer or rejected branch, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
 
-This is the relentless interview layer before execution:
+This is the targeted pressure-test layer when the user explicitly asks to grill,
+interview, or stress-test a plan or design:
 
 - Use `$atlas-workflow:office-hours` when the question is whether an idea is worth doing.
 - Use `$atlas-workflow:brainstorm` when the idea is worth exploring but the solution shape is unclear.
@@ -28,9 +31,10 @@ This is the relentless interview layer before execution:
 
 ## Grilling Protocol
 
-Interview the user relentlessly about the plan until there is a shared
-understanding. Walk the design tree branch by branch, resolving dependencies
-between decisions one at a time.
+Interview the user about the material decision until there is a shared
+understanding. Walk the relevant design tree branch by branch, resolving
+dependencies between decisions one at a time. Do not turn this explicit mode
+into a default admission gate for every request.
 
 Rules:
 
@@ -39,46 +43,53 @@ Rules:
 - For each question, provide the recommended answer and a short rationale.
 - If a fact can be found by exploring the codebase, look it up instead of asking
   the user. Summarize the evidence with file paths or command output.
-- Treat decisions as the user's. Put each decision to the user and wait for
-  confirmation or correction.
+- Treat decisions as the user's. In explicit grilling, put each new or
+  evidence-challenged decision to the user and wait for confirmation or
+  correction; reuse unchanged approved decisions without reopening them. After
+  the questions, ask once for confirmation of the resulting shared
+  understanding when grilling introduced a new decision or an unresolved gap
+  remains; when there is no new decision or gap, do not ask for an extra
+  confirmation. The grilling request and these confirmations do not grant
+  implementation authority; check that authorization separately.
 - Probe assumptions, target users, workflows, non-goals, data and permission
   boundaries, deployment or rollout constraints, validation, failure modes,
   ownership, and stop conditions when they matter to the plan.
-- Maintain a visible decision tree in the working artifact: answered decisions,
+- Maintain a visible decision tree in the dialogue or selected working artifact: answered decisions,
   open decisions, dependencies, recommended defaults, and rejected paths.
 - Do not enact the plan, edit implementation code, or hand off execution until
-  the user explicitly confirms that shared understanding has been reached.
+  the required explicit-grilling confirmations are complete and implementation
+  authority is separately present.
 - Treat `intake.md` as workflow working notes by default. Do not mirror the full
   interview transcript or decision tree into repo docs; when intake produces a
   durable handoff, write only the confirmed summary, open blockers, and next
   layer recommendation.
 
-## Short Request Intake Gate
+## Decide whether intake is useful
 
-Treat one-line or low-information requests as intake candidates by default when
-they have multiple plausible meanings, lack a clear acceptance path, or omit
-important user, data, permission, deployment, workflow, or ownership boundaries.
-Ask the next single blocking question, include the recommended answer, and wait
-for feedback before continuing. Include critical feedback about the main
-ambiguity, risk, simpler alternative, or stop condition. Do not edit code during
+Request length, file count, a `tiny` label, or a single-file scope does not decide
+whether intake is needed. Use it when the user explicitly requests an interview
+or pressure-test, or when available facts leave a material choice about intent,
+scope, data, permission, safety, ownership, or acceptance.
+
+A question can be worth asking without blocking the rest of the work. Ask and
+record information that could change the recommendation; wait only when
+proceeding would overreach authority, make a high-cost choice on weak evidence,
+or make later work stale. A clear implementation request with a known outcome,
+authority, path, and validation can go directly to Task or Clarify regardless of
+file count. Do not require an interview, a decision tree, or a new document
+before coding merely because a request is non-tiny. Do not edit code during
 intake.
-
-Direct execution is allowed only through the tiny escape hatch: the affected
-surface, expected behavior, validation path, and risk are all clear; the change
-does not touch data, permissions, deployment, migration, product strategy, or
-architecture boundaries; and the scope is normally a single file or similarly
-small. If tiny classification is uncertain, ask one short question first.
-
-Non-tiny requests must produce auditable documentation before coding. Existing
-external issues, PRDs, or design docs may count as equivalent evidence only when
-the current artifact cites them and fills missing acceptance, verification, risk,
-and stop-condition gaps.
 
 Follow this loop:
 
-1. Run `~/.codex/workflow/bin/codex-workflow list`.
-2. Reuse a relevant `doing` task if one already exists. Otherwise create/start one.
-3. Record routing evidence:
+1. Decide whether persistence, recovery, audit, or handoff value justifies a
+   working record. Keep an explicit pressure-test in the current dialogue when
+   it does not.
+2. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow list`,
+   reuse a relevant `doing` task, and create/start one only when no relevant
+   task exists. Keep `intake.md` as the one current workflow working body; it is
+   workflow working notes by default and is not a transcript mirror.
+3. When a durable record is used, record routing evidence:
    - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent intake --risk <low|medium|high> --decision use --reason "<why the plan needs grilling or scope must be resolved>"`
 4. Read existing `workflow/artifacts/<task-id>/context.md`, `decision.md`, `spec.md`, or `analysis.md` before writing intake notes.
 5. Identify facts to look up and decisions to grill:
@@ -91,11 +102,14 @@ Follow this loop:
    - validation and rollback path
    - data, permission, and deployment boundaries
 6. Look up codebase facts before asking about them.
-7. Run `~/.codex/workflow/bin/codex-workflow scaffold-intake <task-id>` and
-   write the initial decision tree before asking the first question.
-8. Ask the next single decision question with a recommended answer. Stop and
-   wait for the user's answer before continuing.
-9. Update `workflow/artifacts/<task-id>/intake.md`:
+7. When a durable record is needed, run
+   `~/.codex/workflow/bin/codex-workflow scaffold-intake <task-id>` and write
+   the initial decision tree before asking the first question.
+8. In explicit grilling mode, ask the next single decision question with a
+   recommended answer and stop for its answer. For ordinary ambiguity, ask
+   only the valuable question and continue independent work when it is not a
+   blocker.
+9. When a record is used, update `workflow/artifacts/<task-id>/intake.md`:
    - known facts
    - decision tree
    - answered decisions and accepted recommendations
@@ -103,16 +117,25 @@ Follow this loop:
    - assumptions that are safe to carry
    - unresolved blockers
    - recommended next layer: office-hours, brainstorm, clarify, task, or multica-handoff
-9. Continue one question per turn until shared understanding is reached.
-10. Ask the user to confirm shared understanding before recommending execution.
-11. If the next layer is already clear after confirmation, record it with `route-decision --decision use` or a skip reason for the omitted layer when non-obvious.
-12. Before claiming intake is complete, run:
+10. Continue one question per turn until shared understanding is reached only in
+    explicit grilling mode.
+11. Ask the user to confirm shared understanding before recommending execution
+    only in explicit grilling mode, and only when a new decision or unresolved
+    gap remains after the per-decision confirmations.
+12. If a durable record is used and the next layer is clear after the required confirmations, record it with
+    `route-decision --decision use` or a skip reason for the omitted layer when
+    non-obvious.
+13. Before claiming a durable intake record is complete, run:
    - `~/.codex/workflow/bin/codex-workflow ready <task-id> --require context,analysis`
    - or `ready --skip "<reason>"` when `intake.md` is the only intended artifact.
-13. In the final reply, include the task id, `intake.md`, routing decision, unresolved blockers, and recommended next layer.
+14. In the final reply, include task and `intake.md` paths only when a durable
+    record was used, then report the routing decision, unresolved blockers, and
+    recommended next layer.
 
 Hard rules:
 
 - Intake does not produce execution-ready specs.
 - Do not force `office-hours -> brainstorm -> intake -> clarify` as a mandatory chain.
-- If the user already gave a precise implementation request, skip intake and use `$atlas-workflow:task` only when the tiny escape hatch or a complete non-tiny documentation path is satisfied.
+- If the user already gave a precise implementation request, skip intake and
+  use `$atlas-workflow:task` or `$atlas-workflow:clarify`; a tiny/single-file
+  classification is neither a required escape hatch nor a general gate.

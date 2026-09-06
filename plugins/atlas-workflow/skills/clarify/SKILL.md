@@ -35,9 +35,21 @@ For a corrected or evidence-challenged decision, first apply the shared
 1. Read the request, current conversation, existing decisions and relevant artifacts before asking questions. Reuse the current task and source of scope when they already exist.
 2. Before brownfield discovery or any fan-out, freeze the smallest user-visible Goal, non-goals, authority and acceptance draft from that evidence. Preserve requirement meanings, not just their IDs; delivery labels are not the product behavior. Engineering assumptions remain revisable.
 3. Check the relevant current code, call paths and dependencies. Discovery or review cannot expand the Goal: admit a non-Goal requirement only through the existing controller `current-required` rules when the selected contract uses them; keep unrelated improvements as follow-ups.
-4. Ask one blocking question only when an unresolved choice changes behavior, scope, data, safety, permissions or acceptance and cannot be learned from available evidence. A short request or uncertain tiny/non-tiny label is not itself such a choice. Use ordinary dialogue when structured question tools are unavailable.
+4. Ask a question when its answer could change the recommendation, behavior,
+   scope, data, safety, permissions or acceptance and cannot be learned from
+   available evidence. Mark it blocking only when proceeding would overreach,
+   make a high-cost choice on weak evidence, or make later work stale. A short
+   request or uncertain tiny/non-tiny label is not itself such a choice. Use
+   ordinary dialogue when structured question tools are unavailable.
 5. State only the missing boundaries, material assumptions and engineering decisions needed for this task. Prefer the minimum complete implementation, including necessary safety and quality; do not add a framework, state matrix or roadmap without a current need.
 6. Make acceptance command-verifiable or user-visible, with legal, reachable prerequisites. Do not invent an unauthorized write path to construct a test state, treat mocks as real capabilities, or report unknown data as a real value.
+
+The chosen direction is a current decision, not proof that its supporting
+premises are true. Record assumptions whose failure could cause costly rework,
+look up available facts that test them, and state what observation would change
+the recommendation. Continue independent work while a worthwhile question is
+non-blocking; wait for the user only at the authority, high-cost, or
+downstream-invalidating boundary above.
 
 A one-line request with complete context needs no fixed checklist, repeated
 restatement, extra questions or new workflow artifacts. Output length follows
@@ -106,9 +118,13 @@ skill directory; do not assume an Atlas Forge checkout in the current directory.
 ## Converge and hand off
 
 Compare final clauses with the user's original intent, approved decisions and
-discussion results. Finish when meanings are stable, implementation and
-dependencies have concrete locations, acceptance is reachable, and delivery-changing
-disagreements are resolved. Do not wait for a fixed round count or unanimous preference.
+discussion results. The handoff body must preserve the Goal, key decisions and
+their reasons, the exact real entrypoint or a clearly named implementation
+dependency, the engineering adjustments the implementer may make, applicable
+acceptance and readback obligations, and important unresolved items. Finish
+when meanings are stable, implementation and dependencies have concrete
+locations, acceptance is reachable, and delivery-changing disagreements are
+resolved. Do not wait for a fixed round count or unanimous preference.
 Report a real evidence gap when further discussion cannot resolve it.
 
 Return the necessary decisions, remaining assumptions, verification and the one

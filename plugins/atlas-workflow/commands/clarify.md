@@ -1,5 +1,5 @@
 ---
-description: Use the Atlas clarify flow to convert a chosen direction into execution-ready context and spec artifacts
+description: Use the Atlas clarify flow to convert a chosen direction into execution-ready boundaries and one useful scope record when needed
 argument-hint: '[request]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---

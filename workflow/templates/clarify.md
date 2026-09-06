@@ -26,4 +26,8 @@ artifact_category: workflow_working_notes
 
 ## Durable Handoff Summary
 
--
+- Goal and key decisions / reasons:
+- Exact real entrypoint or implementation dependency:
+- Allowed engineering adjustments:
+- Applicable acceptance / durable result / readback:
+- Important unresolved items:

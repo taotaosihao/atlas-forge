@@ -44,10 +44,10 @@ const expected = {
   'routine-implementation': ['default-luna-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
   'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
   'plan-or-contract-review': ['default-astra-medium-formal-reviewer-or-explicit-exact-override', 'implicit-terra-luna-or-saving-route'],
-  'implementation-review-verify': ['default-terra-high-reviewer-or-verifier', 'saving-route-before-execute-authority'],
+  'implementation-review-verify': ['default-terra-reviewer-max-or-verifier-high', 'saving-route-before-execute-authority'],
   'hard-to-reverse-direction': ['default-astra-high-planner', 'implicit-low-tier-planner'],
   'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
-  'implementation-browser-heavy': ['default-luna-high-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
+  'implementation-browser-heavy': ['default-luna-xhigh-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
   'implementation-exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
   'implementation-exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
   'quality-mode-explicit': ['all-sol-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
@@ -163,6 +163,11 @@ assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*before call
 assert_has "$TEAM" 'Default Planning And Contract Review Mode' 'planning and contract review high-tier default is visible'
 assert_has "$TEAM" 'no-argument policy\s+check resolves this matrix' 'no-argument model policy defaults to planning-review'
 assert_has "$TEAM" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*gpt-6-astra.*medium.*none' 'formal plan or contract review defaults to GPT-6 Astra medium'
+assert_has "$TEAM" 'Use the Astra phase-reviewer by default for formal plan or contract review' 'formal plan review does not default to Sol'
+assert_has "$TEAM" 'REVIEW_VERDICT_JSON' 'formal review preserves the machine verdict contract'
+assert_has "$TEAM" 'Ordinary review opinions may be supplied outside formal admission' 'ordinary review opinions stay outside formal admission'
+assert_has "$TEAM" 'missing\s+materials never authorize an automatic format downgrade' 'missing formal review material cannot downgrade output'
+assert_lacks "$TEAM" 'Use the Sol phase-reviewer by default for formal plan or contract review' 'stale Sol formal-review default is removed'
 assert_has "$TEAM" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*gpt-6-astra.*medium.*none' 'additional plan or contract review defaults to GPT-6 Astra medium'
 assert_has "$TEAM" 'Fable or\s+another high-tier model[\s\S]*explicitly selects the exact provider/model route' 'Fable or another high-tier route requires an exact selection'
 assert_has "$TEAM" 'same exact per-lane authority may explicitly choose\s+a lower model' 'an explicit lane selection may override the high-tier default'
@@ -183,7 +188,7 @@ assert_has "$TEAM" 'Implementation command or business verification.*atlas-sdd-v
 assert_has "$TEAM" 'Implementation replanning.*atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'implementation replanning remains on Sol high'
 
 assert_has "$TEAM" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
-assert_has "$TEAM" 'mechanical or\s+environmental failures stay on the ordinary reviewer/verifier path' 'mechanical and environment failures do not escalate'
+assert_has "$TEAM" 'mechanical or\s+environmental failures stay on the\s+ordinary reviewer/verifier path selected by the implementation mode' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
 assert_has "$TEAM" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*xhigh.*none' 'browser-heavy work defaults to Luna xhigh'

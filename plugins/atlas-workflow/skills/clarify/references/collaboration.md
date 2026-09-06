@@ -44,6 +44,13 @@ An unavailable exact model fails closed; engineering perspectives do not select
 implementation Saving merely because the enclosing task has execute authority.
 Do not alter the root model/provider, shared policy or host configuration.
 
+Formal plan or contract review remains the machine-contract lane: use the
+formal reviewer and preserve its existing `REVIEW_VERDICT_JSON` output and
+validator. Ordinary engineering perspective discussion is outside formal
+admission and may return prose findings for the main author. Missing review
+materials do not silently downgrade a formal review into ordinary prose; stop
+or report the evidence gap according to the current contract.
+
 Admit each lane with a Goal/current-required reference, explicit consumer, ready
 input, bounded evidence domain, expected output, authority and stop condition.
 The main agent is the consumer. Automatic deliberation needs the material

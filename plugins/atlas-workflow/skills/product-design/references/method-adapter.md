@@ -71,6 +71,13 @@ binding evidence is missing, identify that gap and keep the handoff non-executab
 do not infer approval or restart the entire product design merely because files
 were missing. Changed semantics require the affected current approval.
 
+Gate 1 and Gate 2 remain separate approval bindings. The constrained combined-gate
+drafting path follows [Build A and C in `SKILL.md`](../SKILL.md#build-a-and-c).
+One current explicit reply may cover the presented C and D; record two separate
+approval bindings for C and D and never manufacture missing identity or permission.
+A single user action does not erase either binding or make later silence,
+operation, tests, or agent agreement into approval.
+
 Gate 1 approves the complete current C semantics. Reuse it only when the current
 explicit evidence covers the unchanged `content_identity`; otherwise clear
 `approval_ref` and set C to draft.
