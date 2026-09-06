@@ -201,4 +201,48 @@ if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_RO
   exit 1
 fi
 
+catalog_home="$TMP_ROOT/catalog-home"
+mkdir -p "$catalog_home/.codex" "$TMP_ROOT/selected-codex-home"
+cp "$TMP_ROOT/5.6.json" "$catalog_home/.codex/models_cache.json"
+cp "$TMP_ROOT/6.1.json" "$TMP_ROOT/selected-codex-home/active.json"
+cat > "$TMP_ROOT/codex-catalog" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == 'debug models' ]]
+case "${CATALOG_TEST_RESPONSE:-valid}" in
+  failed) printf '%s\n' 'private-config-sentinel' >&2; exit 17 ;;
+  malformed) printf '%s\n' 'not-json'; exit 0 ;;
+esac
+cat "$CODEX_HOME/active.json"
+SH
+chmod +x "$TMP_ROOT/codex-catalog"
+
+for mode in saving quality; do
+  HOME="$catalog_home" CODEX_HOME="$TMP_ROOT/selected-codex-home" \
+    CODEX_BIN="$TMP_ROOT/codex-catalog" \
+    node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode "$mode" \
+      --policy "$ROOT/.codex/agents/model-policy.json" \
+      | jq -e --arg mode "$mode" '.family == "6.1" and .mode == $mode' >/dev/null
+done
+
+# Explicit input remains usable offline and must not start Codex at all.
+CODEX_BIN="$TMP_ROOT/missing-codex" \
+  node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving \
+    --catalog "$TMP_ROOT/5.6.json" \
+    | jq -e '.family == "5.6"' >/dev/null
+
+# A failed current-catalog lookup must not silently use the valid old cache.
+for response in failed malformed; do
+  if HOME="$catalog_home" CODEX_HOME="$TMP_ROOT/selected-codex-home" \
+    CODEX_BIN="$TMP_ROOT/codex-catalog" CATALOG_TEST_RESPONSE="$response" \
+    node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving \
+      --policy "$ROOT/.codex/agents/model-policy.json" \
+      > "$TMP_ROOT/catalog.out" 2> "$TMP_ROOT/catalog.err"; then
+    echo "expected $response current catalog to fail without cache fallback" >&2
+    exit 1
+  fi
+  ! grep -q 'private-config-sentinel' "$TMP_ROOT/catalog.err"
+done
+grep -q 'invalid model catalog JSON' "$TMP_ROOT/catalog.err"
+
 printf 'contract_agent_model_policy: ok\n'

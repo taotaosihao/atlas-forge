@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 function fail(message) {
   process.stderr.write(`atlas-agent-model-policy: ${message}\n`);
@@ -14,6 +14,25 @@ function readJson(file, label) {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (error) {
     fail(`cannot read ${label} ${file}: ${error.message}`);
+  }
+}
+
+function readCatalog(explicitFile) {
+  if (explicitFile) return readJson(path.resolve(explicitFile), 'catalog');
+  // Let Codex resolve its configured catalog rather than guessing a cache path.
+  const result = spawnSync(process.env.CODEX_BIN || 'codex', ['debug', 'models'], {
+    encoding: 'utf8',
+    timeout: 30000,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) {
+    fail('cannot load the current Codex catalog; check `codex debug models` or supply --catalog');
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    fail('Codex returned invalid model catalog JSON');
   }
 }
 
@@ -121,7 +140,6 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const managedAgentsDir = fs.existsSync(path.join(repoRoot, '.codex', 'agents'))
   ? path.join(repoRoot, '.codex', 'agents')
   : path.join(repoRoot, 'agents');
-const catalogFile = path.resolve(args.catalog || path.join(os.homedir(), '.codex', 'models_cache.json'));
 const policyFile = path.resolve(args.policy || path.join(managedAgentsDir, 'model-policy.json'));
 const agentsDir = path.resolve(args.agents_dir || managedAgentsDir);
 const policy = readJson(policyFile, 'policy');
@@ -131,7 +149,7 @@ if (policy.schema_version === 2 && policy.default_mode !== 'planning-review') {
 }
 const mode = args.mode || policy.default_mode || 'saving';
 if (!['planning-review', 'saving', 'quality'].includes(mode)) fail(`unknown default mode ${mode}`);
-const resolved = resolvePolicy(readJson(catalogFile, 'catalog'), policy, mode);
+const resolved = resolvePolicy(readCatalog(args.catalog), policy, mode);
 
 if (args.command === 'resolve') {
   const { capabilities: _capabilities, ...publicResolved } = resolved;

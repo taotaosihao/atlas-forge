@@ -278,6 +278,13 @@ role is not a provider switch. Luna remains the default native candidate, the
 root provider remains unchanged, and the DeepSeek alternative is never a
 default fixed fan-out.
 
+`atlas-agent-model-policy check/resolve` 未指定 `--catalog` 时，通过
+`codex debug models` 读取 Codex 当前实际使用的模型目录，包括
+`model_catalog_json` 配置；不再直接读取 `models_cache.json`。显式
+`--catalog <file>` 优先，且不启动 Codex，适用于离线验证和隔离测试。
+可用 `CODEX_BIN` 指定 Codex 可执行文件。默认目录读取失败时直接报错，
+不会回退到旧缓存；错误输出不转发 Codex 的配置或认证诊断。
+
 Record a Team run. The backend defaults to Codex native subagents when
 `--backend` is omitted. Any explicit Team-level backend selection, including
 Paseo or an explicit native override, requires a controller-attested user or
