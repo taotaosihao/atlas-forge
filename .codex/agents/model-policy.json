@@ -21,9 +21,9 @@
     "atlas-sdd-explorer": { "capability": "fast", "reasoning_effort": "max" }
   },
   "planning_review_roles": {
-    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },
-    "atlas-sdd-phase-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },
-    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "max" }
+    "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "medium" },
+    "atlas-sdd-phase-reviewer": { "capability": "frontier", "reasoning_effort": "medium" },
+    "atlas-sdd-planner": { "capability": "frontier", "reasoning_effort": "high" }
   },
   "quality_roles": {
     "atlas-sdd-reviewer": { "capability": "frontier", "reasoning_effort": "xhigh" },

@@ -10,7 +10,7 @@ make_catalog() {
   local family="$2"
   local include_fast="${3:-yes}"
   {
-    printf '{"models":[{"slug":"gpt-6-astra","description":"Our most capable model for complex, demanding work.","supported_reasoning_levels":[{"effort":"xhigh"},{"effort":"max"}]},'
+    printf '{"models":[{"slug":"gpt-6-astra","description":"Our most capable model for complex, demanding work.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"}]},'
     printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},' "$family"
     printf '{"slug":"gpt-%s-terra","description":"Balanced agentic coding model for everyday work.","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]}' "$family"
     if [[ "$include_fast" == yes ]]; then
@@ -74,8 +74,8 @@ node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/6.1.json" \
   | jq -e '.family == "6.0" and .mode == "planning-review"
     and ([.roles[].model] | unique) == ["gpt-6-astra"]
-    and ([.roles["atlas-sdd-reviewer", "atlas-sdd-phase-reviewer"].model_reasoning_effort] | unique) == ["xhigh"]
-    and .roles["atlas-sdd-planner"].model_reasoning_effort == "max"
+    and ([.roles["atlas-sdd-reviewer", "atlas-sdd-phase-reviewer"].model_reasoning_effort] | unique) == ["medium"]
+    and .roles["atlas-sdd-planner"].model_reasoning_effort == "high"
     and (.roles | has("atlas-sdd-implementer") | not)' >/dev/null
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/6.1.json" \
   | jq -e '.family == "6.1" and .mode == "saving"
@@ -195,7 +195,7 @@ if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_RO
 fi
 jq '.models |= map(select(.slug == "gpt-6-astra"))' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-only.json"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/astra-only.json" --agents-dir "$TMP_ROOT/agents"
-jq '(.models[] | select(.slug == "gpt-6-astra")).supported_reasoning_levels = [{"effort":"high"}]' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-low-effort.json"
+jq '(.models[] | select(.slug == "gpt-6-astra")).supported_reasoning_levels = [{"effort":"low"}]' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-low-effort.json"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/astra-low-effort.json" >/dev/null 2>&1; then
   echo "expected unsupported planning reasoning effort to fail closed" >&2
   exit 1

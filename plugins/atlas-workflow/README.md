@@ -104,8 +104,8 @@ Native Team model routing is downstream of staffing, not a reason to create
 staffing. A small clear task stays on the main Codex; after a Team or subagent
 lane is independently justified, planning and formal plan/contract review use
 the non-persistent `planning-review` frontier route by default. The current
-native mapping uses GPT-6 Astra (`gpt-6-astra`), with `max` planning and
-`xhigh` formal review; an explicitly selected
+native mapping uses GPT-6 Astra (`gpt-6-astra`), with `high` planning and
+`medium` formal review; an explicitly selected
 and admitted Fable or another high-tier exact route may replace a named lane.
 Only an explicit user/operator per-lane selection may choose a lower model
 before implementation. Saving mode is available only after explicit Execute

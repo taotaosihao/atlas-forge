@@ -110,7 +110,7 @@ machine-enforced slice-completion gate.
 ### Cross Plan
 
 The default panel sends the same self-contained packet to an OpenAI
-`atlas-sdd-planner` at `gpt-6-astra` / `max` and a DeepSeek
+`atlas-sdd-planner` at `gpt-6-astra` / `high` and a DeepSeek
 `atlas-sdd-planner-deepseek` at `deepseek-v4-pro:deepseek` / `max`, with
 `fork_turns="none"`. Their first-round plans are independent and are not
 shown to each other. The main Codex extracts only material disagreements about
@@ -320,9 +320,9 @@ check resolves this matrix:
 
 | Lane | `agent_type` | `model` | `reasoning_effort` | `fork_turns` |
 | --- | --- | --- | --- | --- |
-| Planning or replanning | `atlas-sdd-planner` | `gpt-6-astra` | `max` | `none` |
-| Formal plan or contract review | `atlas-sdd-phase-reviewer` | `gpt-6-astra` | `xhigh` | `none` |
-| Additional independent plan or contract review | `atlas-sdd-reviewer` | `gpt-6-astra` | `xhigh` | `none` |
+| Planning or replanning | `atlas-sdd-planner` | `gpt-6-astra` | `high` | `none` |
+| Formal plan or contract review | `atlas-sdd-phase-reviewer` | `gpt-6-astra` | `medium` | `none` |
+| Additional independent plan or contract review | `atlas-sdd-reviewer` | `gpt-6-astra` | `medium` | `none` |
 
 GPT-6 Astra is the checked-in native planning/Clarify route. Cross Plan's exact
 DeepSeek V4 Pro planner/reviewer profiles are also high-tier routes. Fable or
@@ -441,9 +441,9 @@ Visible runtime metadata is optional disclosure, not a daily audit gate. When th
 | `tiny-clear` | `main-by-default; evidence-backed-specialist-allowed` | `fixed-team-fanout` |
 | `routine-implementation` | `default-luna-or-explicit-available-deepseek-single-writer` | `implicit-quality-model-or-default-dual-writer` |
 | `implementation-fallback` | `same-authority-takeover-after-writer-quiescence` | `overlapping-or-uncertain-writer-takeover` |
-| `plan-or-contract-review` | `default-astra-xhigh-formal-reviewer-or-explicit-exact-override` | `implicit-terra-luna-or-saving-route` |
+| `plan-or-contract-review` | `default-astra-medium-formal-reviewer-or-explicit-exact-override` | `implicit-terra-luna-or-saving-route` |
 | `implementation-review-verify` | `default-terra-high-reviewer-or-verifier` | `saving-route-before-execute-authority` |
-| `hard-to-reverse-direction` | `default-astra-max-planner` | `implicit-low-tier-planner` |
+| `hard-to-reverse-direction` | `default-astra-high-planner` | `implicit-low-tier-planner` |
 | `completed-phase-extra-judgment` | `default-sol-medium-phase-reviewer` | `phase-reviewer-for-routine-review` |
 | `implementation-browser-heavy` | `default-luna-high-browser-verifier` | `low-tier-browser-route-before-execute-authority` |
 | `implementation-exploration-single` | `luna-or-deepseek-by-live-availability-and-explicit-route` | `default-dual-fanout-or-pre-execute-saving` |
