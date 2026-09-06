@@ -1,6 +1,7 @@
 {
   "schema_version": 2,
   "default_mode": "planning-review",
+  "planning_review_model": "gpt-6-astra",
   "family": {
     "slug_pattern": "^gpt-(\\d+)\\.(\\d+)-",
     "selection": "latest"

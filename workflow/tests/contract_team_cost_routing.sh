@@ -43,9 +43,9 @@ const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
   'routine-implementation': ['default-luna-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
   'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
-  'plan-or-contract-review': ['default-sol-xhigh-formal-reviewer-or-explicit-exact-override', 'implicit-terra-luna-or-saving-route'],
+  'plan-or-contract-review': ['default-astra-xhigh-formal-reviewer-or-explicit-exact-override', 'implicit-terra-luna-or-saving-route'],
   'implementation-review-verify': ['default-terra-high-reviewer-or-verifier', 'saving-route-before-execute-authority'],
-  'hard-to-reverse-direction': ['default-sol-max-planner', 'implicit-low-tier-planner'],
+  'hard-to-reverse-direction': ['default-astra-max-planner', 'implicit-low-tier-planner'],
   'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
   'implementation-browser-heavy': ['default-luna-high-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
   'implementation-exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
@@ -111,7 +111,7 @@ assert_has "$TEAM" 'Never read or apply Paseo orchestration preferences' 'Paseo 
 
 assert_has "$TEAM" 'Cross v1.*generation-local.*controller-enforced.*non-crash-resumable' 'Cross v1 keeps generation-local controller-only state'
 assert_has "$TEAM" 'non-certification-gate' 'Cross v1 is not a certification gate'
-assert_has "$TEAM" '`atlas-sdd-planner` at `gpt-5\.6-sol` / `high`' 'Cross Plan defaults to OpenAI Sol high'
+assert_has "$TEAM" '`atlas-sdd-planner` at `gpt-6-astra` / `max`' 'Cross Plan defaults to OpenAI GPT-6 Astra max'
 assert_has "$TEAM" '`atlas-sdd-planner-deepseek` at `deepseek-v4-pro:deepseek` / `max`' 'Cross Plan defaults to DeepSeek planner max'
 assert_has "$TEAM" 'same self-contained packet' 'Cross Plan sends an identical packet'
 assert_has "$TEAM" 'fork_turns="none"' 'Cross Plan uses no history fork'
@@ -162,8 +162,8 @@ assert_has "$TEAM" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*before call
 
 assert_has "$TEAM" 'Default Planning And Contract Review Mode' 'planning and contract review high-tier default is visible'
 assert_has "$TEAM" 'no-argument policy\s+check resolves this matrix' 'no-argument model policy defaults to planning-review'
-assert_has "$TEAM" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'formal plan or contract review defaults to Sol xhigh'
-assert_has "$TEAM" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'additional plan or contract review defaults to Sol xhigh'
+assert_has "$TEAM" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*gpt-6-astra.*xhigh.*none' 'formal plan or contract review defaults to GPT-6 Astra xhigh'
+assert_has "$TEAM" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*gpt-6-astra.*xhigh.*none' 'additional plan or contract review defaults to GPT-6 Astra xhigh'
 assert_has "$TEAM" 'Fable or\s+another high-tier model[\s\S]*explicitly selects the exact provider/model route' 'Fable or another high-tier route requires an exact selection'
 assert_has "$TEAM" 'same exact per-lane authority may explicitly choose\s+a lower model' 'an explicit lane selection may override the high-tier default'
 assert_has "$TEAM" 'does not fall back to Terra, Luna, or another low-tier\s+route for planning or contract review' 'unavailable advanced review route cannot degrade to a low-tier model'

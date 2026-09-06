@@ -38,7 +38,9 @@ user-owned tradeoff. Current implementation choices remain the main agent's job.
 
 Before the first dispatch, read the current native collaboration and exact-model
 routing rules in [Team](../../team/SKILL.md). Follow its planning/contract-review
-preflight and current host profiles; engineering perspectives do not select
+preflight and current host profiles: planning uses `gpt-6-astra` / `max`, and
+plan/contract review uses `gpt-6-astra` / `xhigh`, with `fork_turns="none"`.
+An unavailable exact model fails closed; engineering perspectives do not select
 implementation Saving merely because the enclosing task has execute authority.
 Do not alter the root model/provider, shared policy or host configuration.
 

@@ -10,7 +10,7 @@ make_catalog() {
   local family="$2"
   local include_fast="${3:-yes}"
   {
-    printf '{"models":['
+    printf '{"models":[{"slug":"gpt-6-astra","description":"Our most capable model for complex, demanding work.","supported_reasoning_levels":[{"effort":"xhigh"},{"effort":"max"}]},'
     printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},' "$family"
     printf '{"slug":"gpt-%s-terra","description":"Balanced agentic coding model for everyday work.","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]}' "$family"
     if [[ "$include_fast" == yes ]]; then
@@ -72,8 +72,8 @@ node -e '
 make_catalog "$TMP_ROOT/6.1.json" 6.1
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.1.json" --agents-dir "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/6.1.json" \
-  | jq -e '.family == "6.1" and .mode == "planning-review"
-    and ([.roles[].model] | unique) == ["gpt-6.1-sol"]
+  | jq -e '.family == "6.0" and .mode == "planning-review"
+    and ([.roles[].model] | unique) == ["gpt-6-astra"]
     and ([.roles["atlas-sdd-reviewer", "atlas-sdd-phase-reviewer"].model_reasoning_effort] | unique) == ["xhigh"]
     and .roles["atlas-sdd-planner"].model_reasoning_effort == "max"
     and (.roles | has("atlas-sdd-implementer") | not)' >/dev/null
@@ -182,9 +182,22 @@ done
 
 make_catalog "$TMP_ROOT/incomplete.json" 5.8 no
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/incomplete.json" \
-  | jq -e '.mode == "planning-review" and ([.roles[].model] | unique) == ["gpt-5.8-sol"]' >/dev/null
+  | jq -e '.mode == "planning-review" and ([.roles[].model] | unique) == ["gpt-6-astra"]' >/dev/null
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/incomplete.json" >/dev/null 2>&1; then
   echo "expected an incomplete latest family to fail closed" >&2
+  exit 1
+fi
+
+jq '.models |= map(select(.slug != "gpt-6-astra"))' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/no-astra.json"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/no-astra.json" >/dev/null 2>&1; then
+  echo "expected missing GPT-6 Astra to fail closed, without Sol fallback" >&2
+  exit 1
+fi
+jq '.models |= map(select(.slug == "gpt-6-astra"))' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-only.json"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/astra-only.json" --agents-dir "$TMP_ROOT/agents"
+jq '(.models[] | select(.slug == "gpt-6-astra")).supported_reasoning_levels = [{"effort":"high"}]' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-low-effort.json"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/astra-low-effort.json" >/dev/null 2>&1; then
+  echo "expected unsupported planning reasoning effort to fail closed" >&2
   exit 1
 fi
 

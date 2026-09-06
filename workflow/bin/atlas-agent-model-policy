@@ -39,11 +39,15 @@ function compareFamily(a, b) {
 }
 
 function resolvePolicy(catalog, policy, mode) {
-  const familyPattern = new RegExp(policy.family.slug_pattern);
-  const models = (catalog.models || []).flatMap((model) => {
+  const planningModel = mode === 'planning-review' ? policy.planning_review_model : null;
+  if (mode === 'planning-review' && !planningModel) fail('policy lacks planning_review_model');
+  const familyPattern = planningModel ? /^gpt-(\d+)(?:\.(\d+))?-/ : new RegExp(policy.family.slug_pattern);
+  const candidates = (catalog.models || []).filter((model) => !planningModel || model.slug === planningModel);
+  if (planningModel && candidates.length !== 1) fail(`catalog must contain exactly one ${planningModel}`);
+  const models = candidates.flatMap((model) => {
     const match = familyPattern.exec(model.slug || '');
     if (!match) return [];
-    return [{ ...model, family: { major: Number(match[1]), minor: Number(match[2]) } }];
+    return [{ ...model, family: { major: Number(match[1]), minor: Number(match[2] || 0) } }];
   });
   if (!models.length) fail('catalog contains no matching GPT model family');
 
@@ -68,7 +72,7 @@ function resolvePolicy(catalog, policy, mode) {
   for (const [capability, rule] of Object.entries(policy.capabilities)) {
     if (!requiredCapabilities.has(capability)) continue;
     const pattern = new RegExp(rule.description_pattern, 'i');
-    const matches = latest.filter((model) => pattern.test(model.description || ''));
+    const matches = planningModel ? latest : latest.filter((model) => pattern.test(model.description || ''));
     if (matches.length !== 1) {
       fail(`latest family ${latestFamily.major}.${latestFamily.minor} resolves ${matches.length} models for capability ${capability}`);
     }
