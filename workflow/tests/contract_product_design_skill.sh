@@ -105,7 +105,7 @@ for phrase in (
     "An operable real Baseline is required when any one of these is true", "actual platform or application behavior", "explicitly asks to operate a real page or application",
     "independent trigger even when text, static layout, or an isolated prototype could answer", "separately verify exact product-path, local-runtime, and local-candidate-commit authority",
     "existing real entrypoint's focus", "Applicable acceptance requires a real interaction observation", "new page, a lack of an already approved page, or the fact that a direction was chosen does not",
-    "least costly evidence", "Skip it when the selected lower-fidelity evidence or stable reference answers",
+    "least costly evidence", "Skip it only when no condition above requires it",
     "one bounded, single-writer direct Task", "sole pre-E implementation exception", "final page shells, components, and source files",
     "existing mock/fixture/adapter, existing", "synthetic`, `authorized_test`, and `mixed`", "page-specific adjustment, design-semantics", "D sections 3 and 7", "Only then request the existing",
 ):
@@ -116,13 +116,19 @@ check(baseline_flat.index("first freeze an isolatable exact candidate commit") <
 check("explicitly asks to operate a real page or application, and the operation is needed" not in baseline_flat, "real-page request must be an independent Baseline trigger")
 triggers = baseline.split("An operable real Baseline is required when any one of these is true:", 1)[1].split("A new page,", 1)[0]
 check(len([line for line in triggers.splitlines() if line[:1].isdigit()]) == 4, "Baseline must have exactly four trigger items")
-skip = "Skip it when the selected lower-fidelity evidence or stable reference answers the recorded question, the adaptation is local and known, and the critical journey, hierarchy, primary action, and recovery remain unchanged."
-check(skip in baseline_flat, "Baseline skip must preserve exactly three simultaneous clauses")
+skip = "Skip it only when no condition above requires it, the selected lower-fidelity evidence or stable reference answers the recorded question, the adaptation is local and known, and the critical journey, hierarchy, primary action, and recovery remain unchanged."
+check(skip in baseline_flat, "Baseline skips must first exclude every required trigger")
 
 c_section = skill.split("## Build A and C", 1)[1].split("## Build D and obtain Gate 2", 1)[0]
 d_section = skill.split("## Build D and obtain Gate 2", 1)[1].split("### Route an operable Baseline only when needed", 1)[0]
+check("[Route an operable Baseline only when needed](#route-an-operable-baseline-only-when-needed)" in d_section,
+      "adaptations must use the shared Baseline decision before implementation routing")
+check("directly to Task without a Baseline" not in " ".join(d_section.split()),
+      "small adaptations must not bypass required Baseline triggers")
 combined_phrases = (
-    "constrained combined-gate drafting path", "complete current C and D are presented together",
+    "constrained combined-gate drafting path may start with D absent or incomplete",
+    "approval authority, current A/C identities, permission range, and business outcome are clear",
+    "Before requesting either approval, derive the D identity and present the complete current C and D together",
     "no rejection, known conflict, blocker, or high-cost user decision", "both C and D remain `draft`",
     "no C/D `approval_ref`", "no D `approved_*` binding", "enter no product implementation",
     "If a real Baseline needs code, use only the explicitly authorized D-draft Baseline exception",

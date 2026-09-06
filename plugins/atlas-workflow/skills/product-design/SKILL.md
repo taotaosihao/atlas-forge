@@ -102,14 +102,16 @@ For a corrected or evidence-challenged design, first apply the shared
 5. Derive `content_identity`. Reuse Gate 1 only when a current explicit approval
    covers the complete unchanged C semantics. Normally, when a material C
    inference is unapproved, request Scenario Approval and stop before drafting D.
-   A constrained combined-gate drafting path is allowed only when the complete
-   current C and D are presented together for one approval review, the approval
-   authority, identity, permission range, and business outcome are already clear,
-   and there is no rejection, known conflict, blocker, or high-cost user decision
-   that must be resolved first. That path may continue completing D while both C
-   and D remain `draft`; before explicit approval, write no C/D `approval_ref`, no
+   A constrained combined-gate drafting path may start with D absent or incomplete
+   when the approval authority, current A/C identities, permission range, and
+   business outcome are clear, and there is no rejection, known conflict, blocker,
+   or high-cost user decision that must be resolved first. Draft or complete D for
+   a joint review while both C and D remain `draft`; before explicit approval,
+   write no C/D `approval_ref`, no
    D `approved_*` binding, and enter no product implementation. If a real Baseline
    needs code, use only the explicitly authorized D-draft Baseline exception below.
+   Before requesting either approval, derive the D identity and present the
+   complete current C and D together.
    One current explicit reply may approve the presented C and D; store two
    separate approval bindings for C and D and never manufacture missing identity
    or permission.
@@ -133,9 +135,9 @@ For a corrected or evidence-challenged design, first apply the shared
 3. Hide, disable with an explanation, or honestly mark unavailable every visible
    out-of-scope capability.
 4. Prefer, in order: direct reuse, a small adaptation, composition of existing
-   patterns, then a new pattern. A precise small adaptation that preserves the
-   critical journey, information hierarchy, primary action, and recovery routes
-   directly to Task without a Baseline.
+   patterns, then a new pattern. For every adaptation, apply
+   [Route an operable Baseline only when needed](#route-an-operable-baseline-only-when-needed)
+   before selecting the implementation route.
 5. Expose known brownfield conflicts or invalid assumptions as blockers, but do
    not perform a repository-wide collision audit by default.
 6. For every primary action, record its user and prerequisite, the current
@@ -188,11 +190,11 @@ An operable real Baseline is required when any one of these is true:
    could change the selected hierarchy, primary action, state, or recovery.
 
 A new page, a lack of an already approved page, or the fact that a direction was
-chosen does not by itself trigger a real Baseline. Skip it when the selected
-lower-fidelity evidence or stable reference answers the recorded question, the
-adaptation is local and known, and the critical journey, hierarchy, primary
-action, and recovery remain unchanged. Record the evidence choice and rationale
-in D section 3.
+chosen does not by itself trigger a real Baseline. Skip it only when no condition
+above requires it, the selected lower-fidelity evidence or stable reference
+answers the recorded question, the adaptation is local and known, and the critical
+journey, hierarchy, primary action, and recovery remain unchanged. Record the
+evidence choice and rationale in D section 3.
 
 When a Baseline is required, keep D draft. Continue only when the request or
 target-repository rules explicitly authorize all three: edits to the exact

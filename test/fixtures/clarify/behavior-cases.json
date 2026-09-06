@@ -321,39 +321,79 @@
     {
       "case_id": "explicit_real_page_request_even_static_enough",
       "scenario_input": {
-        "request": "请让我在真实页面上操作一次，确认这个配置页的字段顺序和保存反馈。",
+        "request": "调整这个成熟配置页的帮助文案，并让我在真实页面上操作确认。",
         "context": [
-          "字段层级可以由真实样例数据、静态布局和文字演练判断；当前没有焦点、连续操作或失败恢复问题。",
+          "这是已有页面的精确局部适配，关键旅程、信息层级、主操作和恢复方式均保持不变；文字和静态布局足以判断文案。",
           "用户明确要求可操作的真实页面/应用。该行为夹具只保存待观察路径，仍未运行模型回放。"
         ]
       },
       "expected": {
         "should": [
-          "把用户明确要求真实可操作页面/应用作为独立 Baseline 触发，即使低保真材料在技术上足够；仍单独检查 exact product path、local runtime 和 candidate commit 等实施权限。",
+          "在选择实施路线前先判断 Baseline；用户明确要求真实页面是独立触发，即使小改动和静态证据足够也不能跳过；仍单独检查 exact product path、local runtime 和 candidate commit 等实施权限。",
           "把真实页面操作与运行时行为结论分开；没有相应实施授权时保持受限，不擅自进入产品实施。"
         ],
         "should_not": [
-          "因为静态材料足够或没有 focus/recovery 问题而跳过真实 Baseline，或把用户的页面操作要求推断成代码/提交授权。"
+          "因为小改动、静态材料足够或没有 focus/recovery 问题而提前路由 Task 并跳过真实 Baseline，或把用户的页面操作要求推断成代码/提交授权。"
         ]
       }
     },
     {
       "case_id": "combined_gate_draft_without_gate1",
       "scenario_input": {
-        "request": "把完整当前 C/D 一起呈现给用户审阅；Gate 1 尚未批准，继续补齐 D。",
+        "request": "目前只有 C 草稿，Gate 1 尚未批准；请起草尚不存在的 D，并把场景与流程一起交给我审阅。",
         "context": [
-          "当前 C/D 语义已经完整并准备一起呈现；批准 authority、identity、permission range 和 business outcome 已明确。",
+          "C 草稿已经形成，D 尚不存在；批准 authority、当前 A/C identities、permission range 和 business outcome 已明确，D identity 只能在 D 完整后计算。",
           "没有 Gate 1 拒绝、未知业务/权限安全规则、已知冲突、blocker 或必须先解决的高代价用户决定；C/D 必须继续保持 draft。",
           "该行为夹具只保存待观察路径，仍未运行模型回放；批准前不得写 approval_ref、approved_* 或进入产品实施。"
         ]
       },
       "expected": {
         "should": [
-          "仅为把完整当前 C/D 一起呈现给用户审阅而继续起草 D，并让 C/D 都保持 draft。",
+          "在已有 A/C 和明确边界下起草缺失的 D，让 C/D 都保持 draft；请求任一批准前，先计算完整 D 的 identity 并共同呈现完整当前 C/D。",
           "等当前明确回复后，才可把同一回复分别存为 C 与 D 的两个 approval binding；不能补造 identity、permission 或实施授权。"
         ],
         "should_not": [
-          "因为 Gate 1 尚未批准就无条件开始 D 或产品实施，或在批准前写 approved 绑定；遇到拒绝、未知、冲突、blocker 或高代价决定仍继续。"
+          "因为 Gate 1 尚未批准就无条件开始 D 或产品实施，或在批准前写 approved 绑定；遇到拒绝、未知、冲突、blocker 或高代价决定仍继续。",
+          "把完整 D 或已经呈现完整 C/D 当作允许首次起草 D 的前置条件，因而在没有阻断项时强制先索取 Gate 1 批准。"
+        ]
+      }
+    },
+    {
+      "case_id": "grilling_new_decision_already_confirmed",
+      "scenario_input": {
+        "request": "继续这次 grilling，收尾当前方案的压力测试。",
+        "context": [
+          "本轮唯一新增决定是列表默认每页显示 20 还是 50 条，用户刚刚明确答复并批准使用 50 条。",
+          "其余决定已有明确批准，没有剩余未批准决定、冲突或缺口；本轮未授权实施。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "复用刚刚作出的明确批准，结束压力测试并给出结论，不再要求确认共同理解。",
+          "继续保持实施授权边界。"
+        ],
+        "should_not": [
+          "仅因本轮曾提出新决定，就在逐项确认结束后再问一次“是否确认以上理解”。",
+          "把设计决定的批准当作实施授权。"
+        ]
+      }
+    },
+    {
+      "case_id": "grilling_unapproved_decision_remains",
+      "scenario_input": {
+        "request": "继续这次 grilling，收尾当前方案的压力测试。",
+        "context": [
+          "默认每页显示 50 条已明确批准，但用户尚未选择仅导出当前筛选结果还是全部记录。",
+          "导出范围会改变交付行为，无法从代码或现有批准中确定。"
+        ]
+      },
+      "expected": {
+        "should": [
+          "仅就仍未批准的导出范围提出一个有推荐理由的问题，并等待该决定。",
+          "保留已批准的每页 50 条，不重新确认其他决定。"
+        ],
+        "should_not": [
+          "为减少确认次数而忽略未批准的交付行为，或以笼统的最终确认代替这个具体选择。"
         ]
       }
     }

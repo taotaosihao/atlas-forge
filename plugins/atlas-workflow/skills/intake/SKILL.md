@@ -46,11 +46,12 @@ Rules:
 - Treat decisions as the user's. In explicit grilling, put each new or
   evidence-challenged decision to the user and wait for confirmation or
   correction; reuse unchanged approved decisions without reopening them. After
-  the questions, ask once for confirmation of the resulting shared
-  understanding when grilling introduced a new decision or an unresolved gap
-  remains; when there is no new decision or gap, do not ask for an extra
-  confirmation. The grilling request and these confirmations do not grant
-  implementation authority; check that authorization separately.
+  per-decision confirmations, ask only about an unapproved decision or unresolved
+  gap that still remains. When every decision is explicitly approved and no gap
+  remains, do not ask for an extra shared-understanding confirmation, even if this
+  grilling introduced the approved decisions. The grilling request and these
+  confirmations do not grant implementation authority; check that authorization
+  separately.
 - Probe assumptions, target users, workflows, non-goals, data and permission
   boundaries, deployment or rollout constraints, validation, failure modes,
   ownership, and stop conditions when they matter to the plan.
@@ -119,9 +120,8 @@ Follow this loop:
    - recommended next layer: office-hours, brainstorm, clarify, task, or multica-handoff
 10. Continue one question per turn until shared understanding is reached only in
     explicit grilling mode.
-11. Ask the user to confirm shared understanding before recommending execution
-    only in explicit grilling mode, and only when a new decision or unresolved
-    gap remains after the per-decision confirmations.
+11. In explicit grilling mode, apply the remaining-confirmation rule in
+    [Grilling Protocol](#grilling-protocol); do not add a separate final approval.
 12. If a durable record is used and the next layer is clear after the required confirmations, record it with
     `route-decision --decision use` or a skip reason for the omitted layer when
     non-obvious.
