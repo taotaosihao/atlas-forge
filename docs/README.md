@@ -37,6 +37,8 @@
 
 ## Historical
 
+- [Clarify 优化方案与实施记录](atlas-workflow/20260830-051-clarify/implementation-plan.md)：2026-08-31 已授权源码实施；记录设计依据、已通过专项与集成环境缺口，安装态和真实会话效果未验证。当前规则以 Authoritative 中的技能源码为准。
+- [Clarify 跑偏与过度设计：双主机会话分析](atlas-workflow/20260830-050-clarify/analysis.md)：2026-08-30 对本机与 gewu-office 会话、技能规则和合同模板的诊断记录；包含待批准的最小修订建议，不是当前执行规范。
 - 除 Authoritative 表明确登记的当前入口外，`docs/` 下的 plan、review 和 implementation contract 默认都是历史决策或审阅证据；Superseded 表左栏进一步标识其中已被明确取代的文档。
 - 文件名包含 `review` 的文档默认记录当时 finding，不自动成为当前规范。
 - 历史文档可以解释设计来源，但不能覆盖当前 `AGENTS.md`、权威 bundle、源码、schema 或测试。
