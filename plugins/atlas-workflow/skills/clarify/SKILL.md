@@ -51,6 +51,18 @@ the recommendation. Continue independent work while a worthwhile question is
 non-blocking; wait for the user only at the authority, high-cost, or
 downstream-invalidating boundary above.
 
+For a business-function outcome, load the shared
+[Business Acceptance](../team/references/business-acceptance.md) rules while
+drafting acceptance. Carry the current design's role, ordinary entry, every
+required complete journey, same-object continuity, final business result,
+readback/export, and evidence method into either the lightweight scope
+document's existing `Acceptance Criteria` / `Verification Plan` or the selected
+machine contract's existing `Acceptance Criteria` / `Real Validation Plan`.
+This is a planning handoff: it does not require `$atlas-workflow:project-verification`,
+creating a Map, or running verification early. Unknown business rules or
+permission/safety conflicts are blockers, not ordinary implementation
+dependencies.
+
 A one-line request with complete context needs no fixed checklist, repeated
 restatement, extra questions or new workflow artifacts. Output length follows
 the actual decisions, not the length of the request.
@@ -126,6 +138,15 @@ when meanings are stable, implementation and dependencies have concrete
 locations, acceptance is reachable, and delivery-changing disagreements are
 resolved. Do not wait for a fixed round count or unanimous preference.
 Report a real evidence gap when further discussion cannot resolve it.
+
+For business delivery, hand off the same current design/plan requirements to
+Task or Team, including the exact entrypoint, legal role/data prerequisites,
+steps to drive, expected visible and durable results, readbacks, and remaining
+breakpoints. Keep planned, discovered, and executed entrypoints separate; a
+planned or not-yet-implemented path is a dependency or bounded implementation
+plan, not an executable verification command. If a user decision or design
+changes, reopen only the affected acceptance clauses and their verification
+method; do not preserve a superseded obligation or invent a new process.
 
 Return the necessary decisions, remaining assumptions, verification and the one
 scope document/task id when they exist. Do not list nonexistent supporting artifacts.

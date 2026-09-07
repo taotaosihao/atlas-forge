@@ -80,6 +80,12 @@ For a corrected or evidence-challenged design, first apply the shared
 6. Do not read the vendored WDS originals during an ordinary run. Read
    [references/upstream-provenance.md](references/upstream-provenance.md) only for
    provenance or adapter maintenance.
+7. For a user-visible business feature, load the shared
+   [Business Acceptance](../team/references/business-acceptance.md) reference.
+   Product Design establishes the applicable role, ordinary entry, complete
+   business journey, visible behavior, durable result, and important recovery
+   in its existing C/D artifacts; this is a design-time standard, not a request
+   to run the product or create a map.
 
 ## Build A and C
 
@@ -145,7 +151,10 @@ For a corrected or evidence-challenged design, first apply the shared
    bounded real-side-effect plan, durable result, success feedback, and failure
    recovery. Mocks may replace data and responses, never invent a capability.
    If API, permission, or safety boundaries conflict, keep D draft and stop
-   before approval.
+   before approval. For a business feature, use the shared Business Acceptance
+   rules to align D's visible acceptance with C and record any required final
+   result/readback; unknown business rules or permission/safety conflicts are
+   blockers, not ordinary implementation dependencies.
 7. Clear flow-changing open questions and derive the D identity. Normally Gate 1
    must be explicit before D continues. For joint approval, follow the constrained
    combined-gate drafting path in [Build A and C](#build-a-and-c).
@@ -232,7 +241,9 @@ Gate 2 and create E; do not add another approval.
 ## Create and validate E
 
 1. Create E only as a reference and approval index. Do not copy A, C, or D
-   narrative into it.
+   narrative into it. E may point to the C/D business acceptance rows and the
+   inherited verification method, but it must not add, remove, or lower an
+   approved requirement.
 2. Recompute A, C, and D identities and apply every fail-closed check in the
    adapter. Treat a stale `status: approved` as `draft/non-executable` whenever
    one check fails.
@@ -242,6 +253,9 @@ Gate 2 and create E; do not add another approval.
    implementation dependency, allowed engineering adjustments, applicable
    acceptance/readback, and important unresolved items by reference to the
    current A/C/D body. Do not add a second design narrative.
+   Keep planned, discovered, and executed entrypoints distinct; a planned or
+   not-yet-implemented path is a dependency, not a runnable command or proof of
+   execution readiness.
 4. Route remaining implementation risk to Task, Clarify, Team, or Design Review.
    Design approval and passing tests do not certify or release a product. For a
    `product_increment`, report real checks and any `证据采集：降级` recorder

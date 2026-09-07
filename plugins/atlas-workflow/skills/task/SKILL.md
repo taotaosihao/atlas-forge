@@ -70,6 +70,19 @@ the request as explicit `product_release` intent. The minimum real acceptance is
 5. No unauthorized deployment, publication, shared-environment write, or
    irreversible operation occurred.
 
+When the current goal delivers a business function, conditionally load the shared
+[Business Acceptance](../team/references/business-acceptance.md) rules and
+inherit the current design or plan's acceptance requirements before executing the
+journey. This applies to a direct Task entry even when no Product Design or
+Clarify artifact was loaded first; a clearly small task may state its applicable
+requirements in the task itself. Drive the required complete journey with one
+related set of business objects, including the final result and applicable
+readbacks, and record the actual outcome in the existing task, contract, scenario,
+or report carrier. A Project Verification Map or an extra protocol selection is
+not a precondition; BAF artifacts remain limited to contracts that already
+require them. Ordinary technical, library, CLI, maintenance, and read-only tasks
+do not activate business acceptance.
+
 For a small public beta, also make the applicable access boundary, data/sensitive
 information isolation, credential handling, rollback/close path, and one real
 entrypoint smoke explicit. Report the actual commands, exit results, and key

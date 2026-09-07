@@ -503,6 +503,19 @@ reason; failed, unrun, or unknown real checks still block. This path never write
 or implies `release_decision`, `certified`, or source-level release-ready, and it
 never substitutes for the strict release path below.
 
+For a business-function delivery, conditionally load the shared
+[Business Acceptance](references/business-acceptance.md) rules and inherit the
+current approved design or plan's requirements before executing that flow. The
+same condition applies to a direct Team entry when Task did not preload the
+reference; it does not require `$atlas-workflow:project-verification`, an
+existing map, or an extra protocol selection. Use one related set of business
+objects through every required step, perform required UI actions through the UI,
+and check the final business result and applicable readbacks. Record the actual
+design comparison, evidence, and breakpoints in the existing task/contract,
+scenario, or report carrier. Ordinary technical, library, CLI, maintenance, and
+read-only Team tasks do not activate this rule; BAF artifacts remain limited to
+contracts that already require them.
+
 ## Release Certification
 
 Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.
@@ -583,10 +596,14 @@ materials never authorize an automatic format downgrade.
 
 ## Optional Protocols
 
-Load optional protocol references only when the current contract actually requires them:
+Load optional protocol references when the current contract actually requires
+them or when a business-function delivery needs the shared business acceptance
+rules. This conditional load also covers a direct Team entry and does not depend
+on Task having preloaded a reference, a Project Verification Map, or an explicit
+protocol choice:
 
 - Read `references/sdd.md` for Codex-native SDD JSON contracts, slice ledger, implementer/reviewer reports, or `codex-team-*` helpers.
-- Read `references/business-acceptance.md` for business scenario, stakeholder, protocol/device, or dual-goal UI acceptance.
+- Read `references/business-acceptance.md` for business scenario, stakeholder, protocol/device, dual-goal UI acceptance, or any business-function delivery whose current design/plan defines acceptance requirements.
 - Read `references/code-review.md` when a substantive code or merge-readiness review needs the optional perspective menu, evidence checklist, focused deliberation prompts, or synthesis shape.
 - First-code and Product/UI gates belong to the selected implementation contract and the clarify/task skills; do not duplicate their full rules here. Execute admission binds their production identities, and reaching the exact first-code stop before acceptance durably pauses the grant until explicit replan.
 

@@ -33,6 +33,7 @@ After the plugin is installed, these entrypoints are available:
 - `$atlas-workflow:worktree`
 - `$atlas-workflow:finish`
 - `$atlas-workflow:3d-harness` (source-checkout exploration only)
+- `$atlas-workflow:project-verification` (optional project verification map)
 
 Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
@@ -404,6 +405,16 @@ existing `codex-web-acceptance` evidence kernel and never installs dependencies,
 downloads Chromium, refreshes cache, or makes release claims automatically. See
 [`tools/atlas-3d-harness/README.md`](tools/atlas-3d-harness/README.md).
 
+`$atlas-workflow:project-verification` is an optional navigation guide for a
+project's real user entrypoints, bounded journeys, observable outcomes, and
+maintenance triggers. It can create, run, or audit a single derived
+`docs/verification-map.md` (new v1 entries up to five stable capabilities;
+existing material is not trimmed), but it is not a
+runner, evidence kernel, business-acceptance verdict, workflow state, or release
+gate. Current valid user decisions, approved design, and applicable contracts
+define the target behavior; project harnesses provide verification entrypoints
+and evidence only. A map is not required for ordinary business delivery.
+
 ## Refresh After Changes
 
 Refresh the installed development copy only when the task explicitly includes an
@@ -441,4 +452,5 @@ primitive used by the update command.
 - `skills/worktree/SKILL.md`: isolated git worktree entry
 - `skills/finish/SKILL.md`: isolated branch completion entry
 - `skills/3d-harness/SKILL.md`: source-checkout-only reviewed-local 3D acceptance entry
+- `skills/project-verification/SKILL.md`: optional project verification map and journey navigation entry
 - `tools/atlas-3d-harness/README.md`: 3D runtime CLI, evidence, safety, and host limits

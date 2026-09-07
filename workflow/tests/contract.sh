@@ -542,6 +542,8 @@ cache_plugin_root="${ATLAS_CACHE_PLUGIN_ROOT:-}"
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
   ATLAS_FORGE_ROOT="$ATLAS_FORGE_ROOT" bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_product_design_skill.sh"
   pass "product-design skill contract"
+  node "$ATLAS_FORGE_ROOT/workflow/tests/contract_project_verification_skill.mjs"
+  pass "project-verification skill contract"
   cache_plugin_root="$CODEX_HOME_ROOT/plugins/atlas-workflow"
   cache_skills_root="$cache_plugin_root/skills"
 elif [[ -z "$cache_skills_root" ]]; then
