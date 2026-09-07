@@ -14,7 +14,7 @@ Give the selected reviewers a common, bounded packet:
 - available test, runtime, migration, browser, or release evidence;
 - explicit unknowns that the diff cannot establish.
 
-Keep first-round reviewer contexts independent. Each reviewer should form its own position before cross-checking another role's findings.
+Keep first-round reviewer contexts independent. Reviewers supplying independent implementation review must not have implemented the change. Each reviewer should form its own position from the bounded packet and source evidence before cross-checking another role's findings. Treat author explanations as claims to verify, not established results. When this reference is used, include the relevant questions below in the bounded review packet without a preset controller verdict.
 
 ## Perspective Menu
 
@@ -25,7 +25,7 @@ Recommend only perspectives that materially improve the current review. Two or t
 - evidence verification, including whether claimed checks actually ran and whether the available inputs support the conclusion;
 - domain, operations, release integrity, business acceptance, accessibility, data, or another specialist view justified by the change.
 
-For a material review, consider assigning one perspective the strongest counterargument against accepting the change as-is. This is a responsibility, not a required `architect` role name.
+For a material review, ask a selected reviewer who did not implement the change to investigate the strongest counterargument against accepting the change as-is. Ground objections in a plausible execution path, contract mismatch, or direct evidence; do not invent findings to fill an adversarial role. This is a responsibility, not a required `architect` role name or an additional agent-count requirement.
 
 ## Evidence And Finding Quality
 
@@ -38,9 +38,15 @@ Each actionable finding should include:
 - the observed behavior or contract mismatch;
 - the concrete risk or user impact;
 - a focused recommendation;
-- the evidence that supports the claim and any remaining verification gap.
+- the evidence that supports the claim, which parts are inference, and any remaining verification gap or observation that would change the conclusion.
 
-Use review categories as prompts, not universal gates. Select from correctness and edge cases; authentication, authorization, secrets, injection, and trust boundaries; errors and failure semantics; concurrency, transactions, idempotency, and state consistency; performance and resource behavior; compatibility, migration, and rollback; coupling, duplication, and testability; critical-path, failure-path, and regression tests; and system boundaries or long-horizon tradeoffs.
+Use review categories as prompts, not universal gates. Select only relevant correctness, security, state consistency, performance, compatibility, rollback, ownership, coupling, and regression concerns.
+
+For a fix, trace the reported failure through the affected ownership, state flow, and authoritative boundary. Check whether the remedy addresses the supported cause and whether available regression evidence distinguishes the original defect from the corrected behavior. For new behavior, check the authorized acceptance instead. If the cause or before/after behavior cannot be established, report the gap without inventing a reproduction or root cause.
+
+Check whether the change is the smallest coherent solution at the existing source of truth. Challenge added authority, state, branches, configuration, dependencies, and fallbacks against the required behavior. Identify tests that only mirror implementation details, duplicate stronger coverage, or fail to distinguish the defect. Prefer reuse or removal when it preserves correctness, required behavior, and useful regression coverage; recommend broader refactoring only when a concrete boundary defect blocks the current goal.
+
+If a decision depends on the claimed benefit of an added mechanism, inspect any available comparison that removes or disables a non-required factor while holding other relevant conditions fixed and preserving required safety, permissions, compatibility, and product behavior. Distinguish a controlled comparison from a multi-change result. Request further experiments only when the missing evidence could change the current decision and the experiment is authorized; otherwise qualify the claim.
 
 Do not impose language-independent numeric rules for function length, cyclomatic complexity, or nesting depth. Treat them as contextual signals only. Do not claim that absence of a finding proves absence of risk.
 

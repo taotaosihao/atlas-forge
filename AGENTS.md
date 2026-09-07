@@ -5,6 +5,8 @@
 - 当前 Git checkout 是插件、workflow helper、测试和文档的唯一开发源。
 - Atlas 插件源码位于 `plugins/atlas-workflow/`，workflow helper 源码位于 `workflow/`；已安装 cache、marketplace snapshot 和 `~/.codex/workflow` 都是派生产物，不能反向作为修改源。
 - 文档权威级别以 [docs/README.md](docs/README.md) 为准；实现行为冲突时，以当前源码、schema、测试和 manifest 为准。
+- 修改规则、提示词或工具约束前，指出它要纠正的具体失败行为与期望结果；优先原位修订已有规则，仅在现有机制无法表达当前需求时增加入口或机制。
+- 同一约束、状态和证据保持明确的责任归属：Skill 指导执行，可执行校验检查其负责的约束，记录保存实际结果。复用现有职责边界，避免在多个入口维护相互漂移的完整规则副本。
 
 ## 开发与发布边界
 
@@ -32,7 +34,7 @@
 
 - 默认简洁回复：结论优先，只报告关键改动、验证结果和需要用户行动的残留问题。
 - 除非用户明确要求详细说明，不逐项复述执行过程、完整合同、已知上下文或无须行动的检查结果。
-- 简洁不得省略失败验证、授权边界、真实风险或需要用户决定的事项。
+- 简洁不得省略失败验证、授权边界、影响结论的关键未知与未测范围。规则文案、静态检查、隔离合同、真实模型行为及安装态证据分别说明；源码修改和检查通过不能证明模型行为改善、安装态生效或发布就绪。
 
 ## 最小验证矩阵
 
@@ -43,6 +45,6 @@
 | 发布、安装、doctor 或 cache 行为 | 上述检查加 `contract_host_install.sh` 和 release identity gate |
 | 跨域或最终集成 | `bash workflow/tests/contract.sh`，并核对 forbidden paths 与 Multica hard fingerprints |
 
-- 先运行最小专项检查，再按影响面扩大；无法运行的命令必须记录具体原因。
+- 先运行最小专项检查，再按影响面扩大；无法运行的命令必须记录具体原因。规则文案变更复用已有检查，并按实际触发场景审阅含义与授权边界；不默认增加真实模型实验、付费评测或逐条规则的统计验证。
 - 提交时机与工作阶段匹配：方案/合同在最终确认时形成一个逻辑提交；进入已授权实施后，按适中、可独立理解/验证/回退的逻辑成果创建 Conventional Commit。不要按每个 step、slice 或 fix round 机械提交，也不要把整个 roadmap 堆成超大 diff。
 - 只 stage 当前任务拥有的 paths/hunks，提交前检查 staged diff、`git diff --cached --check` 和 forbidden paths；commit 不推导出 push、release 或安装态 mutation 权限。
