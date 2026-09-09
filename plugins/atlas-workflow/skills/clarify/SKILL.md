@@ -63,6 +63,13 @@ creating a Map, or running verification early. Unknown business rules or
 permission/safety conflicts are blockers, not ordinary implementation
 dependencies.
 
+For an explicit video-and-manual request, including an ordinary technical task,
+load only **Optional operation-guide delivery** in the shared Business Acceptance
+reference. Record the optional delivery choice in the current verification plan:
+standard acceptance by default, or video plus operation manual when requested.
+Carry it into execution without repeating approval. This material-only selection
+does not activate business-object, UI, BAF or release requirements.
+
 A one-line request with complete context needs no fixed checklist, repeated
 restatement, extra questions or new workflow artifacts. Output length follows
 the actual decisions, not the length of the request.

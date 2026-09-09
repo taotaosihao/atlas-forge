@@ -516,6 +516,12 @@ scenario, or report carrier. Ordinary technical, library, CLI, maintenance, and
 read-only Team tasks do not activate this rule; BAF artifacts remain limited to
 contracts that already require them.
 
+For an explicit video-and-manual request, including an ordinary technical task
+or direct Team entry, load only the **Optional operation-guide delivery** section
+of the shared [Business Acceptance](references/business-acceptance.md) reference
+and carry the choice in the current verification plan. This material-only
+selection does not activate business-object, UI, BAF or release requirements.
+
 ## Release Certification
 
 Release-readiness invariant: only a Team execution-vnext product_release whose immutable Profile final sweep binds one unchanged candidate and yields the completion-derived release_decision.status=certified may be called source-level release-ready; it never proves or authorizes installation, push, deployment, publication, or actual release. Task/slice/agent/review completion, passing tests, screenshots, Business Acceptance, design approval, or MVP/Beta labels never grant release-ready status.

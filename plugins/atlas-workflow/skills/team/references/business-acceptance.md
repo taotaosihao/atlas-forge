@@ -21,6 +21,9 @@ Map is optional and is never a prerequisite.
   observed result. Reuse the existing task/contract/scenario/report carrier.
 - Ordinary library, CLI, refactor, maintenance, and technical Team tasks do not
   activate this protocol.
+- An explicit video-and-manual request loads only **Optional operation-guide
+  delivery** below; for a non-business task it does not activate the rest of this
+  business protocol or require BAF artifacts.
 - BAF artifacts are created only when the selected contract requires them; this
   shared reference does not add a new schema, validator, approval, or runner.
 
@@ -114,3 +117,62 @@ reviewer agreement are implementation evidence, not user approval of the
 business outcome. User revalidation confirms a result that the agent has
 already exercised; it must not be the first discovery that a required step was
 never run.
+
+## Optional operation-guide delivery
+
+Record the delivery choice in the current Verification Plan / Real Validation
+Plan: **标准验收** (default) or **操作手册式验收：视频 + 文档**. An explicit
+request for video and accompanying documentation selects the latter without
+another confirmation. Task and direct Team inherit this choice; no Map, BAF,
+global setting, new CLI option, or additional business action is required.
+
+When selected, deliver both a real-operation MP4 and an offline HTML operation
+manual together in a retained, user-accessible directory. Embed screenshots in
+the HTML and link the video relatively; do not depend on remote assets or leave
+the only deliverables in a disposable run directory. Raw recordings and logs
+remain in the existing evidence channel, outside Git by default. Voice-over is
+optional; Chinese step titles and necessary explanations must be visible in
+the video itself. PDF is an additional format only when requested.
+
+Use one set of scenario steps for both outputs. Each required step identifies
+its number, purpose, entry/control, action, necessary explanation, expected and
+observed result, corresponding screenshot, and final-video time range. The
+manual explains prerequisites, role, environment/version, the complete journey,
+result confirmation and applicable recovery; it must be usable without playing
+the video. Do not turn internal review fields or logs into operator prose.
+
+Record the actual authorized journey on the same candidate, instance and related
+objects. Show the before state, action and feedback. Keep key actions at normal
+speed, allow time to read, make the target visible and keep captions off the
+controls. Prefer 1080p where appropriate, but judge readability at the actual
+playback size. Mark shortened waits or edits and recompute final timecodes;
+never edit away failures to imply success. Screenshots and timestamps must
+match the recorded run. Synthetic UI or screenshot animations cannot substitute
+for real recording; an approved simulator still proves only its stated boundary.
+Avoid credentials and unrelated personal data; redaction must not hide the
+result needed for acceptance.
+
+Check recording and export capability before the journey. Reuse the project's
+adapter and installed tools; missing capability does not authorize installation,
+new business writes, device actions or a side-effecting rerun. For
+`codex-web-acceptance`, the project adapter may use its own `adapter.argv` options;
+declare both files in existing `required_evidence` and use an independent
+material validator with `input_context: "run-context@1"` to inspect the actual
+files. Do not add unknown project-config fields. Bind the step content to the
+frozen contract or registered content evidence, not merely an external filename.
+
+Check that the video decodes, the offline document opens, all required steps
+and timecodes correspond, and linked resources remain usable when the directory
+moves. Then watch the full video and read the manual to assess clarity; file
+existence, hashes and static tests cannot prove readable instruction. The
+source-only [local adapter example](../../../../../workflow/examples/operation-guide/README.md)
+demonstrates this integration, not automatic support in every project.
+
+Keep business results and material results separate. If the real checks passed
+but either deliverable is missing, broken, unreadable or incomplete, report
+“业务流程检查通过；操作资料未完成”. The usual evidence-collection degradation
+does not complete this selected delivery and must not silently fall back to
+standard acceptance. Preserve runner statuses: material failure fails that
+attempt and may produce aggregate `failed` or `unstable`; neither is completed
+delivery. Materials cannot override a failed, unrun or unknown business step,
+grant stakeholder approval, or change release certification.

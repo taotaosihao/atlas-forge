@@ -18,6 +18,11 @@ title: {{TITLE}}
 |------|-------------------------|-------------------------|--------------------|-------|
 | 1 |  |  |  |  |
 
+For selected operation-guide delivery only, extend the existing steps with
+purpose, entry/control, action, necessary explanation, screenshot and final-video
+time range. Use the same steps in the video and standalone manual; do not create
+a second scenario. Standard acceptance does not require these extra materials.
+
 ## Business Result
 
 - Outcome reached:

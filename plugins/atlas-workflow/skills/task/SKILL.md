@@ -92,6 +92,12 @@ check that failed, was not run, or has an unknown result still blocks. Never tur
 this degraded evidence into `certified` or `release-ready`, and never use it to
 weaken the fail-closed `product_release` path.
 
+For an explicit video-and-manual request, including an ordinary technical task,
+load only the **Optional operation-guide delivery** section of the shared
+[Business Acceptance](../team/references/business-acceptance.md) reference and
+carry the choice in the current verification plan. This material-only selection
+does not activate business-object, UI, BAF or release requirements.
+
 ## Independent Staffing, Lease, And Model Choices
 
 Keep three decisions separate: `staffing_mode` (`main` or `team`) answers whether

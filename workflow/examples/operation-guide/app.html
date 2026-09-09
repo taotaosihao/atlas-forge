@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>记录管理 · 本地示例</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;background:#f4f6fa;color:#182539;font:24px/1.6 system-ui,sans-serif}
+  main{max-width:1100px;margin:90px auto} h1{font-size:44px;margin-bottom:8px} h2{margin:0 0 25px;font-size:30px}
+  .intro{color:#52647a;margin:0 0 40px} section{background:white;border:1px solid #d8e0ec;border-radius:18px;padding:36px;margin:24px 0}
+  label{display:block;font-weight:600} input{display:block;width:100%;font:inherit;padding:14px;border:2px solid #7c8ca1;border-radius:8px;margin:12px 0 24px}
+  input:focus{outline:4px solid #bfdbfe;border-color:#1761c5} button{font:inherit;padding:12px 28px;border:0;border-radius:9px;background:#1761c5;color:white;cursor:pointer}
+  button:disabled{background:#77879b} #result{display:flex;align-items:center;gap:35px} #status{font-weight:650;color:#176349} #record{flex:1}
+</style>
+<main>
+  <h1>记录管理</h1><p class="intro">本地示例 · 创建记录并确认保存结果</p>
+  <section><h2>新建记录</h2><form>
+    <label for="name">记录名称</label><input id="name" required maxlength="40" autocomplete="off">
+    <button type="submit">创建记录</button>
+  </form></section>
+  <section id="result" aria-live="polite"><span id="status">尚未创建</span><span id="record">保存后将在这里显示名称和编号</span><button id="read" type="button">重新读取</button></section>
+</main>
+<script>
+  const form = document.querySelector('form'), nameInput = document.querySelector('#name');
+  function show(value) {
+    document.querySelector('#status').textContent = value ? '已保存' : '尚未创建';
+    document.querySelector('#record').textContent = value ? `${value.name} · 编号 ${value.id}` : '保存后将在这里显示名称和编号';
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); const button = form.querySelector('button'); button.disabled = true;
+    document.querySelector('#status').textContent = '正在保存…';
+    try { const response = await fetch('/record', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nameInput.value})});
+      if (!response.ok) throw new Error('保存失败'); show(await response.json());
+    } catch { document.querySelector('#status').textContent = '保存失败，请重试'; }
+    finally { button.disabled = false; }
+  });
+  document.querySelector('#read').addEventListener('click', async () => {
+    try { const response = await fetch('/record'); if (!response.ok) throw new Error('读取失败'); show(await response.json()); }
+    catch { document.querySelector('#status').textContent = '读取失败，请重试'; }
+  });
+</script>
+</html>

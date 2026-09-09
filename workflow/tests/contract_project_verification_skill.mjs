@@ -116,3 +116,14 @@ assert.ok(contractShell.indexOf("contract_project_verification_skill.mjs") > con
 hasAll(readme, "README", ["$atlas-workflow:project-verification", "docs/verification-map.md", "optional project verification map", "skills/project-verification/SKILL.md", "Current valid user decisions", "project harnesses provide verification entrypoints"]);
 
 console.log("project-verification source contract passed");
+
+const guide = section(businessAcceptance, "Optional operation-guide delivery");
+hasAll(guide, "operation guide", ["标准验收", "视频 + 文档", "without another confirmation", "offline HTML", "same candidate", "required_evidence", "run-context@1", "watch the full video", "must not silently fall back"]);
+hasAll(clarifyAcceptance, "guide handoff", ["optional delivery choice", "without repeating approval"]);
+for (const [label, text] of [["Task",task],["Team",team],["Clarify",clarify]]) {
+  hasAll(text, `${label} explicit guide entry`, ["explicit video-and-manual request", "ordinary technical task", "material-only", "does not activate business-object, UI, BAF or release requirements"]);
+}
+for (const template of ["implementation-contract.md", "implementation-contract.final.md"]) {
+  hasAll(section(source(`workflow/templates/${template}`), "Real Validation Plan"), template, ["标准验收（默认）", "视频 + 文档"]);
+}
+console.log("optional operation-guide delivery source contract passed");

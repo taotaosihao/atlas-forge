@@ -23,6 +23,8 @@ title: {{TITLE}}
 
 ## Evidence Summary
 
+- Delivery choice: 标准验收 / 操作手册式验收：视频 + 文档 (inherit the current plan)
+- Selected operation-guide delivery only: video link, offline manual link, full playback/readability check, and any missing material. Material failure does not rewrite the observed business result and does not complete the selected delivery.
 - Strongest supporting evidence:
 - Weakest supporting evidence:
 - Unverified claim:

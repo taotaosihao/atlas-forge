@@ -145,6 +145,8 @@ compatibility, not new-authoring alternatives.
 
 ## Real Validation Plan
 
+- 验收交付形式：标准验收（默认）/ 操作手册式验收：视频 + 文档。按共享 Business Acceptance 规则执行；明确要求双件时直接选择，未选择时不增加材料要求。
+
 | Row | Target | Command or action | Expected result | Phase conclusion evidence |
 |-----|--------|-------------------|-----------------|---------------------------|
 | V-1 |  |  |  | `evidence/phase-review-report.md` |

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "protocol_version": "1",
+  "task_id": "operation-guide-example",
+  "scenario_id": "create-record",
+  "project_root": ".",
+  "adapter": { "argv": ["node", "adapter.cjs"] },
+  "phases": ["journey"],
+  "validators": [
+    { "id": "flow", "claim_id": "flow", "argv": ["node", "validator.cjs"], "input_context": "run-context@1" }
+  ],
+  "required_evidence": [{ "id": "flow", "claim_id": "flow" }]
+}
