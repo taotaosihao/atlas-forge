@@ -25,6 +25,9 @@ a second scenario. Standard acceptance does not require these extra materials.
 Write operator-facing prose using the
 [shared concise-writing rules](../../plugins/atlas-workflow/skills/team/references/business-acceptance.md#optional-operation-guide-delivery);
 this evidence table remains the factual record, not text to repeat in the manual.
+Each operation step must include an inline, legible screenshot beside its
+instruction. Check video pacing against the shared follow-along rules, including
+pauses before actions and after results; timecodes alone are not screenshots.
 
 ## Business Result
 

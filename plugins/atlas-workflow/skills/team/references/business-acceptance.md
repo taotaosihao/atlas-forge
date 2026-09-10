@@ -140,6 +140,11 @@ observed result, corresponding screenshot, and final-video time range. The
 manual explains prerequisites, role, environment/version, the complete journey,
 result confirmation and applicable recovery; it must be usable without playing
 the video. Do not turn internal review fields or logs into operator prose.
+Every operation step must show at least one corresponding screenshot inline
+in the manual, beside its instruction and visible without expanding acceptance
+details. Use additional before/after screenshots when one image cannot explain
+the action and result. Screenshots must make the relevant controls and feedback
+legible; video links or timestamps alone do not satisfy this requirement.
 
 Keep operator-facing prose concise: use one short action sentence per step,
 adding only necessary cautions and a clear way to confirm the result. Omit
@@ -152,9 +157,14 @@ evidence and step correspondence. Apply the same brevity to video captions
 without removing information needed to perform the operation safely.
 
 Record the actual authorized journey on the same candidate, instance and related
-objects. Show the before state, action and feedback. Keep key actions at normal
-speed, allow time to read, make the target visible and keep captions off the
-controls. Prefer 1080p where appropriate, but judge readability at the actual
+objects. Show the before state, action and feedback. Record at a deliberate,
+follow-along pace: pause on the target before clicking, type at a readable pace,
+and hold each result before moving on. As a starting point, show the target for
+about 1–2 seconds and the result for at least 3 seconds; extend these pauses for
+longer captions or complex steps. Do not fast-forward key clicks, input or
+confirmation. A viewer at normal playback speed must be able to read and follow
+each step without repeatedly pausing. Keep captions off the controls.
+Prefer 1080p where appropriate, but judge readability at the actual
 playback size. Mark shortened waits or edits and recompute final timecodes;
 never edit away failures to imply success. Screenshots and timestamps must
 match the recorded run. Synthetic UI or screenshot animations cannot substitute
