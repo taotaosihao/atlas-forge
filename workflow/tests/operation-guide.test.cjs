@@ -50,8 +50,8 @@ async function main() {
     ["damaged manual", target => fs.writeFileSync(path.join(target,"操作手册.html"),"broken"), /Timeout/],
     ["missing instruction", target => {
       const file = path.join(target,"操作手册.html");
-      fs.writeFileSync(file,fs.readFileSync(file,"utf8").replace("名称用于在保存后识别同一条记录，提交前核对输入。",""));
-    }, /手册缺少 input 的 explanation/],
+      fs.writeFileSync(file,fs.readFileSync(file,"utf8").replace("保存中请勿重复提交。",""));
+    }, /手册缺少 submit 的 explanation/],
     ["wrong timecode", target => {
       const file = path.join(target,"操作手册.html"); fs.writeFileSync(file,fs.readFileSync(file,"utf8").replace(/data-start="[^"]+"/,'data-start="9999"'));
     }, /Expected values/],

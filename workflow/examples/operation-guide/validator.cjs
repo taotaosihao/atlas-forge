@@ -57,7 +57,7 @@ async function validate(input) {
       assert.equal(Number(await section.getAttribute("data-start")), step.start);
       assert.equal(Number(await section.getAttribute("data-end")), step.end);
       assert.equal(await section.locator("h2").innerText(), `${index+1}. ${step.title}`);
-      const text = await section.innerText();
+      const text = await section.textContent();
       for (const key of ["action","explanation","expected","observed"]) assert.ok(text.replace(/\s+/g," ").includes(step[key].replace(/\s+/g," ")), `手册缺少 ${step.id} 的 ${key}`);
       assert.equal(await section.locator("a").getAttribute("href"), `操作演示.mp4#t=${step.start.toFixed(2)},${step.end.toFixed(2)}`);
       const png = fs.readFileSync(path.join(root, `${step.id}.png`)).toString("base64");
