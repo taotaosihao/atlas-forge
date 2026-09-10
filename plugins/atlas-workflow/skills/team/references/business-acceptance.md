@@ -157,11 +157,11 @@ evidence and step correspondence. Apply the same brevity to video captions
 without removing information needed to perform the operation safely.
 
 Record the actual authorized journey on the same candidate, instance and related
-objects. Show the before state, action and feedback. Record at a deliberate,
-follow-along pace: pause on the target before clicking, type at a readable pace,
-and hold each result before moving on. As a starting point, show the target for
-about 1–2 seconds and the result for at least 3 seconds; extend these pauses for
-longer captions or complex steps. Do not fast-forward key clicks, input or
+objects. Show the before state, action and feedback. Record at a natural,
+readable pace: briefly pause on the target before clicking, type clearly, and
+show the result for about one second before continuing. This is a starting
+point, not a mandatory delay per action; pause longer only for longer captions
+or complex state changes. Avoid padding simple steps. Do not fast-forward key clicks, input or
 confirmation. A viewer at normal playback speed must be able to read and follow
 each step without repeatedly pausing. Keep captions off the controls.
 Prefer 1080p where appropriate, but judge readability at the actual
