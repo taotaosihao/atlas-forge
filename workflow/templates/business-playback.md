@@ -22,6 +22,9 @@ For selected operation-guide delivery only, extend the existing steps with
 purpose, entry/control, action, necessary explanation, screenshot and final-video
 time range. Use the same steps in the video and standalone manual; do not create
 a second scenario. Standard acceptance does not require these extra materials.
+Write operator-facing prose using the
+[shared concise-writing rules](../../plugins/atlas-workflow/skills/team/references/business-acceptance.md#optional-operation-guide-delivery);
+this evidence table remains the factual record, not text to repeat in the manual.
 
 ## Business Result
 

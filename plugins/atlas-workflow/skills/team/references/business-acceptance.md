@@ -141,6 +141,16 @@ manual explains prerequisites, role, environment/version, the complete journey,
 result confirmation and applicable recovery; it must be usable without playing
 the video. Do not turn internal review fields or logs into operator prose.
 
+Keep operator-facing prose concise: use one short action sentence per step,
+adding only necessary cautions and a clear way to confirm the result. Omit
+self-evident explanations and repeated introductions or conclusions. When
+expected and observed results agree, keep the confirmation visible and put
+duplicate acceptance details in a collapsed record (or an appendix in static
+documents). Show failures, differences and unresolved results directly beside
+the affected step; never hide them in a collapsed record. Preserve the full
+evidence and step correspondence. Apply the same brevity to video captions
+without removing information needed to perform the operation safely.
+
 Record the actual authorized journey on the same candidate, instance and related
 objects. Show the before state, action and feedback. Keep key actions at normal
 speed, allow time to read, make the target visible and keep captions off the
