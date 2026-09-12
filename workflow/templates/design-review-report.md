@@ -14,15 +14,11 @@ created: {{CREATED}}
 
 ## Phase Evidence
 
-### Desktop
+Repeat this section for each required viewport in the current contract; do not add coverage from template defaults.
 
-- Screenshot:
-- Structure snapshot:
-- Key measurements:
-- Interaction notes:
+### Viewport
 
-### Mobile
-
+- Viewport and design reference:
 - Screenshot:
 - Structure snapshot:
 - Key measurements:
@@ -41,7 +37,7 @@ created: {{CREATED}}
 | Input completeness | pending |  |  |
 | Structure and copy | pending |  |  |
 | Hard visual/layout rules | pending |  |  |
-| Multi-viewport behavior | pending |  |  |
+| Required viewport behavior | pending |  |  |
 | Interaction coverage | pending |  |  |
 | Overall visual coherence | pending |  |  |
 

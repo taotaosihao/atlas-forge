@@ -99,7 +99,7 @@ init_review() {
   ensure_template "design-review-verdict.json"
 
   task_title="design-review: $title"
-  success_criteria="完成设计还原验收：生成 contract/report/verdict，覆盖结构、视觉、交互、桌面和手机，并给出通过、不通过或阻塞结论。"
+  success_criteria="完成设计还原验收：生成 contract/report/verdict，按批准设计及当前用户决定覆盖适用的结构、视觉、交互、视口和状态，并给出通过、不通过或阻塞结论。"
 
   task_id="$("$TASK_HELPER" init-task "$task_title" "$success_criteria")"
   "$TASK_HELPER" start "$task_id" >/dev/null

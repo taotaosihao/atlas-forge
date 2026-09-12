@@ -63,7 +63,7 @@ Follow this loop:
    - input completeness
    - structure and copy
    - hard visual/layout rules
-   - multi-viewport behavior
+   - required viewport behavior
    - interaction coverage
    - overall visual coherence
    - in release mode, record only the four typed formal Web UI facts assigned by the immutable Profile and official adapter, and bind every fact to the unchanged candidate; dead controls, happy-path-only coverage, engineering/meta content leakage, missing owner acceptance, or missing stable evidence fail or remain `cannot_verify` as the adapter contract specifies
@@ -72,8 +72,8 @@ Follow this loop:
    - prefer evidence over claims
    - keep implementation and judgment separate
    - use explicit gates
-   - keep retries bounded
-11. If the verdict is incomplete but the remaining work is agent-actionable, continue with targeted fixes, rerun the failed checks, then rerun D's applicable viewports and interactions. After 3 failed loops, stop and report the blocker clearly.
+   - keep retries focused on unresolved findings
+11. If the verdict is incomplete, continue targeted fixes within current implementation authority while safe work can materially advance the current goal, and rerun the affected checks, viewports and interactions required by D. Return only when the remaining work needs new authority, a user-owned decision, an external state change, or no safe work can materially advance the goal; report the concrete blocker and keep unverified outcomes non-passing. Attempt counts and elapsed time do not by themselves determine completion or stopping.
 12. Before reporting success, verify with real commands and tools, then read
     `verdict.json.status` without translation. Only the literal value `passed`
     permits a passing claim. Missing, unknown, unparsable, or any other value

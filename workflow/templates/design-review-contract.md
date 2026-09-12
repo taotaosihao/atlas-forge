@@ -17,8 +17,7 @@ created: {{CREATED}}
 
 - [ ] Design source is accessible
 - [ ] Review page is accessible
-- [ ] Desktop viewport defined
-- [ ] Mobile viewport defined
+- [ ] Target viewports and required states follow the approved design and current user decisions
 - [ ] Required states/interactions listed
 
 ## Must-Match Rules
@@ -41,26 +40,25 @@ created: {{CREATED}}
 
 ## Target Viewports
 
+List only the viewports required by the approved design and current user decisions, with their source references. Do not add desktop or mobile coverage by default. Resolve missing required dimensions before judging layout.
+
 | Viewport | Width | Required | Notes |
 |----------|-------|----------|-------|
-| Desktop | 1440 | yes |  |
-| Mobile | 390 | yes |  |
+|  |  |  |  |
 
 ## Required States And Interactions
 
+Derive the required states and interactions from the same sources; the scaffold does not decide which recovery or interaction is optional.
+
 | Item | How To Trigger | Required | Notes |
 |------|----------------|----------|-------|
-| Default | page load | yes |  |
-| Hover | pointer hover | no |  |
-| Active | click/tap | no |  |
-| Empty/error/loading | direct route or setup | no |  |
+|  |  |  |  |
 
 ## Hard Gates
 
 - [ ] No missing structural sections
 - [ ] No incorrect core copy
-- [ ] No broken desktop layout
-- [ ] No broken mobile layout
+- [ ] No broken layout at any required viewport
 - [ ] No missing required interaction/state
 
 ## Soft Review Prompts
