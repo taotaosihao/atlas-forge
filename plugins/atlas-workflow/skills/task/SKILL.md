@@ -112,7 +112,9 @@ or lane and is not persisted as workflow state. Planning and plan/contract
 review default to a frontier model; only an explicitly specified lane may
 override that default, and low-tier Saving routes are otherwise limited to an
 authorized implementation Execute. The Claude-family manual exact-model gate
-remains unchanged.
+remains unchanged for explicit Paseo routing. Claude-native agents instead use
+the host inheritance policy in Team’s Claude Native Collaboration section; the
+Codex frontier/saving/quality matrices do not apply to that host.
 
 Choose a path lease from actual write-conflict risk, independently of Team:
 

@@ -53,6 +53,9 @@ env_candidates = [
     os.environ.get("CODEX_TOOL_INPUT", ""),
     os.environ.get("TOOL_INPUT", ""),
 ]
+tool_input = payload.get("tool_input", {}) if isinstance(payload, dict) else {}
+if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str):
+    env_candidates.append(tool_input["command"])
 payload_candidates = list(recursive_strings(payload))
 all_candidates = [item for item in env_candidates + payload_candidates if item]
 

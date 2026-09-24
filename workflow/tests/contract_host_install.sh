@@ -161,4 +161,5 @@ require_suite_output host-layout-fixtures 'missing exact cache is rejected' \
 run_labeled_suite strict-doctor-fixtures "$DOCTOR_SUITE"
 run_labeled_suite local-cache-transaction "$REFRESH_SUITE"
 run_labeled_suite atlas-development-sync "$DEV_SYNC_SUITE"
+run_labeled_suite claude-runtime-fixtures "$ATLAS_FORGE_ROOT/workflow/tests/contract_claude_host.sh"
 printf 'host install contract passed: snapshot/cache/install layout checks are isolated\n'

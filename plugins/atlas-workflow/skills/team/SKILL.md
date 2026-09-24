@@ -1,13 +1,18 @@
 ---
 name: team
-description: Use the Atlas team flow with Codex native collaboration by default and Paseo only when it is explicitly selected for a Team, lane, or dispatch.
+description: Use the Atlas team flow with the current host native collaboration by default and Paseo only when it is explicitly selected for a Team, lane, or dispatch.
 ---
 
 Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:team`; Claude Code invokes it as `/team` or by calling the `team` skill directly. "The main Codex" below refers to the current host's root/main session regardless of host — on Claude Code that is the main Claude Code session. See `## Codex Native Collaboration` and the paired `## Claude Native Collaboration` section below for the host-specific dispatch tool mapping; the backend, staffing, and release rules in this file apply identically to both hosts.
+Codex invokes this flow as `$atlas-workflow:team`; Claude Code invokes it as `/team` or by calling the `team` skill directly. "The main Codex" below refers to the current host's root/main session regardless of host — on Claude Code that is the main Claude Code session. See `## Codex Native Collaboration` and the paired `## Claude Native Collaboration` section below for the host-specific dispatch tool mapping; staffing, authority, path ownership, evidence, and release rules apply to both hosts. Select the host before model or tool preflight:
+
+- Claude Code: use only `## Claude Native Collaboration` for native tools and model selection. The Codex Cross recipe, `## Native Exact Model Routing` (including every planning/saving/quality matrix and Routing Scenarios subsection), Codex catalogs, `atlas-agent-model-policy`, `fork_turns`, and `reasoning_effort` are not Claude prerequisites.
+- Codex: use `## Codex Native Collaboration` and its exact-model rules.
+- `team-v1` and DeepSeek/ZenMux routes are deprecated. Do not select, recommend, revive, or fall back to them; retained legacy recipes are historical compatibility material, not available routes. This also excludes the DeepSeek-dependent Cross recipe.
+- Explicit Paseo lanes retain their own admission and fallback rules; installing or using Claude Code does not select Paseo.
 
 ## Independent Staffing, Model, Release, And Lease Decisions
 
@@ -29,7 +34,7 @@ Planning/review, implementation-saving, quality, and exact-override selection is
 a per-task or per-lane dispatch choice and is not persisted as workflow state.
 A lane may choose its own model within the admitted policy, but cannot change
 the goal, authority, paths, or acceptance. The Claude-family manual exact-model
-gate remains unchanged.
+gate remains unchanged for explicit Paseo routing; it does not require a new model selection for Claude-native inheritance.
 
 Choose a path lease from actual write-conflict risk, separately from staffing:
 
@@ -86,7 +91,7 @@ field.
   zero-dispatch outcomes, but neither is evidence of admitted dispatch or
   parallel completion. A missing exact route, schema-restricted/profile-mismatch
   surface, or cost anomaly therefore stays main-only/fail-closed; do not use a
-  generic or inherited child as a substitute.
+  generic or inherited child as a substitute for an unavailable exact route. Claude-native model inheritance is its admitted default, not such a substitution.
 
 ## Language
 
@@ -170,7 +175,7 @@ capability are independently verified.
 Team selection and backend selection are separate decisions. A request for `$atlas-workflow:team`, multiple agents, parallel work, specialist review, or a difficult task does not select Paseo.
 
 - Outside Team, stay with the main Codex unless Team materially reduces latency or risk.
-- Inside Team, default to Codex native collaboration, including the provider-bound DeepSeek V4 Pro implementation and exploration profiles.
+- Inside Team, default to the current host native collaboration: Codex tools on Codex, Claude tools on Claude Code. Deprecated DeepSeek/ZenMux profiles are not selectable.
 - Select Paseo only from an explicit user or operator choice scoped to the Team, a lane, or one dispatch. Resolve backend and fallback policy independently in this order: dispatch, lane, Team, then `backend=native` and `fallback_policy=codex`.
 - A review-lane Paseo choice does not transfer to implementation. A Team-level Paseo choice may be overridden by an explicit native lane or dispatch.
 - `no-fallback` is an explicit opt-out and normalizes to `fallback_policy=none`; otherwise an operational Paseo failure falls back to Codex in the same logical lane.
@@ -200,21 +205,16 @@ writer lease. Agent completion is evidence, not controller admission.
 
 ## Claude Native Collaboration
 
-On Claude Code, native collaboration uses Claude's own dispatch tools instead of Codex's `spawn_agent`/`collaboration.*` surface. This is the same `backend=native` concept as the Codex section above — Team's `native`/`paseo` backend distinction is host-agnostic; only the concrete tool calls differ:
+On Claude Code, use the callable `Agent` tool and the seven plugin profiles under `agents/*.md`. Use the exact profile identifier exposed by the host (including a plugin namespace when present), not a guessed Codex `agent_type`. If `Agent` or the required profile is unavailable, stay main-only and disclose the missing capability.
 
-| Semantic action | Codex tool | Claude Code tool |
-| --- | --- | --- |
-| Spawn a bounded lane | `spawn_agent` | `Agent` |
-| Send info without a new turn | `collaboration.send_message` | `SendMessage` |
-| Reuse an idle agent for a follow-up | `collaboration.followup_task` | `SendMessage` (to the same agent name or id) |
-| Wait for live work | `collaboration.wait_agent` | `TaskOutput` |
-| Inspect current capacity and status | `collaboration.list_agents` | `TaskList` / `TaskGet` |
-| Stop work that should no longer continue | `collaboration.interrupt_agent` | `TaskStop` |
+- Leave the model override unset. Atlas's Claude profiles do not pin `model`; the host resolves the model from the user's session/configuration. Inheritance is the default and does not require an exact-provider selection event, a Codex catalog, or `atlas-agent-model-policy check`. An explicitly requested different model must be supported by the current Claude tool/configuration; do not silently substitute it or rewrite the root model. Do not claim model/provider diversity merely from separate agents.
+- Pass a self-contained task prompt with the goal, authority, active decisions, owned and forbidden paths, acceptance, checks, stop conditions, and expected output. Use the current `Agent` schema; never send Codex-only `agent_type`, `reasoning_effort`, or `fork_turns` fields.
+- Keep the returned agent/task identifier. Use `SendMessage` for follow-up only when available for that agent; otherwise use the host's exposed resume mechanism. Receive foreground completion directly; for background work use the host completion notification or `Read` on the returned output path (`TaskOutput` only when exposed by that host). Use `TaskStop` only when the host exposes it for the running task. Missing lifecycle tools do not justify inventing calls or starting a replacement writer before the old one is quiesced.
+- `TaskList` / `TaskGet` describe tracked work items, not a complete inventory of live agents. Determine available capacity and completion from actual dispatch results and host status; do not treat an empty task list as proof that no writer is running.
+- Planner, formal reviewer, implementation, ordinary reviewer, verifier, browser verifier, and explorer roles keep the same authority and output contracts. Use `atlas-sdd-phase-reviewer` for formal plan/contract review and retain `REVIEW_VERDICT_JSON`; model inheritance does not relax review independence, path ownership, leases, or release acceptance.
+- Do not use the deprecated DeepSeek/ZenMux profiles or `atlas-native-agent-inbox` transport. Use `main-claude` when a main-session `runtime_agent_id` sentinel is needed for independent-perspective bookkeeping.
 
-- `Agent`'s `subagent_type` selects one of the checked-in profiles under `plugins/atlas-workflow/agents/*.md` (the Claude-side equivalents of the native Codex `.codex/agents/*.toml` roles). Only the plain planner/explorer/reviewer/phase-reviewer/implementer/verifier/browser-verifier profiles exist on this host; the DeepSeek-on-ZenMux equivalents are Codex-only custom-provider routes and have no Claude Code counterpart.
-- The same staffing, model-independence, path-lease, and release rules from `## Independent Staffing, Model, Release, And Lease Decisions` above apply unchanged; dispatching through `Agent` instead of `spawn_agent` does not relax any of them.
-- Do not copy the Codex-specific `atlas-native-agent-inbox` compatibility transport described in the Native Exact Model Routing section below — that exists only to recover a task payload hidden behind OpenAI-encrypted custom-provider content on affected Codex hosts. Claude Code's `Agent`/`SendMessage` deliver the prompt as plain text; there is no equivalent problem to work around.
-- When a main-session self-bind needs an explicit `runtime_agent_id` sentinel for `required_perspective` bookkeeping, use `main-claude` (the Claude-side counterpart of Codex's `main-codex`/`controller` sentinels).
+The [Claude subagent documentation](https://code.claude.com/docs/en/sub-agents) and [tools reference](https://code.claude.com/docs/en/tools-reference) describe the host surfaces. The current callable schema remains the authority for available fields and lifecycle tools.
 
 ## Explicit Paseo Lanes
 
@@ -229,6 +229,8 @@ Only after a Team/lane/dispatch has resolved to Paseo:
 - Prompts carry repository instructions, scope, authority, expected evidence, and stop conditions.
 
 ### Claude Manual-Only Gate
+
+This gate applies only to the explicitly selected Paseo lanes in this section, not to Claude Code native agents inheriting the host model.
 
 Claude-family models are never eligible for automatic routing or model recommendation, whether exposed by the direct `claude` provider or through a gateway.
 
@@ -252,6 +254,8 @@ Claude-family models are never eligible for automatic routing or model recommend
 - Atomically record the fallback event and reserve the native attempt in the same logical lane. The native actor continues the same goal, paths, authority, acceptance, and admitted evidence; fallback never widens scope or hides Paseo provenance.
 
 ## Native Exact Model Routing
+
+Codex-only: this section and all its subsections do not apply on Claude Code. Deprecated DeepSeek/ZenMux branches below must not be selected.
 
 ### Root Session And Child Provider Invariant
 

@@ -137,7 +137,20 @@ Codex behavior is unchanged either way. The repo root
 are the Claude-facing manifests; they carry the same skills, plus Claude-native
 `commands/`, `agents/`, and `hooks/` that the Codex manifest does not need.
 
-Add the local marketplace and install the plugin from a checkout:
+Claude 插件只分发 skills、agents 和 hooks 入口；首次使用还需从同一 checkout 安装 workflow runtime。需要 Node.js、Python 3、rsync 和 Git，无需 Codex CLI。
+
+```bash
+cd /path/to/atlas-forge
+scripts/sync-live-atlas-workflow.sh --host claude
+export PATH="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin:$PATH"
+atlas-workflow list
+```
+
+默认 runtime 位于 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow`，命令入口位于同目录下的 `bin`（与 `workflow` 并列）。将上述 PATH 设置加入 shell 配置，然后从该环境启动 Claude Code。更新 runtime 时重新运行同一条同步命令；它保留 tasks、state、artifacts，不安装 Codex agents，也不更新任何 marketplace 或插件 cache。可先加 `--dry-run` 检查目标。
+
+使用自定义 runtime 时，在安装及启动 Claude Code 的环境中都设置 `ATLAS_WORKFLOW_ROOT`；`LOCAL_BIN_ROOT` 可覆盖命令目录，对应调整 PATH。
+
+再添加本地 marketplace 并安装插件：
 
 ```bash
 claude plugin marketplace add /path/to/atlas-forge

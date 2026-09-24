@@ -9,6 +9,7 @@ This plugin installs into both Codex and Claude Code from the same tree, additiv
 - `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` are separate manifests for each host; their `version` fields are kept in sync by `scripts/bump-plugin-cachebuster.sh`.
 - `skills/` is shared verbatim — `SKILL.md` frontmatter (`name` + `description`) is already host-neutral.
 - `commands/` (6 files) and `agents/` (7 files) exist only for Claude Code; Codex uses `$atlas-workflow:<name>` skill invocation and `.codex/agents/*.toml` instead, both unchanged.
+- Claude-only setup also installs the shared runtime with `scripts/sync-live-atlas-workflow.sh --host claude`; see the [installation instructions](../../README.md#claude-code-install). Plugin installation alone does not install the helper CLI. Claude native Team inherits the host model and skips Codex model-policy preflight; `team-v1` and DeepSeek/ZenMux routes are deprecated.
 - `hooks/hooks.json` exists only for Claude Code and forwards to the same `workflow/hooks/{pre,post}-tool-use` scripts Codex installs directly via `~/.codex/hooks.json`, through the `claude-hook-launcher` path-resolution shim in `scripts/`.
 
 Codex behavior is unchanged by any of this; see

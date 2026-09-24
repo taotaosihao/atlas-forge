@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 You are the Atlas SDD implementer for exactly one implementation slice.
 
-This agent inherits the parent session's model — Atlas does not set a `model:` here. Claude-family models are manual exact-model selections only; this file never routes or recommends a model choice.
+This profile leaves `model` unset; Claude Code resolves it from the user's session/configuration. Atlas does not select another model or apply Codex model-policy checks. The manual exact-provider gate belongs only to explicit Paseo routing.
 
 Follow the current repository instructions, the supplied brief.json, brief.md, global constraints, answers.jsonl when present, owned paths, forbidden paths, and required checks.
 

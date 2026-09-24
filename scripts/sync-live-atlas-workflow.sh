@@ -4,10 +4,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CODEX_HOME_ROOT="${CODEX_HOME_ROOT:-${CODEX_HOME:-$HOME/.codex}}"
 LIVE_WORKFLOW_ROOT="${CODEX_WORKFLOW_ROOT:-$CODEX_HOME_ROOT/workflow}"
-LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-$HOME/.local/bin}"
+LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-}"
 CODEX_AGENT_SOURCE="$REPO_ROOT/.codex/agents"
 CODEX_AGENT_TARGET="$CODEX_HOME_ROOT/agents"
 
+HOST=codex
 DRY_RUN=0
 WORKFLOW_STAGE=""
 AGENT_STAGE=""
@@ -19,12 +20,16 @@ BIN_ROOT_EXISTED=0
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/sync-live-atlas-workflow.sh [--dry-run]
+  scripts/sync-live-atlas-workflow.sh [--host codex|claude] [--dry-run]
 
 Sync only Atlas workflow helpers, the managed native Atlas agents, and Atlas
 command shims. Writes are limited to CODEX_WORKFLOW_ROOT,
 CODEX_HOME_ROOT/agents, and LOCAL_BIN_ROOT. All assets are staged and verified
-before managed targets change. This helper never writes AGENTS_HOME or
+before managed targets change. With --host claude, install the runtime into
+${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow and shims into its sibling bin/;
+ATLAS_WORKFLOW_ROOT and LOCAL_BIN_ROOT override those destinations. No Codex
+agents are installed. Add that bin/ directory to PATH before starting Claude.
+This helper never writes AGENTS_HOME or
 $HOME/.agents and never invokes Multica or the full workflow self-test.
 EOF
 }
@@ -40,6 +45,11 @@ die() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --host)
+      [[ $# -ge 2 ]] || die "--host requires codex or claude"
+      HOST="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -56,6 +66,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$HOST" in
+  codex) LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-$HOME/.local/bin}" ;;
+  claude)
+    LIVE_WORKFLOW_ROOT="${ATLAS_WORKFLOW_ROOT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow}"
+    LOCAL_BIN_ROOT="${LOCAL_BIN_ROOT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin}"
+    ;;
+  *) die "unsupported host: $HOST" ;;
+esac
+
 command -v python3 >/dev/null || die "python3 not found in PATH"
 command -v rsync >/dev/null || die "rsync not found in PATH"
 command -v diff >/dev/null || die "diff not found in PATH"
@@ -68,7 +87,9 @@ for source_dir in \
   [[ -d "$source_dir" ]] || die "missing Atlas workflow source directory: $source_dir"
 done
 [[ -f "$REPO_ROOT/workflow/README.md" ]] || die "missing Atlas workflow README"
-[[ -d "$CODEX_AGENT_SOURCE" ]] || die "missing native Atlas agent source: $CODEX_AGENT_SOURCE"
+if [[ "$HOST" == codex ]]; then
+  [[ -d "$CODEX_AGENT_SOURCE" ]] || die "missing native Atlas agent source: $CODEX_AGENT_SOURCE"
+fi
 
 ATLAS_AGENT_NAMES=(
   atlas-sdd-browser-verifier.toml
@@ -96,7 +117,12 @@ ATLAS_COMMAND_NAMES=(
   codex-workflow
 )
 
-for agent_name in "${ATLAS_AGENT_NAMES[@]}"; do
+if [[ "$HOST" == claude ]]; then
+  ATLAS_AGENT_NAMES=()
+  ATLAS_COMMAND_NAMES=(atlas-workflow codex-workflow codex-design-review codex-web-acceptance)
+fi
+
+for agent_name in ${ATLAS_AGENT_NAMES[@]+"${ATLAS_AGENT_NAMES[@]}"}; do
   [[ -f "$CODEX_AGENT_SOURCE/$agent_name" ]] || die "missing native Atlas agent: $agent_name"
 done
 for command_name in "${ATLAS_COMMAND_NAMES[@]}"; do
@@ -109,17 +135,19 @@ python3 - \
   "${AGENTS_HOME:-}" \
   "$CODEX_HOME_ROOT/.tmp/marketplaces/atlas-forge" \
   "$CODEX_HOME_ROOT/plugins/cache/atlas-forge" \
+  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins" \
   "$LIVE_WORKFLOW_ROOT" \
-  "$CODEX_AGENT_TARGET" \
+  "$([[ "$HOST" == codex ]] && printf %s "$CODEX_AGENT_TARGET")" \
   "$LOCAL_BIN_ROOT" <<'PY'
 import sys
 from pathlib import Path
 
-legacy_home, agents_home, snapshot_root, release_cache_root, *raw_targets = sys.argv[1:]
+legacy_home, agents_home, snapshot_root, release_cache_root, claude_plugins, *raw_targets = sys.argv[1:]
 forbidden = [
     Path(legacy_home).resolve(strict=False),
     Path(snapshot_root).resolve(strict=False),
     Path(release_cache_root).resolve(strict=False),
+    Path(claude_plugins).resolve(strict=False),
 ]
 if agents_home:
     forbidden.append(Path(agents_home).resolve(strict=False))
@@ -134,6 +162,7 @@ def reject_existing_symlink_prefix(raw_path):
         if not cursor.exists():
             break
 
+raw_targets = [value for value in raw_targets if value]
 for value in raw_targets:
     reject_existing_symlink_prefix(value)
 
@@ -155,7 +184,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   done
   log "would stage and atomically sync Atlas workflow README: $LIVE_WORKFLOW_ROOT/README.md"
   log "would write Atlas workflow source root atomically: $LIVE_WORKFLOW_ROOT/source-root"
-  for agent_name in "${ATLAS_AGENT_NAMES[@]}"; do
+  for agent_name in ${ATLAS_AGENT_NAMES[@]+"${ATLAS_AGENT_NAMES[@]}"}; do
     log "would stage and atomically sync native Codex agent: $CODEX_AGENT_TARGET/$agent_name"
   done
   for command_name in "${ATLAS_COMMAND_NAMES[@]}"; do
@@ -173,7 +202,7 @@ cleanup_stages() {
   if [[ "$WORKFLOW_ROOT_EXISTED" -eq 0 ]]; then
     rmdir "$LIVE_WORKFLOW_ROOT" 2>/dev/null || true
   fi
-  if [[ "$AGENT_ROOT_EXISTED" -eq 0 ]]; then
+  if [[ "$HOST" == codex && "$AGENT_ROOT_EXISTED" -eq 0 ]]; then
     rmdir "$CODEX_AGENT_TARGET" 2>/dev/null || true
   fi
   if [[ "$BIN_ROOT_EXISTED" -eq 0 ]]; then
@@ -185,9 +214,14 @@ trap cleanup_stages EXIT
 [[ -d "$LIVE_WORKFLOW_ROOT" ]] && WORKFLOW_ROOT_EXISTED=1
 [[ -d "$CODEX_AGENT_TARGET" ]] && AGENT_ROOT_EXISTED=1
 [[ -d "$LOCAL_BIN_ROOT" ]] && BIN_ROOT_EXISTED=1
-mkdir -p "$LIVE_WORKFLOW_ROOT" "$CODEX_AGENT_TARGET" "$LOCAL_BIN_ROOT"
+mkdir -p "$LIVE_WORKFLOW_ROOT" "$LOCAL_BIN_ROOT"
+if [[ "$HOST" == codex ]]; then
+  mkdir -p "$CODEX_AGENT_TARGET"
+fi
 WORKFLOW_STAGE="$(mktemp -d "$LIVE_WORKFLOW_ROOT/.atlas-workflow-stage.XXXXXX")"
-AGENT_STAGE="$(mktemp -d "$CODEX_AGENT_TARGET/.atlas-agents-stage.XXXXXX")"
+if [[ "$HOST" == codex ]]; then
+  AGENT_STAGE="$(mktemp -d "$CODEX_AGENT_TARGET/.atlas-agents-stage.XXXXXX")"
+fi
 SHIM_STAGE="$(mktemp -d "$LOCAL_BIN_ROOT/.atlas-shims-stage.XXXXXX")"
 
 for directory_name in bin hooks templates tests; do
@@ -204,7 +238,7 @@ cmp -s "$REPO_ROOT/workflow/README.md" "$WORKFLOW_STAGE/README.md" \
   || die "staged Atlas workflow README failed equality verification"
 printf '%s\n' "$REPO_ROOT" > "$WORKFLOW_STAGE/source-root"
 
-for agent_name in "${ATLAS_AGENT_NAMES[@]}"; do
+for agent_name in ${ATLAS_AGENT_NAMES[@]+"${ATLAS_AGENT_NAMES[@]}"}; do
   cp -p "$CODEX_AGENT_SOURCE/$agent_name" "$AGENT_STAGE/$agent_name"
   cmp -s "$CODEX_AGENT_SOURCE/$agent_name" "$AGENT_STAGE/$agent_name" \
     || die "staged native Atlas agent failed equality verification: $agent_name"
@@ -214,6 +248,10 @@ for command_name in "${ATLAS_COMMAND_NAMES[@]}"; do
   target_path="$LIVE_WORKFLOW_ROOT/bin/$command_name"
   {
     printf '#!/usr/bin/env bash\n'
+    if [[ "$HOST" == claude ]]; then
+      printf 'export ATLAS_WORKFLOW_ROOT=%q\n' "$LIVE_WORKFLOW_ROOT"
+      printf 'export CODEX_WORKFLOW_ROOT=%q\n' "$LIVE_WORKFLOW_ROOT"
+    fi
     printf 'exec %q "$@"\n' "$target_path"
   } > "$SHIM_STAGE/$command_name"
   chmod +x "$SHIM_STAGE/$command_name"
@@ -235,7 +273,7 @@ TARGET_PATHS=(
   "$LIVE_WORKFLOW_ROOT/README.md"
   "$LIVE_WORKFLOW_ROOT/source-root"
 )
-for agent_name in "${ATLAS_AGENT_NAMES[@]}"; do
+for agent_name in ${ATLAS_AGENT_NAMES[@]+"${ATLAS_AGENT_NAMES[@]}"}; do
   STAGED_PATHS+=("$AGENT_STAGE/$agent_name")
   TARGET_PATHS+=("$CODEX_AGENT_TARGET/$agent_name")
 done
@@ -302,7 +340,7 @@ verify_installed_targets() {
   done
   cmp -s "$REPO_ROOT/workflow/README.md" "$LIVE_WORKFLOW_ROOT/README.md" || return 1
   [[ "$(<"$LIVE_WORKFLOW_ROOT/source-root")" == "$REPO_ROOT" ]] || return 1
-  for agent_name in "${ATLAS_AGENT_NAMES[@]}"; do
+  for agent_name in ${ATLAS_AGENT_NAMES[@]+"${ATLAS_AGENT_NAMES[@]}"}; do
     cmp -s "$CODEX_AGENT_SOURCE/$agent_name" "$CODEX_AGENT_TARGET/$agent_name" || return 1
   done
 }
@@ -317,6 +355,8 @@ for backup in "${BACKUP_PATHS[@]}"; do
 done
 
 log "atomically synchronized Atlas workflow helpers: $LIVE_WORKFLOW_ROOT"
-log "atomically synchronized native Atlas agents: $CODEX_AGENT_TARGET"
+if [[ "$HOST" == codex ]]; then
+  log "atomically synchronized native Atlas agents: $CODEX_AGENT_TARGET"
+fi
 log "atomically installed Atlas command shims: $LOCAL_BIN_ROOT"
 log "Atlas-only live sync complete."

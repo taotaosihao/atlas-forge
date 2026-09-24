@@ -1,7 +1,7 @@
 # Atlas Workflow 支持 Claude Code（双宿主并存）实施方案
 
 - 状态：已实施并完成源码级验证；未安装、刷新或发布
-- 日期：2026-08-15
+- 日期：2026-08-15；2026-09-24 补齐独立 runtime 与 Team 宿主分流
 - 工作类型：implementation
 - 交付目标：product_increment
 - 权威范围：`plugins/atlas-workflow/` 的 Claude Code 插件清单、命令、agents、hooks；`workflow/bin/lib/codex-workflow/core/paths.js` 与 5 处 `pluginCandidates()` 的宿主中性候选路径；`team/commands.js` 的 grok/xai provider family 预置；`team/SKILL.md` 的 Claude Native Collaboration 映射与 `lane-registry.js` 自绑定哨兵扩容
@@ -69,12 +69,16 @@ Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案�
 
 `workflow/bin/lib/codex-workflow/team/commands.js` 的 `DIRECT_PROVIDER_MODEL_FAMILIES` 增加 `grok`/`xai` → `non-claude`，附代码注释说明这是 family 分类而非供应商准入。Paseo 当前不暴露 grok provider（仅 claude/codex/deepseek/zenmux/kimi），因此该改动今天不产生任何可用路由，只是让未来出现 grok 路由时不会因 `MODEL_FAMILY_UNVERIFIED` 直接 fail-closed。`skills/team/SKILL.md` 中"不要从 DeepSeek/ZenMux 配方推断未来 Grok/Kimi 路由"的措辞未改动。
 
-## 4. 已知限制
+## 4. 当前补齐范围与限制（2026-09-24）
 
-- Claude 侧 6 个命令、7 个 agents 均未安装到真实 `~/.claude`，仅完成源码级布局与语法验证；端到端安装验证需要用户在临时 `CLAUDE_CONFIG_DIR` 下手动执行（见验证记录）。
-- `claudePluginCacheCandidates()` 依赖真实 Claude 安装后的 cache 目录结构；本机当前没有已安装的 `atlas-workflow` Claude 插件，因此该函数在本机返回空数组，只在合成 fixture 下验证过其排序与容错行为。
+- `scripts/sync-live-atlas-workflow.sh --host claude` 复用原子同步与回滚，默认将 runtime 安装到 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow`，命令 shim 安装到并列的 `bin`。保留 tasks/state/artifacts，不安装 Codex agents，不调用 Claude/Codex 模型，不修改 marketplace/cache。安装步骤以根 README 为准。
+- Claude hook launcher 可定位此独立 runtime；共享 pre-tool hook 优先读取 `tool_input.command`，避免把 `tool_name: Bash` 误当命令。
+- Claude 原生 Team 使用当前宿主的 `Agent` schema 和用户会话/配置解析的模型，不执行 Codex catalog/model-policy 检查，也不要求 `reasoning_effort` 或 `fork_turns`。Paseo 的模型准入门禁仅用于显式 Paseo 派发，公共权限、独立审查、写入边界及验收要求保留。
+- `team-v1` 与 DeepSeek/ZenMux 已弃用，不再视为可选路由；本次不迁移或恢复，也不进行全仓 legacy 清理。
+- 专项 `workflow/tests/contract_claude_host.sh` 使用临时 HOME、含空格的 `CLAUDE_CONFIG_DIR`、模拟 cache 布局、CLI 禁用桩与 hook JSON 验证。它接入 `contract_host_install.sh`，不调用 Claude 模型。
+- 真实 Claude 模型调用、实际插件发现及宿主事件派发不在本次测试范围；静态规则与合成 payload 通过不证明真实模型行为或安装态生效。多版本 cache 的精确绑定仍属于单独的后续项。
 
-## 5. 验证记录
+## 5. 初次适配验证记录（2026-08-15）
 
 - `node --check` 全部修改的 JS 文件：`core/paths.js`、5 处 `pluginCandidates()` 调用点、`lane-registry.js`、`commands.js`、`team-commands.test.js`：全部通过。
 - `node --test workflow/tests/js/team-commands.test.js`：81/81 通过（含新增 `main-claude` 场景与既有 grok 不影响的 `non-claude` 断言）。
