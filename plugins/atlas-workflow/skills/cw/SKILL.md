@@ -1,6 +1,6 @@
 ---
 name: cw
-description: Use the Atlas local workflow helper for bounded work.
+description: Compatibility entrypoint for bounded local work that follows the Atlas task flow with workflow-helper tracking. Use when the user invokes cw or wants a tracked Atlas task for a clear change.
 ---
 
 `$atlas-workflow:cw` is the compatibility entrypoint for local bounded work. Follow `$atlas-workflow:task` as the authoritative execution policy instead of maintaining a second copy of routing, artifact, Team, review, commit, and completion rules.

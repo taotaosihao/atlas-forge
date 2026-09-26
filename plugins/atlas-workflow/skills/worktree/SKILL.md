@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Use the Atlas worktree flow when a task needs an isolated git worktree.
+description: Creates an isolated git worktree for an Atlas task with branch naming, ignore checks, and readiness verification. Use when isolation from the current workspace has concrete value, such as parallel branches or risky experiments; ordinary fixes stay in place.
 ---
 
 Use the Atlas worktree flow for this request.

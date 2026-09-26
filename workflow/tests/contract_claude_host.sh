@@ -35,6 +35,14 @@ task_id="$(atlas-workflow init-task 'Claude runtime' 'isolated CLI and hooks')"
 atlas-workflow start "$task_id"
 [[ -f "$runtime/tasks/$task_id.md" ]]
 
+# SessionStart context: baseline always, re-orientation only for the Claude runtime task.
+session_out="$(bash "$ROOT/plugins/atlas-workflow/scripts/claude-session-start")"
+grep -q 'Atlas operating baseline' <<<"$session_out"
+grep -q "Active Atlas task" <<<"$session_out"
+grep -q "$task_id" <<<"$session_out"
+grep -qF "$runtime/artifacts/$task_id " <<<"$session_out"
+[[ ! -e "$HOME/.codex" ]]
+
 # Exercise the plugin-cache layout: no sibling checkout workflow is present.
 plugin_root="$CLAUDE_CONFIG_DIR/plugins/cache/atlas-forge/atlas-workflow/test"
 mkdir -p "$plugin_root/scripts"
@@ -54,6 +62,7 @@ bash "$sync_script" --host claude >/dev/null
 [[ "$before" == "$(shasum "$runtime/tasks/$task_id.md" "$runtime/state/current-task.json" "$runtime/artifacts/$task_id/runtime.jsonl")" ]]
 atlas-workflow verify "$task_id" -- bash -c 'test -s "$1"' bash "$runtime/artifacts/$task_id/runtime.jsonl" >/dev/null
 atlas-workflow done "$task_id"
+! bash "$ROOT/plugins/atlas-workflow/scripts/claude-session-start" | grep -q "Active Atlas task"
 codex-design-review init 'Claude review' 'http://localhost' 'fixture' >/dev/null
 [[ -d "$runtime/design-reviews" && ! -e "$HOME/.codex" ]]
 
@@ -82,7 +91,7 @@ plugin = Path(sys.argv[1]) / 'plugins/atlas-workflow'
 team = (plugin / 'skills/team/SKILL.md').read_text()
 host = team.split('## Host Note\n', 1)[1].split('\n## ', 1)[0]
 claude = team.split('## Claude Native Collaboration\n', 1)[1].split('\n## ', 1)[0]
-codex = team.split('## Native Exact Model Routing\n', 1)[1].split('\n## ', 1)[0]
+codex = (plugin / 'skills/team/references/codex-model-routing.md').read_text()
 assert 'not Claude prerequisites' in host
 assert 'team-v1` and DeepSeek/ZenMux routes are deprecated' in host
 assert 'Leave the model override unset' in claude
@@ -90,7 +99,25 @@ assert 'never send Codex-only' in claude
 assert 'stay main-only' in claude and 'old one is quiesced' in claude
 assert 'not a complete inventory of live agents' in claude
 assert 'Codex-only:' in codex and 'do not apply on Claude Code' in codex
+assert 'Claude Code never loads this file' in codex
+assert 'do not read `references/codex-model-routing.md`' in host
+assert '## Native Exact Model Routing' not in team, 'Codex-only routing must stay out of the shared Team skill'
+assert len(team.splitlines()) < 500, 'Team SKILL.md must stay under 500 lines'
 assert 'gate applies only to the explicitly selected Paseo lanes' in team
+import json
+hooks = json.loads((plugin / 'hooks/hooks.json').read_text())['hooks']
+starts = [h['command'] for entry in hooks['SessionStart'] for h in entry['hooks']]
+assert any('claude-session-start' in c for c in starts), starts
+baseline = (plugin / 'hooks/session-baseline.md').read_text()
+assert 'take precedence' in baseline and 'Preserve authority' in baseline
+assert 'honor an explicit request not to use an Atlas skill' in ' '.join(baseline.split())
+assert len(baseline.splitlines()) < 60, 'session baseline must stay short'
+for command in (plugin / 'commands').glob('*.md'):
+    head = command.read_text().split('---', 2)[1]
+    allowed = next(line for line in head.splitlines() if line.startswith('allowed-tools:'))
+    # allowed-tools pre-approves without prompting, so it must not cover push-capable git or arbitrary node.
+    assert 'Bash(git' not in allowed and 'Bash(node' not in allowed, command
+    assert 'Bash(atlas-workflow *)' in allowed, command
 for profile in (plugin / 'agents').glob('*.md'):
     text = profile.read_text()
     assert '\nmodel:' not in text.split('---', 2)[1], profile

@@ -1,6 +1,6 @@
 ---
 name: team-v1
-description: Use the legacy Atlas team flow backed by codex-workflow team-start/team-loop and codex exec lanes.
+description: Deprecated legacy Atlas team flow backed by codex-workflow team-start/team-loop and Codex-only codex exec lanes. Do not select it for new work; use team instead.
 ---
 
 Use the legacy Atlas team flow for this request.

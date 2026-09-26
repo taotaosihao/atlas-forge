@@ -85,6 +85,17 @@ Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案�
 - 专项 `workflow/tests/contract_claude_host.sh` 使用临时 HOME、含空格的 `CLAUDE_CONFIG_DIR`、模拟 cache 布局、CLI 禁用桩与 hook JSON 验证。它接入 `contract_host_install.sh`，不调用 Claude 模型。
 - 真实 Claude 模型调用、实际插件发现及宿主事件派发不在本次测试范围；静态规则与合成 payload 通过不证明真实模型行为或安装态生效。多版本 cache 的精确绑定仍属于单独的后续项。
 
+## 4.1 Claude 侧架构与 prompt 补齐（2026-09-27）
+
+依据 Anthropic 官方材料：[Skill authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)、[Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)、[Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps)、[Scaling Managed Agents](https://www.anthropic.com/engineering/managed-agents)，以及 Claude Code 的 skills、hooks、permissions 文档。
+
+- **Team 渐进披露。** 官方建议 SKILL.md 正文不超过 500 行，只在 Codex 用到的内容拆到按需读取的 reference。`team/SKILL.md` 原有 642 行，其中精确模型路由和 Cross v1 只对 Codex 有用，现已移到 `team/references/codex-model-routing.md`：Codex 在做模型或工具预检之前必须完整读取，Claude Code 不读。SKILL.md 降到 360 行，原文逐行保留，没有删改。
+- **会话开始时的固定动作。** 对应 harness 文章里“每个会话开始先读进度、看 git 状态”的做法。插件新增 `SessionStart` hook，在 startup、resume、clear 和 compact 时注入 `hooks/session-baseline.md`，即 Codex home `AGENTS.md` 里 Atlas 规则的 Claude 版本，并明确用户和项目自己的指令优先。Claude runtime 中有当前任务时，hook 还会提示重读任务记录、产物、checkpoint 和 git 状态。只有状态为 doing 或 blocked 的任务才会提示，措辞也是“若当前请求在延续该任务”，因为 current-task 指针是整个 runtime 共用的，不区分项目。hook 只读 Claude runtime，任何失败都不阻塞会话。
+- **命令预授权收窄。** 按文档，`allowed-tools` 的作用是在本轮免去权限确认，并不限制可用工具。原先预授权的 `Bash(git:*)` 会让 `git push` 等操作无需确认就执行，与 Atlas 的授权边界冲突。现在只预授权 Atlas CLI，但这只对 PATH 上的裸命令生效，用完整路径调用时仍按用户的权限设置处理；只读的 git 命令本来就在 Claude Code 内置的免确认清单里。
+- **skill description。** 官方要求 description 同时写明“做什么”和“何时用”，它是自动触发的唯一依据。已补全 analyze、task、cw、design-review、learn、worktree、team 这 7 个过于简短的 description，并给 team-v1 标注已弃用；所有插件 skill 都可以用 `/atlas-workflow:<name>` 直接调用。Codex 也按 description 自动选择 skill，所以这项改动同样影响 Codex 的路由；新写法沿用 Codex 全局规则中的路由分工，例如 analyze 注明压力测试方案时改用 intake。
+- **暂不改写 prompt 措辞。** 官方建议先做评估：先观察真实的 Claude 行为，再补说明。目前还没有 Claude 的行为证据，所以 skill 正文措辞不做推测性改写，待真实运行后再根据观察调整。
+- **Codex 全局基线与 Claude 版本并存。** 两者目前是两个来源，Claude 版只保留 Atlas 相关的子集；以后修改其中一份时，需要同步核对另一份。
+
 ## 5. 初次适配验证记录（2026-08-15）
 
 - `node --check` 全部修改的 JS 文件：`core/paths.js`、5 处 `pluginCandidates()` 调用点、`lane-registry.js`、`commands.js`、`team-commands.test.js`：全部通过。

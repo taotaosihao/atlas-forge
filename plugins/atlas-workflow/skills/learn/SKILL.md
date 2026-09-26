@@ -1,6 +1,6 @@
 ---
 name: learn
-description: Use the legacy Atlas learning flow to save a manual archival lesson.
+description: Saves a manual legacy Atlas lesson file for a completed task. Use only when the user explicitly asks to record a lesson; MemPalace, where the host provides it, is the default memory layer.
 ---
 
 Use the local learning helper only when a user explicitly wants a legacy Atlas lesson file. MemPalace, where the current host provides it, is the default long-term memory and semantic recall layer.

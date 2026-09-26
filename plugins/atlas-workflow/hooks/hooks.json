@@ -1,6 +1,17 @@
 {
-  "description": "Atlas workflow risk-pattern and failure-capture hooks for Bash tool calls.",
+  "description": "Atlas workflow session baseline plus risk-pattern and failure-capture hooks for Bash tool calls.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/claude-session-start\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",

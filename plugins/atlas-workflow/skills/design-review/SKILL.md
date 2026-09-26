@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: Use the Atlas design-review flow for design fidelity or formal Web UI evidence verification.
+description: Reviews an implemented, served UI against its approved design or design source using viewed screenshots, DOM, geometry, and real interactions, and records a pass/fail verdict. Use for design fidelity or visual restoration checks, or for formal Web UI evidence inside an admitted release check.
 ---
 
 Use the Atlas design-review flow for this request.

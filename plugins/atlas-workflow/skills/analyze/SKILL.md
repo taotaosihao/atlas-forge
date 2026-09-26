@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Use the Atlas analyze flow for read-only cross-file synthesis.
+description: Produces a read-only Atlas analysis that synthesizes code, documents, sessions, or artifacts into evidence, inferences, unknowns, and a recommended next route. Use for cross-file investigation or for assessing an existing plan or proposal when nothing should be changed yet; use intake to grill or stress-test a plan.
 ---
 
 Use the Atlas analyze flow for this request.

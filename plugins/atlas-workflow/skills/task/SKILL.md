@@ -1,6 +1,6 @@
 ---
 name: task
-description: Use the Atlas task flow for bounded work.
+description: Runs the Atlas task flow for clear, bounded implementation, diagnosis, bug fixing, or maintenance, including its verification, review, and commit rules. Use when the goal and scope are clear enough to act; send unsettled product value, solution shape, UI flow, or execution boundaries to office-hours, brainstorm, product-design, or clarify first.
 ---
 
 Use the local task helper for bounded implementation, diagnosis, or maintenance.

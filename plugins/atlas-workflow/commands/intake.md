@@ -1,7 +1,7 @@
 ---
 description: Use the Atlas intake flow for an explicit interview or pressure-test, or a material unresolved plan/design decision
 argument-hint: '[request]'
-allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+allowed-tools: Read, Glob, Grep, AskUserQuestion, Bash(atlas-workflow *), Bash(codex-workflow *), Bash(codex-design-review *)
 ---
 
 Raw slash-command arguments:

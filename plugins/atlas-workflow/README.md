@@ -10,7 +10,7 @@ This plugin installs into both Codex and Claude Code from the same tree, additiv
 - `skills/` is shared verbatim — `SKILL.md` frontmatter (`name` + `description`) is already host-neutral.
 - `commands/` (6 files) and `agents/` (7 files) exist only for Claude Code; Codex uses `$atlas-workflow:<name>` skill invocation and `.codex/agents/*.toml` instead, both unchanged.
 - Claude-only setup also installs the shared runtime with `scripts/sync-live-atlas-workflow.sh --host claude`; see the [installation instructions](../../README.md#claude-code-install). Plugin installation alone does not install the helper CLI. Claude native Team inherits the host model and skips Codex model-policy preflight; `team-v1` and DeepSeek/ZenMux routes are deprecated.
-- `hooks/hooks.json` exists only for Claude Code and forwards to the same `workflow/hooks/{pre,post}-tool-use` scripts Codex installs directly via `~/.codex/hooks.json`, through the `claude-hook-launcher` path-resolution shim in `scripts/`.
+- `hooks/hooks.json` exists only for Claude Code and forwards to the same `workflow/hooks/{pre,post}-tool-use` scripts Codex installs directly via `~/.codex/hooks.json`, through the `claude-hook-launcher` path-resolution shim in `scripts/`. It also registers a Claude-only `SessionStart` hook (`scripts/claude-session-start`) that adds the Atlas operating baseline from `hooks/session-baseline.md`, the counterpart of the Codex home `AGENTS.md` Atlas rules.
 
 Codex behavior is unchanged by any of this; see
 [`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](../../docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
@@ -438,6 +438,7 @@ primitive used by the update command.
 - `agents/*.md`: Claude Code agent definitions, mapped from `.codex/agents/*.toml` (DeepSeek/ZenMux custom-provider variants have no Claude Code equivalent and are not mapped)
 - `commands/*.md`: Claude Code slash commands for the 6 highest-frequency entrypoints (task, team, clarify, intake, finish, cw); the remaining skills are reachable by name through Claude Code's own skill discovery
 - `hooks/hooks.json`: Claude Code hook registration; forwards to `workflow/hooks/*` via `scripts/claude-hook-launcher`
+- `hooks/session-baseline.md` and `scripts/claude-session-start`: Claude Code `SessionStart` context with the Atlas operating baseline and current-task re-orientation
 - `skills/cw/SKILL.md`: bounded Atlas workflow entry
 - `skills/task/SKILL.md`: bounded task entry
 - `skills/office-hours/SKILL.md`: upstream product judgment entry
@@ -447,6 +448,7 @@ primitive used by the update command.
 - `skills/intake/SKILL.md`: targeted interview/pressure-test and plan stress-test entry
 - `skills/team/SKILL.md`: Codex-native Team entry with explicit local Paseo selection and operational Codex fallback
 - `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
+- `skills/team/references/codex-model-routing.md`: Codex-only exact-model routing and the deprecated Cross v1 recipe, loaded only on Codex
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry

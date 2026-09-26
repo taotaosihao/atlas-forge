@@ -161,8 +161,12 @@ claude plugin install atlas-workflow@atlas-forge
 
 Start a new Claude Code session so skills, the six `/task`, `/team`, `/clarify`,
 `/intake`, `/finish`, `/cw` commands, and the `atlas-sdd-*` agents are loaded.
-The remaining eleven skills are reachable by name through Claude Code's own skill
-discovery; they do not have dedicated slash commands. See
+Every plugin skill is also invocable as `/atlas-workflow:<name>` and loads
+automatically when its description matches the request; within the turn that
+invokes them, the six commands pre-approve bare Atlas CLI calls found on `PATH`
+(full-path calls still follow your permission settings). A `SessionStart` hook adds the Atlas operating
+baseline and, when the Claude runtime has a current task, a short
+re-orientation step. See
 [`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
 for the full host-parity scope and boundaries.
 

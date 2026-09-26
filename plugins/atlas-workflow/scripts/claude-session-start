@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Claude Code SessionStart hook: prints the Atlas operating baseline and, when
+# the Claude runtime has an active (doing or blocked) task, a short
+# re-orientation routine. Plain
+# stdout becomes session context. It reads only the Claude runtime (never
+# ~/.codex/workflow) and must never block a session, so every failure exits 0.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASELINE="$SCRIPT_DIR/../hooks/session-baseline.md"
+
+[[ -r "$BASELINE" ]] && cat "$BASELINE"
+
+RUNTIME="${ATLAS_WORKFLOW_ROOT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow}"
+POINTER="$RUNTIME/state/current-task.json"
+[[ -r "$POINTER" ]] || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+
+node - "$POINTER" "$RUNTIME" <<'NODE' 2>/dev/null || true
+const fs = require("fs");
+const path = require("path");
+const [pointerFile, runtime] = process.argv.slice(2);
+const pointer = JSON.parse(fs.readFileSync(pointerFile, "utf8"));
+const id = String(pointer.task_id || "");
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id)) process.exit(0);
+const taskFile = path.join(runtime, "tasks", id + ".md");
+const header = fs.readFileSync(taskFile, "utf8").split("\n").slice(0, 12).join("\n");
+const status = (header.match(/^status: (doing|blocked)$/m) || [])[1];
+if (!status) process.exit(0);
+const title = String(pointer.title || "").replace(/\s+/g, " ").slice(0, 200);
+console.log(`
+## Active Atlas task
+
+${id} — ${title} (${status})
+
+If the current request continues this task, first reread ${taskFile} and
+${path.join(runtime, "artifacts", id)} (including any rolling checkpoint), then
+check \`git status\` and recent \`git log\`. Otherwise leave the task as is.`);
+NODE
+exit 0
