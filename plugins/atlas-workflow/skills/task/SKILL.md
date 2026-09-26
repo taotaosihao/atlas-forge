@@ -7,7 +7,7 @@ Use the local task helper for bounded implementation, diagnosis, or maintenance.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:task`; Claude Code invokes it as `/task` or by calling the `task` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:task`; Claude Code invokes it as `/task` or by calling the `task` skill directly. Other `$atlas-workflow:<name>` references below follow the same per-host pattern. Commands below are written as bare Atlas command names (`atlas-workflow`, `codex-design-review`, and so on); run them through the current host's entry: `~/.codex/workflow/bin/<command>` on Codex, and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>` (or the `LOCAL_BIN_ROOT` chosen at install) on Claude Code, whose entry sets the runtime root, so do not call the runtime copy under `workflow/bin` there. A bare `PATH` lookup is acceptable only when `command -v <command>` does not resolve into the other host's directory, because a machine with both hosts can put either first.
 
 ## Language
 
@@ -17,7 +17,7 @@ Keep user-facing replies and summaries in plain, conversational language. Do not
 
 ## Routing
 
-1. Reuse a relevant existing task. When tracking, recovery, handoff, audit or the selected formal workflow gives a durable task value, run `~/.codex/workflow/bin/codex-workflow list` and create/start one only when none fits. Clear work without that need can run directly; using Task does not itself require task artifacts.
+1. Reuse a relevant existing task. When tracking, recovery, handoff, audit or the selected formal workflow gives a durable task value, run `atlas-workflow list` and create/start one only when none fits. Clear work without that need can run directly; using Task does not itself require task artifacts.
 2. Execute clear, low-risk, verifiable work directly. Multiple files or a behavior change do not by themselves require Team, a worktree, or a new documentation bundle.
 3. Use `$atlas-workflow:intake` only when unresolved intent, scope, stakeholder, safety, permission, data, deployment, or ownership decisions block safe progress.
 4. Use `$atlas-workflow:product-design` when a direction is chosen for a user-visible feature but the primary scenario or user-operable flow lacks current approval. Keep pure backend, migration, CLI, no-interaction, and tiny precise work in Task or Clarify.
@@ -179,6 +179,6 @@ For canonical phase status, run `codex-workflow project-phase-report <task-id> <
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.
-- Run `~/.codex/workflow/bin/codex-workflow done <task-id>` only when the whole authorized goal is actually complete.
+- Run `atlas-workflow done <task-id>` only when the whole authorized goal is actually complete.
 
 In the final reply, follow the product-manager structure above. Put the task id, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.

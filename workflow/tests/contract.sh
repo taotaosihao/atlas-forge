@@ -257,6 +257,7 @@ bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_legacy.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_sdd.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_business_acceptance.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_clarify_parallel_routing.sh"
+bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_host_neutral_skills.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_team_review.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_implementation_contract.sh"
 bash -n "$ATLAS_FORGE_ROOT/workflow/tests/contract_web_acceptance.sh"
@@ -542,6 +543,8 @@ cache_plugin_root="${ATLAS_CACHE_PLUGIN_ROOT:-}"
 if [[ "${ATLAS_CONTRACT_INTERNAL_REPO:-0}" == 1 ]]; then
   ATLAS_FORGE_ROOT="$ATLAS_FORGE_ROOT" bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_product_design_skill.sh"
   pass "product-design skill contract"
+  ATLAS_FORGE_ROOT="$ATLAS_FORGE_ROOT" bash "$ATLAS_FORGE_ROOT/workflow/tests/contract_host_neutral_skills.sh"
+  pass "host-neutral skill contract"
   node "$ATLAS_FORGE_ROOT/workflow/tests/contract_project_verification_skill.mjs"
   pass "project-verification skill contract"
   cache_plugin_root="$CODEX_HOME_ROOT/plugins/atlas-workflow"
@@ -559,7 +562,7 @@ for skill in analyze office-hours brainstorm intake clarify team team-v1 task cw
   cmp -s "$src" "$cache"
 done
 for skill in analyze office-hours brainstorm intake clarify team-v1 worktree; do
-  rg -q "codex-workflow ready" "$source_skills_root/$skill/SKILL.md"
+  rg -q "(atlas|codex)-workflow ready" "$source_skills_root/$skill/SKILL.md"
 done
 cmp -s "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/README.md" "$cache_plugin_root/README.md"
 cmp -s "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-plugin/plugin.json" "$cache_plugin_root/.codex-plugin/plugin.json"

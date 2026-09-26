@@ -73,7 +73,7 @@ selection and its existing rules; do not infer it from a multi-agent request.
 Unavailable exact spawn schema/profile/model/reasoning/backend routes and
 confirmed cost anomalies fail closed instead of creating generic substitute fan-out.
 
-The main Codex is the sole canonical scope/artifact writer and final synthesizer.
+The main session (the current host's root agent) is the sole canonical scope/artifact writer and final synthesizer.
 Child findings cannot expand the Goal, create workflow artifacts or write project
 documents. These read-only lanes need no writer lease. Discussion does not enter
 Team execute or create a writable attempt; any later implementation preserves

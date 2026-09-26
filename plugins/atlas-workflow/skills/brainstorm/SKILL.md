@@ -7,14 +7,14 @@ Use the Atlas brainstorm flow for this request.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:brainstorm`; Claude Code invokes it as `/brainstorm` or by calling the `brainstorm` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:brainstorm`; Claude Code invokes it as `/brainstorm` or by calling the `brainstorm` skill directly. Other `$atlas-workflow:<name>` references below follow the same per-host pattern. Commands below are written as bare Atlas command names (`atlas-workflow`, `codex-design-review`, and so on); run them through the current host's entry: `~/.codex/workflow/bin/<command>` on Codex, and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>` (or the `LOCAL_BIN_ROOT` chosen at install) on Claude Code, whose entry sets the runtime root, so do not call the runtime copy under `workflow/bin` there. A bare `PATH` lookup is acceptable only when `command -v <command>` does not resolve into the other host's directory, because a machine with both hosts can put either first.
 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
 - 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
-- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+- 如果 `atlas-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
 For a corrected or rejected option, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
@@ -38,12 +38,12 @@ Follow this loop:
 1. Decide whether persistence, recovery, audit, or handoff value justifies a
    workflow record. A small, self-contained exploration can remain in the
    current response.
-2. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow list`,
+2. When a durable record is useful, run `atlas-workflow list`,
    reuse a relevant `doing` task, and create/start one only when no relevant
    task exists. Keep one current authoritative body instead of mirroring the
    same exploration across workflow and repository documents.
 3. For durable design exploration, record routing evidence:
-   - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent brainstorm --risk <low|medium|high> --decision use --reason "<why solution shape is unsettled>"`
+   - `atlas-workflow route-decision <task-id> --intent brainstorm --risk <low|medium|high> --decision use --reason "<why solution shape is unsettled>"`
    - If office-hours was plausible but intentionally skipped because the idea is already worth exploring, record a separate `--intent office-hours --decision skip` reason.
 4. Gather project context before asking detailed questions:
    - current user request and conversation
@@ -66,7 +66,7 @@ Follow this loop:
    - error and edge cases
    - verification strategy
 8. For UI or visual product work, offer visual exploration only when seeing options would be materially clearer than text. If accepted, use the available browser or image workflow; otherwise continue text-only.
-9. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow scaffold-brainstorm <task-id>`,
+9. When a durable record is useful, run `atlas-workflow scaffold-brainstorm <task-id>`,
    then write or update the one current `workflow/artifacts/<task-id>/brainstorm.md` and update
    `context.md` when the factual base changes:
    - current state
@@ -99,7 +99,7 @@ Follow this loop:
    - assumptions are labelled
    - scope is small enough for the next execution step
 14. When a durable workflow record is used for handoff, run
-    `~/.codex/workflow/bin/codex-workflow ready <task-id> --require <used-supported-kinds>`
+    `atlas-workflow ready <task-id> --require <used-supported-kinds>`
     with only its intended `context`, `spec`, `analysis`, or `decision` artifacts.
     When the one authoritative body is `brainstorm.md` or a project document,
     use `ready <task-id> --skip "<reason naming that body>"`; do not create copies

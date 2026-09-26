@@ -7,14 +7,14 @@ Use the Atlas office-hours flow for this request.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:office-hours`; Claude Code invokes it as `/office-hours` or by calling the `office-hours` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:office-hours`; Claude Code invokes it as `/office-hours` or by calling the `office-hours` skill directly. Other `$atlas-workflow:<name>` references below follow the same per-host pattern. Commands below are written as bare Atlas command names (`atlas-workflow`, `codex-design-review`, and so on); run them through the current host's entry: `~/.codex/workflow/bin/<command>` on Codex, and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>` (or the `LOCAL_BIN_ROOT` chosen at install) on Claude Code, whose entry sets the runtime root, so do not call the runtime copy under `workflow/bin` there. A bare `PATH` lookup is acceptable only when `command -v <command>` does not resolve into the other host's directory, because a machine with both hosts can put either first.
 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
 - 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
-- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+- 如果 `atlas-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
 For a corrected premise or rejected direction, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
@@ -37,12 +37,12 @@ Follow this loop:
 1. Decide whether persistence, recovery, audit, or handoff value justifies a
    workflow record. Keep a clear, self-contained judgment in the current
    response when it does not.
-2. When a durable record is useful, run `~/.codex/workflow/bin/codex-workflow list`,
+2. When a durable record is useful, run `atlas-workflow list`,
    reuse a relevant `doing` task, and create/start one only when no relevant
    task exists. Keep one current authoritative body for the product judgment;
    do not mirror it into a repository bundle merely for handoff.
 3. For a durable nontrivial judgment, record the active route:
-   - `~/.codex/workflow/bin/codex-workflow route-decision <task-id> --intent office-hours --risk <low|medium|high> --decision use --reason "<why product judgment is needed>"`
+   - `atlas-workflow route-decision <task-id> --intent office-hours --risk <low|medium|high> --decision use --reason "<why product judgment is needed>"`
 4. Recover local context first:
    - user brief and current conversation
    - project docs and existing artifacts when relevant
@@ -86,7 +86,7 @@ Follow this loop:
    - `$atlas-workflow:clarify` when execution boundaries remain and no user-visible scenario or flow decision is missing
    - `$atlas-workflow:task` for an already-scoped implementation
 13. When a durable workflow record is used for handoff, run
-    `~/.codex/workflow/bin/codex-workflow ready <task-id> --require <used-supported-kinds>`
+    `atlas-workflow ready <task-id> --require <used-supported-kinds>`
     with only its intended `context`, `spec`, `analysis`, or `decision` artifacts.
     If the one authoritative body is elsewhere, use
     `ready <task-id> --skip "<reason naming that body>"`; do not create copies

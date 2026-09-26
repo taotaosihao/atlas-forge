@@ -150,6 +150,8 @@ atlas-workflow list
 
 使用自定义 runtime 时，在安装及启动 Claude Code 的环境中都设置 `ATLAS_WORKFLOW_ROOT`；`LOCAL_BIN_ROOT` 可覆盖命令目录，对应调整 PATH。
 
+同一台机器同时使用 Codex 时，PATH 中两个宿主的命令同名，谁在前就先命中谁。Atlas skills 已按宿主使用各自的入口目录，不依赖 PATH 顺序；手动调用命令前，先用 `command -v atlas-workflow` 确认它指向当前宿主的目录。
+
 再添加本地 marketplace 并安装插件：
 
 ```bash
@@ -159,7 +161,7 @@ claude plugin install atlas-workflow@atlas-forge
 
 Start a new Claude Code session so skills, the six `/task`, `/team`, `/clarify`,
 `/intake`, `/finish`, `/cw` commands, and the `atlas-sdd-*` agents are loaded.
-The remaining nine skills are reachable by name through Claude Code's own skill
+The remaining eleven skills are reachable by name through Claude Code's own skill
 discovery; they do not have dedicated slash commands. See
 [`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
 for the full host-parity scope and boundaries.

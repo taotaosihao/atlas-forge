@@ -7,14 +7,14 @@ Use the Atlas worktree flow for this request.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:worktree`; Claude Code invokes it as `/worktree` or by calling the `worktree` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:worktree`; Claude Code invokes it as `/worktree` or by calling the `worktree` skill directly. Other `$atlas-workflow:<name>` references below follow the same per-host pattern. Commands below are written as bare Atlas command names (`atlas-workflow`, `codex-design-review`, and so on); run them through the current host's entry: `~/.codex/workflow/bin/<command>` on Codex, and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>` (or the `LOCAL_BIN_ROOT` chosen at install) on Claude Code, whose entry sets the runtime root, so do not call the runtime copy under `workflow/bin` there. A bare `PATH` lookup is acceptable only when `command -v <command>` does not resolve into the other host's directory, because a machine with both hosts can put either first.
 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
 - 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
-- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+- 如果 `atlas-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
 ## Short Request Intake Gate
 
@@ -50,14 +50,16 @@ Follow this loop:
    - Use one when the user asks for isolation, the change is broad or risky, the work will run for a while, or you need to keep the current workspace clean.
    - If a worktree is not needed, stay in the current workspace and continue with the normal Atlas task flow.
 3. Start from the active Atlas task when possible.
-   - Run `~/.codex/workflow/bin/codex-workflow list`.
+   - Run `atlas-workflow list`.
    - Reuse the relevant `doing` task or create/start one.
    - Prefer a branch and worktree name derived from the task id.
 4. Choose the worktree location in this order:
    - existing `.worktrees/`
    - existing `worktrees/`
-   - repo instructions in `AGENTS.md`, `README.md`, or nearby docs
-   - otherwise default to `~/.codex/worktrees/<project-name>/`
+   - repo instructions in `AGENTS.md`, `CLAUDE.md`, `README.md`, or nearby docs
+   - otherwise default to the host's global Atlas location:
+     `~/.codex/worktrees/<project-name>/` on Codex,
+     `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/worktrees/<project-name>/` on Claude Code
 5. If you use `.worktrees/` or `worktrees/`, verify the directory is ignored with `git check-ignore`.
    - If it is not ignored, either add the ignore rule before continuing or fall back to the global Atlas location.
    - Do not create a project-local worktree inside a tracked directory.
@@ -79,7 +81,7 @@ Follow this loop:
    - When Compose is used, run `docker compose -p "$compose_project" ps`.
    - Run the repo's normal baseline tests from the worktree.
    - If the baseline is already failing, stop and report that before adding new changes.
-10. Before reporting the worktree ready, run the relevant `~/.codex/workflow/bin/codex-workflow ready <task-id> --require ...` check when planning artifacts exist, or `ready --skip "<why worktree setup is intentionally minimal>"` when this is only environment setup.
+10. Before reporting the worktree ready, run the relevant `atlas-workflow ready <task-id> --require ...` check when planning artifacts exist, or `ready --skip "<why worktree setup is intentionally minimal>"` when this is only environment setup.
 11. Report the ready state with the task id, branch, worktree path, Compose project name if one was started, and readiness/skip result.
 12. When implementation is complete, switch to `$atlas-workflow:finish`.
     - Do not merge, discard, shut down the dedicated Compose project, or remove the worktree automatically at this stage.

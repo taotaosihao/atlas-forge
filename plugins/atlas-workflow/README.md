@@ -454,4 +454,5 @@ primitive used by the update command.
 - `skills/finish/SKILL.md`: isolated branch completion entry
 - `skills/3d-harness/SKILL.md`: source-checkout-only reviewed-local 3D acceptance entry
 - `skills/project-verification/SKILL.md`: optional project verification map and journey navigation entry
+- `skills/system-message-design/SKILL.md`: UI copy and feedback wording guidance shared by both hosts
 - `tools/atlas-3d-harness/README.md`: 3D runtime CLI, evidence, safety, and host limits

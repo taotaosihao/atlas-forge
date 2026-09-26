@@ -8,7 +8,8 @@ Discussion, task size or a short request alone does not require one.
 Copy and fill the existing workflow helper's `implementation-contract.md` or
 `implementation-contract.final.md` template: use its `CODEX_WORKFLOW_TEMPLATE_DIR`
 override when configured, otherwise the helper module's `templates/` directory
-(normally `~/.codex/workflow/templates/`). The source-checkout copies live in
+(normally `~/.codex/workflow/templates/` on Codex or
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/workflow/templates/` on Claude Code). The source-checkout copies live in
 `workflow/templates/`; do not assume that directory exists in the target project.
 `scaffold-clarify` creates `clarify.md`, not a machine contract. If the templates
 are unavailable, author the required fields below and validate them; do not

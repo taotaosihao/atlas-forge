@@ -7,14 +7,14 @@ Use the Atlas design-review flow for this request.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:design-review`; Claude Code invokes it as `/design-review` or by calling the `design-review` skill directly. For CLI commands below, prefer the bare `atlas-workflow` command on `PATH`, falling back to the absolute `~/.codex/workflow/bin/codex-workflow` only when no `PATH` command is available.
+Codex invokes this flow as `$atlas-workflow:design-review`; Claude Code invokes it as `/design-review` or by calling the `design-review` skill directly. Other `$atlas-workflow:<name>` references below follow the same per-host pattern. Commands below are written as bare Atlas command names (`atlas-workflow`, `codex-design-review`, and so on); run them through the current host's entry: `~/.codex/workflow/bin/<command>` on Codex, and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>` (or the `LOCAL_BIN_ROOT` chosen at install) on Claude Code, whose entry sets the runtime root, so do not call the runtime copy under `workflow/bin` there. A bare `PATH` lookup is acceptable only when `command -v <command>` does not resolve into the other host's directory, because a machine with both hosts can put either first.
 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
 - 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
-- 如果 `codex-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
+- 如果 `atlas-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
 For a corrected or evidence-challenged design, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
@@ -29,10 +29,10 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 
 Follow this loop:
 
-1. Search MemPalace for related prior decisions, sessions, design reviews, and legacy Atlas lessons.
-2. Run `~/.codex/workflow/bin/codex-workflow list`.
+1. When the current host provides MemPalace, search it for related prior decisions, sessions, design reviews, and legacy Atlas lessons; otherwise rely on task records and the repository, and say recall was unavailable.
+2. Run `atlas-workflow list`.
 3. Reuse a relevant `doing` task if one already exists. Otherwise prefer:
-   - `~/.codex/workflow/bin/codex-design-review init "<short title>" "<page url or route>" "<design source>"`
+   - `codex-design-review init "<short title>" "<page url or route>" "<design source>"`
    - This creates and starts a bounded ordinary design-fidelity task and scaffolds:
      - `contract.md`
      - `report.md`
@@ -89,6 +89,6 @@ Follow this loop:
     stays non-passing; task `done`, build/test results, and screenshots cannot
     infer or replace it. In release mode, report each formal fact as `passed`,
     `failed`, or `cannot_verify`; do not write `certified`.
-13. When the review work is actually finished, run `~/.codex/workflow/bin/codex-workflow done <task-id>`. Review-task completion is not product-release certification and cannot change the verdict status.
-14. Let MemPalace hooks/mining capture reusable context by default; use `codex-workflow learn` only for legacy manual archival.
+13. When the review work is actually finished, run `atlas-workflow done <task-id>`. Review-task completion is not product-release certification and cannot change the verdict status.
+14. Where MemPalace is installed, let its hooks/mining capture reusable context by default; use `atlas-workflow learn` only for legacy manual archival.
 15. In the final reply, include the task id, the verdict file path and its exact status, the release raw-input file path and candidate identity when release mode was active, verification commands and results, and any remaining fidelity risks. State these in plain Chinese (for example “评审结论写在 `<verdict.json path>`”) instead of surfacing internal terms such as `generic verdict` or `canonical raw adapter input`. Mention a release decision only when a separate Team completion-derived record was supplied, and quote its status exactly.

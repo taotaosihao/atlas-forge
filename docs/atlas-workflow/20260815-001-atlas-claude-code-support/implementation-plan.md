@@ -36,6 +36,13 @@ Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案�
 
 `team-v1`（legacy，依赖 `codex exec` 子进程）额外注明其后端是 Codex-only，Claude Code 上应改用 `team`（host-neutral 原生协作）。
 
+2026-09-26 补充：上面“绝对路径保持不变”的做法已被替代。Claude-only 环境里没有 `~/.codex`，而 agent 会照字面执行正文中的命令。因此，除 `team-v1` 外，各 skill 正文改用不带路径的命令名（`atlas-workflow`、`codex-design-review`）；Host Note 分宿主给出命令入口：Codex 用 `~/.codex/workflow/bin/<command>`，Claude Code 用 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bin/<command>`（或安装时指定的 `LOCAL_BIN_ROOT`）。其中 Claude 侧的 shim 负责设置 runtime root，所以不能直接调用 runtime 目录里的副本。两个宿主装在同一台机器上时，PATH 里的顺序无法区分两套 runtime，所以只有当 `command -v` 解析到的不是另一个宿主的目录时，才可以直接用 PATH 上的命令。其他改动：
+- worktree 的默认位置、clarify reference 中的模板目录都按宿主分别给出；
+- MemPalace 相关步骤改为宿主提供时才使用，缺失时明确降级；
+- `system-message-design` 随插件分发，两个宿主都能用。
+
+静态约束由 `workflow/tests/contract_host_neutral_skills.sh` 检查。
+
 ### 3.3 运行时路径中立
 
 - `workflow/bin/lib/codex-workflow/core/paths.js`：`workflowRoot()`/`codexHomeRoot()` 增加 `ATLAS_WORKFLOW_ROOT`/`ATLAS_HOME_ROOT` 作为最高优先级的中性别名，原有 `CODEX_WORKFLOW_ROOT`/`CODEX_HOME_ROOT`/`CODEX_HOME` 解析顺序和语义不变。

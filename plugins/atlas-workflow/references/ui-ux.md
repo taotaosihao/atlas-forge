@@ -68,4 +68,5 @@ citation, the item applies.
 - Use the project's confirmed terms; one object keeps one name everywhere.
   Labels do not repeat their value's wording; filter options map one-to-one to
   the categories shown.
-- For wording, use the `system-message-design` skill when the host provides it.
+- For wording, use the bundled
+  [system-message-design](../skills/system-message-design/SKILL.md) skill.
