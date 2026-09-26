@@ -477,12 +477,13 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 
 - Use discuss for read-only options, architecture, diagnosis, risk review, or a second opinion.
 - Discuss does not authorize implementation, commits, deployment, release, or other mutation.
-- Discuss lanes never acquire writable attempts or writer leases; an explicitly authorized writable deliverable must enter through execute admission.
+- Discuss lanes never acquire writable attempts or writer leases; an explicitly authorized writable deliverable follows the applicable Execute path below.
 
 ### Execute
 
 - Use execute only after an explicit user implementation request. Do not infer it from a plan, review, decision file, roadmap, or prior discuss round.
-- Record execute start or promotion with the explicit message reference. Native is the default; an explicitly selected Paseo Team also records its controller-attested selection authority:
+- For the single-writer quick path described under [Independent Staffing, Model, Release, And Lease Decisions](#independent-staffing-model-release-and-lease-decisions), use the current scope, owned paths, related checks, and applicable business acceptance without creating a formal grant or receipt. Reassess writer isolation when its stated conditions change.
+- The CLI admission steps below apply only after formal execution admission has been selected; they do not select it for a lightweight task. Record that execute start or promotion with the explicit message reference. Native is the default; an explicitly selected Paseo Team also records its controller-attested selection authority:
 
 ```bash
 codex-workflow team-record-start <task-id> "<objective>" --mode execute --authorization-ref <user-message-ref> --brief <canonical-brief.json> --operation-id <id>
@@ -491,7 +492,7 @@ codex-workflow team-promote <task-id> --to execute --authorization-ref <user-mes
 ```
 
 - `authorization_ref` is an audit guard against accidental promotion, not a host capability. Never fabricate it from workflow artifacts.
-- Execute start and promotion require canonical brief schema v4 binding an admitted contract semantics v5 or v6. Before compilation, `codex-team-brief` runs the same full semantic validator and canonical authority-slice checks as strict new-authoring lint, binds a sorted and duplicate-free snapshot of every authority input file into the brief, and performs a stable recheck before writing. Team recomputes those identities from the current canonical files and binds them into the exact scope/grant digest on authorize, replay, admission, verification, acceptance, completion, and replan; task mismatch, missing files, symlinks, or byte/existence drift fail closed. Team also revalidates contract/plan digests, the exact v5→execution-plan v3 or v6→execution-plan v4 mapping, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock. Historical semantics v3/v4 and brief schema v3 remain read-only discussion compatibility.
+- Formal execute start and promotion require canonical brief schema v4 binding an admitted contract semantics v5 or v6. Before compilation, `codex-team-brief` runs the same full semantic validator and canonical authority-slice checks as strict new-authoring lint, binds a sorted and duplicate-free snapshot of every authority input file into the brief, and performs a stable recheck before writing. Team recomputes those identities from the current canonical files and binds them into the exact scope/grant digest on authorize, replay, admission, verification, acceptance, completion, and replan; task mismatch, missing files, symlinks, or byte/existence drift fail closed. Team also revalidates contract/plan digests, the exact v5→execution-plan v3 or v6→execution-plan v4 mapping, release policy when present, base, dependencies, size gate, permanent checks, and global writer scope while holding the global admission lock. Historical semantics v3/v4 and brief schema v3 remain read-only discussion compatibility.
 - Discuss starts and non-execute promotions do not require the reference.
 
 ### Product Increment Evidence
