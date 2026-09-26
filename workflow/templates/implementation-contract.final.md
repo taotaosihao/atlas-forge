@@ -153,14 +153,14 @@ compatibility, not new-authoring alternatives.
 
 | Row | Target | Command or action | Expected result | Phase conclusion evidence |
 |-----|--------|-------------------|-----------------|---------------------------|
-| V-1 |  |  |  | `evidence/phase-review-report.md` |
+| V-1 |  |  |  |  |
+
+Reference the selected task, scenario, report or protocol result; the row does not require a new evidence file.
 
 ## Evidence Budget
 
-- Git evidence defaults to phase conclusions: `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`.
-- Optional git evidence: `review-checklist.md`, `verification-checklist.md`, final screenshots, or customer-facing HTML/PDF/sign-off deliverables when needed.
+- Reuse the existing conclusion carrier. Create additional evidence files only when required by the selected contract, business protocol or requested deliverable; a phase label alone does not require `scaffold-phase` or an evidence bundle.
 - Temporary run artifacts outside git by default: raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, failed retry logs, worker debug JSONL, API dumps, localhost/port status, and intermediate repair output.
-- Target per phase: 10 git evidence files or fewer and 1 MB or less. Explain exceptions in `phase-review-report.md`.
 
 ## Edge Cases
 

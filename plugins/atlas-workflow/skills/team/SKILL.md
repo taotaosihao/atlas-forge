@@ -473,6 +473,15 @@ Use this table as a decision contract, not as a fixed sequence of lanes.
 
 ## Modes And Authority
 
+When choosing or inheriting checks, measurements or diagnostic code, including
+direct Team entry, load the shared
+[Verification guidance](../../references/verification.md). For a child selecting
+verification methods or changing tests, harnesses or diagnostics, include a
+resolvable reference and the applicable boundaries in its existing self-contained
+dispatch packet and require it to read them; do not depend on parent history.
+Unrelated read-only fact-finding lanes need no such load. This adds no brief field
+or agent role and does not alter formal admission or required gates.
+
 ### Discuss
 
 - Use discuss for read-only options, architecture, diagnosis, risk review, or a second opinion.
@@ -580,7 +589,7 @@ materials never authorize an automatic format downgrade.
 - Recommend complementary review perspectives and agent count from the actual task. There is no required council shape. Two or three perspectives are often useful, but this is guidance rather than a staffing gate. When the risk justifies it, include a perspective that owns the strongest evidence-backed counterargument or tradeoff instead of duplicating another general reviewer.
 - Let each selected reviewer form an independent first-round position before seeing the other reviewers' conclusions. Findings should state the affected path and line when applicable, the concrete evidence, impact, and recommendation; uncertainty belongs in an explicit evidence gap rather than a clean verdict.
 - Keep useful review agents available after their initial findings. The main Codex integrates the first-round results, combines duplicates without erasing provenance or dissent, makes an evidence-backed interim ruling, and sends only the material objections and ruling back to the same relevant agents with `paseo send` or native `followup_task`. Do not replay the full history or involve every role in every finding.
-- Review discussion should normally converge within two or three rounds. This is an operating target, not a hard semantic limit. Continue beyond it only while a material disagreement remains and another focused exchange or verification can add evidence or change the final recommendation. The main Codex may adjudicate ordinary duplication, wording, severity, and scope differences from the user goal, authoritative contract, and repository evidence.
+- Review discussion should normally converge within two or three rounds. This is an operating target, not a hard semantic limit. Continue beyond it only while a material disagreement remains and another focused exchange or verification can add evidence or change the final recommendation. Apply the shared verification guidance when selecting repair checks. The main Codex may adjudicate ordinary duplication, wording, severity, and scope differences from the user goal, authoritative contract, and repository evidence.
 - If a material disagreement persists after several useful exchanges, or the decision depends on product intent, risk acceptance, compatibility, permissions, ownership, or another user choice, stop the internal loop and return a concise human decision packet: agreed facts, the remaining disagreement, each side's strongest evidence, the main Codex's recommendation, and the concrete options. After the user decides, return that authority to the relevant agents only when a final consistency check is useful.
 - Silence, timeout, an unavailable reviewer, or unsupported agreement is not consensus. Replace a missing perspective when useful or disclose that independent review is unavailable; the main Codex may inspect and adjudicate evidence but must not present itself as the missing independent reviewer.
 - Convergence means no unresolved disagreement remains that would materially change the final recommendation, not that every role shares the same design preference. Use `CONSENSUS`, `CONSENSUS_WITH_RESERVATIONS`, or `HUMAN_DECISION_REQUIRED` when those labels make the outcome clearer.

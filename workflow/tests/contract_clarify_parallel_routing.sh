@@ -27,6 +27,13 @@ assert_lacks() {
 test -f "$COLLABORATION"
 test -f "$CONTRACT"
 
+# All direct entrypoints load the same policy; unrelated fact-finding stays light.
+for entry in task team clarify; do
+  assert_has "$PLUGIN/skills/$entry/SKILL.md" '\[Verification guidance\]\(../../references/verification.md\)' "$entry shared verification entry"
+done
+assert_has "$PLUGIN/skills/team/SKILL.md" 'resolvable reference.*self-contained\s+dispatch packet' 'verification guidance reaches children without parent history'
+assert_has "$CLARIFY" 'ready <task-id> --require clarify' 'explicit single-document readiness'
+
 # Default routing must work without loading the conditional detail files.
 assert_has "$CLARIFY" 'Read the request, current conversation, existing decisions' 'reuse context before asking'
 assert_has "$CLARIFY" 'Before brownfield discovery or any fan-out, freeze the smallest user-visible Goal' 'Goal freeze precedes discovery and fan-out'
@@ -110,8 +117,11 @@ try {
   process.chdir(target);
   const skill = path.join(plugin, 'skills', 'clarify', 'SKILL.md');
   assert.equal(path.resolve(path.dirname(skill), '..', '..'), plugin);
-  const references = ['collaboration', 'contract-authoring'].map(name =>
-    path.join(path.dirname(skill), 'references', name + '.md'));
+  const references = [
+    ...['collaboration', 'contract-authoring'].map(name =>
+      path.join(path.dirname(skill), 'references', name + '.md')),
+    ...['task', 'team'].map(name => path.join(plugin, 'skills', name, 'SKILL.md')),
+  ];
   for (const file of [skill, ...references]) {
     const body = fs.readFileSync(file, 'utf8');
     const links = [...body.matchAll(/\[[^\]]+\]\(([^)]+\.md)\)/g)];
@@ -121,6 +131,13 @@ try {
       assert.ok(resolved.startsWith(plugin + path.sep), 'reference escaped plugin: ' + link);
       assert.ok(fs.readFileSync(resolved, 'utf8').trim(), 'unreadable reference: ' + link);
     }
+  }
+  const verification = path.join(plugin, 'references', 'verification.md');
+  for (const entry of ['task', 'team', 'clarify']) {
+    const entryFile = path.join(plugin, 'skills', entry, 'SKILL.md');
+    const link = fs.readFileSync(entryFile, 'utf8').match(/\[Verification guidance\]\(([^)]+)\)/);
+    assert.ok(link, 'missing verification reference: ' + entry);
+    assert.equal(path.resolve(path.dirname(entryFile), link[1]), verification);
   }
 } finally {
   process.chdir(cwd);

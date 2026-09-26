@@ -24,10 +24,9 @@ supporting_evidence:
 - workflow_team_staffing: {{WORKFLOW_TEAM_STAFFING_PATH}}
 
 evidence_rules:
-- Git evidence is the phase conclusion packet, not the raw run archive.
-- Default phase files: `phase-review-report.md`, `defect-queue.md`, `evidence-index.md` or `evidence-manifest.json`, and `gate-checklist.md`.
+- Retain the supporting evidence required by this selected contract bundle. Reuse existing conclusion carriers for results; create additional files only for requirements of the selected contract, business protocol or requested deliverable.
+- A phase label alone does not require `scaffold-phase` or another evidence bundle.
 - Keep raw logs, Playwright JSON, traces, videos, HAR, bulk screenshots, full command output, retry logs, debug JSONL, API dumps, port status, and intermediate repair output outside git by default.
-- Target each phase at 10 git evidence files or fewer and 1 MB or less; explain exceptions in `phase-review-report.md`.
 
 artifact_categories:
 - durable_handoff: repo docs future implementers should read, including this index and the current authoritative contract.

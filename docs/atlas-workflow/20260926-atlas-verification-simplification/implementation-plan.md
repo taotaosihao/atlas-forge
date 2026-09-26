@@ -1,7 +1,7 @@
 # Atlas 验证选择、诊断退出与材料默认行为优化方案
 
 - 日期：2026-09-26
-- 状态：用户于 2026-09-26 以“修复”确认方案并授权源码实施；安装、发布和真实模型验证不在授权内。
+- 状态：用户于 2026-09-26 以“修复”授权后，源码修复与专项验证已完成；最终集成结果由任务 `20260926-002-atlas` 记录。安装、发布和真实模型验证不在授权内。
 - 源码基线：`7820313ba38c763bc67d5eb0eda69e9ca99b8f67`
 - 目标：修改 Atlas 框架自身，减少以后任务中的无关前检、无消费者测量、重复验证和已结束诊断的持续维护；保持当前必需验收与安全边界。
 - 本文是唯一方案正文。讨论与原始会话证据保留在 Git 外，不创建机器合同、配套证据包或新工作流状态。
@@ -143,3 +143,13 @@ bash workflow/tests/contract_implementation_contract.sh
 本轮使用三个只读工程视角独立提出选项，再讨论 runtime 兼容、共享指导归属与最小验收。最终一致性审阅补齐了无父历史子代理的指导传递、集成套件结果复用，以及安全反例不触发额外业务验收的边界。没有剩余会改变当前实施范围或安全验收的分歧；这不是 formal machine-contract 准入或真实模型效果证明。
 
 源码实施完成后可以直接确认：模板不再推荐默认套餐，单份 Clarify 可被 helper 正确检查，普通入口没有无条件建档要求，直接 Team 与 Task 复用同一验证指导。诊断选择是否在真实会话中长期改善仍需实际使用证据，不能用本方案、静态 PASS 或 Team 共识替代。
+
+## 9. 源码实施记录
+
+三项修改已落实，共同规则位于 [verification.md](../../../plugins/atlas-workflow/references/verification.md)，readiness 使用配置的真实 Clarify 模板识别骨架，保留旧材料路径。原样模板、元数据／空白变化和新增空 AC 行不会被判为实质内容；已填写的单份文档可以从公开 CLI 检查通过，且不生成实施授权或三份镜像材料。
+
+专项结果：readiness 7/7，`contract_clarify_parallel_routing.sh`、`contract_team_review.sh`、`contract_implementation_contract.sh`（216 项）、官方 plugin validator、manifest 完整性与 Markdown 链接检查均通过。新增 CLI 用例在改动前因不支持 clarify 而失败，修复后通过。两个原方案只读工程视角完成源码复核；其中新增空 AC 行的反例已修复并复核闭合。
+
+`atlas-agent-model-policy check --mode saving` 因当前模型目录 `latest family 5.6 resolves 0 models for capability frontier` 未通过；未派发该路由或修改模型配置。复用的原工程视角不代表该 Saving 路由可用。
+
+最终集成命令为 `bash workflow/tests/contract.sh`，包含 repo suite 与隔离 host fixture；当前任务结果和原始日志保存在 Git 外：`/Users/sihao/.codex/workflow/artifacts/20260926-002-atlas/`。这次不运行真实模型或刷新安装态，formal size/freshness 和 FMS 保持本轮未修改。

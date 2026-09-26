@@ -442,6 +442,9 @@ const uiFixture = fs.readFileSync(path.join(root, "test/fixtures/implementation-
 for (const flavor of ["draft", "final"]) {
   const filename = flavor === "draft" ? "implementation-contract.md" : "implementation-contract.final.md";
   let contract = fs.readFileSync(path.join(root, "workflow/templates", filename), "utf8");
+  const evidenceBudget = contract.split("## Evidence Budget\n")[1].split("\n## ")[0];
+  assert.doesNotMatch(evidenceBudget, /phase-review-report|defect-queue|evidence-index|gate-checklist/,
+    "template must not prescribe an extra evidence package");
   assert.match(contract, /^contract_semantics_version: 5$/m);
   assert.doesNotMatch(contract, /^```atlas-release-intent\+json$/m);
   const matches = [...contract.matchAll(planFence)];
@@ -489,7 +492,7 @@ for (const flavor of ["draft", "final"]) {
   for (const [field, value] of Object.entries(fields)) contract = fill(contract, field, value);
   contract = replaceOnce(contract, "| AC-1 |  | yes |  | goal:<requirement-ref> |",
     "| REQ-1 | Preserve the authorized workflow behavior. | yes | Run the contract check. | goal:REQ-1 |");
-  contract = replaceOnce(contract, "| V-1 |  |  |  | `evidence/phase-review-report.md` |",
+  contract = replaceOnce(contract, "| V-1 |  |  |  |  |",
     "| V-1 | Workflow contract | bash workflow/tests/contract_implementation_contract.sh | Exit 0 | `evidence/phase-review-report.md` |");
   contract = replaceOnce(contract, "|  |  | no | optional |",
     "| Unrelated suggestion | Record as a follow-up. | no | optional |");

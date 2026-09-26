@@ -62,6 +62,19 @@ Show a task:
 ~/.codex/workflow/bin/codex-workflow show <task-id>
 ```
 
+Check only selected helper documents when that material check is useful:
+
+```bash
+~/.codex/workflow/bin/codex-workflow ready <task-id> --require clarify
+```
+
+This accepts a filled `clarify.md` without requiring `context.md`, `spec.md` or
+`analysis.md`; missing, empty or unfilled scaffold content remains `not-ready`.
+Readiness checks materials, not semantic completeness, approval or implementation
+success. Existing issues, PRDs and repository contracts need their applicable
+review, not mirrored helper files or a readiness skip. Bare `ready` retains its
+legacy `context,spec,analysis` default; callers should select their intended set.
+
 Task mutations commit to `events-v2.jsonl` before updating Markdown, `state.json`,
 or the derived compatibility `runtime.jsonl`. Each event carries a monotonic
 revision, operation identity, previous-event link, payload digest, whole-record

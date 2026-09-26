@@ -17,8 +17,8 @@ const {
 } = require("../task/runtime");
 
 const READY_USAGE =
-  'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]';
-const VALID_REQUIREMENTS = new Set(["context", "spec", "analysis", "decision"]);
+  'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]|clarify] [--skip "<reason>"]';
+const VALID_REQUIREMENTS = new Set(["context", "spec", "analysis", "decision", "clarify"]);
 
 function parseReadyArgs(argv) {
   if (argv.length === 0) {
@@ -84,6 +84,21 @@ function substantiveContent(file) {
     .trim();
 }
 
+function substantiveClarifyContent(paths, file) {
+  const contentLines = (text) => text.split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim().replace(/\s*\|\s*/g, "|"))
+    .filter((line) => line && !line.startsWith("#")
+      && !/^(task_id|created|artifact_category):/.test(line)
+      && !/^\|[^|]*\|\|\|$/.test(line));
+  // Compare with the configured scaffold, not a second copy of its empty slots.
+  // This establishes non-template content only, not semantic completeness.
+  const templateLines = new Set(contentLines(
+    fs.readFileSync(path.join(paths.templateDir, "clarify.md"), "utf8"),
+  ));
+  return contentLines(fs.readFileSync(file, "utf8"))
+    .filter((line) => !templateLines.has(line)).join("\n");
+}
+
 function evaluateReadiness(paths, taskId, requirementsText) {
   const requirements = requirementsText.split(",").filter((item) => item);
   if (requirements.length === 0) {
@@ -109,7 +124,9 @@ function evaluateReadiness(paths, taskId, requirementsText) {
     recordedPaths.push(`${requirement}:${path.relative(artifactDir, file).split(path.sep).join("/")}`);
     if (!fs.existsSync(file)) {
       issues.push(`${requirement}:missing`);
-    } else if (!substantiveContent(file)) {
+    } else if (!(requirement === "clarify"
+      ? substantiveClarifyContent(paths, file)
+      : substantiveContent(file))) {
       issues.push(`${requirement}:template`);
     }
   }

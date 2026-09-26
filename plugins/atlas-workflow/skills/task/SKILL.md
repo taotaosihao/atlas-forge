@@ -17,7 +17,7 @@ Keep user-facing replies and summaries in plain, conversational language. Do not
 
 ## Routing
 
-1. Run `~/.codex/workflow/bin/codex-workflow list` and reuse a relevant `doing` task; create/start one only when none exists.
+1. Reuse a relevant existing task. When tracking, recovery, handoff, audit or the selected formal workflow gives a durable task value, run `~/.codex/workflow/bin/codex-workflow list` and create/start one only when none fits. Clear work without that need can run directly; using Task does not itself require task artifacts.
 2. Execute clear, low-risk, verifiable work directly. Multiple files or a behavior change do not by themselves require Team, a worktree, or a new documentation bundle.
 3. Use `$atlas-workflow:intake` only when unresolved intent, scope, stakeholder, safety, permission, data, deployment, or ownership decisions block safe progress.
 4. Use `$atlas-workflow:product-design` when a direction is chosen for a user-visible feature but the primary scenario or user-operable flow lacks current approval. Keep pure backend, migration, CLI, no-interaction, and tiny precise work in Task or Clarify.
@@ -139,6 +139,10 @@ For a corrected or evidence-challenged decision, first apply the shared
 - For product implementation, make the stable domain or capability identity prominent in the execution objective and name new long-lived files and symbols from that identity plus their actual responsibility. Task, Gate, phase, slice, and acceptance labels are delivery metadata unless the object itself is delivery-scoped; do not copy a nearby delivery-prefixed implementation as a naming precedent solely because it is similar or recent.
 - Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while scope and authority remain unchanged. Persistence wording alone does not expand a narrower goal.
 
+When choosing or inheriting checks, measurements or diagnostic code, load the
+shared [Verification guidance](../../references/verification.md). It owns check
+selection, diagnostic failure/retirement and evidence reuse for direct execution.
+
 ## Artifacts And Context
 
 - Create durable documentation only when ambiguity, risk, handoff, audit, or release value justifies it. Reuse existing issues, PRDs, specs, or contracts instead of mirroring them.
@@ -165,7 +169,6 @@ For canonical phase status, run `codex-workflow project-phase-report <task-id> <
 
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
-- Run focused verification first and broaden with blast radius. If a check cannot run, record the exact command and reason.
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.
 - Run `~/.codex/workflow/bin/codex-workflow done <task-id>` only when the whole authorized goal is actually complete.
 

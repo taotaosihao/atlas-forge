@@ -44,6 +44,11 @@ For a corrected or evidence-challenged decision, first apply the shared
 5. State only the missing boundaries, material assumptions and engineering decisions needed for this task. Prefer the minimum complete implementation, including necessary safety and quality; do not add a framework, state matrix or roadmap without a current need.
 6. Make acceptance command-verifiable or user-visible, with legal, reachable prerequisites. Do not invent an unauthorized write path to construct a test state, treat mocks as real capabilities, or report unknown data as a real value.
 
+When choosing or inheriting verification, load the shared
+[Verification guidance](../../references/verification.md). Carry the applicable
+checks and diagnostic failure boundaries into the existing verification plan;
+this does not require an early run or another artifact.
+
 The chosen direction is a current decision, not proof that its supporting
 premises are true. Record assumptions whose failure could cause costly rework,
 look up available facts that test them, and state what observation would change
@@ -157,8 +162,11 @@ method; do not preserve a superseded obligation or invent a new process.
 
 Return the necessary decisions, remaining assumptions, verification and the one
 scope document/task id when they exist. Do not list nonexistent supporting artifacts.
-Run `codex-workflow ready` only for an already chosen artifact set; readiness and
-structural lint do not prove semantic fidelity or successful implementation.
+If checking helper artifacts, explicitly select the existing set, for example
+`codex-workflow ready <task-id> --require clarify` for `clarify.md`. An adequate
+issue, PRD or repository contract needs its applicable review, not a `ready` call,
+mirrored helper files or a skip record. Readiness and structural lint do not prove
+semantic fidelity, user approval or successful implementation.
 
 Clarify does not authorize coding, commit, installation, deployment or release.
 Enter Task only after an explicit implementation request. MVP/Beta/internal or

@@ -180,6 +180,74 @@ test("ready evaluates requested artifacts without interpreting admission-shaped 
   });
 });
 
+test("public clarify readiness rejects missing, empty and unfilled scaffold content", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Single clarify input");
+  const file = path.join(taskArtifactDir(paths, taskId), "clarify.md");
+  const check = () => spawnSync(PUBLIC_BIN, ["ready", taskId, "--require", "clarify"], {
+    encoding: "utf8", env: environment,
+  });
+
+  let result = check();
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /issues: clarify:missing/);
+  fs.writeFileSync(file, "");
+  result = check();
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /issues: clarify:template/);
+
+  fs.unlinkSync(file);
+  const scaffold = spawnSync(PUBLIC_BIN, ["scaffold-clarify", taskId], {
+    encoding: "utf8", env: environment,
+  });
+  assert.equal(scaffold.status, 0, scaffold.stderr);
+  const template = fs.readFileSync(file, "utf8");
+  for (const content of [
+    template,
+    template.replace(/^created:.*$/m, "created: 2030-01-01")
+      .replace(/^task_id:.*$/m, "task_id: changed-metadata")
+      .replace(/ /g, "  ").replace(/\n/g, "\r\n\n"),
+    "# Clarify Working Notes\n\n- Goal:\n\n| AC-1 |||\n",
+    template.replace("| AC-1 |  |  |", "| AC-1 |  |  |\n| AC-2 |  |  |"),
+  ]) {
+    fs.writeFileSync(file, content);
+    result = check();
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /issues: clarify:template/);
+  }
+});
+
+test("public clarify readiness uses one filled document without mirrored artifacts or authority", (t) => {
+  const { environment, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Filled clarify input");
+  const artifactDir = taskArtifactDir(paths, taskId);
+  for (const name of ["context", "spec", "analysis"]) {
+    fs.unlinkSync(path.join(artifactDir, `${name}.md`));
+  }
+  const scaffold = spawnSync(PUBLIC_BIN, ["scaffold-clarify", taskId], {
+    encoding: "utf8", env: environment,
+  });
+  assert.equal(scaffold.status, 0, scaffold.stderr);
+  const file = path.join(artifactDir, "clarify.md");
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8")
+    .replace("- Goal:", "- Goal: Check an explicitly selected scope document.")
+    .replace("| AC-1 |  |  |", "| AC-1 | Keep existing CLI defaults. | Run the compatibility test. |"));
+  const result = spawnSync(PUBLIC_BIN, ["ready", taskId, "--require=clarify"], {
+    encoding: "utf8", env: environment,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, [
+    `task_id: ${taskId}`, "status: ready", "requirements: clarify", "issues: -",
+    "paths: clarify:clarify.md", "",
+  ].join("\n"));
+  for (const name of ["context", "spec", "analysis"]) {
+    assert.equal(fs.existsSync(path.join(artifactDir, `${name}.md`)), false);
+  }
+  const state = readJsonObject(taskStateFile(paths, taskId));
+  assert.equal(state.readiness.paths, "clarify:clarify.md");
+  assert.equal(state.execution_authority, undefined);
+});
+
 test("records an explicit readiness skip and rejects unsafe reasons", (t) => {
   const { environment, paths } = temporaryWorkflow(t);
   const taskId = createFixtureTask(environment, "Skipped readiness");
@@ -253,6 +321,6 @@ test("public dispatcher preserves ready output, usage, and exit codes", (t) => {
   assert.equal(usage.status, 1);
   assert.equal(
     usage.stderr,
-    'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]] [--skip "<reason>"]\n',
+    'usage: codex-workflow ready <task-id> [--require context,spec,analysis[,decision]|clarify] [--skip "<reason>"]\n',
   );
 });
