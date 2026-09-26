@@ -28,6 +28,8 @@ For each substantive surface, record its entry, primary information, primary
 action, exit, information hierarchy, and at most one ASCII floorplan.
 
 - Target form factor / primary viewport:
+- Visual baseline (existing page/theme followed; what is emphasized vs.
+  neutral), or not applicable:
 - Minimum adaptation, overflow, or primary-action-position rule (or
   `desktop-only` / `not applicable` with reason):
 - Evidence level (text rehearsal, static layout, interaction prototype, real

@@ -89,6 +89,32 @@ rg -q 'product_increment' "$skill_root/SKILL.md"
 rg -q 'must omit release-intent, v4, immutable Profile, release' "$skill_root/SKILL.md"
 rg -q '证据采集：降级' "$skill_root/SKILL.md"
 
+# UI/UX guidance has one owner and every GUI entry links it with an action.
+ui_ux="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/references/ui-ux.md"
+fidelity="$skills_root/design-review/references/fidelity-acceptance.md"
+test -f "$ui_ux" || fail "missing shared UI/UX guidance"
+test -f "$fidelity" || fail "missing design-review fidelity acceptance model"
+rg -Uq 'never\s+reopens\s+an\s+approved\s+D' "$ui_ux" || fail "UI/UX guidance must not reopen approved D"
+rg -Uq 'exception\s+must\s+cite\s+a\s+decision\s+recorded' "$ui_ux" || fail "UI/UX exceptions must cite a decision"
+rg -Uq 'does\s+not\s+add\s+delivery\s+scope' "$ui_ux" || fail "UI/UX guidance must not expand delivery scope"
+test "$(rg -c '^## [1-6]\. ' "$ui_ux")" = 6 || fail "UI/UX guidance must stay at six sections"
+for entry in product-design design-review task; do
+  rg -q '\[UI/UX guidance\]\(../../references/ui-ux.md\)' "$skills_root/$entry/SKILL.md" || fail "$entry does not link UI/UX guidance"
+done
+rg -Uq 'When\s+`DESIGN.md`\s+exists,\s+read\s+it\s+in\s+full' "$skill_root/SKILL.md" || fail "Product Design must read DESIGN.md in full"
+rg -Uq 'Visual\s+baseline' "$d_template" || fail "D missing visual baseline field"
+rg -Uq 'compare\s+a\s+screenshot\s+of\s+the\s+result' "$skills_root/task/SKILL.md" || fail "Task UI trigger lacks screenshot action"
+rg -Uq 'no\s+GUI\s+outcome\s+does\s+not\s+load\s+it' "$skills_root/task/SKILL.md" || fail "Task UI trigger must exclude non-GUI work"
+rg -q '\[references/fidelity-acceptance.md\]\(references/fidelity-acceptance.md\)' "$skills_root/design-review/SKILL.md" || fail "design-review must link bundled acceptance model"
+if rg -q 'docs/design-fidelity-verification-playbook.md' "$skills_root/design-review/SKILL.md"; then
+  fail "design-review still points at an unbundled playbook"
+fi
+rg -Uq 'missing\s+screenshots\s+keep\s+it\s+non-passing' "$skills_root/design-review/SKILL.md" || fail "coherence gate must require viewed screenshots"
+rg -Uq 'never\s+overrides\s+or\s+retroactively\s+fails\s+an\s+approved\s+D' "$skills_root/design-review/SKILL.md" || fail "UI/UX prompts must stay soft against approved D"
+rg -Uq 'unrecorded\s+conflict\s+with\s+D\s+is\s+a\s+`spec-gap`' "$skills_root/design-review/SKILL.md" || fail "DESIGN.md conflicts with approved D must route to Product Design"
+rg -Uq "Replace\s+the\s+scaffold's\s+default\s+\`blocked\`" "$fidelity" || fail "acceptance model must replace the default blocked status"
+rg -Uq 'Do\s+not\s+add\s+desktop,\s+tablet,\s+or\s+mobile\s+coverage\s+by\s+default' "$fidelity" || fail "acceptance model must not default viewports"
+
 python3 - "$skill_root/SKILL.md" "$adapter" "$d_template" "$design_review" <<'PY'
 import pathlib, sys, yaml
 
@@ -259,7 +285,7 @@ known_a = {
 }
 check(canonical_a(known_a) == "b3dea6a789b454a00de8f66fd42e13bccc0dac2ae37d5d2d87922058a91f11c4", "A known-answer identity mismatch")
 check(body_identity(c_body) == "1fa087ccbfb1e673889f2a0f9747ac6e398aaead23bc84640507a02450b2d15f", "C normalization known-answer mismatch")
-check(body_identity(d_body) == "89093413afbcb79e301970d56f5d5e2ffd21d78046edfa1a4f2b4dd57c412bf6", "D normalization known-answer mismatch")
+check(body_identity(d_body) == "e592503bf494442f30769c426c44585d29bafcb217c84c5631351057ff6a3bd9", "D normalization known-answer mismatch")
 
 def read_artifacts(root):
     result = {}
@@ -513,6 +539,8 @@ GIT_INDEX_FILE="$temporary_index" git -C "$ATLAS_FORGE_ROOT" add -- \
   plugins/atlas-workflow/skills/brainstorm/SKILL.md \
   plugins/atlas-workflow/skills/task/SKILL.md \
   plugins/atlas-workflow/skills/clarify/SKILL.md \
+  plugins/atlas-workflow/skills/design-review \
+  plugins/atlas-workflow/references/ui-ux.md \
   plugins/atlas-workflow/README.md \
   plugins/atlas-workflow/.codex-plugin/plugin.json \
   workflow/tests/contract_product_design_skill.sh \

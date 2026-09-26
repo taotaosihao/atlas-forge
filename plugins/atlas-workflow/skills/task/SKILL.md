@@ -143,6 +143,15 @@ When choosing or inheriting checks, measurements or diagnostic code, load the
 shared [Verification guidance](../../references/verification.md). It owns check
 selection, diagnostic failure/retirement and evidence reuse for direct execution.
 
+Before changing or verifying a GUI surface users see or operate (page,
+dashboard, big screen, form, status/feedback; UI, visual, fidelity,
+screenshot), including a backend fix for a UI symptom, read the project
+`DESIGN.md` in full when present and the shared
+[UI/UX guidance](../../references/ui-ux.md), then compare a screenshot of the
+result with the design source, or the closest existing page of the same kind
+when none exists. CLI, API-only, library and
+maintenance work with no GUI outcome does not load it.
+
 ## Artifacts And Context
 
 - Create durable documentation only when ambiguity, risk, handoff, audit, or release value justifies it. Reuse existing issues, PRDs, specs, or contracts instead of mirroring them.

@@ -38,7 +38,7 @@ Follow this loop:
      - `report.md`
      - `verdict.json`
    - If the page or design source is missing, create a normal bounded task instead and ask one short blocking question.
-4. Read `docs/design-fidelity-verification-playbook.md` if you need the detailed acceptance model. The scaffolded contract and verdict remain the generic fidelity record. Release-mode evidence exists only inside an admitted Team release check: load the immutable Profile, write the canonical formal Web UI raw adapter input under the task `release/raw/` artifact path, and bind that exact file through the admitted check's `verify --input` instead of redefining the generic verdict.
+4. Read [references/fidelity-acceptance.md](references/fidelity-acceptance.md) if you need the detailed acceptance model, including a review against a design source without D. The scaffolded contract and verdict remain the generic fidelity record. Release-mode evidence exists only inside an admitted Team release check: load the immutable Profile, write the canonical formal Web UI raw adapter input under the task `release/raw/` artifact path, and bind that exact file through the admitted check's `verify --input` instead of redefining the generic verdict.
 5. For an applicable Web UI review, read the approved D and E, D's bound
    candidate commit and entrypoint, the current candidate and relevant diff, D
    section 7, and optional screenshots. Treat D's form factor/viewport, states,
@@ -46,7 +46,13 @@ Follow this loop:
    specifies desktop-only Web. Review the current candidate by default; replay a
    historical Baseline only for a named dispute.
 6. Build a design contract before judging:
-   - must-match rules
+   - must-match rules, including the prohibitions and mappings of the project
+     `DESIGN.md` when present (read it in full); where an approved D records a
+     departure from it, D wins, and an unrecorded conflict with D is a
+     `spec-gap` for Product Design, not an implementation failure
+   - where D and the project are silent, the shared
+     [UI/UX guidance](../../references/ui-ux.md) as Soft Review Prompts; it
+     never overrides or retroactively fails an approved D
    - allowed tolerances
    - target viewports
    - required states and interactions
@@ -65,7 +71,10 @@ Follow this loop:
    - hard visual/layout rules
    - required viewport behavior
    - interaction coverage
-   - overall visual coherence
+   - overall visual coherence — compare current screenshots side by side with
+     the design source, or the closest existing page of the same kind when D
+     has no visual source, region by region; geometry, element counts or check
+     totals alone cannot pass it, and missing screenshots keep it non-passing
    - in release mode, record only the four typed formal Web UI facts assigned by the immutable Profile and official adapter, and bind every fact to the unchanged candidate; dead controls, happy-path-only coverage, engineering/meta content leakage, missing owner acceptance, or missing stable evidence fail or remain `cannot_verify` as the adapter contract specifies
 9. Write the ordinary result into the scaffolded `report.md` and generic `verdict.json`. In release mode, additionally write the canonical `formal-web-ui-v1@1` raw adapter input under the task `release/raw/` artifact path and bind that exact file through the admitted check's `verify --input`; never replace or reinterpret the generic verdict as release evidence. Screenshots and model judgment alone never prove interaction behavior, owner acceptance, or release readiness.
 10. Port the useful Reflection ideas, not the OpenCode runtime hooks:
