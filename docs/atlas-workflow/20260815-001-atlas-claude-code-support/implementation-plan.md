@@ -9,7 +9,7 @@
 
 ## 1. 目标
 
-Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案让 `atlas-workflow` 在 Claude Code 里可安装、可用（`/task`、`/team` 等斜杠命令，或直接按 skill 名调用），同时保持 Codex 行为逐字节不变——双宿主并存（additive），而非替换或分叉。
+Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案让 `atlas-workflow` 在 Claude Code 里可安装、可用（`/atlas-workflow:<name>` 斜杠调用，或直接按 skill 名调用），同时保持 Codex 行为逐字节不变——双宿主并存（additive），而非替换或分叉。
 
 参考 `~/work/opencodex` 的宿主接入范式（ownership marker、host-neutral 路径解析、additive 注入），但 Atlas 是插件仓库而非常驻代理，因此只借用模式，不搬运其代理/注入代码。
 
@@ -68,7 +68,9 @@ Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案�
 
 `workflow/bin/lib/codex-workflow/team/lane-registry.js` 的自绑定哨兵正则从 `/^(main-codex|controller).../i` 扩容为 `/^(main-codex|main-claude|controller).../i`，纯粹的黑名单扩容,不改变任何现有调用行为。`workflow/tests/js/team-commands.test.js` 的 "required perspective admission requires an independently bound actor" 测试新增 `main-claude` 场景，验证同样被拒绝。
 
-### 3.7 Claude commands（6 个）
+### 3.7 Claude commands（6 个，2026-09-27 已移除）
+
+2026-09-27 补充：这 6 个命令已删除。在 Claude Code 2.1.281 上的真实运行显示，插件内的同名命令覆盖了同名 skill。官方文档只说明 `.claude/commands/` 与 skill 同名时 skill 优先，没有覆盖插件内同名的情况，所以这是与文档不一致的实测行为：`/atlas-workflow:team` 解析到命令文件，命令正文只说“使用 team skill”，再调用又回到同一个命令，真正的 SKILL.md 始终没有加载。删除后同一场景正确加载了 Team 规则。skills 本身就能用 `/atlas-workflow:<name>` 调用。以下为原记录。
 
 `plugins/atlas-workflow/commands/{task,team,clarify,intake,finish,cw}.md`：`description`/`argument-hint`/`allowed-tools` frontmatter，正文引用 `$ARGUMENTS` 并转交同名 skill 的完整规则（不复制 skill 内容,只做入口转发）。`team.md` 的 `allowed-tools` 额外包含 `Agent, SendMessage, TaskList, TaskGet, TaskOutput, TaskStop`。其余 9 个 skill 靠 Claude Code 的 skill 自动发现进入,不生成对应命令。
 
@@ -91,10 +93,20 @@ Atlas Forge 原本是 Codex-only 的插件市场 + workflow runtime。本方案�
 
 - **Team 渐进披露。** 官方建议 SKILL.md 正文不超过 500 行，只在 Codex 用到的内容拆到按需读取的 reference。`team/SKILL.md` 原有 642 行，其中精确模型路由和 Cross v1 只对 Codex 有用，现已移到 `team/references/codex-model-routing.md`：Codex 在做模型或工具预检之前必须完整读取，Claude Code 不读。SKILL.md 降到 360 行，原文逐行保留，没有删改。
 - **会话开始时的固定动作。** 对应 harness 文章里“每个会话开始先读进度、看 git 状态”的做法。插件新增 `SessionStart` hook，在 startup、resume、clear 和 compact 时注入 `hooks/session-baseline.md`，即 Codex home `AGENTS.md` 里 Atlas 规则的 Claude 版本，并明确用户和项目自己的指令优先。Claude runtime 中有当前任务时，hook 还会提示重读任务记录、产物、checkpoint 和 git 状态。只有状态为 doing 或 blocked 的任务才会提示，措辞也是“若当前请求在延续该任务”，因为 current-task 指针是整个 runtime 共用的，不区分项目。hook 只读 Claude runtime，任何失败都不阻塞会话。
-- **命令预授权收窄。** 按文档，`allowed-tools` 的作用是在本轮免去权限确认，并不限制可用工具。原先预授权的 `Bash(git:*)` 会让 `git push` 等操作无需确认就执行，与 Atlas 的授权边界冲突。现在只预授权 Atlas CLI，但这只对 PATH 上的裸命令生效，用完整路径调用时仍按用户的权限设置处理；只读的 git 命令本来就在 Claude Code 内置的免确认清单里。
+- **命令已移除。** 原先 6 个命令的 `allowed-tools` 预授权了 `Bash(git:*)`，会让 `git push` 无需确认就执行，与 Atlas 的授权边界冲突；随后的真实运行又发现这些命令会遮蔽同名 skill（见 3.7）。现已整体删除，测试禁止插件命令与 skill 同名。只读的 git 命令本来就在 Claude Code 内置的免确认清单里。
 - **skill description。** 官方要求 description 同时写明“做什么”和“何时用”，它是自动触发的唯一依据。已补全 analyze、task、cw、design-review、learn、worktree、team 这 7 个过于简短的 description，并给 team-v1 标注已弃用；所有插件 skill 都可以用 `/atlas-workflow:<name>` 直接调用。Codex 也按 description 自动选择 skill，所以这项改动同样影响 Codex 的路由；新写法沿用 Codex 全局规则中的路由分工，例如 analyze 注明压力测试方案时改用 intake。
 - **暂不改写 prompt 措辞。** 官方建议先做评估：先观察真实的 Claude 行为，再补说明。目前还没有 Claude 的行为证据，所以 skill 正文措辞不做推测性改写，待真实运行后再根据观察调整。
 - **Codex 全局基线与 Claude 版本并存。** 两者目前是两个来源，Claude 版只保留 Atlas 相关的子集；以后修改其中一份时，需要同步核对另一份。
+
+### 4.2 真实 Claude 运行观察（2026-09-27）
+
+隔离方式：runtime 装在临时目录（通过 `ATLAS_WORKFLOW_ROOT`/`LOCAL_BIN_ROOT` 指定），插件用 `claude -p --plugin-dir` 从源码加载，不保存会话，也不触碰 `~/.claude`、marketplace 和 cache。只开放只读工具，禁用 Edit/Write，派发 agent 的场景同时禁用 Agent。模型为 `claude-opus-5-5`，共 6 次运行，合计约 1 美元。
+
+- **会话基线：** 每次都生效。有进行中的任务、且用户说“继续刚才那个任务”时，Claude 按提示重读了任务记录、checkpoint 和其余产物，又看了 git 状态，正确说出了进度和下一步，推断的部分也单独标注了。与任务无关的请求里，它会说明两者无关，不去动那个任务。
+- **按 description 自动选 skill：** 产品价值类请求自动选中 `office-hours`，并说明了选择理由。一个只涉及两个文件的只读分析没有调用 `analyze`，直接完成了，符合“用最轻的流程”。
+- **命令遮蔽 skill（已修复）：** 在 Claude Code 2.1.281 上，插件带同名命令时，Team 的正文没有加载，Claude 只能自行发挥，甚至提出要把模型固定为某个具体型号，与 skill 规则相悖。删除命令后，Team 规则正确生效：用 `Agent` 派发，不固定模型，不用 Paseo，用 `SendMessage` 追问，并且没有读 Codex 路由 reference。
+- **Claude 侧的权限摩擦（未改动）：** 调用 skill 本身需要权限（`Execute skill: …`，非交互模式下会被直接拒绝）；runtime 在项目目录之外，所以 Bash 的 `ls` 会被“工作目录外”保护拦下，读取也可能弹出确认。想减少确认的用户，可以自行在设置里放行 `Skill(atlas-workflow:*)`，并把 runtime 目录加为额外目录。
+- **范围：** 以上都是单次运行、非实施类场景下的观察，只能说明机制能用，不能代表稳定的遵循率；实施类流程（task、team 的真实派发）没有做真实运行。
 
 ## 5. 初次适配验证记录（2026-08-15）
 

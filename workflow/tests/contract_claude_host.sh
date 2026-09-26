@@ -112,12 +112,14 @@ baseline = (plugin / 'hooks/session-baseline.md').read_text()
 assert 'take precedence' in baseline and 'Preserve authority' in baseline
 assert 'honor an explicit request not to use an Atlas skill' in ' '.join(baseline.split())
 assert len(baseline.splitlines()) < 60, 'session baseline must stay short'
+skill_names = {path.parent.name for path in (plugin / 'skills').glob('*/SKILL.md')}
 for command in (plugin / 'commands').glob('*.md'):
-    head = command.read_text().split('---', 2)[1]
-    allowed = next(line for line in head.splitlines() if line.startswith('allowed-tools:'))
-    # allowed-tools pre-approves without prompting, so it must not cover push-capable git or arbitrary node.
-    assert 'Bash(git' not in allowed and 'Bash(node' not in allowed, command
-    assert 'Bash(atlas-workflow *)' in allowed, command
+    # Claude Code merges commands and skills: a same-named command replaces the skill body.
+    assert command.stem not in skill_names, f'{command} shadows the same-named skill on Claude Code'
+host_noted = [path for path in (plugin / 'skills').glob('*/SKILL.md') if '## Host Note' in path.read_text()]
+assert len(host_noted) >= 14, host_noted
+for path in host_noted:
+    assert f'`/atlas-workflow:{path.parent.name}`' in path.read_text(), path
 for profile in (plugin / 'agents').glob('*.md'):
     text = profile.read_text()
     assert '\nmodel:' not in text.split('---', 2)[1], profile

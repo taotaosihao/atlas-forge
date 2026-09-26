@@ -135,7 +135,7 @@ starts.
 Codex behavior is unchanged either way. The repo root
 `.claude-plugin/marketplace.json` and `plugins/atlas-workflow/.claude-plugin/plugin.json`
 are the Claude-facing manifests; they carry the same skills, plus Claude-native
-`commands/`, `agents/`, and `hooks/` that the Codex manifest does not need.
+`agents/` and `hooks/` that the Codex manifest does not need.
 
 Claude 插件只分发 skills、agents 和 hooks 入口；首次使用还需从同一 checkout 安装 workflow runtime。需要 Node.js、Python 3、rsync 和 Git，无需 Codex CLI。
 
@@ -159,14 +159,12 @@ claude plugin marketplace add /path/to/atlas-forge
 claude plugin install atlas-workflow@atlas-forge
 ```
 
-Start a new Claude Code session so skills, the six `/task`, `/team`, `/clarify`,
-`/intake`, `/finish`, `/cw` commands, and the `atlas-sdd-*` agents are loaded.
-Every plugin skill is also invocable as `/atlas-workflow:<name>` and loads
-automatically when its description matches the request; within the turn that
-invokes them, the six commands pre-approve bare Atlas CLI calls found on `PATH`
-(full-path calls still follow your permission settings). A `SessionStart` hook adds the Atlas operating
-baseline and, when the Claude runtime has a current task, a short
-re-orientation step. See
+Start a new Claude Code session so skills and the `atlas-sdd-*` agents are
+loaded. Every plugin skill is invocable as `/atlas-workflow:<name>` (for example
+`/atlas-workflow:task`) and loads automatically when its description matches the
+request. The plugin ships no separate commands: a real run observed on Claude Code 2.1.281 that a same-named command inside the plugin replaced the skill body (the documented precedence covers only `.claude/commands/`, where the skill wins). A `SessionStart`
+hook adds the Atlas operating baseline and, when the Claude runtime has an
+active task, a short re-orientation step. See
 [`docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md`](docs/atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md)
 for the full host-parity scope and boundaries.
 
@@ -275,7 +273,6 @@ atlas-forge/
       .codex-plugin/
       .claude-plugin/
       agents/
-      commands/
       hooks/
       skills/
     mempalace-codex-plugin/

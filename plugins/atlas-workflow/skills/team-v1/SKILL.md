@@ -13,7 +13,7 @@ explicitly accepts legacy behavior, or when you need to reproduce/debug old
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:team-v1`; on Claude Code it is reachable as `/team-v1` or the `team-v1` skill, but its lane processes shell out to `codex exec` and require a Codex CLI on `PATH` — this legacy backend is Codex-only regardless of which host loaded the skill. On Claude Code, prefer `$atlas-workflow:team` (native collaboration, host-neutral) instead of this legacy entrypoint.
+Codex invokes this flow as `$atlas-workflow:team-v1`; on Claude Code it is reachable as `/atlas-workflow:team-v1` or the `atlas-workflow:team-v1` skill, but its lane processes shell out to `codex exec` and require a Codex CLI on `PATH` — this legacy backend is Codex-only regardless of which host loaded the skill. On Claude Code, prefer `$atlas-workflow:team` (native collaboration, host-neutral) instead of this legacy entrypoint.
 
 ## 输出语言
 

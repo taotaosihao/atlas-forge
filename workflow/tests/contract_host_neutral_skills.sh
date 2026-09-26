@@ -16,7 +16,7 @@ failures = []
 # team-v1 is a documented Codex-only legacy backend; team keeps its own paired
 # Codex/Claude sections under contract_claude_host.sh.
 exempt = {"team-v1", "team"}
-cli = re.compile(r"`(?:atlas|codex)-workflow\b|`codex-design-review\b")
+cli = re.compile(r"`(?:atlas|codex)-workflow(?=[ `])|`codex-design-review(?=[ `])")
 
 def fail(message):
     failures.append(message)

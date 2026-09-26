@@ -19,7 +19,7 @@
 | [Atlas 快速产品通道与后续框架债务修订方案](atlas-workflow/20260803-001-atlas-rapid-product-path/implementation-plan.md) | 保留 product_increment/product_release、path lease 与模型路由解耦及延期债务 backlog；普通 safety 行为沿用默认轻量化方案，Clarify staffing 以当前技能源码为准 |
 | [Atlas Clarify 与 Team 有界并行默认策略实施方案](atlas-workflow/20260809-001-atlas-clarify-team-bounded-parallel/implementation-plan.md) | 保留已选择 Team 后的 bounded-ready-wave 策略与兼容边界；Clarify 不因“非 tiny”自动建 child，按当前技能中的实质工程取舍与明确协作请求判断 |
 | [Atlas Team Paseo 显式启用与 Codex 连续降级实施方案](atlas-workflow/20260720-011-atlas-team-paseo-codex/implementation-plan.md) | Team 默认 Codex、Paseo 局部 opt-in、Claude model 仅人工指定、运行故障 fallback、多角色审查收敛与实施接管的当前开发目标；实现前以源码和测试的现状行为为准 |
-| [Atlas Workflow 支持 Claude Code（双宿主并存）实施方案](atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md) | Claude Code 插件清单/市场、skills 宿主中性化、运行时路径中立、hooks、7 个原生 agents 映射、Team 原生协作按宿主拆分、6 个 Claude commands、Grok provider family 预置的当前实施范围；Codex 行为保持逐字节不变 |
+| [Atlas Workflow 支持 Claude Code（双宿主并存）实施方案](atlas-workflow/20260815-001-atlas-claude-code-support/implementation-plan.md) | Claude Code 插件清单/市场、skills 宿主中性化、运行时路径中立、hooks、7 个原生 agents 映射、Team 原生协作按宿主拆分、Grok provider family 预置的当前实施范围；Codex 行为保持逐字节不变 |
 | [发布完整性与治理 bundle](atlas-workflow/20260710-003-atlas-forge-release-integrity-governance-plan/README.md) | 当前 Atlas release integrity、semantic lint 和治理合同及 phase evidence |
 | [业务验收中文阅读层合同](atlas-workflow/20260718-004-atlas-business-acceptance-readable-report/README.md) | BAF v2 中文派生报告、freshness/tamper 与 presentation-strict；底层 machine semantics 继续继承发布完整性与治理 bundle |
 | [远端 Agent 部署手册](remote-agent-deployment.md) | 仅 legacy/full-stack 兼容部署；包含冻结 Multica 资产，不是 Atlas dev/release 路径 |

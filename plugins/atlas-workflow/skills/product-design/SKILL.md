@@ -19,7 +19,7 @@ audit, or a responsive matrix.
 
 ## Host Note
 
-Codex invokes this flow as `$atlas-workflow:product-design`; Claude Code invokes it as `/product-design` or by calling the `product-design` skill directly. The other `$atlas-workflow:<name>` references below follow the same pattern per host.
+Codex invokes this flow as `$atlas-workflow:product-design`; Claude Code invokes it as `/atlas-workflow:product-design` or by calling the `atlas-workflow:product-design` skill. The other `$atlas-workflow:<name>` references below follow the same pattern per host.
 
 ## Language
 
