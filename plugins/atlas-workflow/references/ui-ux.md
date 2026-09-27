@@ -2,13 +2,15 @@
 
 Use when designing, changing, or reviewing a GUI surface users see or operate.
 These are review prompts, not a visual system, token set, checklist to fill, or
-new approval. An approved D, the project `DESIGN.md`, and confirmed project
-terms and mappings take precedence; this guidance never reopens an approved D.
-An applicable item shapes how the requested change is designed and reviewed; it
-does not add delivery scope. An exception must cite a decision recorded in D or
-the project `DESIGN.md`, or an explicit current user instruction for that
-element; a general goal such as "make it look good" is not one. Without such a
-citation, the item applies.
+new approval. An approved D, the project `DESIGN.md` within the surfaces it
+covers, and confirmed project terms and mappings take precedence; this guidance
+never reopens an approved D. An applicable item shapes how the requested change
+is designed and reviewed; it does not add delivery scope. An exception must cite
+a decision recorded in D or the project `DESIGN.md`, or an explicit current user
+instruction for that element; a general goal such as "make it look good" is not
+one. Without such a citation, the item applies. Scenario patterns (tables,
+forms, feedback states, charts, far-view displays, touch terminals) live in [UI
+patterns](ui-patterns.md).
 
 ## 1. Layout, labels, and legibility
 

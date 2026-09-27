@@ -51,7 +51,8 @@ Follow this loop:
      departure from it, D wins, and an unrecorded conflict with D is a
      `spec-gap` for Product Design, not an implementation failure
    - where D and the project are silent, the shared
-     [UI/UX guidance](../../references/ui-ux.md) as Soft Review Prompts; it
+     [UI/UX guidance](../../references/ui-ux.md) and the matching sections of
+     [UI patterns](../../references/ui-patterns.md) as Soft Review Prompts; it
      never overrides or retroactively fails an approved D
    - allowed tolerances
    - target viewports

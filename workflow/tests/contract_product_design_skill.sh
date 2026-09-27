@@ -115,6 +115,15 @@ rg -Uq 'unrecorded\s+conflict\s+with\s+D\s+is\s+a\s+`spec-gap`' "$skills_root/de
 rg -Uq "Replace\s+the\s+scaffold's\s+default\s+\`blocked\`" "$fidelity" || fail "acceptance model must replace the default blocked status"
 rg -Uq 'Do\s+not\s+add\s+desktop,\s+tablet,\s+or\s+mobile\s+coverage\s+by\s+default' "$fidelity" || fail "acceptance model must not default viewports"
 message_skill="$skills_root/system-message-design/SKILL.md"
+ui_patterns="$ATLAS_FORGE_ROOT/plugins/atlas-workflow/references/ui-patterns.md"
+test -f "$ui_patterns" || fail "missing UI patterns reference"
+rg -q '^## Contents' "$ui_patterns" || fail "UI patterns needs a table of contents"
+test "$(rg -c '^## ([1-9]|10)\. ' "$ui_patterns")" = 10 || fail "UI patterns must keep ten scenario sections"
+rg -Uq 'never\s+reopen\s+an\s+approved\s+D\s+or\s+add\s+delivery\s+scope' "$ui_patterns" || fail "UI patterns must stay soft and scope-neutral"
+rg -Uq 'DESIGN.md`\s+within\s+the\s+surfaces\s+it\s+covers\s+take\s+precedence' "$ui_patterns" || fail "UI patterns must defer to project rules within their scope"
+for entry in product-design design-review task; do
+  rg -q '\[UI patterns\]\(../../references/ui-patterns.md\)' "$skills_root/$entry/SKILL.md" || fail "$entry does not link UI patterns"
+done
 rg -Uq 'do\s+not\s+shrink\s+individual\s+text' "$ui_ux" || fail "UI/UX guidance must keep key text readable instead of shrinking it"
 rg -Uq 'keep\s+confirmation\s+for\s+high-impact\s+or\s+irreversible\s+actions' "$ui_ux" || fail "removing redundant steps must keep high-impact confirmation"
 rg -Uq 'status\s+color\s+as\s+an\s+accent,\s+not\s+a\s+saturated\s+fill' "$ui_ux" || fail "status color must stay an accent"
@@ -551,6 +560,8 @@ GIT_INDEX_FILE="$temporary_index" git -C "$ATLAS_FORGE_ROOT" add -- \
   plugins/atlas-workflow/skills/clarify/SKILL.md \
   plugins/atlas-workflow/skills/design-review \
   plugins/atlas-workflow/references/ui-ux.md \
+  plugins/atlas-workflow/references/ui-patterns.md \
+  plugins/atlas-workflow/skills/system-message-design \
   plugins/atlas-workflow/README.md \
   plugins/atlas-workflow/.codex-plugin/plugin.json \
   workflow/tests/contract_product_design_skill.sh \

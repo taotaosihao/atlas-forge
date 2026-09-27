@@ -147,7 +147,8 @@ Before changing or verifying a GUI surface users see or operate (page,
 dashboard, big screen, form, status/feedback; UI, visual, fidelity,
 screenshot), including a backend fix for a UI symptom, read the project
 `DESIGN.md` in full when present and the shared
-[UI/UX guidance](../../references/ui-ux.md), then compare a screenshot of the
+[UI/UX guidance](../../references/ui-ux.md) with the matching sections of
+[UI patterns](../../references/ui-patterns.md), then compare a screenshot of the
 result with the design source, or the closest existing page of the same kind
 when none exists. CLI, API-only, library and
 maintenance work with no GUI outcome does not load it.

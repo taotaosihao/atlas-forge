@@ -89,7 +89,9 @@ For a corrected or evidence-challenged design, first apply the shared
    in its existing C/D artifacts; this is a design-time standard, not a request
    to run the product or create a map.
 8. For a visible surface, load the shared
-   [UI/UX guidance](../../references/ui-ux.md) while drafting D sections 3–5.
+   [UI/UX guidance](../../references/ui-ux.md), plus the sections of
+   [UI patterns](../../references/ui-patterns.md) that match the surface, while
+   drafting D sections 3–5.
    Record a deliberate departure in D rather than copying the guidance.
 
 ## Build A and C

@@ -42,6 +42,7 @@ taste.
   such as "primary button outweighs the title" or "cards still use two columns
   at the required narrow viewport", never "looks similar". Where D and the
   project are silent, use the shared [UI/UX guidance](../../../references/ui-ux.md)
+  and the matching sections of [UI patterns](../../../references/ui-patterns.md)
   as soft prompts.
 - Every finding records location, evidence, severity, and a suggested fix.
   If a finding cannot be written that way, the evidence is not yet sufficient.
