@@ -46,6 +46,24 @@ taste.
 - Every finding records location, evidence, severity, and a suggested fix.
   If a finding cannot be written that way, the evidence is not yet sufficient.
 
+## Interaction evidence
+
+- Before and after each interaction, capture the DOM or accessibility structure
+  and a screenshot, and confirm the result before the next step.
+- Locate targets from that structure (role, label, or selector), not from
+  screenshot estimates; fall back to coordinates only after a structured target
+  fails.
+- Wait for loading to finish before judging. If an interaction has no visible
+  effect, recapture and retry it once; if it still fails, record a finding.
+- Classify what you see. A functional defect (no response, wrong destination,
+  missing data) or a visual defect (overlap, clipped or unreadable text,
+  off-screen or misaligned elements, wrong color) is a finding unless it falls
+  within a contract tolerance row. Recheck a transient state (loading,
+  animation) after it settles. An expected state (a real empty state, a disabled
+  control with its reason, a permission prompt) is not a defect.
+- Within the required viewports and states, use the longest real names and the
+  fullest data available.
+
 ## Blocked versus failing
 
 Replace the scaffold's default `blocked` status with the actual result: only

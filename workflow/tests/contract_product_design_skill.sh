@@ -114,6 +114,16 @@ rg -Uq 'never\s+overrides\s+or\s+retroactively\s+fails\s+an\s+approved\s+D' "$sk
 rg -Uq 'unrecorded\s+conflict\s+with\s+D\s+is\s+a\s+`spec-gap`' "$skills_root/design-review/SKILL.md" || fail "DESIGN.md conflicts with approved D must route to Product Design"
 rg -Uq "Replace\s+the\s+scaffold's\s+default\s+\`blocked\`" "$fidelity" || fail "acceptance model must replace the default blocked status"
 rg -Uq 'Do\s+not\s+add\s+desktop,\s+tablet,\s+or\s+mobile\s+coverage\s+by\s+default' "$fidelity" || fail "acceptance model must not default viewports"
+message_skill="$skills_root/system-message-design/SKILL.md"
+rg -Uq 'do\s+not\s+shrink\s+individual\s+text' "$ui_ux" || fail "UI/UX guidance must keep key text readable instead of shrinking it"
+rg -Uq 'keep\s+confirmation\s+for\s+high-impact\s+or\s+irreversible\s+actions' "$ui_ux" || fail "removing redundant steps must keep high-impact confirmation"
+rg -Uq 'status\s+color\s+as\s+an\s+accent,\s+not\s+a\s+saturated\s+fill' "$ui_ux" || fail "status color must stay an accent"
+rg -Uq 'count\s+from\s+the\s+real\s+event' "$ui_ux" || fail "UI/UX guidance must anchor elapsed times to real events"
+rg -Uq 'name\s+the\s+blocking\s+objects' "$ui_ux" || fail "UI/UX guidance must name blocking objects"
+rg -Uq 'Before\s+and\s+after\s+each\s+interaction' "$fidelity" || fail "acceptance model must capture evidence around interactions"
+rg -Uq 'not\s+from\s+screenshot\s+estimates' "$fidelity" || fail "acceptance model must locate targets from structure"
+rg -q '^## 中文书写' "$message_skill" || fail "message skill must carry Chinese writing defaults"
+rg -q '项目已有的术语和写法优先' "$message_skill" || fail "project wording must precede message defaults"
 
 python3 - "$skill_root/SKILL.md" "$adapter" "$d_template" "$design_review" <<'PY'
 import pathlib, sys, yaml
