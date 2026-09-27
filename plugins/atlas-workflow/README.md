@@ -115,14 +115,15 @@ Native Team model routing is downstream of staffing, not a reason to create
 staffing. A small clear task stays on the main Codex; after a Team or subagent
 lane is independently justified, planning and formal plan/contract review use
 the non-persistent `planning-review` frontier route by default. The current
-native mapping uses GPT-6 Astra (`gpt-6-astra`), with `high` planning and
+catalog resolves GPT-6 Astra (`gpt-6-astra`), with `high` planning and
 `medium` formal review; an explicitly selected
 and admitted Fable or another high-tier exact route may replace a named lane.
 Only an explicit user/operator per-lane selection may choose a lower model
 before implementation. Saving mode is available only after explicit Execute
 authority and routes implementation, its browser verification and exploration
-to Luna, and implementation-slice review and verification to Terra. Quality
-mode remains an explicit all-Sol implementation choice. None of these modes
+to the resolved fast model, implementation-slice review and verification to the
+resolved balanced model, and replanning and phase review to the resolved
+frontier model. Quality mode remains an explicit frontier implementation choice. None of these modes
 rewrites the root host model, persists into workflow state, or changes the
 lane's goal, paths, authority, or acceptance. Every mode uses explicit spawn
 fields and `fork_turns="none"`; none relies on a global default subagent model.
@@ -135,9 +136,9 @@ provider-bound DeepSeek equivalent profiles are the explicit exception and must
 match their checked-in ZenMux/model/`max` policy. The model-policy checker uses
 `planning-review` when `--mode` is omitted, rejects routing pins, and validates
 the applicable pinned equivalent profiles; each admitted native dispatch must
-supply its exact matrix values explicitly. Run `atlas-agent-model-policy check
+supply the current `resolve --mode <mode>` model ID and matrix effort explicitly. Run `atlas-agent-model-policy check
 --mode saving` only for authorized implementation Execute, and use `--mode
-quality` before an explicitly selected all-Sol implementation dispatch.
+quality` before an explicitly selected frontier implementation dispatch.
 
 The root-session provider is also unchanged. DeepSeek V4 Pro is a child-local
 ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
@@ -149,23 +150,23 @@ the requested effort to `high` or another compatibility value. If the current
 host rejects native `max`, the exact DeepSeek child route is unavailable and
 falls back according to the lane policy without changing its configured effort.
 
-Routine implementation keeps Luna as the default native single writer and
+Routine implementation keeps the resolved fast model as the default native single writer and
 offers `atlas-sdd-implementer-deepseek` / `deepseek-v4-pro:deepseek` as an
 availability-gated native ZenMux alternative with the exact same implementer
 instructions, inherited sandbox semantics, owned paths, acceptance inputs, and
 report contract. Atlas never sends the same writable packet to both candidates
 or uses a shared checkout for duplicate-writer cross-validation. Concurrent
-Luna and DeepSeek implementation is allowed only for explicitly authorized,
+Fast-model and DeepSeek implementation is allowed only for explicitly authorized,
 disjoint path ownership with an integration owner and the applicable
 lease/quiescence boundary. A writable fallback starts only after the previous
 writer is proven quiesced and its diff/untracked evidence is preserved.
 
 For read-heavy implementation exploration, the native
 `atlas-sdd-explorer-deepseek` / `deepseek-v4-pro:deepseek` route is an
-availability-gated alternative to Luna with the same read-only role contract.
+availability-gated alternative to the resolved fast model with the same read-only role contract.
 Its upstream ZenMux `/models` identity remains
 `deepseek/deepseek-v4-pro`; Atlas validates both boundaries and never guesses
-or interchanges the identifiers. During Execute, Atlas keeps Luna as the
+or interchanges the identifiers. During Execute, Atlas keeps the resolved fast model as the
 ordinary single-dispatch default, selects DeepSeek only for an explicit
 non-OpenAI perspective after a live route preflight, and dispatches both only
 when independent cross-checking materially lowers a named risk or the user
@@ -186,7 +187,7 @@ logical role when no plaintext assignment is visible; this is a 700/600
 assignment-transport compatibility path, not a child runner or Paseo fallback.
 Atlas deletes the packet only after the attempt is terminal and quiesced.
 Refuse-overwrite slots safely serialize affected DeepSeek attempts of the same
-role, while Luna and DeepSeek may still cross-check the same packet concurrently.
+role, while the fast-model and DeepSeek roles may still cross-check the same packet concurrently.
 Atlas still requires task-specific tool/check evidence before calling the route
 usable.
 

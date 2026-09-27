@@ -10,9 +10,14 @@ make_catalog() {
   local family="$2"
   local include_fast="${3:-yes}"
   {
-    printf '{"models":[{"slug":"gpt-6-astra","description":"Our most capable model for complex, demanding work.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"}]},'
-    printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},' "$family"
-    printf '{"slug":"gpt-%s-terra","description":"Balanced agentic coding model for everyday work.","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]}' "$family"
+    printf '{"models":[{"slug":"gpt-6-astra","description":"Frontier intelligence for the most demanding work.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},'
+    if [[ "$family" == 6 ]]; then
+      printf '{"slug":"gpt-6-sol","description":"Workhorse model for coding and everyday work.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},'
+    else
+      printf '{"slug":"gpt-%s-sol","description":"Latest frontier agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},' "$family"
+      printf '{"slug":"gpt-%s-terra","description":"Balanced agentic coding model for everyday work.","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]},' "$family"
+    fi
+    printf '{"slug":"gpt-5.6-sol","description":"Older coding model for complex work.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}'
     if [[ "$include_fast" == yes ]]; then
       printf ',{"slug":"gpt-%s-luna","description":"Fast and affordable agentic coding model.","supported_reasoning_levels":[{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}' "$family"
     fi
@@ -36,22 +41,28 @@ make_agents() {
   printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "max"\nsandbox_mode = "read-only"\ndeveloper_instructions = """routine reviewer"""\n' > "$dir/atlas-sdd-reviewer-deepseek.toml"
 }
 
-make_catalog "$TMP_ROOT/5.6.json" 5.6
+make_catalog "$TMP_ROOT/6.json" 6
 make_agents "$TMP_ROOT/agents"
-node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
-node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode planning-review --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
-node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode saving --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
-node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode quality --catalog "$TMP_ROOT/5.6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode planning-review --catalog "$TMP_ROOT/6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode saving --catalog "$TMP_ROOT/6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode quality --catalog "$TMP_ROOT/6.json" --agents-dir "$TMP_ROOT/agents"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/6.json" \
+  | jq -e '.family == "6.0" and .capabilities == null
+    and .roles["atlas-sdd-reviewer"].model == "gpt-6-sol"
+    and .roles["atlas-sdd-implementer"].model == "gpt-6-luna"' >/dev/null
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode quality --catalog "$TMP_ROOT/6.json" \
+  | jq -e '([.roles[].model] | unique) == ["gpt-6-astra"]' >/dev/null
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --policy "$ROOT/.codex/agents/model-policy.json" \
   --agents-dir "$ROOT/.codex/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode quality \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --policy "$ROOT/.codex/agents/model-policy.json" \
   --agents-dir "$ROOT/.codex/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode saving \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --policy "$ROOT/.codex/agents/model-policy.json" \
   --agents-dir "$ROOT/.codex/agents"
 while IFS= read -r role; do
@@ -72,8 +83,8 @@ node -e '
 make_catalog "$TMP_ROOT/6.1.json" 6.1
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/6.1.json" --agents-dir "$TMP_ROOT/agents"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/6.1.json" \
-  | jq -e '.family == "6.0" and .mode == "planning-review"
-    and ([.roles[].model] | unique) == ["gpt-6-astra"]
+  | jq -e '.family == "6.1" and .mode == "planning-review"
+    and ([.roles[].model] | unique) == ["gpt-6.1-sol"]
     and ([.roles["atlas-sdd-reviewer", "atlas-sdd-phase-reviewer"].model_reasoning_effort] | unique) == ["medium"]
     and .roles["atlas-sdd-planner"].model_reasoning_effort == "high"
     and (.roles | has("atlas-sdd-implementer") | not)' >/dev/null
@@ -96,7 +107,7 @@ node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode quality --cata
 jq '.planning_review_roles["atlas-sdd-reviewer"].capability = "balanced"' \
   "$ROOT/.codex/agents/model-policy.json" > "$TMP_ROOT/low-tier-planning-review-policy.json"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --policy "$TMP_ROOT/low-tier-planning-review-policy.json" >/dev/null 2>&1; then
   echo "expected a low-tier planning-review policy to fail closed" >&2
   exit 1
@@ -105,7 +116,7 @@ fi
 jq 'del(.default_mode)' "$ROOT/.codex/agents/model-policy.json" \
   > "$TMP_ROOT/missing-default-policy.json"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --policy "$TMP_ROOT/missing-default-policy.json" >/dev/null 2>&1; then
   echo "expected schema v2 without a planning-review default to fail closed" >&2
   exit 1
@@ -116,7 +127,7 @@ printf 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "medium"\n' \
   >> "$TMP_ROOT/agents-pinned-native/atlas-sdd-implementer.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
   --mode saving \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --agents-dir "$TMP_ROOT/agents-pinned-native" >/dev/null 2>&1; then
   echo "expected a native profile model pin to fail closed" >&2
   exit 1
@@ -127,7 +138,7 @@ printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_rea
   > "$TMP_ROOT/agents-divergent-equivalent/atlas-sdd-explorer-deepseek.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
   --mode saving \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --agents-dir "$TMP_ROOT/agents-divergent-equivalent" >/dev/null 2>&1; then
   echo "expected divergent equivalent-role instructions to fail closed" >&2
   exit 1
@@ -137,7 +148,7 @@ cp -R "$TMP_ROOT/agents" "$TMP_ROOT/agents-divergent-planner"
 printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "high"\nsandbox_mode = "read-only"\ndeveloper_instructions = """planner"""\n' \
   > "$TMP_ROOT/agents-divergent-planner/atlas-sdd-planner-deepseek.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --agents-dir "$TMP_ROOT/agents-divergent-planner" >/dev/null 2>&1; then
   echo "expected planner equivalent route drift to fail closed" >&2
   exit 1
@@ -147,7 +158,7 @@ cp -R "$TMP_ROOT/agents" "$TMP_ROOT/agents-divergent-reviewer"
 printf 'model_provider = "zenmux"\nmodel = "deepseek-v4-pro:deepseek"\nmodel_reasoning_effort = "max"\nsandbox_mode = "read-only"\ndeveloper_instructions = """different reviewer"""\n' \
   > "$TMP_ROOT/agents-divergent-reviewer/atlas-sdd-reviewer-deepseek.toml"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
-  --catalog "$TMP_ROOT/5.6.json" \
+  --catalog "$TMP_ROOT/6.json" \
   --agents-dir "$TMP_ROOT/agents-divergent-reviewer" >/dev/null 2>&1; then
   echo "expected reviewer equivalent instruction drift to fail closed" >&2
   exit 1
@@ -164,7 +175,7 @@ assert_equivalent_drift_rejected() {
     "$dir/$role.toml" > "$dir/$role.toml.tmp"
   mv "$dir/$role.toml.tmp" "$dir/$role.toml"
   if node "$ROOT/workflow/bin/atlas-agent-model-policy" check \
-    --catalog "$TMP_ROOT/5.6.json" \
+    --catalog "$TMP_ROOT/6.json" \
     --agents-dir "$dir" >/dev/null 2>&1; then
     echo "expected $label drift to fail closed" >&2
     exit 1
@@ -188,14 +199,23 @@ if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --ca
   exit 1
 fi
 
-jq '.models |= map(select(.slug != "gpt-6-astra"))' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/no-astra.json"
-if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/no-astra.json" >/dev/null 2>&1; then
-  echo "expected missing GPT-6 Astra to fail closed, without Sol fallback" >&2
+jq '.models |= map(select(.slug != "gpt-6-astra"))' "$TMP_ROOT/6.json" > "$TMP_ROOT/no-frontier.json"
+if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/no-frontier.json" >/dev/null 2>&1; then
+  echo "expected missing frontier capability to fail closed" >&2
   exit 1
 fi
-jq '.models |= map(select(.slug == "gpt-6-astra"))' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-only.json"
+jq '.models |= map(.slug |= if . == "gpt-6-astra" then "gpt-6-orbit" elif . == "gpt-6-sol" then "gpt-6-ember" elif . == "gpt-6-luna" then "gpt-6-pulse" else . end)' \
+  "$TMP_ROOT/6.json" > "$TMP_ROOT/renamed.json"
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/renamed.json" \
+  | jq -e '([.roles[].model] | unique) == ["gpt-6-orbit"]' >/dev/null
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/renamed.json" \
+  | jq -e '.roles["atlas-sdd-reviewer"].model == "gpt-6-ember"
+    and .roles["atlas-sdd-implementer"].model == "gpt-6-pulse"' >/dev/null
+node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode quality --catalog "$TMP_ROOT/renamed.json" \
+  | jq -e '([.roles[].model] | unique) == ["gpt-6-orbit"]' >/dev/null
+jq '.models |= map(select(.slug == "gpt-6-astra"))' "$TMP_ROOT/6.json" > "$TMP_ROOT/astra-only.json"
 node "$ROOT/workflow/bin/atlas-agent-model-policy" check --catalog "$TMP_ROOT/astra-only.json" --agents-dir "$TMP_ROOT/agents"
-jq '(.models[] | select(.slug == "gpt-6-astra")).supported_reasoning_levels = [{"effort":"low"}]' "$TMP_ROOT/5.6.json" > "$TMP_ROOT/astra-low-effort.json"
+jq '(.models[] | select(.slug == "gpt-6-astra")).supported_reasoning_levels = [{"effort":"low"}]' "$TMP_ROOT/6.json" > "$TMP_ROOT/astra-low-effort.json"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/astra-low-effort.json" >/dev/null 2>&1; then
   echo "expected unsupported planning reasoning effort to fail closed" >&2
   exit 1
@@ -203,7 +223,7 @@ fi
 
 catalog_home="$TMP_ROOT/catalog-home"
 mkdir -p "$catalog_home/.codex" "$TMP_ROOT/selected-codex-home"
-cp "$TMP_ROOT/5.6.json" "$catalog_home/.codex/models_cache.json"
+cp "$TMP_ROOT/6.json" "$catalog_home/.codex/models_cache.json"
 cp "$TMP_ROOT/6.1.json" "$TMP_ROOT/selected-codex-home/active.json"
 cat > "$TMP_ROOT/codex-catalog" <<'SH'
 #!/usr/bin/env bash
@@ -228,8 +248,8 @@ done
 # Explicit input remains usable offline and must not start Codex at all.
 CODEX_BIN="$TMP_ROOT/missing-codex" \
   node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving \
-    --catalog "$TMP_ROOT/5.6.json" \
-    | jq -e '.family == "5.6"' >/dev/null
+    --catalog "$TMP_ROOT/6.json" \
+    | jq -e '.family == "6.0"' >/dev/null
 
 # A failed current-catalog lookup must not silently use the valid old cache.
 for response in failed malformed; do

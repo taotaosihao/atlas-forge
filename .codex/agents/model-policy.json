@@ -1,14 +1,13 @@
 {
   "schema_version": 2,
   "default_mode": "planning-review",
-  "planning_review_model": "gpt-6-astra",
   "family": {
-    "slug_pattern": "^gpt-(\\d+)\\.(\\d+)-",
+    "slug_pattern": "^gpt-(\\d+)(?:\\.(\\d+))?-",
     "selection": "latest"
   },
   "capabilities": {
-    "frontier": { "description_pattern": "\\bfrontier\\b" },
-    "balanced": { "description_pattern": "\\bbalanced\\b" },
+    "frontier": { "description_pattern": "\\b(frontier|most capable)\\b" },
+    "balanced": { "description_pattern": "\\b(balanced|workhorse)\\b" },
     "fast": { "description_pattern": "\\bfast\\b" }
   },
   "roles": {

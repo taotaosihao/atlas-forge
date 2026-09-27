@@ -42,16 +42,16 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['default-luna-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
+  'routine-implementation': ['default-fast-model-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
   'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
-  'plan-or-contract-review': ['default-astra-medium-formal-reviewer-or-explicit-exact-override', 'implicit-terra-luna-or-saving-route'],
-  'implementation-review-verify': ['default-terra-reviewer-max-or-verifier-high', 'saving-route-before-execute-authority'],
-  'hard-to-reverse-direction': ['default-astra-high-planner', 'implicit-low-tier-planner'],
-  'completed-phase-extra-judgment': ['default-sol-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
-  'implementation-browser-heavy': ['default-luna-xhigh-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
-  'implementation-exploration-single': ['luna-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
+  'plan-or-contract-review': ['default-frontier-medium-formal-reviewer-or-explicit-exact-override', 'implicit-low-tier-or-saving-route'],
+  'implementation-review-verify': ['default-balanced-reviewer-max-or-verifier-high', 'saving-route-before-execute-authority'],
+  'hard-to-reverse-direction': ['default-frontier-high-planner', 'implicit-low-tier-planner'],
+  'completed-phase-extra-judgment': ['default-frontier-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
+  'implementation-browser-heavy': ['default-fast-xhigh-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
+  'implementation-exploration-single': ['fast-model-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
   'implementation-exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
-  'quality-mode-explicit': ['all-sol-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
+  'quality-mode-explicit': ['all-frontier-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
   'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
   'profile-mismatch': ['block-spawn; reconcile-policy-profile', 'spawn-with-mismatched-model'],
   'metadata-invisible': ['disclose-unverified; no-billing-proof-required', 'claim-billing-model-verified'],
@@ -164,39 +164,39 @@ assert_has "$TEAM_ROUTING" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*bef
 
 assert_has "$TEAM_ROUTING" 'Default Planning And Contract Review Mode' 'planning and contract review high-tier default is visible'
 assert_has "$TEAM_ROUTING" 'no-argument policy\s+check resolves this matrix' 'no-argument model policy defaults to planning-review'
-assert_has "$TEAM_ROUTING" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*gpt-6-astra.*medium.*none' 'formal plan or contract review defaults to GPT-6 Astra medium'
-assert_has "$TEAM_ROUTING" 'Use the Astra phase-reviewer by default for formal plan or contract review' 'formal plan review does not default to Sol'
+assert_has "$TEAM_ROUTING" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*resolved frontier.*medium.*none' 'formal plan or contract review defaults to frontier medium'
+assert_has "$TEAM_ROUTING" 'Use the frontier phase-reviewer by default for formal plan or contract review' 'formal plan review stays on frontier capability'
 assert_has "$TEAM" 'REVIEW_VERDICT_JSON' 'formal review preserves the machine verdict contract'
 assert_has "$TEAM" 'Ordinary review opinions may be supplied outside formal admission' 'ordinary review opinions stay outside formal admission'
 assert_has "$TEAM" 'missing\s+materials never authorize an automatic format downgrade' 'missing formal review material cannot downgrade output'
 assert_lacks "$TEAM" 'Use the Sol phase-reviewer by default for formal plan or contract review' 'stale Sol formal-review default is removed'
 assert_lacks "$TEAM_ROUTING" 'Use the Sol phase-reviewer by default for formal plan or contract review' 'stale Sol formal-review default is removed'
-assert_has "$TEAM_ROUTING" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*gpt-6-astra.*medium.*none' 'additional plan or contract review defaults to GPT-6 Astra medium'
+assert_has "$TEAM_ROUTING" 'Additional independent plan or contract review.*atlas-sdd-reviewer.*resolved frontier.*medium.*none' 'additional plan or contract review defaults to frontier medium'
 assert_has "$TEAM_ROUTING" 'Fable or\s+another high-tier model[\s\S]*explicitly selects the exact provider/model route' 'Fable or another high-tier route requires an exact selection'
 assert_has "$TEAM_ROUTING" 'same exact per-lane authority may explicitly choose\s+a lower model' 'an explicit lane selection may override the high-tier default'
-assert_has "$TEAM_ROUTING" 'does not fall back to Terra, Luna, or another low-tier\s+route for planning or contract review' 'unavailable advanced review route cannot degrade to a low-tier model'
+assert_has "$TEAM_ROUTING" 'does not fall back to a balanced, fast, or another low-tier\s+route for planning or contract review' 'unavailable advanced review route cannot degrade to a low-tier model'
 assert_has "$TEAM_ROUTING" 'Implementation-Stage Saving Mode' 'saving mode is explicitly implementation-scoped'
 assert_has "$TEAM_ROUTING" 'only after explicit user implementation authority has\s+entered Execute' 'saving mode requires implementation Execute authority'
 assert_has "$TEAM_ROUTING" 'must never author or review a plan or contract' 'saving mode cannot review a plan or contract'
 assert_has "$TEAM_ROUTING" 'only after staffing\s+has independently established that the lane is useful' 'saving mode follows staffing rather than creating Team'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer.*gpt-5\.6-luna.*max.*none' 'routine implementation defaults to Luna max'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer.*resolved fast.*max.*none' 'routine implementation defaults to fast max'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro implementation always uses max'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro planning always uses max'
 assert_has "$TEAM_ROUTING" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
 assert_has "$TEAM_ROUTING" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
 assert_has "$TEAM_ROUTING" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
-assert_has "$TEAM_ROUTING" 'Implementation slice review.*atlas-sdd-reviewer.*gpt-5\.6-terra.*max.*none' 'implementation slice review defaults to Terra max'
+assert_has "$TEAM_ROUTING" 'Implementation slice review.*atlas-sdd-reviewer.*resolved balanced.*max.*none' 'implementation slice review defaults to balanced max'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro review always uses max'
-assert_has "$TEAM_ROUTING" 'Implementation command or business verification.*atlas-sdd-verifier.*gpt-5\.6-terra.*high.*none' 'implementation verification defaults to Terra high'
-assert_has "$TEAM_ROUTING" 'Implementation replanning.*atlas-sdd-planner.*gpt-5\.6-sol.*high.*none' 'implementation replanning remains on Sol high'
+assert_has "$TEAM_ROUTING" 'Implementation command or business verification.*atlas-sdd-verifier.*resolved balanced.*high.*none' 'implementation verification defaults to balanced high'
+assert_has "$TEAM_ROUTING" 'Implementation replanning.*atlas-sdd-planner.*resolved frontier.*high.*none' 'implementation replanning remains on frontier high'
 
-assert_has "$TEAM_ROUTING" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*medium.*none' 'phase reviewer explicitly routes to Sol medium'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-phase-reviewer.*resolved frontier.*medium.*none' 'phase reviewer explicitly routes to frontier medium'
 assert_has "$TEAM_ROUTING" 'mechanical or\s+environmental failures stay on the\s+ordinary reviewer/verifier path selected by the implementation mode' 'mechanical and environment failures do not escalate'
 assert_lacks "$TEAM" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 assert_lacks "$TEAM_ROUTING" 'Upgrade to the Sol phase-reviewer' 'automatic Sol upgrade wording'
 
-assert_has "$TEAM_ROUTING" 'atlas-sdd-browser-verifier.*gpt-5\.6-luna.*xhigh.*none' 'browser-heavy work defaults to Luna xhigh'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer.*gpt-5\.6-luna.*max.*none' 'exploration defaults to Luna max'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-browser-verifier.*resolved fast.*xhigh.*none' 'browser-heavy work defaults to fast xhigh'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer.*resolved fast.*max.*none' 'exploration defaults to fast max'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro exploration always uses max'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek planner is present in the native matrix'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek reviewer is present in the native matrix'
@@ -240,15 +240,15 @@ assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'experimental_bearer_
 assert_lacks "$AGENTS/atlas-sdd-implementer-deepseek.toml" '^sandbox_mode\s*=' 'DeepSeek implementer does not override Luna authority inheritance'
 assert_has "$TEAM_ROUTING" 'Explicit Quality Mode' 'quality mode is separately defined'
 assert_has "$TEAM_ROUTING" 'explicitly requests\s+quality mode' 'quality mode requires an explicit user request'
-assert_has "$TEAM_ROUTING" '\| Planning \| `atlas-sdd-planner` \| `gpt-5\.6-sol` \| `max` \| `none` \|' 'quality planning routes to Sol max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer.*gpt-5\.6-sol.*medium.*none' 'quality implementation routes to Sol medium'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality review routes to Sol xhigh'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-verifier.*gpt-5\.6-sol.*medium.*none' 'quality verification routes to Sol medium'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-phase-reviewer.*gpt-5\.6-sol.*xhigh.*none' 'quality phase review routes to Sol xhigh'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-browser-verifier.*gpt-5\.6-sol.*medium.*none' 'quality browser verification routes to Sol medium'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer.*gpt-5\.6-sol.*high.*none' 'quality exploration routes to Sol high'
-assert_has "$TEAM_ROUTING" 'Do not infer an all-Sol implementation\s+route' 'quality implementation mode is never activated automatically'
-assert_has "$TEAM_ROUTING" 'atlas-agent-model-policy check --mode quality' 'quality mode validates the all-Sol dispatch matrix'
+assert_has "$TEAM_ROUTING" '\| Planning \| `atlas-sdd-planner` \| resolved frontier \| `max` \| `none` \|' 'quality planning routes to frontier max'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer.*resolved frontier.*medium.*none' 'quality implementation routes to frontier medium'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer.*resolved frontier.*xhigh.*none' 'quality review routes to frontier xhigh'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-verifier.*resolved frontier.*medium.*none' 'quality verification routes to frontier medium'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-phase-reviewer.*resolved frontier.*xhigh.*none' 'quality phase review routes to frontier xhigh'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-browser-verifier.*resolved frontier.*medium.*none' 'quality browser verification routes to frontier medium'
+assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer.*resolved frontier.*high.*none' 'quality exploration routes to frontier high'
+assert_has "$TEAM_ROUTING" 'Do not infer a frontier implementation\s+route' 'quality implementation mode is never activated automatically'
+assert_has "$TEAM_ROUTING" 'atlas-agent-model-policy check --mode quality' 'quality mode validates the frontier dispatch matrix'
 assert_has "$TEAM" 'staffing_mode' 'staffing is an independent decision'
 assert_has "$TEAM" 'model_policy' 'model policy is an independent decision'
 assert_has "$TEAM" 'release_mode' 'release mode is an independent decision'
@@ -273,7 +273,7 @@ assert_has "$TEAM_ROUTING" 'atlas-native-agent-inbox put atlas_sdd_explorer.*atl
 assert_has "$TEAM_ROUTING" 'also pass the same packet as `message`' 'compatibility transport preserves the native message contract'
 assert_has "$TEAM_ROUTING" 'not a Paseo fallback' 'compatibility transport remains a native Codex dispatch'
 assert_has "$TEAM_ROUTING" 'terminal and quiesced.*delete the corresponding role slot' 'DeepSeek packet cleanup waits for quiescence'
-assert_has "$TEAM_ROUTING" 'serialized independently.*Luna peer.*may still run concurrently' 'role slots fail closed without blocking Luna cross-checking'
+assert_has "$TEAM_ROUTING" 'serialized independently.*fast-model peer.*may still run concurrently' 'role slots fail closed without blocking fast-model cross-checking'
 assert_has "$TEAM_ROUTING" 'inbox `get` alone does not prove usable routing' 'transport bootstrap is not confused with a complete tool loop'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek explorer has the encrypted-payload bootstrap'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek implementer has the encrypted-payload bootstrap'
