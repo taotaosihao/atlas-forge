@@ -163,7 +163,7 @@ maintenance work with no GUI outcome does not load it.
 
 ## Product-Manager Progress Reports
 
-For every meaningful implementation checkpoint and the final reply, keep the product-manager body to one screen and use this order:
+Whenever work returns to the user, including the final reply, keep the product-manager body to one screen and use this order; internal checkpoints update only the rolling checkpoint:
 
 When a formal execution grant exists, use `codex-workflow product-progress <task-id>` for the read-only current objective, blocker, next acceptance point, and authorization impact; do not infer those facts from `progress.jsonl` or hand-edited task state.
 

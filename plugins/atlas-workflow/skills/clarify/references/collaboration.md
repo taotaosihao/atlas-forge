@@ -27,8 +27,12 @@ a bounded structural improvement now. Do not demand artificial disagreement.
 4. The main agent decides from evidence and the current goal. Do not vote, mechanically average options or merge all suggestions into requirements. A concern needs a current-task reason before it becomes required work.
 5. Relevant roles compare the final clauses with the original user intent, approved decisions and the discussion outcome. Keep deliberation history outside the executable scope body.
 
-Converge when no unresolved disagreement changes delivery, its safety or reachable
-acceptance. Round counts, time, agent count and unanimous preference are not stop
+Revise one draft in place and let Git or the task history keep earlier
+versions; do not accumulate numbered draft files. A later review round covers
+the changed clauses and still-open findings, and a newly raised point blocks
+only when it changes delivery, its safety, data or permissions, or reachable
+acceptance; other points become follow-ups. Converge when no unresolved
+disagreement changes delivery, its safety or reachable acceptance. Round counts, time, agent count and unanimous preference are not stop
 conditions. Unrelated improvements do not prolong this task. If no new evidence
 can resolve a necessary fact, report the gap rather than repeat the debate.
 Ask the user only for a change of goal, authority, necessary acceptance or a

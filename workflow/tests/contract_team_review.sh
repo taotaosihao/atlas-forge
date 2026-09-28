@@ -35,8 +35,11 @@ assert_has "$TEAM" 'Silence, timeout, an unavailable reviewer, or unsupported ag
 assert_has "$TEAM" 'must not present itself as the missing independent reviewer' 'main controller cannot impersonate independent review'
 assert_has "$TEAM" 'no unresolved disagreement remains that would materially change the final recommendation' 'convergence is recommendation-oriented'
 assert_has "$TEAM" 'references/code-review.md' 'optional detailed reference is routed'
+assert_has "$TEAM" 'first round yields no material finding, disagreement or evidence gap, close the review' 'quiet first round ends the review'
+assert_has "$TEAM" 'one independent reviewer for an ordinary change' 'multiple perspectives are reserved for discussion or high risk'
 
 assert_has "$REFERENCE" 'Perspective Menu' 'task-adapted perspective menu exists'
+assert_has "$REFERENCE" 'round 1 leaves no material finding, disagreement or evidence gap, stop there' 'quiet round 1 ends deliberation'
 assert_has "$REFERENCE" 'strongest counterargument against accepting the change as-is' 'adversarial perspective is recommended'
 assert_has "$REFERENCE" 'path and line when applicable' 'findings are evidence-located'
 assert_has "$REFERENCE" 'Critical.*, `Important`.*, or `Minor`' 'Atlas severity vocabulary is preserved'

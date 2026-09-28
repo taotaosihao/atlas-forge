@@ -39,7 +39,7 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
   mismatch, or a non-descendant commit. `logical_outcome` does not force a
   pre-verification or per-slice commit. Outside execution-vnext, keep using moderate
   verified logical commits rather than one commit per repair round.
-- Regenerate review input after a repair and inspect new direct regressions normally.
+- Regenerate review input when a repair is reviewed under Team's Review And Focused Repair timing, and inspect new direct regressions normally.
 - Run branch/integration review only when integration risk justifies it.
 - Treat durable observer and verification claims as control-plane authority. A pending observer replay is `ls`-only: an exact actor match may become a factual bind receipt, while missing or ambiguous state remains `launch-state-unknown` with its lease held until exact `resolve-launch` authority/evidence and subsequent quiescence. A pending verification command is never rerun after controller loss; `verify-resolve` records only an `indeterminate` resolution and never supplies a passing check, required gate, acceptance, or release fact.
 - Keep raw logs, traces, screenshots, dumps, and intermediate repair output outside Git. Keep one rolling runtime checkpoint for cross-compaction continuity instead of replaying all ledgers.

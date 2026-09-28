@@ -83,6 +83,8 @@ assert_has "$TEAM" '## Bounded-Parallel Controller Policy' 'bounded-parallel con
 assert_has "$TEAM" 'two or more admitted, independent,\s+ready lanes.*same bounded wave by default' 'two ready independent lanes share a bounded wave'
 assert_has "$TEAM" 'child_count = min\(ready independent lanes, host available child slots, 4\)' 'bounded wave width is capacity- and lane-limited'
 assert_has "$TEAM" 'initial soft wave cap, not a completion or stop condition' 'wave cap is soft and not a stop condition'
+assert_has "$TEAM" 'When a wave adds nothing\s+new, stop widening' 'waves stop widening when they add nothing new'
+assert_has "$TEAM" 'Assign write ownership per\s+deliverable outcome' 'write ownership lasts for a deliverable outcome'
 assert_has "$TEAM" 'A lane is admitted only with' 'Team lane admission is explicit'
 for lane_field in Goal 'output consumer' 'ready input' 'consumer-appropriate output' authority 'stop condition'; do
   assert_has "$TEAM" "$lane_field" "Team lane admission records $lane_field"

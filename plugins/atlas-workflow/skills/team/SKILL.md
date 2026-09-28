@@ -3,7 +3,7 @@ name: team
 description: Coordinates multiple agents for Atlas work through the current host's native collaboration, using Paseo lanes only when explicitly selected. Use when the user asks for a team or agents, or when independent lanes, specialist review, or parallel work materially reduce risk or latency.
 ---
 
-Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
+Decide whether Team is needed from the user's current request, including the requested collaboration style, latency needs, and risk. Use `$atlas-workflow:team` when the user asks for multiple agents or when independent lanes or a distinct specialist/reviewer materially serve those needs; otherwise stay with the main Codex. Multiple files, behavior changes, task complexity, or the existence of an implementation contract do not require Team by themselves. Ordinary `$atlas-workflow:task` and `$atlas-workflow:cw` do not auto-upgrade to Team. Once Team is selected, its controller defaults to bounded parallel dispatch over the admitted ready frontier rather than main-first serial exploration, so that exploration, discussion and review see the problem from several independent angles; this is a controller policy, not a runtime scheduler invariant. An MVP, Beta, internal test, or small-scope public beta without explicit formal certification is `product_increment`: Team may be selected only for an independent collaboration or review need, while release-intent, v4, immutable Profile, release receipt, and release-decision machinery must be omitted. Reclassify to explicit `product_release` intent before using those release controls.
 
 ## Host Note
 
@@ -80,14 +80,22 @@ field.
   `child_count = min(ready independent lanes, host available child slots, 4)`.
   The `4` is an initial soft wave cap, not a completion or stop condition;
   synthesize the current wave, recompute the frontier, and continue with another
-  wave while admitted lanes remain ready. A user-authorized wider frontier may
+  wave while admitted lanes remain ready and the previous wave's output actually
+  changed the integration, a decision or the evidence. When a wave adds nothing
+  new, stop widening: the main Codex or the sole writer handles any remaining
+  admitted lanes serially. A user-authorized wider frontier may
   expand the wave only while routing, authority, writer, and release gates stay
   intact.
 - The main Codex remains the integration owner, controller authority, sole
   canonical writer for shared scope/artifacts, and final acceptance owner.
   Parallel writers are allowed only for explicitly disjoint owned paths with an
   integration owner and the applicable lease/quiescence boundary; tightly
-  coupled implementation remains single-writer. Keep the root context small:
+  coupled implementation remains single-writer. Assign write ownership per
+  deliverable outcome and keep it until that outcome is accepted: route its
+  repairs back to the same writer with a follow-up task, and transfer ownership
+  only when that writer is unavailable, quiesced and the existing fallback and
+  takeover rules are met. A checkpoint records the
+  current ownership table, not the handover history. Keep the root context small:
   when such a lane is admitted, give long journeys, iterative diagnosis and
   large-output inspection to a child that cannot modify the candidate under
   test, and take back its
@@ -288,7 +296,7 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 1. Freeze the minimum Goal and construct the dependency/ownership ready frontier with the main Codex. In a selected Team, dispatch admitted independent lanes in bounded parallel waves by default; spawn only concrete bounded lanes whose results materially change latency or risk.
 2. Choose roles from the actual task; there is no default role set or required agent count. Do not add lanes merely to follow the model preference table.
 3. Use one writable owner for tightly coupled changes. Multiple writable agents require disjoint path/module ownership and an explicit integration owner.
-4. Reviewers and verifiers stay read-only unless a focused repair is assigned.
+4. Reviewers and verifiers stay read-only unless a focused repair is assigned; that assignment follows the write-ownership rule above, so a repair inside an owned outcome returns to its writer.
 5. Do not create staffing artifacts or omitted-role inventories solely to prove that planning occurred. Record ownership only when handoff, concurrent writes, audit, or risk makes it useful.
 6. Agent completion is evidence, not automatic acceptance; the main Codex integrates and verifies the result.
 
@@ -302,7 +310,7 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 
 ## Product-Manager Progress Reports
 
-For every meaningful implementation checkpoint and the final reply, the main Codex translates internal Team evidence into a one-screen product-manager body in this order:
+Whenever work returns to the user, including the final reply, the main Codex translates internal Team evidence into a one-screen product-manager body in this order; internal checkpoints update only the rolling checkpoint:
 
 - `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
 - `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; do not paste agent reports or use a command name or green gate as the explanation.
@@ -321,9 +329,9 @@ reviewer must receive the required materials and emit `REVIEW_VERDICT_JSON`.
 Ordinary review opinions may be supplied outside formal admission, but missing
 materials never authorize an automatic format downgrade.
 
-- Recommend complementary review perspectives and agent count from the actual task. There is no required council shape. Two or three perspectives are often useful, but this is guidance rather than a staffing gate. When the risk justifies it, include a perspective that owns the strongest evidence-backed counterargument or tradeoff instead of duplicating another general reviewer.
+- Recommend complementary review perspectives and agent count from the actual task. There is no required council shape. Two or three perspectives are often useful, but this is guidance rather than a staffing gate: use several for design discussion, formal plan or contract review, or high-risk changes such as migration, permission, security, release or cross-module coupling, and one independent reviewer for an ordinary change. When the risk justifies it, include a perspective that owns the strongest evidence-backed counterargument or tradeoff instead of duplicating another general reviewer.
 - Let each selected reviewer form an independent first-round position before seeing the other reviewers' conclusions. Findings should state the affected path and line when applicable, the concrete evidence, impact, and recommendation; uncertainty belongs in an explicit evidence gap rather than a clean verdict.
-- Keep useful review agents available after their initial findings. The main Codex integrates the first-round results, combines duplicates without erasing provenance or dissent, makes an evidence-backed interim ruling, and sends only the material objections and ruling back to the same relevant agents with `paseo send` or native `followup_task`. Do not replay the full history or involve every role in every finding.
+- Keep useful review agents available after their initial findings. When every selected reviewer has returned and the first round yields no material finding, disagreement or evidence gap, close the review and release the agents. Otherwise the main Codex integrates the first-round results, combines duplicates without erasing provenance or dissent, makes an evidence-backed interim ruling, and sends only the material objections and ruling back to the same relevant agents with `paseo send` or native `followup_task`. Do not replay the full history or involve every role in every finding.
 - Review discussion should normally converge within two or three rounds. This is an operating target, not a hard semantic limit. Continue beyond it only while a material disagreement remains and another focused exchange or verification can add evidence or change the final recommendation. Apply the shared verification guidance when selecting repair checks. The main Codex may adjudicate ordinary duplication, wording, severity, and scope differences from the user goal, authoritative contract, and repository evidence.
 - If a material disagreement persists after several useful exchanges, or the decision depends on product intent, risk acceptance, compatibility, permissions, ownership, or another user choice, stop the internal loop and return a concise human decision packet: agreed facts, the remaining disagreement, each side's strongest evidence, the main Codex's recommendation, and the concrete options. After the user decides, return that authority to the relevant agents only when a final consistency check is useful.
 - Silence, timeout, an unavailable reviewer, or unsupported agreement is not consensus. Replace a missing perspective when useful or disclose that independent review is unavailable; the main Codex may inspect and adjudicate evidence but must not present itself as the missing independent reviewer.

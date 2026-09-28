@@ -56,7 +56,7 @@ Do not impose language-independent numeric rules for function length, cyclomatic
 
 Round 1 is independent review. The main Codex then normalizes duplicate findings, preserves the originating perspectives, and identifies only disagreements that can affect the final recommendation.
 
-In the next round, send a focused dispute back to the same relevant agents. Ask each to distinguish:
+When every reviewer has returned and round 1 leaves no material finding, disagreement or evidence gap, stop there. Otherwise, in the next round, send a focused dispute back to the same relevant agents. Ask each to distinguish:
 
 1. whether the factual claim is correct;
 2. whether the stated impact or severity is justified;

@@ -163,4 +163,13 @@ for (const item of corpus.cases) {
 }
 NODE
 
+assert_has "$CLARIFY" 'has not authorized the whole set as one delivery, tell the user, split them' 'unauthorized multi-outcome goals are split openly'
+assert_has "$CLARIFY" 'recovery journey that the\s+design or scope requires' 'required recovery journeys keep complete-journey acceptance'
+assert_has "$CLARIFY" 'names whether it is a focused check or a complete journey' 'validation rows name their layer'
+assert_has "$COLLABORATION" 'do not accumulate numbered draft files' 'drafts are revised in place'
+assert_has "$COLLABORATION" 'newly raised point blocks\s+only when it changes delivery' 'later review points block only on delivery impact'
+for progress in "$PLUGIN/skills/task/SKILL.md" "$PLUGIN/skills/team/SKILL.md"; do
+  assert_has "$progress" 'Whenever work returns to the user, including the final reply' 'progress reports appear only when work returns to the user'
+done
+assert_has "$PLUGIN/skills/team/references/sdd.md" 'Regenerate review input when a repair is reviewed' 'SDD review input follows review timing'
 printf 'contract_clarify_parallel_routing: ok\n'

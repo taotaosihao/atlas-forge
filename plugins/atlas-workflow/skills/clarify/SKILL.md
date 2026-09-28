@@ -41,7 +41,7 @@ For a corrected or evidence-challenged decision, first apply the shared
    make a high-cost choice on weak evidence, or make later work stale. A short
    request or uncertain tiny/non-tiny label is not itself such a choice. Use
    ordinary dialogue when structured question tools are unavailable.
-5. State only the missing boundaries, material assumptions and engineering decisions needed for this task. Prefer the minimum complete implementation, including necessary safety and quality; do not add a framework, state matrix or roadmap without a current need.
+5. State only the missing boundaries, material assumptions and engineering decisions needed for this task. Prefer the minimum complete implementation, including necessary safety and quality; do not add a framework, state matrix or roadmap without a current need. When the Goal holds several independently deliverable outcomes and the user has not authorized the whole set as one delivery, tell the user, split them and clarify the first; the rest stay in the same goal as the next outcomes rather than rows of one contract. An authorized roadmap or full set keeps its scope and is still sequenced by outcome.
 6. Make acceptance command-verifiable or user-visible, with legal, reachable prerequisites. Do not invent an unauthorized write path to construct a test state, treat mocks as real capabilities, or report unknown data as a real value.
 
 When choosing or inheriting verification, load the shared
@@ -63,7 +63,11 @@ required complete journey, same-object continuity, final business result,
 readback/export, and evidence method into either the lightweight scope
 document's existing `Acceptance Criteria` / `Verification Plan` or the selected
 machine contract's existing `Acceptance Criteria` / `Real Validation Plan`.
-This is a planning handoff: it does not require `$atlas-workflow:project-verification`,
+Acceptance Criteria state user-visible results. A recovery journey that the
+design or scope requires is itself such a result and keeps its complete-journey
+acceptance; other failure and recovery branches go to Edge Cases (or, in a
+lightweight document, its Verification Plan) with focused checks. Each
+validation row names whether it is a focused check or a complete journey. This is a planning handoff: it does not require `$atlas-workflow:project-verification`,
 creating a Map, or running verification early. Unknown business rules or
 permission/safety conflicts are blockers, not ordinary implementation
 dependencies.
