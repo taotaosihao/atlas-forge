@@ -132,74 +132,34 @@ The planning-review/saving/quality Atlas custom-agent profiles intentionally
 leave `model`, `model_reasoning_effort`, and `model_provider` unset. Codex gives
 values pinned in a custom-agent file precedence over explicit spawn values,
 which would otherwise silently disable the stage-aware matrices. The
-provider-bound DeepSeek equivalent profiles are the explicit exception and must
-match their checked-in ZenMux/model/`max` policy. The model-policy checker uses
-`planning-review` when `--mode` is omitted, rejects routing pins, and validates
-the applicable pinned equivalent profiles; each admitted native dispatch must
+model-policy checker uses `planning-review` when `--mode` is omitted, rejects
+routing pins, and still validates the installed provider-bound DeepSeek profiles
+against their checked-in policy, so a drifted profile fails `check` even though
+the route is deprecated; each admitted native dispatch must
 supply the current `resolve --mode <mode>` model ID and matrix effort explicitly. Run `atlas-agent-model-policy check
 --mode saving` only for authorized implementation Execute, and use `--mode
 quality` before an explicitly selected frontier implementation dispatch.
 
-The root-session provider is also unchanged. DeepSeek V4 Pro is a child-local
-ZenMux route only: `model_provider = "zenmux"` belongs in the selected DeepSeek
-custom-agent profile, not in the root session. A bare DeepSeek `model` override
-on the inherited `explorer` or `implementer` role does not switch providers and
-must fail closed when the child metadata does not prove the ZenMux route. Every
-Atlas DeepSeek profile and catalog route uses `max`; Atlas never silently lowers
-the requested effort to `high` or another compatibility value. If the current
-host rejects native `max`, the exact DeepSeek child route is unavailable and
-falls back according to the lane policy without changing its configured effort.
+The root-session provider is also unchanged; a `model` override never switches
+providers. The DeepSeek/ZenMux routes and the Cross recipe are removed from the
+routing guidance; any still-installed DeepSeek profile must not be selected.
 
-Routine implementation keeps the resolved fast model as the default native single writer and
-offers `atlas-sdd-implementer-deepseek` / `deepseek-v4-pro:deepseek` as an
-availability-gated native ZenMux alternative with the exact same implementer
-instructions, inherited sandbox semantics, owned paths, acceptance inputs, and
-report contract. Atlas never sends the same writable packet to both candidates
-or uses a shared checkout for duplicate-writer cross-validation. Concurrent
-Fast-model and DeepSeek implementation is allowed only for explicitly authorized,
-disjoint path ownership with an integration owner and the applicable
-lease/quiescence boundary. A writable fallback starts only after the previous
-writer is proven quiesced and its diff/untracked evidence is preserved.
+Routine implementation keeps the resolved fast model as the default native
+single writer. Atlas never sends the same writable packet to two implementers
+or uses a shared checkout for duplicate-writer cross-validation, and a writable
+fallback starts only after the previous writer is proven quiesced and its
+diff/untracked evidence is preserved. Dual exploration of one question is a
+per-lane choice for an explicit request or a named risk, never a fixed fan-out;
+the main Codex reconciles the evidence.
 
-For read-heavy implementation exploration, the native
-`atlas-sdd-explorer-deepseek` / `deepseek-v4-pro:deepseek` route is an
-availability-gated alternative to the resolved fast model with the same read-only role contract.
-Its upstream ZenMux `/models` identity remains
-`deepseek/deepseek-v4-pro`; Atlas validates both boundaries and never guesses
-or interchanges the identifiers. During Execute, Atlas keeps the resolved fast model as the
-ordinary single-dispatch default, selects DeepSeek only for an explicit
-non-OpenAI perspective after a live route preflight, and dispatches both only
-when independent cross-checking materially lowers a named risk or the user
-explicitly requests it. Planning and contract discovery stays on the frontier
-planning-review route unless an exact per-lane override exists. Dual dispatch
-is never a fixed fan-out; the main Codex reconciles evidence and discloses any
-lost provider perspective.
-
-The DeepSeek profiles keep provider metadata in the managed custom-agent files
-but obtain authentication through `atlas-zenmux-bearer-token`, which reads the
-existing `~/.codex/zenmux-deepseek.config.toml` only when `CODEX_HOME` has mode
-700 and that profile has mode 600. Agent files and model catalogs contain no
-credential. For Codex hosts that deliver a native custom-provider child an
-empty visible Payload plus OpenAI-encrypted content, Atlas writes the same
-self-contained packet to `atlas-native-agent-inbox` before the native
-`spawn_agent` call. The equivalent profiles read only the stable slot for their
-logical role when no plaintext assignment is visible; this is a 700/600
-assignment-transport compatibility path, not a child runner or Paseo fallback.
-Atlas deletes the packet only after the attempt is terminal and quiesced.
-Refuse-overwrite slots safely serialize affected DeepSeek attempts of the same
-role, while the fast-model and DeepSeek roles may still cross-check the same packet concurrently.
-Atlas still requires task-specific tool/check evidence before calling the route
-usable.
-
-`atlas-team-model-catalog` builds a credential-free root catalog projection from
-the official cache plus the isolated DeepSeek catalog. It preserves every
-official entry, promotes the exact Luna entry to `multi_agent_version=v2` only
-while the official catalog has not done so, and adds
-`deepseek-v4-pro:deepseek` as v2. The isolated entry must declare the configured
-`low`, `high`, and `max` efforts exactly once and use `max` as Atlas's default.
-Point the user-level `model_catalog_json` at
-`~/.codex/model-catalogs/atlas-team.json`, regenerate it after either input
-catalog changes, and start a new task. This supplies normal catalog eligibility
+`atlas-team-model-catalog` builds a credential-free root catalog projection. It
+preserves every official entry and promotes the exact Luna entry to
+`multi_agent_version=v2` only while the official catalog has not done so. Until
+the helper is retired, it still requires the isolated DeepSeek catalog input
+(`~/.codex/model-catalogs/zenmux-deepseek.json` by default) and appends that
+deprecated entry, which must not be selected. Point the user-level
+`model_catalog_json` at `~/.codex/model-catalogs/atlas-team.json`, regenerate it
+after either input catalog changes, and start a new task. This supplies normal catalog eligibility
 metadata; it does not bypass host allowlists, entitlement, or schema validation.
 
 When Paseo is explicitly selected, Atlas discovers provider, model, thinking,
@@ -448,7 +408,9 @@ primitive used by the update command.
 - `skills/intake/SKILL.md`: targeted interview/pressure-test and plan stress-test entry
 - `skills/team/SKILL.md`: Codex-native Team entry with explicit local Paseo selection and operational Codex fallback
 - `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
-- `skills/team/references/codex-model-routing.md`: Codex-only exact-model routing and the deprecated Cross v1 recipe, loaded only on Codex
+- `skills/team/references/codex-model-routing.md`: Codex-only exact-model routing, loaded only on Codex
+- `skills/team/references/paseo-lanes.md`: Paseo discovery, Claude manual-only gate, lifecycle and fallback, loaded only after Paseo is selected
+- `references/progress-reports.md`: shared product-manager progress report format for Task and Team
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry

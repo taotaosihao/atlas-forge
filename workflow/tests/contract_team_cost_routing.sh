@@ -42,14 +42,14 @@ for (const line of section[1].split('\n').slice(2)) {
 
 const expected = {
   'tiny-clear': ['main-by-default; evidence-backed-specialist-allowed', 'fixed-team-fanout'],
-  'routine-implementation': ['default-fast-model-or-explicit-available-deepseek-single-writer', 'implicit-quality-model-or-default-dual-writer'],
+  'routine-implementation': ['default-fast-model-single-writer', 'implicit-quality-model-or-default-dual-writer'],
   'implementation-fallback': ['same-authority-takeover-after-writer-quiescence', 'overlapping-or-uncertain-writer-takeover'],
   'plan-or-contract-review': ['default-frontier-medium-formal-reviewer-or-explicit-exact-override', 'implicit-low-tier-or-saving-route'],
   'implementation-review-verify': ['default-balanced-reviewer-max-or-verifier-high', 'saving-route-before-execute-authority'],
   'hard-to-reverse-direction': ['default-frontier-high-planner', 'implicit-low-tier-planner'],
   'completed-phase-extra-judgment': ['default-frontier-medium-phase-reviewer', 'phase-reviewer-for-routine-review'],
   'implementation-browser-heavy': ['default-fast-xhigh-browser-verifier', 'low-tier-browser-route-before-execute-authority'],
-  'implementation-exploration-single': ['fast-model-or-deepseek-by-live-availability-and-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
+  'implementation-exploration-single': ['fast-model-by-live-availability-or-explicit-route', 'default-dual-fanout-or-pre-execute-saving'],
   'implementation-exploration-cross-check': ['same-input-dual-dispatch-when-risk-reduced-or-explicit', 'different-authority-or-implicit-fanout'],
   'quality-mode-explicit': ['all-frontier-with-role-specific-reasoning', 'implicit-or-automatic-quality'],
   'schema-restricted': ['main-only; disclose-routing-unavailable', 'generic-inherited-fanout'],
@@ -107,64 +107,12 @@ assert_has "$TEAM_ROUTING" 'agent_type.*model.*reasoning_effort.*fork_turns' 'pr
 assert_has "$TEAM_ROUTING" 'schema-restricted.*main-only' 'restricted schema fails closed to main-only'
 assert_has "$TEAM_ROUTING" 'root Codex session keeps its active model, `model_provider`' 'root session provider remains unchanged'
 assert_has "$TEAM_ROUTING" 'A `model` override is not a provider switch' 'model override cannot silently switch provider'
-assert_has "$TEAM_ROUTING" 'DeepSeek route is child-local' 'DeepSeek provider override stays child-local'
-assert_has "$TEAM_ROUTING" 'provider-routing layer' 'provider routing failure is disclosed at the correct layer'
-assert_has "$TEAM_ROUTING" 'Every Atlas DeepSeek profile and catalog route uses the exact `max` effort' 'DeepSeek always uses max'
-assert_has "$TEAM_ROUTING" 'Never lower native.*to `high`' 'DeepSeek never silently downshifts from max'
-assert_has "$TEAM" 'Select Paseo only from an explicit user or operator choice' 'Paseo remains explicit after native DeepSeek routing'
+assert_has "$TEAM" 'Select Paseo only from an explicit user or operator choice' 'Paseo remains explicit after native routing'
 assert_has "$TEAM" 'Never read or apply Paseo orchestration preferences' 'Paseo preferences do not override controller routing'
 
-assert_has "$TEAM_ROUTING" 'Cross v1.*generation-local.*controller-enforced.*non-crash-resumable' 'Cross v1 keeps generation-local controller-only state'
-assert_has "$TEAM_ROUTING" 'non-certification-gate' 'Cross v1 is not a certification gate'
-assert_has "$TEAM_ROUTING" '`atlas-sdd-planner` at `gpt-6-astra` / `high`' 'Cross Plan defaults to OpenAI GPT-6 Astra high'
-assert_has "$TEAM_ROUTING" '`atlas-sdd-planner-deepseek` at `deepseek-v4-pro:deepseek` / `max`' 'Cross Plan defaults to DeepSeek planner max'
-assert_has "$TEAM_ROUTING" 'same self-contained packet' 'Cross Plan sends an identical packet'
-assert_has "$TEAM_ROUTING" 'fork_turns="none"' 'Cross Plan uses no history fork'
-assert_has "$TEAM_ROUTING" 'followup_task.*original planner runtime id' 'Cross Plan sends disputes to the original planner'
-assert_has "$TEAM_ROUTING" 'cross-plan-perspective-missing' 'Cross Plan records a missing DeepSeek perspective'
-assert_has "$TEAM_ROUTING" 'highest convergence outcome is' 'Cross Plan caps degraded consensus'
-node - "$TEAM_ROUTING" <<'NODE'
-const fs = require('fs');
-const source = fs.readFileSync(process.argv[2], 'utf8');
-const section = source.match(/### Cross Plan\n\n([\s\S]*?)\n\n### Cross Execute/);
-if (!section) throw new Error('missing parseable Cross Plan section');
-const plan = section[1];
-if (!/two OpenAI planner\s+runtime ids that are different actors/.test(plan)) {
-  throw new Error('Cross Plan degradation must use two different OpenAI planner runtime actors');
-}
-if (!/Record `cross-plan-perspective-missing`/.test(plan)) {
-  throw new Error('Cross Plan degradation must record cross-plan-perspective-missing');
-}
-const degraded = plan.match(/If the exact DeepSeek route is unavailable,[\s\S]*?fail Cross closed\./)?.[0] || '';
-if (!/highest convergence outcome is\s+`CONSENSUS_WITH_RESERVATIONS`/.test(degraded)) {
-  throw new Error('Cross Plan degradation must cap the outcome at CONSENSUS_WITH_RESERVATIONS');
-}
-if (/highest convergence outcome is\s+`(?:CONSENSUS|HUMAN_DECISION_REQUIRED)`/.test(degraded)) {
-  throw new Error('Cross Plan degradation must not claim another highest outcome');
-}
-NODE
-assert_has "$TEAM_ROUTING" 'The default pair is an OpenAI' 'Cross Execute has an OpenAI default writer'
-assert_has "$TEAM_ROUTING" '`atlas-sdd-implementer` on Saving Luna `max`' 'Cross Execute defaults to Luna writer'
-assert_has "$TEAM_ROUTING" '`atlas-sdd-reviewer-deepseek` on `deepseek-v4-pro:deepseek` / `max`' 'Cross Execute defaults to DeepSeek reviewer'
-assert_has "$TEAM_ROUTING" 'explicitly selects a DeepSeek writer' 'Cross Execute supports an explicit DeepSeek writer'
-assert_has "$TEAM_ROUTING" '`atlas-sdd-implementer-deepseek` with the OpenAI `atlas-sdd-reviewer` on Sol\s+`xhigh`' 'Cross Execute pairs a DeepSeek writer with a high-tier OpenAI reviewer'
-assert_has "$TEAM_ROUTING" 'mandatory pre-review examines\s+the real brief and contract' 'Cross Execute contract pre-review cannot downgrade to Terra'
-assert_has "$TEAM_ROUTING" 'meaningful\s+read-only pre-review' 'Cross Execute pre-reviews before writer startup'
-assert_has "$TEAM_ROUTING" 'Each\s+execute slice has exactly one implementer' 'Cross Execute keeps one writer per slice'
-assert_has "$TEAM_ROUTING" 'Actionable current-goal repair\s+findings go back to the original implementer' 'Cross repair follows the original writer'
-assert_has "$TEAM_ROUTING" 'rereview\s+always goes back to the original reviewer' 'Cross rereview follows the original reviewer'
-assert_has "$TEAM_ROUTING" 'route/profile,' 'Cross route drift is named'
-assert_has "$TEAM_ROUTING" 'fails Cross closed' 'Cross actor or route drift fails closed'
-assert_has "$TEAM_ROUTING" 'explicitly switch to ordinary Saving Team' 'Saving fallback requires explicit user choice'
-assert_has "$TEAM_ROUTING" 'must not be reported as Cross' 'Saving fallback is not Cross success'
-assert_has "$TEAM_ROUTING" 'no Paseo fallback, Claude or Fable' 'Cross runtime excludes Paseo, Claude, and Fable'
-assert_has "$TEAM_ROUTING" 'cryptographic provider or billing attestation' 'Cross does not claim billing attestation'
-assert_has "$TEAM_ROUTING" 'release-certification authority' 'Cross does not grant release certification'
-assert_has "$TEAM_ROUTING" 'suffix identifies the model supplier' 'Cross names the DeepSeek supplier suffix'
-assert_has "$TEAM_ROUTING" '`zenmux` identifies the transport/provider' 'Cross distinguishes ZenMux transport from supplier'
-assert_has "$TEAM_ROUTING" 'atlas-native-agent-inbox put atlas_sdd_planner.*before calling `spawn_agent`' 'Cross stages the planner logical-role slot before spawn'
-assert_has "$TEAM_ROUTING" 'atlas-native-agent-inbox put atlas_sdd_reviewer.*before calling `spawn_agent`' 'Cross stages the reviewer logical-role slot before spawn'
-
+assert_lacks "$TEAM_ROUTING" 'Cross v1|Cross Plan|Cross Execute' 'deprecated Cross recipe is removed'
+assert_lacks "$TEAM_ROUTING" 'deepseek-v4-pro|zenmux|atlas-native-agent-inbox' 'deprecated DeepSeek routing is removed'
+assert_has "$TEAM_ROUTING" 'DeepSeek profile must not be selected' 'still-installed DeepSeek profiles stay unselectable'
 assert_has "$TEAM_ROUTING" 'Default Planning And Contract Review Mode' 'planning and contract review high-tier default is visible'
 assert_has "$TEAM_ROUTING" 'no-argument policy\s+check resolves this matrix' 'no-argument model policy defaults to planning-review'
 assert_has "$TEAM_ROUTING" 'Formal plan or contract review.*atlas-sdd-phase-reviewer.*resolved frontier.*medium.*none' 'formal plan or contract review defaults to frontier medium'
@@ -183,13 +131,9 @@ assert_has "$TEAM_ROUTING" 'only after explicit user implementation authority ha
 assert_has "$TEAM_ROUTING" 'must never author or review a plan or contract' 'saving mode cannot review a plan or contract'
 assert_has "$TEAM_ROUTING" 'only after staffing\s+has independently established that the lane is useful' 'saving mode follows staffing rather than creating Team'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer.*resolved fast.*max.*none' 'routine implementation defaults to fast max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-implementer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro implementation always uses max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro planning always uses max'
-assert_has "$TEAM_ROUTING" 'same logical writable implementation role' 'Luna and DeepSeek preserve one logical implementation responsibility'
-assert_has "$TEAM_ROUTING" '[Nn]ever send the same writable packet to both' 'implementation alternatives are not a duplicate-writer fanout'
+assert_has "$TEAM_ROUTING" 'Never send the same writable packet to two implementers' 'implementation alternatives are not a duplicate-writer fanout'
 assert_has "$TEAM_ROUTING" 'predecessor writer is quiesced' 'writable fallback requires quiescence'
 assert_has "$TEAM_ROUTING" 'Implementation slice review.*atlas-sdd-reviewer.*resolved balanced.*max.*none' 'implementation slice review defaults to balanced max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro review always uses max'
 assert_has "$TEAM_ROUTING" 'Implementation command or business verification.*atlas-sdd-verifier.*resolved balanced.*high.*none' 'implementation verification defaults to balanced high'
 assert_has "$TEAM_ROUTING" 'Implementation replanning.*atlas-sdd-planner.*resolved frontier.*high.*none' 'implementation replanning remains on frontier high'
 
@@ -200,19 +144,14 @@ assert_lacks "$TEAM_ROUTING" 'Upgrade to the Sol phase-reviewer' 'automatic Sol 
 
 assert_has "$TEAM_ROUTING" 'atlas-sdd-browser-verifier.*resolved fast.*xhigh.*none' 'browser-heavy work defaults to fast xhigh'
 assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer.*resolved fast.*max.*none' 'exploration defaults to fast max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-explorer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek V4 Pro exploration always uses max'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-planner-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek planner is present in the native matrix'
-assert_has "$TEAM_ROUTING" 'atlas-sdd-reviewer-deepseek.*deepseek-v4-pro:deepseek.*max.*none' 'DeepSeek reviewer is present in the native matrix'
-assert_has "$TEAM_ROUTING" 'Atlas always selects `max`' 'DeepSeek V4 Pro native profiles use max explicitly'
-assert_has "$TEAM_ROUTING" 'configured `low` / `high` / `max` capability set' 'DeepSeek catalog preserves the configured effort set'
-assert_has "$TEAM_ROUTING" 'same logical read-only exploration role' 'Luna and DeepSeek preserve one logical responsibility'
 assert_has "$TEAM_ROUTING" 'per-lane decision, never a default fan-out' 'dual cross-check is conditional'
+assert_has "$TEAM_ROUTING" 'disclose the failed layer and the lost perspective' 'a failed exploration candidate discloses the lost perspective'
+assert_has "$TEAM_ROUTING" 'useful but conflicting output is a disagreement to synthesize' 'conflicting output is synthesized as disagreement'
 assert_has "$TEAM_ROUTING" 'same self-contained packet' 'dual cross-check uses identical acceptance input'
 assert_has "$TEAM_ROUTING" 'main Codex compares evidence' 'controller synthesizes model disagreement'
 assert_has "$TEAM_ROUTING" 'cannot bypass the host/model allowlist' 'catalog cannot bypass host admission'
 assert_has "$TEAM_ROUTING" 'atlas-team-model-catalog' 'Team documents the allowlist catalog projection'
 assert_has "$TEAM_ROUTING" 'planning-review/saving/quality Atlas custom-agent profiles intentionally omit `model`, `model_reasoning_effort`, and `model_provider`' 'stage-aware profiles cannot shadow explicit routing'
-assert_has "$TEAM_ROUTING" 'provider-bound DeepSeek equivalent profiles are the explicit exception' 'DeepSeek profiles preserve child-local provider routing'
 assert_has "$AGENTS/atlas-sdd-explorer.toml" 'sandbox_mode = "read-only"' 'Luna explorer has an explicit read-only sandbox'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'sandbox_mode = "read-only"' 'DeepSeek explorer has an explicit read-only sandbox'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" '^model_provider = "zenmux"$' 'DeepSeek explorer binds ZenMux locally'
@@ -272,12 +211,6 @@ assert_lacks "$AGENTS/atlas-sdd-browser-verifier.toml" 'require the controller t
 
 assert_has "$TEAM_ROUTING" 'fork_turns="none"' 'custom role dispatch avoids full-history fork'
 assert_has "$TEAM_ROUTING" 'self-contained dispatch packet' 'fresh child receives a complete task packet'
-assert_has "$TEAM_ROUTING" 'atlas-native-agent-inbox put atlas_sdd_explorer.*atlas-native-agent-inbox put atlas_sdd_implementer' 'DeepSeek native dispatch stages the exact packet in a logical-role slot'
-assert_has "$TEAM_ROUTING" 'also pass the same packet as `message`' 'compatibility transport preserves the native message contract'
-assert_has "$TEAM_ROUTING" 'not a Paseo fallback' 'compatibility transport remains a native Codex dispatch'
-assert_has "$TEAM_ROUTING" 'terminal and quiesced.*delete the corresponding role slot' 'DeepSeek packet cleanup waits for quiescence'
-assert_has "$TEAM_ROUTING" 'serialized independently.*fast-model peer.*may still run concurrently' 'role slots fail closed without blocking fast-model cross-checking'
-assert_has "$TEAM_ROUTING" 'inbox `get` alone does not prove usable routing' 'transport bootstrap is not confused with a complete tool loop'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek explorer has the encrypted-payload bootstrap'
 assert_has "$AGENTS/atlas-sdd-implementer-deepseek.toml" 'empty visible Payload plus encrypted content' 'DeepSeek implementer has the encrypted-payload bootstrap'
 assert_has "$AGENTS/atlas-sdd-explorer-deepseek.toml" 'atlas-native-agent-inbox get atlas_sdd_explorer' 'DeepSeek explorer uses only its stable logical-role slot'

@@ -275,21 +275,16 @@ atlas-team-model-catalog
 ```
 
 The helper preserves the official catalog, promotes only the exact Luna entry
-to v2 when necessary, and appends the isolated native DeepSeek catalog entry
-`deepseek-v4-pro:deepseek` as v2. It writes
-`~/.codex/model-catalogs/atlas-team.json` atomically with mode 600 and never
-modifies `models_cache.json`. The user-level `model_catalog_json` must point to
-that output. The isolated entry must declare the configured `low`, `high`, and
-`max` efforts exactly once and set `default_reasoning_level` to `max`.
-Regenerate it whenever either input catalog changes. Catalog
+to v2 when necessary, and writes `~/.codex/model-catalogs/atlas-team.json`
+atomically with mode 600 without modifying `models_cache.json`. The user-level
+`model_catalog_json` must point to that output; regenerate it whenever either
+input catalog changes. Until the helper is retired it still requires the
+isolated DeepSeek catalog input and appends `deepseek-v4-pro:deepseek`; that
+entry must declare `low`, `high`, and `max` exactly once with
+`default_reasoning_level` `max`. DeepSeek/ZenMux routes are deprecated: Atlas
+does not select the DeepSeek custom profiles or that catalog entry. Catalog
 metadata remains subject to the host's model allowlist, entitlement, and tool
-schema checks. Atlas selects the provider-bound
-`atlas-sdd-implementer-deepseek` or `atlas-sdd-explorer-deepseek` custom profile
-for a native DeepSeek lane and supplies the exact routed model, `max` reasoning,
-and `fork_turns="none"` to `spawn_agent`; a bare model override on an inherited
-role is not a provider switch. Luna remains the default native candidate, the
-root provider remains unchanged, and the DeepSeek alternative is never a
-default fixed fan-out.
+schema checks, and the root provider remains unchanged.
 
 `atlas-agent-model-policy check/resolve` 未指定 `--catalog` 时，通过
 `codex debug models` 读取 Codex 当前实际使用的模型目录，包括

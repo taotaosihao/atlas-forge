@@ -163,17 +163,12 @@ maintenance work with no GUI outcome does not load it.
 
 ## Product-Manager Progress Reports
 
-Whenever work returns to the user, including the final reply, keep the product-manager body to one screen and use this order; internal checkpoints update only the rolling checkpoint:
-
-When a formal execution grant exists, use `codex-workflow product-progress <task-id>` for the read-only current objective, blocker, next acceptance point, and authorization impact; do not infer those facts from `progress.jsonl` or hand-edited task state.
-
-- `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
-- `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; a command name or green gate alone is not a capability explanation.
-- `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
-
-Files changed and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent JSON, or command lists. Put exact engineering details in a short `技术追溯` section after the acceptance body when they aid audit or handoff.
-
-For canonical phase status, run `codex-workflow project-phase-report <task-id> <phase-id>`. The scaffold is only an unprojected sentinel; never hand-author its acceptance coverage, receipt status, or release decision.
+Whenever work returns to the user, including the final reply, follow the shared
+[progress report format](../../references/progress-reports.md): a one-screen
+product-manager body led by verified user-visible behavior, with exact
+engineering facts only in `技术追溯`. Internal checkpoints update only the
+rolling checkpoint. For canonical phase status, run
+`codex-workflow project-phase-report <task-id> <phase-id>`.
 
 ## Review, Commits, And Completion
 

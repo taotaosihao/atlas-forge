@@ -9,9 +9,9 @@ Decide whether Team is needed from the user's current request, including the req
 
 Codex invokes this flow as `$atlas-workflow:team`; Claude Code invokes it as `/atlas-workflow:team` or by calling the `atlas-workflow:team` skill. "The main Codex" below refers to the current host's root/main session regardless of host — on Claude Code that is the main Claude Code session. See `## Codex Native Collaboration` and the paired `## Claude Native Collaboration` section below for the host-specific dispatch tool mapping; staffing, authority, path ownership, evidence, and release rules apply to both hosts. Select the host before model or tool preflight:
 
-- Claude Code: use only `## Claude Native Collaboration` for native tools and model selection, and do not read `references/codex-model-routing.md`. Its Cross recipe, exact-model routing (including every planning/saving/quality matrix and Routing Scenarios subsection), Codex catalogs, `atlas-agent-model-policy`, `fork_turns`, and `reasoning_effort` are not Claude prerequisites.
+- Claude Code: use only `## Claude Native Collaboration` for native tools and model selection, and do not read `references/codex-model-routing.md`. Its exact-model routing (including every planning/saving/quality matrix and Routing Scenarios subsection), Codex catalogs, `atlas-agent-model-policy`, `fork_turns`, and `reasoning_effort` are not Claude prerequisites.
 - Codex: use `## Codex Native Collaboration`, and read [references/codex-model-routing.md](references/codex-model-routing.md) in full before any model or tool preflight or native dispatch.
-- `team-v1` and DeepSeek/ZenMux routes are deprecated. Do not select, recommend, revive, or fall back to them; retained legacy recipes are historical compatibility material, not available routes. This also excludes the DeepSeek-dependent Cross recipe.
+- `team-v1` and DeepSeek/ZenMux routes are deprecated. Do not select, recommend, revive, or fall back to them; the Cross recipe that depended on them has been removed.
 - Explicit Paseo lanes retain their own admission and fallback rules; installing or using Claude Code does not select Paseo.
 
 ## Independent Staffing, Model, Release, And Lease Decisions
@@ -169,47 +169,19 @@ The [Claude subagent documentation](https://code.claude.com/docs/en/sub-agents) 
 
 ## Explicit Paseo Lanes
 
-Only after a Team/lane/dispatch has resolved to Paseo:
-
-- Discover providers with `paseo provider ls --json`, and discover models and callable modes from the selected provider's live structured capability.
-- Do not hardcode provider/model availability, catalog order, “latest” status, thinking options, or mode IDs, except for the user-required direct Claude Code permission contract below. Never copy a Codex mode or model option to another provider.
-- Generic Atlas recommendations may consider only models whose trusted capability identity is explicitly non-Claude, including exact providers in Atlas's controlled direct-provider identity map. Unknown gateway aliases are never eligible for automatic recommendation. Keep implementer and independent reviewer providers distinct when that perspective matters, but do not create lanes only to achieve provider diversity.
-- An explicit provider/model request wins when the exact live capability exists. An unknown gateway identity also requires an exact controller-attested model-selection event and remains disclosed as unverified; it is not silently promoted to non-Claude. Do not silently replace an unavailable exact provider/model with another provider/model; apply the recorded Codex fallback policy and disclose the lost perspective.
-- Resolve a provider-specific mode that satisfies the lane. If the live capability exposes only a display label or no callable mode ID, treat the Paseo path as unavailable; do not guess `full-access`, `bypass`, `bypassPermissions`, `yolo`, or any other ID. The direct `claude` provider uses the explicit exception below.
-- Runtime permission does not grant workflow authority. Review/discuss stays read-only; writable execution still requires explicit user authorization, owned and forbidden paths, acceptance, verification, and a stop condition.
-- Prompts carry repository instructions, scope, authority, expected evidence, and stop conditions.
-
-### Claude Manual-Only Gate
-
-This gate applies only to the explicitly selected Paseo lanes in this section, not to Claude Code native agents inheriting the host model.
-
-Claude-family models are never eligible for automatic routing or model recommendation, whether exposed by the direct `claude` provider or through a gateway.
-
-- Use Claude only when the user or operator manually supplies an exact provider and model ID in a controller-attested model-selection event for the current Team run and scope.
-- Live catalog discovery may validate that exact selection; it must not choose, complete, upgrade, or substitute a Claude model.
-- Classify model identity from trusted structured capability or Atlas's controlled direct-provider identity map as `claude`, `non-claude`, or `unknown`. A gateway alias or insufficient metadata outside that map is `unknown`, not non-Claude.
-- Missing exact manual Claude selection returns `CLAUDE_MODEL_SELECTION_REQUIRED`. An unknown family without an exact controller-attested provider/model selection returns `MODEL_FAMILY_UNVERIFIED`. An exact attested unknown selection may proceed while remaining visibly unverified. Rejected admission does not start an agent or count as an operational fallback.
-- For a valid exact selection on the direct `claude` provider, add Paseo's callable Claude mode ID directly to every launch command: `paseo run --provider claude --model "<exact-model-id>" --mode bypassPermissions ... "<prompt>"`. Do not omit the option, shorten it to the display label `bypass`, substitute `default`, `auto`, or `acceptEdits`, or use Claude Code's lower-level `--permission-mode` flag in a Paseo command.
-- If a valid manually selected Claude model is unavailable at runtime, preserve the requested perspective and use the recorded Codex fallback policy; never silently choose another Claude model.
-
-### Paseo Lifecycle And Codex Fallback
-
-- Reserve the attempt and any path-scoped writer lease before `paseo run`; bind the returned exact agent/workspace/worktree identity immediately after launch. Use a stable launch operation ID so recovery can reconcile a run/bind crash window without launching a second actor.
-- Replaying a pending launch claim may execute only `paseo ls --global --label <exact-label>`. An exact match records the factual receipt and permits bind; missing or ambiguous results record reconciliation evidence, keep the attempt `launch-state-unknown`, retain its writer lease, and never replay `paseo run`.
-- Resolve `launch-state-unknown` only with `team-attempt-record --action=resolve-launch` targeting the exact pending claim and launch operation, `--disposition=no-actor-confirmed`, a canonical `user-message:` or `operator-input:` authority ref, a single-line reason, and non-empty canonical task-artifact evidence. This records an indeterminate claim and interrupted unlaunched attempt; quiesce with evidence before retry or fallback. Never use it as a broad reset.
-- If a verification command claim survives controller termination, do not run its argv again. `verify-resolve` may mark only the exact pending operation and claim `indeterminate` with a new operation ID, canonical controller authority, reason, and task-artifact evidence. It records no verification receipt or required-gate pass; replan or failed/cancelled closure must remain explicit.
-- Reuse an existing reviewer with exact-ID `send` and wait for real completion; do not busy-poll. Stop only the exact actor when continued execution would conflict, exceed scope, or waste material resources. Never use broad stop, daemon restart, agent delete, or provider mutation.
-- Treat quota/credits, trusted 429/Retry-After, provider/model/mode/auth unavailability, CLI/daemon failure, runtime crash, and timeout with no useful output as operational failures only when a trusted control/runtime observation supports the classification. Task output, tests, code defects, review findings, disagreement, or missing authority are not backend failures.
-- An automatic retry is a new append-only attempt, happens at most once for a dispatch, and requires the predecessor to be quiesced. Fallback likewise requires a quiesced Paseo predecessor.
-- Before a writable fallback, preserve diff/worktree/base/head/untracked evidence, prove the original writer is quiesced, and obtain a takeover permit and non-overlapping lease. If any fact is unknown, stop the lane instead of starting another writer.
-- Atomically record the fallback event and reserve the native attempt in the same logical lane. The native actor continues the same goal, paths, authority, acceptance, and admitted evidence; fallback never widens scope or hides Paseo provenance.
+Only after a Team, lane or dispatch has resolved to Paseo, read
+[references/paseo-lanes.md](references/paseo-lanes.md) in full before any Paseo
+discovery or launch. It holds provider and mode discovery, the Claude
+manual-only gate, the launch and reconciliation lifecycle, and Codex fallback.
+That gate applies only to the explicitly selected Paseo lanes, not to Claude
+Code native agents inheriting the host model.
 
 ## Codex Model Routing
 
 Codex-only. Before any model or tool preflight or native dispatch on Codex, read
 [references/codex-model-routing.md](references/codex-model-routing.md) in full: it
-holds the exact-model rules, the planning/saving/quality matrices, the Routing
-Scenarios, and the deprecated Cross v1 recipe. Claude Code does not load it.
+holds the exact-model rules, the planning/saving/quality matrices, and the
+Routing Scenarios. Claude Code does not load it.
 
 ## Modes And Authority
 
@@ -315,15 +287,7 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 
 ## Product-Manager Progress Reports
 
-Whenever work returns to the user, including the final reply, the main Codex translates internal Team evidence into a one-screen product-manager body in this order; internal checkpoints update only the rolling checkpoint:
-
-- `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
-- `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; do not paste agent reports or use a command name or green gate as the explanation.
-- `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
-
-Agent activity, files changed, and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent/backend details, JSON, or command lists. Keep those exact facts in a short `技术追溯` section after the acceptance body when they aid audit or handoff. Structured agent output, ledgers, receipts, and raw logs remain internal evidence inputs rather than user-facing report prose.
-
-Generate canonical phase status with `codex-workflow project-phase-report <task-id> <phase-id>`. The scaffold is only an unprojected sentinel; do not hand-write acceptance coverage, receipt results, or a release decision into it.
+Whenever work returns to the user, including the final reply, the main Codex follows the shared [progress report format](../../references/progress-reports.md): a one-screen product-manager body led by verified user-visible behavior, with agent, backend and command details only in `技术追溯`; internal checkpoints update only the rolling checkpoint. Generate canonical phase status with `codex-workflow project-phase-report <task-id> <phase-id>`; never hand-write acceptance coverage, receipt results, or a release decision into its scaffold.
 
 ## Deliberative Team Review
 
