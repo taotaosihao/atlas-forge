@@ -71,8 +71,8 @@ field.
 - A lane is admitted only with a frozen Goal or controller-admitted
   `current-required` reference, a named output consumer, ready input, a
   read-only evidence domain or disjoint owned/forbidden paths, consumer-appropriate output,
-  authority and stop condition, and a reason tied to critical-path time or a
-  named risk. Duplicate lanes, dependency-not-ready lanes, outputs without a
+  authority and stop condition, and a reason tied to critical-path time, root
+  context cost or a named risk. Duplicate lanes, dependency-not-ready lanes, outputs without a
   current consumer, uncertain writer lease/quiescence, unavailable exact
   spawn/profile/model/reasoning/backend routes, and confirmed cost anomalies
   fail closed instead of creating fan-out.
@@ -87,7 +87,13 @@ field.
   canonical writer for shared scope/artifacts, and final acceptance owner.
   Parallel writers are allowed only for explicitly disjoint owned paths with an
   integration owner and the applicable lease/quiescence boundary; tightly
-  coupled implementation remains single-writer. Child findings never broaden
+  coupled implementation remains single-writer. Keep the root context small:
+  when such a lane is admitted, give long journeys, iterative diagnosis and
+  large-output inspection to a child that cannot modify the candidate under
+  test, and take back its
+  conclusion, failure signature and evidence paths. At an acceptance point the
+  root rereads the raw result itself, including the pass marker, exit status
+  and resource cleanup. Child findings never broaden
   the Goal or silently create workflow artifacts.
 - `record-only` compatibility and `effective_backend=none` remain legal
   zero-dispatch outcomes, but neither is evidence of admitted dispatch or
@@ -332,8 +338,8 @@ materials never authorize an automatic format downgrade.
 - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Automatically repair only findings that block the current goal, regressions introduced by the current diff, or safety/data/permission problems that make the current delivery unsafe.
 - Architecture improvements, adjacent cleanup, historical defects, additional product requirements, and roadmap-external work are follow-ups unless continuing the current delivery would be unsafe.
-- After a repair, review the repair diff and relevant integration surface normally; do not ban new regressions, and do not reopen unrelated repository-wide discovery by default.
-- Continue repair only while a verifiable implementation or evidence change materially advances the current goal. If progress stalls, record `fix_progress_stalled` and return the concrete blocker instead of generating more lanes or artifacts.
+- Review repairs at each independently deliverable outcome, covering the repair diff and relevant integration surface; do not ban new regressions, and do not reopen unrelated repository-wide discovery by default. Review a repair immediately when it touches permission, identity, lock order, transaction boundaries, final-send eligibility or data provenance.
+- Continue repair only while a verifiable implementation or evidence change materially advances the current goal. A repeating repair loop follows the shared verification guidance's design-signal rule; record `fix_progress_stalled` and return the concrete blocker only when that analysis cannot continue without a person, instead of generating more lanes or artifacts.
 - Run a branch/integration review when parallel writes, cross-module coupling, migration, security, release, or comparable risk justifies it; it is not an unconditional final ritual.
 
 ## Commits And Context
@@ -342,7 +348,7 @@ materials never authorize an automatic format downgrade.
 - Keep one primary reason per commit and include its tests/necessary docs. Do not commit every step, slice, or repair round, and do not accumulate an entire roadmap into one oversized diff.
 - When an independently understandable result meets its acceptance, consume its review and verification, reconcile its diff and ownership, and update the existing handoff state before expanding the next delivery batch. Commit only when authorized and safely isolatable; mixed prior work is not a reason to force a commit or block unrelated authorized work. This adds no approval or artifact gate.
 - Stage only current-task paths or hunks. A commit does not authorize push, PR, deployment, release, cache refresh, or other external mutation.
-- For work crossing compaction or handoff, keep one non-Git rolling checkpoint: current goal, active constraints, completed work, next critical path, diff/verification state, and real blockers/follow-ups. Replace each capability's old conclusion, remaining gap, and next action together; remove superseded blockers and link historical evidence. Retain identities, resources, and failures in the current text only when the next action depends on them. Engineering results cannot overwrite user decisions.
+- For work crossing compaction or handoff, keep one non-Git rolling checkpoint: current goal, active constraints, completed work, next critical path, diff/verification state, and real blockers/follow-ups. Replace each capability's old conclusion, remaining gap, and next action together; remove superseded blockers and link historical evidence. Retain identities, resources, and failures in the current text only when the next action depends on them, and keep active safety constraints in their own section. `codex-workflow checkpoint` warns when this checkpoint or the uncommitted diff exceeds its budget; the warning asks for pruning, an authorized verified commit (execution-vnext commits only after `done`) or a narrower batch and never forces a commit. Engineering results cannot overwrite user decisions.
 
 ## Optional Protocols
 

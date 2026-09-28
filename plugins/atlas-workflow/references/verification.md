@@ -26,8 +26,19 @@ BAF or release certification.
   code, configuration, identity, environment, data, measurement method, oracle
   or acceptance meaning changes; do not reuse a pass when applicability is
   unknown. A final suite's included checks satisfy those requirements in that
-  run; do not repeat them just to check off another name. Formal gate, receipt,
+  run; do not repeat them just to check off another name. Identify a candidate
+  by its tree or build identity rather than a per-file hash ledger; keep file
+  hashes only where a later check depends on them, such as the same build across
+  a long or final run, proof that an unavoidable authorized temporary change was
+  reverted, or a migration with history checksum obligations. Formal gate, receipt,
   freshness and final-candidate rules remain binding.
+- **Build focused checks from real producers.** When a focused test stands in
+  for an in-repository producer across a boundary, build its fixture from that
+  producer's actual output, by calling it or capturing what it emits; a
+  hand-written record there expresses a deliberate negative case, not a positive
+  pass. Pure-function tests and external producers keep their own inputs. When a
+  complete journey exposes a defect that a focused check missed, first make the
+  focused check fail for the same reason, then repair.
 - **Retire answered diagnostics.** Once an experiment has answered the current
   question or is explicitly closed, stop adding samples. Under the current edit
   authority, remove newly introduced temporary runners, duplicate sampling and
@@ -39,6 +50,23 @@ BAF or release certification.
   existing logs. Extra stderr is not authority to replay a migration, resend a
   device action or perform another write. An already authorized recovery follows
   its own conditions.
+- **Make the cause observable before rerunning.** When existing output does not
+  show why a check failed, first add a durable observation at the failing
+  boundary, such as a structured rejection reason, a preserved error body or a
+  dead-letter summary, and reach it with the smallest check. Do not temporarily
+  edit migrations, fixtures or product code to print a cause and then revert
+  them. Rerunning a complete journey only to see an error is a last resort.
+- **Treat a repeating repair loop as a design signal.** Progress means new
+  information that narrows the remaining work. When the same failure signature
+  recurs without new information, or a new branch breaks the same consumer
+  again, stop rerunning and analyze the shared cause across the affected
+  branches. Research the established industry solution for that class of
+  problem, choose and record the approach, and continue within the current
+  goal, contract and edit authority; changing frozen scope, acceptance or owned
+  paths uses its existing amendment path. Ask the user only when the choice
+  needs a person: product intent, risk acceptance, permission or authority, an
+  external state change, or reversing an active user decision. Rounds and tokens
+  remain telemetry, not stop conditions.
 - **Stop on sufficient evidence.** After related checks pass, repeat or expand
   only for new changes, failures or unresolved risks. If a claimed benefit drives
   a decision, use a proportionate comparison under the same relevant conditions

@@ -159,6 +159,54 @@ test("writes checkpoint ledger, lifecycle projection, task fields, and state", (
       ),
     /blocked phase requires --blocker/,
   );
+  assert.equal(lines.length, 5);
+});
+
+test("warns without failing when the rolling checkpoint or uncommitted diff exceeds its budget", (t) => {
+  const { environment, home, paths } = temporaryWorkflow(t);
+  const taskId = createFixtureTask(environment, "Checkpoint budget");
+  const uuid = "0b14445b-1a2b-4c3d-8e9f-0123456789ab";
+  fs.writeFileSync(
+    path.join(taskArtifactDir(paths, taskId), "checkpoint.md"),
+    `# Checkpoint\n\n${`r1 failed ${uuid}; `.repeat(1200)}\n`,
+    "utf8",
+  );
+  const worktree = path.join(home, "repo");
+  fs.mkdirSync(worktree);
+  const git = (...args) => {
+    const result = spawnSync("git", ["-C", worktree, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git("init", "-q");
+  git(
+    "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+    "commit", "-q", "--allow-empty", "-m", "base",
+  );
+  const checkpoint = (worktreeArgument) =>
+    writeCheckpoint(
+      parseCheckpointArgs([taskId, "--phase", "implement", "--summary", "big", "--worktree", worktreeArgument]),
+      { clock: fixedClock, environment },
+    ).filter((line) => line.startsWith("warning: "));
+  const diffWarnings = (worktreeArgument) =>
+    checkpoint(worktreeArgument).filter((line) => line.includes("uncommitted diff"));
+
+  assert.deepEqual(diffWarnings(worktree), []);
+  assert.deepEqual(diffWarnings(home), []);
+
+  fs.writeFileSync(path.join(worktree, "runner.mjs"), "line\n".repeat(4001), "utf8");
+  assert.match(diffWarnings(worktree)[0], /uncommitted diff is 1 files\/4001\+ LOC/);
+  fs.rmSync(path.join(worktree, "runner.mjs"));
+
+  for (let index = 0; index < 81; index += 1) {
+    fs.writeFileSync(path.join(worktree, `file-${index}.txt`), "x\n", "utf8");
+  }
+  const warnings = checkpoint(worktree);
+  assert.equal(warnings.length, 4);
+  assert.match(warnings[0], /checkpoint\.md is \d+ KB \(budget 16 KB\)/);
+  assert.match(warnings[1], /embeds 1200 hashes\/UUIDs/);
+  assert.match(warnings[2], /checkpoint\.md:3 is \d+ characters/);
+  assert.match(warnings[3], /uncommitted diff is 81 files\/81 LOC/);
+  assert.equal(readJsonObject(taskStateFile(paths, taskId)).current_phase, "implement");
 });
 
 test("records file and URL source snapshots without guessing source content", (t) => {

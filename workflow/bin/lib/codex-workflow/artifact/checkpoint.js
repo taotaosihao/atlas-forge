@@ -1,5 +1,6 @@
 "use strict";
 
+const childProcess = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { atomicWriteFile } = require("../core/atomic-file");
@@ -27,6 +28,15 @@ const VALID_PHASES = new Set([
   "blocked",
   "done",
 ]);
+
+// Advisory budgets: exceeding one prints a warning and never fails the checkpoint.
+const ROLLING_CHECKPOINT_BUDGET = {
+  maxBytes: 16 * 1024,
+  maxIdentifiers: 30,
+  maxLineChars: 2000,
+};
+const UNCOMMITTED_DIFF_BUDGET = { maxFiles: 80, maxLoc: 4000 };
+const UNTRACKED_LINE_COUNT_MAX_BYTES = 1024 * 1024;
 
 function parseCheckpointArgs(argv) {
   if (argv.length === 0) {
@@ -112,6 +122,87 @@ function readLedger(file) {
     }
     throw error;
   }
+}
+
+function rollingCheckpointWarnings(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    return [`unable to inspect ${path.basename(file)}: ${error.code || error.message}`];
+  }
+  const warnings = [];
+  const name = path.basename(file);
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > ROLLING_CHECKPOINT_BUDGET.maxBytes) {
+    warnings.push(
+      `${name} is ${Math.ceil(bytes / 1024)} KB (budget ${ROLLING_CHECKPOINT_BUDGET.maxBytes / 1024} KB); replace superseded conclusions and link history instead of embedding it`,
+    );
+  }
+  const identifiers = (
+    text.match(/\b[0-9a-f]{40,64}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi) || []
+  ).length;
+  if (identifiers > ROLLING_CHECKPOINT_BUDGET.maxIdentifiers) {
+    warnings.push(
+      `${name} embeds ${identifiers} hashes/UUIDs (budget ${ROLLING_CHECKPOINT_BUDGET.maxIdentifiers}); keep only identities the next action needs`,
+    );
+  }
+  text.split("\n").forEach((line, index) => {
+    if (line.length > ROLLING_CHECKPOINT_BUDGET.maxLineChars) {
+      warnings.push(
+        `${name}:${index + 1} is ${line.length} characters; move round-by-round failure history to the linked evidence`,
+      );
+    }
+  });
+  return warnings;
+}
+
+function uncommittedDiffWarnings(worktree) {
+  if (!worktree || !path.isAbsolute(worktree) || !fs.existsSync(worktree)) return [];
+  const git = (args) =>
+    childProcess.spawnSync("git", ["-C", worktree, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 10000,
+    });
+  const status = git(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+  if (status.error || status.status !== 0) return [];
+  const files = status.stdout
+    .split("\0")
+    .filter((entry) => /^.. /.test(entry)).length;
+  let loc = 0;
+  const numstat = git(["diff", "--numstat", "HEAD"]);
+  if (!numstat.error && numstat.status === 0) {
+    for (const row of numstat.stdout.split("\n")) {
+      const [added, deleted] = row.split("\t", 2);
+      if (/^\d+$/.test(added)) loc += Number(added);
+      if (/^\d+$/.test(deleted)) loc += Number(deleted);
+    }
+  }
+  const untracked = git(["ls-files", "--others", "--exclude-standard", "-z"]);
+  if (!untracked.error && untracked.status === 0) {
+    for (const relative of untracked.stdout.split("\0").filter(Boolean)) {
+      if (loc > UNCOMMITTED_DIFF_BUDGET.maxLoc) break;
+      try {
+        const file = path.join(worktree, relative);
+        const stat = fs.lstatSync(file);
+        if (!stat.isFile() || stat.size > UNTRACKED_LINE_COUNT_MAX_BYTES) continue;
+        const content = fs.readFileSync(file);
+        if (content.includes(0)) continue;
+        loc += content.toString("utf8").split("\n").length - (content.at(-1) === 10 ? 1 : 0);
+      } catch {
+        // An unreadable untracked file still counts toward the file total.
+      }
+    }
+  }
+  if (files <= UNCOMMITTED_DIFF_BUDGET.maxFiles && loc <= UNCOMMITTED_DIFF_BUDGET.maxLoc) {
+    return [];
+  }
+  return [
+    `uncommitted diff is ${files} files/${loc}${loc > UNCOMMITTED_DIFF_BUDGET.maxLoc ? "+" : ""} LOC (budget ${UNCOMMITTED_DIFF_BUDGET.maxFiles} files/${UNCOMMITTED_DIFF_BUDGET.maxLoc} LOC); commit a verified logical outcome when authorized and isolatable, or narrow the next batch`,
+  ];
 }
 
 function writeCheckpoint(parsed, options = {}) {
@@ -231,11 +322,17 @@ function writeCheckpoint(parsed, options = {}) {
     `lifecycle: ${lifecycleFile}`,
     `phase: ${phase}`,
     `next_count: ${next.length}`,
+    ...[
+      ...rollingCheckpointWarnings(artifactFile(paths, parsed.taskId, "checkpoint.md")),
+      ...uncommittedDiffWarnings(worktree),
+    ].map((warning) => `warning: ${warning}`),
   ];
 }
 
 module.exports = {
   CHECKPOINT_USAGE,
+  ROLLING_CHECKPOINT_BUDGET,
+  UNCOMMITTED_DIFF_BUDGET,
   VALID_PHASES,
   parseCheckpointArgs,
   readLedger,

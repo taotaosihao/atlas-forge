@@ -92,8 +92,11 @@ check has actually passed; a failed, unrun, or unknown real check still blocks.
 After a failure, use existing output to locate the earliest unmet prerequisite
 or postcondition; distinguish product behavior, setup, driver/environment, and
 assertion assumptions where evidence permits, otherwise keep the cause unknown.
-Verify a repair with the smallest affected check before rerunning the still
-missing or invalidated complete journey. Diagnostic checks do not replace final
+When existing output cannot locate the cause, make it observable and reproduce
+it in a producer-backed focused check under the shared verification guidance
+before rerunning the journey; a repeating failure follows that guidance's
+design-signal rule. Verify a repair with the smallest affected check before
+rerunning the still missing or invalidated complete journey. Diagnostic checks do not replace final
 acceptance; do not bypass steps, alter business end states, or combine unrelated
 objects to obtain a pass. Reuse unaffected evidence under the shared verification
 guidance. Repair only under the current implementation authority; this reference

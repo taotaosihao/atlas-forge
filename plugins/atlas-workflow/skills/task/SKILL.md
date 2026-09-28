@@ -159,7 +159,7 @@ maintenance work with no GUI outcome does not load it.
 - A lightweight contract should name goal, non-goals, acceptance, real verification, and true return conditions. Do not add staffing/evidence files solely to satisfy a file checklist.
 - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Keep raw logs, traces, screenshots, dumps, retry output, and intermediate repair output outside Git by default.
-- Long work crossing compaction or handoff uses one non-Git rolling checkpoint. Replace a capability's old conclusion, remaining gap, and next action together, remove superseded blockers, and link historical evidence. Preserve active constraints and the identities/resources needed for the next action; engineering results do not overwrite user decisions.
+- Long work crossing compaction or handoff uses one non-Git rolling checkpoint. Replace a capability's old conclusion, remaining gap, and next action together, remove superseded blockers, and link historical evidence. Preserve active constraints in their own section and the identities/resources needed for the next action; `codex-workflow checkpoint` warns when the checkpoint or uncommitted diff exceeds its budget, without forcing a commit. Engineering results do not overwrite user decisions.
 
 ## Product-Manager Progress Reports
 
@@ -179,7 +179,7 @@ For canonical phase status, run `codex-workflow project-phase-report <task-id> <
 
 - Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
-- Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, external-state dependency, or evidenced lack of material progress.
+- Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, or external-state dependency. A repeating repair loop follows the Verification guidance's design-signal rule and returns only when that analysis needs a person.
 - Run `atlas-workflow done <task-id>` only when the whole authorized goal is actually complete.
 
 In the final reply, follow the product-manager structure above. Put the task id, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.
