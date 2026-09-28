@@ -62,8 +62,11 @@ feedback, durable outcome, and required recovery. Do not add an unapproved
 visual system, viewport matrix, or feature merely because an implementation
 could support it.
 
-The verification unit is every complete business journey required by the
-current scope, one journey at a time. Identify the role, ordinary startup and
+The final acceptance unit is every complete business journey required by the
+current scope, one journey at a time. Reuse existing entrypoints, fixtures, and
+allowed actions; an acceptance row does not itself require a new permanent
+runner. Add lasting automation for an actual repeat or regression need.
+Identify the role, ordinary startup and
 entrypoint, legal starting data, required steps, and final business result.
 Execute every required step with the same related objects and IDs, including
 API, Worker, callback, persistence, downstream page, or export only when that
@@ -86,8 +89,16 @@ accepted. A local test, health check, HTTP 200, green unit test, screenshot, or
 partial page cannot be averaged into acceptance. A recorder/evidence collector
 failure may be reported as `证据采集：降级` only after every applicable real
 check has actually passed; a failed, unrun, or unknown real check still blocks.
-Repair only under the current implementation authority and rerun the affected
-complete journey; this reference never authorizes product or external writes.
+After a failure, use existing output to locate the earliest unmet prerequisite
+or postcondition; distinguish product behavior, setup, driver/environment, and
+assertion assumptions where evidence permits, otherwise keep the cause unknown.
+Verify a repair with the smallest affected check before rerunning the still
+missing or invalidated complete journey. Diagnostic checks do not replace final
+acceptance; do not bypass steps, alter business end states, or combine unrelated
+objects to obtain a pass. Reuse unaffected evidence under the shared verification
+guidance. Repair only under the current implementation authority; this reference
+never authorizes product or external writes and adds no classification form or
+preflight gate.
 
 ## Design and planning handoff
 

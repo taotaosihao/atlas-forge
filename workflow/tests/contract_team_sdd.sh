@@ -181,7 +181,7 @@ if (!validateReviewVerdict(emptyRequiredFix).some((error) => error.includes("req
 const nonStringEvidenceGap = { ...legacy, cannot_verify_from_diff: [42] };
 if (validateReviewVerdict(nonStringEvidenceGap).length !== 0) process.exit(1);
 NODE
-grep -q 'New verdicts must use review-verdict schema_version 2' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-reviewer.toml"
+grep -q 'Formal verdicts must use review-verdict schema_version 2' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-reviewer.toml"
 grep -q 'New verdicts must use review-verdict schema_version 2' "$ATLAS_FORGE_ROOT/.codex/agents/atlas-sdd-phase-reviewer.toml"
 grep -q 'schema v1 is read-only historical compatibility' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"
 grep -q 'codex-team-controller-resolution --task' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/skills/team/references/sdd.md"

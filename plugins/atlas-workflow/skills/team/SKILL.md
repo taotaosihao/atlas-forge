@@ -60,15 +60,17 @@ For a corrected or evidence-challenged decision, first apply the shared
 
 Once Team is selected, the controller first freezes the admitted Goal and
 constructs dependency and ownership information, then dispatches the current
-ready frontier. At least one valid child lane runs in parallel with main
-integration work; when the frontier contains two or more admitted, independent,
-ready lanes, they run in the same bounded wave by default. This is controller
+ready frontier. Run useful independent child lanes alongside main integration
+work; when the frontier contains two or more admitted, independent,
+ready lanes, they run in the same bounded wave by default. Once their outputs are consumed,
+continue with the sole writer when no useful independent lane remains; Team
+selection does not require continuous delegation. This is controller
 policy, not a runtime scheduler invariant, and it does not add a ledger or schema
 field.
 
 - A lane is admitted only with a frozen Goal or controller-admitted
   `current-required` reference, a named output consumer, ready input, a
-  read-only evidence domain or disjoint owned/forbidden paths, structured output,
+  read-only evidence domain or disjoint owned/forbidden paths, consumer-appropriate output,
   authority and stop condition, and a reason tied to critical-path time or a
   named risk. Duplicate lanes, dependency-not-ready lanes, outputs without a
   current consumer, uncertain writer lease/quiescence, unavailable exact
@@ -207,6 +209,14 @@ or agent role and does not alter formal admission or required gates.
 - Discuss does not authorize implementation, commits, deployment, release, or other mutation.
 - Discuss lanes never acquire writable attempts or writer leases; an explicitly authorized writable deliverable follows the applicable Execute path below.
 
+The dispatch packet states the already selected lightweight or formal path.
+Ordinary discussion, review, and quick-path implementation use the existing
+self-contained assignment and a result suited to its consumer; do not create
+formal briefs, review packages, or SDD JSON solely for an agent role. Active
+formal admission or a required SDD machine consumer retains its exact input and
+output contracts, including for `product_increment`. Missing formal material
+is a gap, not permission to downgrade. This does not change model routing.
+
 ### Execute
 
 - Use execute only after an explicit user implementation request. Do not infer it from a plan, review, decision file, roadmap, or prior discuss round.
@@ -330,8 +340,9 @@ materials never authorize an automatic format downgrade.
 
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible.
 - Keep one primary reason per commit and include its tests/necessary docs. Do not commit every step, slice, or repair round, and do not accumulate an entire roadmap into one oversized diff.
+- When an independently understandable result meets its acceptance, consume its review and verification, reconcile its diff and ownership, and update the existing handoff state before expanding the next delivery batch. Commit only when authorized and safely isolatable; mixed prior work is not a reason to force a commit or block unrelated authorized work. This adds no approval or artifact gate.
 - Stage only current-task paths or hunks. A commit does not authorize push, PR, deployment, release, cache refresh, or other external mutation.
-- For work crossing compaction or handoff, keep one non-Git rolling checkpoint: current goal, completed work, next critical path, diff/verification state, and real blockers/follow-ups. Overwrite it rather than appending a history diary.
+- For work crossing compaction or handoff, keep one non-Git rolling checkpoint: current goal, active constraints, completed work, next critical path, diff/verification state, and real blockers/follow-ups. Replace each capability's old conclusion, remaining gap, and next action together; remove superseded blockers and link historical evidence. Retain identities, resources, and failures in the current text only when the next action depends on them. Engineering results cannot overwrite user decisions.
 
 ## Optional Protocols
 

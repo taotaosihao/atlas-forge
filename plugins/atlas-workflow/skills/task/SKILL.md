@@ -159,7 +159,7 @@ maintenance work with no GUI outcome does not load it.
 - A lightweight contract should name goal, non-goals, acceptance, real verification, and true return conditions. Do not add staffing/evidence files solely to satisfy a file checklist.
 - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Keep raw logs, traces, screenshots, dumps, retry output, and intermediate repair output outside Git by default.
-- Long work crossing compaction or handoff uses one non-Git rolling checkpoint that is overwritten rather than appended.
+- Long work crossing compaction or handoff uses one non-Git rolling checkpoint. Replace a capability's old conclusion, remaining gap, and next action together, remove superseded blockers, and link historical evidence. Preserve active constraints and the identities/resources needed for the next action; engineering results do not overwrite user decisions.
 
 ## Product-Manager Progress Reports
 

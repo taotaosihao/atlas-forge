@@ -389,17 +389,19 @@ Scaffold a design-fidelity review task plus contract/report/verdict artifacts:
 ~/.codex/workflow/bin/codex-design-review init "<title>" "<page url or route>" "<design source>"
 ```
 
-Lightweight implementation contracts:
+Implementation scope and machine contracts:
 
-- Use `workflow/templates/implementation-contract.md` when machine-checkable
-  scope admission, cross-session handoff, audit, or release value justifies its
-  maintenance cost.
+- Reuse an existing issue, PRD, spec or contract for durable scope, handoff or
+  audit. Those needs alone do not select machine admission.
+- Use `workflow/templates/implementation-contract.md` only for an already selected
+  machine-checkable contract; [Clarify](../plugins/atlas-workflow/skills/clarify/SKILL.md)
+  owns that selection and its required validation.
 - Clear, low-risk work may skip the contract even when it changes behavior or
   touches multiple files, provided the acceptance path remains explicit and
   verifiable.
 - The contract records goal, non-goals, acceptance criteria, real validation
-  steps, evidence paths, and stop conditions. It is the Atlas workflow
-  lightweight counterpart to the full Multica sprint contract.
+  steps, evidence references, and stop conditions. Keep current progress and
+  transient run locations in the existing checkpoint or evidence.
 
 Web UI acceptance uses the dependency-free `codex-web-acceptance` thin layer:
 

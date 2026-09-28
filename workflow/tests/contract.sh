@@ -584,7 +584,7 @@ rg -q 'atlas-workflow:team-v1' "$ATLAS_FORGE_ROOT/plugins/atlas-workflow/.codex-
 rg -q 'List tasks and reuse a relevant `doing` task' "$ATLAS_FORGE_ROOT/workflow/README.md"
 rg -q 'Only when no relevant task exists, create one with `init-task`' "$ATLAS_FORGE_ROOT/workflow/README.md"
 rg -q 'Search MemPalace only when the user requests it or prior decisions are material evidence' "$ATLAS_FORGE_ROOT/workflow/README.md"
-rg -U -q 'machine-checkable[[:space:]]+scope admission, cross-session handoff, audit, or release value' "$ATLAS_FORGE_ROOT/workflow/README.md"
+rg -U -q 'only for an already selected[[:space:]]+machine-checkable contract' "$ATLAS_FORGE_ROOT/workflow/README.md"
 rg -q 'completion\.final_commit_link' "$ATLAS_FORGE_ROOT/workflow/README.md" "$source_skills_root/team/references/sdd.md"
 rg -q '`source-lint`' "$ATLAS_FORGE_ROOT/README.md"
 ! rg -q 'Create one dedicated commit|Search MemPalace for related prior decisions' "$ATLAS_FORGE_ROOT/workflow/README.md"

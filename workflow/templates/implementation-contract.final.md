@@ -18,6 +18,11 @@ product_ui_not_applicable_reason:
 
 ## Release Intent
 
+Use this template only for an already selected machine-checkable contract.
+Ordinary scope, handoff, or audit documentation may reuse an existing scope body
+without adopting this schema. Missing required material never downgrades an
+already selected formal contract.
+
 Choose the target deliberately. A `product_increment` (MVP, Beta, internal
 test/dogfood, or small-scope public beta without explicit formal certification),
 `exploration`, or `non_product` uses ordinary semantics-v5. The default below
@@ -39,7 +44,7 @@ For strict mixed-surface authoring/admission, use schema version 2, Profile `int
 
 ## Execution Plan
 
-All newly authored ordinary contracts use semantics v5 and execution-plan schema
+All newly authored ordinary machine contracts use semantics v5 and execution-plan schema
 version 3: no `release` object and no `release_requirement` checks. Use the actual
 bounded implementation and acceptance locations instead of the example values below.
 
@@ -155,7 +160,7 @@ compatibility, not new-authoring alternatives.
 |-----|--------|-------------------|-----------------|---------------------------|
 | V-1 |  |  |  |  |
 
-Reference the selected task, scenario, report or protocol result; the row does not require a new evidence file.
+Reference the selected task, scenario, report or protocol result; the row does not require a new evidence file. Commands identify reusable verification entrypoints, not an automatic obligation to create a runner or preserve its file layout. Explicit deliverables, compatibility consumers, and formal plan/check identity rules remain binding.
 
 ## Evidence Budget
 
@@ -197,7 +202,7 @@ Keep `visible-follow-up` and `informational` findings visible here or by stable 
 
 - [ ] This is a clean rewrite of the final agreed requirements.
 - [ ] Superseded requirements are not included as executable instructions.
-- [ ] Review notes are linked in provenance, not pasted into the body.
+- [ ] Review/repair history is linked in provenance; current progress, transient run locations and superseded next actions remain in the existing checkpoint/evidence rather than executable requirements.
 - [ ] Required acceptance criteria and validation rows are complete.
 - [ ] Every finding-derived executable requirement cites `current-required:<finding_id>`.
 - [ ] Visible follow-up and informational findings remain provenance only.

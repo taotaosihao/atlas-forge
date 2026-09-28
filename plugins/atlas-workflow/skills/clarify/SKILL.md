@@ -129,11 +129,17 @@ needed, use `codex-workflow scaffold-clarify <task-id>`; if machine-contract val
 is already established, author that contract directly. Do not mirror scope into
 `context.md`, `spec.md`, `decision.md` or a repo bundle to satisfy readiness.
 
-Only when machine-checkable admission, cross-session handoff, audit or release
-value requires an implementation contract, read
+Cross-session handoff or audit may need a durable scope body without machine
+admission; use the existing document and keep its stable requirements separate
+from current progress, run identities, and historical evidence. A document's
+name, task size, or agent role does not select a machine contract.
+
+Only when machine-checkable admission or formal release certification has been
+selected, read
 [references/contract-authoring.md](references/contract-authoring.md) in full.
 Multi-role discussion alone does not require a machine contract. Once selected,
-its required fields, authority bindings and validation remain mandatory.
+its required fields, authority bindings and validation remain mandatory;
+missing material cannot downgrade that selection.
 
 All references resolve relative to this loaded plugin, not the target project's
 checkout. `ATLAS_WORKFLOW_PLUGIN_ROOT` is two directories above the containing

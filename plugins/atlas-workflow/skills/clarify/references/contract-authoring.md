@@ -1,7 +1,8 @@
 # Machine implementation contract authoring
 
 Read this only after choosing a machine-checkable implementation contract.
-Discussion, task size or a short request alone does not require one.
+Discussion, task size, durable handoff, or a short request alone does not require
+one. An already selected formal contract keeps its requirements when inputs are missing.
 
 ## One current scope body
 
@@ -22,6 +23,13 @@ existing project authority actually requires it.
 Record the agreed Goal and stable requirement meanings, non-goals, accepted
 assumptions, executable boundaries, reachable acceptance and verification.
 Identify real commands, app/API/CLI entrypoints and legal data prerequisites.
+Separate required behavior and evidence from the current test organization:
+reuse working commands, and require a particular runner or new file only when
+it is an explicit deliverable or has a concrete compatibility consumer. Changes
+to formal plan/check identities still follow their existing admission rules.
+Keep current progress, transient run locations and superseded next actions in
+the existing checkpoint or evidence, not as executable requirements. Preserve
+environment, identity and permission constraints needed for safe execution.
 Keep raw logs, traces, videos, HAR, screenshots, API dumps and intermediate
 repair output outside Git. Supporting artifacts reference scope rather than repeat it.
 
@@ -72,7 +80,7 @@ repair output outside Git. Supporting artifacts reference scope rather than repe
 - a safety, data-integrity, or permission finding may become `current-required` only when its controller resolution binds a canonical invariant, a current `acceptance:<ref>`, the current diff or equivalent path/evidence, and a substantive reason explaining why omission blocks or makes that acceptance unsafe; machine validation checks these bindings, not the truth of the prose
 - project those admitted findings only into Goal, Acceptance, Completion, Edge Cases, or Required safe fallback; retain `visible-follow-up` and `informational` findings only in `Finding Provenance` or follow-up records
 - in semantics-v2 contracts, mark required acceptance and edge-case rows with `goal:<requirement-ref>` or `current-required:<finding_id>` so strict lint can validate attribution without interpreting natural language
-- newly authored ordinary contracts use semantics v5, retain the complete semantics-v2 authoring and authority rules, and add exactly one canonical execution-plan schema v3 `atlas-execution-plan+json` fenced block; every executable slice must declare its dependency DAG, keeper outputs, owned/forbidden paths, acceptance ownership, risk/failure/rollback boundaries, positive size budget, and structured checks; semantics v3 is read-only compatibility
+- newly authored ordinary machine contracts use semantics v5, retain the complete semantics-v2 authoring and authority rules, and add exactly one canonical execution-plan schema v3 `atlas-execution-plan+json` fenced block; every executable slice must declare its dependency DAG, keeper outputs, owned/forbidden paths, acceptance ownership, risk/failure/rollback boundaries, positive size budget, and structured checks; semantics v3 is read-only compatibility
 - a newly authored `product_release` contract must use semantics v6, include exactly one canonical `atlas-release-intent+json` block, bind the immutable Profile by digest, use execution-plan schema version 4, and place every Profile check in one terminal release-certification slice that transitively depends on every other executable slice; reference the Profile instead of copying its dimension policy into prompts or prose; semantics v4 is read-only compatibility
 - use `atlas-slice-size-v2`; every slice must declare `estimated_changed_files`, `estimated_net_loc`, `target_p90_minutes`, `serial_dependency_depth`, and `independent_vertical_count`; the declared dependency depth must equal the plan DAG depth, while estimates above any budget, serial depth above two, more than one independent vertical, or a repository-broad path such as `src/**` or `.` require split or a named, unexpired `size_exception` containing `authority_ref`, `expires_at`, `reason`, and non-empty `compensating_controls`; an exception never downgrades a permanent gate or converts cached, imported, or skipped evidence into a pass
 

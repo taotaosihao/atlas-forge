@@ -49,7 +49,7 @@ assert_has "$CLARIFY" 'common pair, not a fixed roster' 'roles follow the engine
 assert_has "$CLARIFY" 'File count, request length and a non-tiny\s+label alone do not justify discussion' 'size labels alone do not trigger deliberation'
 assert_has "$CLARIFY" 'Repetitive bulk work may benefit from parallel\s+fact-finding without a stance debate' 'bulk work is not forced into a debate'
 assert_has "$CLARIFY" 'Before dispatch, read \[references/collaboration.md\]' 'explicit collaboration read trigger'
-assert_has "$CLARIFY" 'Only when machine-checkable admission, cross-session handoff, audit or release\s+value requires an implementation contract, read' 'contract detail is conditional'
+assert_has "$CLARIFY" 'Only when machine-checkable admission or formal release certification has been\s+selected, read' 'contract detail follows the selected machine workflow'
 assert_has "$CLARIFY" 'Compare final clauses with the user.s original intent, approved decisions and\s+discussion results' 'compare original intent, not consensus alone'
 assert_has "$CLARIFY" 'Goal, key decisions and\s+their reasons' 'handoff preserves decisions and reasons'
 assert_has "$CLARIFY" 'exact real entrypoint or a clearly named implementation\s+dependency' 'handoff preserves the real entrypoint boundary'
