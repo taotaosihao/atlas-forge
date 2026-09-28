@@ -638,6 +638,26 @@ grep -q "review_fail_rate: 0.5000" "$TMP_ROOT/scorecard-summary.out"
 grep -q "fix_loop_count: 2" "$TMP_ROOT/scorecard-summary.out"
 grep -q "reviewer: 2" "$TMP_ROOT/scorecard-summary.out"
 grep -q "gpt-5.4-mini: 2" "$TMP_ROOT/scorecard-summary.out"
+if grep -q "^warning:" "$TMP_ROOT/scorecard-summary.out"; then
+  echo "unexpected scorecard warning at baseline" >&2
+  exit 1
+fi
+node "$scorecard_bin" --task fixture-scorecard-spread append --json '{"slice_id":"slice-a","role":"fixer","model":"gpt-5.4-mini","status":"DONE","event":"fix_started","duration_ms":1,"metadata":{"round":1}}' >/dev/null
+node "$scorecard_bin" --task fixture-scorecard-spread append --json '{"slice_id":"slice-b","role":"fixer","model":"gpt-5.4-mini","status":"DONE","event":"fix_started","duration_ms":1,"metadata":{"round":1}}' >/dev/null
+node "$scorecard_bin" --task fixture-scorecard-spread append --json '{"slice_id":"slice-c","role":"fixer","model":"gpt-5.4-mini","status":"DONE","event":"fix_started","duration_ms":1,"metadata":{"round":1}}' >/dev/null
+if node "$scorecard_bin" --task fixture-scorecard-spread summary | grep -q "^warning:"; then
+  echo "fix loops spread across slices must not warn" >&2
+  exit 1
+fi
+for round in 4 5; do
+  node "$scorecard_bin" --task fixture-scorecard append --json "{\"slice_id\":\"slice-002\",\"role\":\"fixer\",\"model\":\"gpt-5.4-mini\",\"status\":\"DONE\",\"event\":\"fix_started\",\"duration_ms\":40,\"metadata\":{\"round\":$round}}" >/dev/null
+done
+for round in 1 2 3 4 5; do
+  node "$scorecard_bin" --task fixture-scorecard append --json "{\"slice_id\":\"slice-00$round\",\"role\":\"reviewer\",\"model\":\"gpt-5.4\",\"status\":\"DONE\",\"event\":\"review_clean\",\"duration_ms\":10,\"metadata\":{\"round\":$round}}" >/dev/null
+done
+node "$scorecard_bin" --task fixture-scorecard summary > "$TMP_ROOT/scorecard-advisory.out"
+grep -q "^warning: 6/7 reviews returned clean" "$TMP_ROOT/scorecard-advisory.out"
+grep -q "^warning: slice slice-002 started 3 fix loops" "$TMP_ROOT/scorecard-advisory.out"
 expect_fail "scorecard rejects missing slice id" node "$scorecard_bin" --task fixture-scorecard append --json '{"role":"reviewer","model":"gpt-5.4","status":"DONE","event":"review_clean"}'
 
 export CODEX_WORKFLOW_ROOT="$previous_codex_workflow_root"

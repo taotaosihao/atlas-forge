@@ -1421,7 +1421,12 @@ function validateContractText(content, {
     } else {
       diagnostic = makeDiagnostic("WARNING", "LEGACY_CONTRACT_UNVERSIONED", "contract_semantics_version", 0, "semantic validation was skipped for an unversioned historical contract");
     }
-    const diagnostics = sortDiagnostics([...parsed.diagnostics, ...taskDiagnostics, diagnostic]);
+    const diagnostics = sortDiagnostics([
+      ...parsed.diagnostics,
+      ...taskDiagnostics,
+      diagnostic,
+      ...scopeAdvisories(content, expectedTaskId || declaredTaskId, explicitWorkflowRoot),
+    ]);
     const ok = !diagnostics.some((item) => item.severity === "ERROR");
     return { diagnostics, ok, version: "legacy" };
   }
@@ -1506,6 +1511,9 @@ function validateContractText(content, {
           strict,
         )
         : validateVersionOne(parsed.fields, parsed.diagnostics)),
+    ...(version.value === "1"
+      ? []
+      : scopeAdvisories(content, expectedTaskId || declaredTaskId, explicitWorkflowRoot)),
   ]);
   const ok = !diagnostics.some((item) => item.severity === "ERROR");
   return {
@@ -1514,6 +1522,77 @@ function validateContractText(content, {
     ok,
     version: version.value,
   };
+}
+
+// Advisory: a contract whose required acceptance rows exceed this usually holds
+// several independently deliverable outcomes that should be split.
+const REQUIRED_ACCEPTANCE_ROW_BUDGET = 12;
+
+// Returns null when the contract has no canonical acceptance table.
+function requiredAcceptanceRowCount(lines) {
+  const section = sectionLines(lines, "Acceptance Criteria") || [];
+  let header = null;
+  let count = 0;
+  for (const line of section) {
+    const cells = tableCells(line.text);
+    if (!cells) continue;
+    if (!header) {
+      header = cells.map((cell) => cell.toLowerCase());
+      continue;
+    }
+    if (cells.every((cell) => /^:?-+:?$/.test(cell))) continue;
+    const requiredIndex = header.indexOf("required");
+    if (requiredIndex < 0 || String(cells[requiredIndex] || "").toLowerCase() === "yes") count += 1;
+  }
+  return header ? count : null;
+}
+
+function activeDecisionIds(root, taskId) {
+  if (!taskId || !SAFE_ID_PATTERN.test(taskId)) return [];
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, "artifacts", taskId, "decisions.md"), "utf8");
+  } catch {
+    return [];
+  }
+  const lines = text.split("\n").map((value, index) => ({ text: value, line: index + 1 }));
+  return (sectionLines(lines, "Active decisions") || [])
+    .map((line) => /^\|\s*`([^`]+)`\s*\|/.exec(line.text.trim()))
+    .filter(Boolean)
+    .map((match) => match[1]);
+}
+
+function scopeAdvisories(content, taskId, root) {
+  const diagnostics = [];
+  const lines = visibleContentLines(content);
+  const visible = lines.map((line) => line.text).join("\n");
+  // Free-form contracts without the canonical table still name their rows AC<n>.
+  const tableRows = requiredAcceptanceRowCount(lines);
+  const rows = tableRows ?? new Set(
+    (visible.match(/\bAC-?0*(\d{1,3})\b/g) || []).map((id) => Number(id.replace(/\D/g, ""))),
+  ).size;
+  if (rows > REQUIRED_ACCEPTANCE_ROW_BUDGET) {
+    diagnostics.push(makeDiagnostic(
+      "WARNING",
+      "ACCEPTANCE_SCOPE_LARGE",
+      "Acceptance Criteria",
+      0,
+      `${rows} required acceptance rows exceed the advisory budget of ${REQUIRED_ACCEPTANCE_ROW_BUDGET}; split independently deliverable outcomes or move branches to Edge Cases`,
+    ));
+  }
+  for (const id of activeDecisionIds(root, taskId)) {
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`decision:${escaped}(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`).test(visible)) {
+      diagnostics.push(makeDiagnostic(
+        "WARNING",
+        "DECISION_NOT_REFERENCED",
+        "decisions",
+        0,
+        `active decision ${id} is not cited as decision:${id}; cite it where the contract honors it, usually Non-goals`,
+      ));
+    }
+  }
+  return diagnostics;
 }
 
 function lint(file, strict, newAuthoring, authoritySlices = []) {

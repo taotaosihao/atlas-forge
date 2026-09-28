@@ -7,6 +7,9 @@ const path = require("path");
 const { validateScorecardEvent } = require("../contracts/team-sdd/validators/scorecard");
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const CLEAN_REVIEW_MIN_SAMPLE = 6;
+const CLEAN_REVIEW_RATIO = 0.75;
+const FIX_LOOP_REPLAN_COUNT = 3;
 
 function usage() {
   console.log(`usage:
@@ -137,7 +140,9 @@ function summary(options) {
   const byModel = new Map();
   const byStatus = new Map();
   const byEvent = new Map();
+  const fixStartsBySlice = new Map();
   for (const event of events) {
+    if (event.event === "fix_started") increment(fixStartsBySlice, event.slice_id);
     increment(byRole, event.role);
     increment(byModel, event.model);
     increment(byStatus, event.status);
@@ -153,8 +158,18 @@ function summary(options) {
   printGroup("by_model", byModel);
   printGroup("by_status", byStatus);
   printGroup("by_event", byEvent);
+  const fixLoopCount = (byEvent.get("fix_started") || 0) + (byEvent.get("fix_progress_stalled") || 0);
   console.log(`review_fail_rate: ${failRate.toFixed(4)}`);
-  console.log(`fix_loop_count: ${(byEvent.get("fix_started") || 0) + (byEvent.get("fix_progress_stalled") || 0)}`);
+  console.log(`fix_loop_count: ${fixLoopCount}`);
+  // Advisory cost signals; they never change the exit status.
+  if (reviewTotal >= CLEAN_REVIEW_MIN_SAMPLE && reviewClean / reviewTotal >= CLEAN_REVIEW_RATIO) {
+    console.log(`warning: ${reviewClean}/${reviewTotal} reviews returned clean; review at deliverable outcomes and keep several perspectives for high-risk changes`);
+  }
+  for (const [sliceId, count] of [...fixStartsBySlice.entries()].sort((x, y) => x[0].localeCompare(y[0]))) {
+    if (count >= FIX_LOOP_REPLAN_COUNT) {
+      console.log(`warning: slice ${sliceId} started ${count} fix loops; apply the verification guidance's design-signal rule before another round`);
+    }
+  }
 }
 
 function main() {

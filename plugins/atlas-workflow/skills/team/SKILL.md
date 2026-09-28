@@ -75,7 +75,12 @@ field.
   context cost or a named risk. Duplicate lanes, dependency-not-ready lanes, outputs without a
   current consumer, uncertain writer lease/quiescence, unavailable exact
   spawn/profile/model/reasoning/backend routes, and confirmed cost anomalies
-  fail closed instead of creating fan-out.
+  fail closed instead of creating fan-out. A cost anomaly is what the
+  controller can observe in its own dispatch results: a wave whose output went
+  unused, reviewers whose recent verdicts mostly carry no finding, or
+  coordination messages outnumbering the lane results they produce.
+  `codex-team-scorecard summary` warns on the review and fix-loop signals when
+  SDD records them.
 - Compute each soft wave with
   `child_count = min(ready independent lanes, host available child slots, 4)`.
   The `4` is an initial soft wave cap, not a completion or stop condition;

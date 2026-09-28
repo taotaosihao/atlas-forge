@@ -1065,4 +1065,48 @@ authority_after="$(sha256 "$CURRENT_AUTHORITY")"
 [[ ! -s "$TMP_ROOT/read-only.stderr" ]] || show_failure 'read-only lint emitted diagnostics'
 pass 'strict lint leaves the input contract byte-for-byte unchanged'
 
+case_paths
+if ! node - "$BIN" "$TMP_ROOT/advisory-root" >"$CASE_STDOUT" 2>"$CASE_STDERR" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const [bin, root] = process.argv.slice(2);
+const { validateContractText } = require(bin);
+fs.mkdirSync(path.join(root, "artifacts", "advisory-task"), { recursive: true });
+fs.writeFileSync(path.join(root, "artifacts", "advisory-task", "decisions.md"), [
+  "# Current Decisions", "", "## Active decisions", "",
+  "| ID | Current decision | Authority |", "| --- | --- | --- |",
+  "| `no-new-framework` | Do not add a general recovery framework. | `user-message:1` |", "",
+].join("\n"));
+const contract = (rows, cite, version = "2", taskId = "advisory-task") => [
+  `contract_semantics_version: ${version}`, `task_id: ${taskId}`, "",
+  "## Non-goals", "", cite, "",
+  "## Acceptance Criteria", "",
+  "| id | criterion | required | verification | authority |", "| --- | --- | --- | --- | --- |",
+  ...Array.from({ length: rows }, (_, index) => `| AC${index} | result ${index} | yes | check | goal:g${index} |`),
+  ...Array.from({ length: 6 }, (_, index) => `| AC${rows + index} | optional ${index} | no | check | goal:o${index} |`),
+  "",
+].join("\n");
+const codes = (text) => validateContractText(text, { workflowRoot: root })
+  .diagnostics.filter((item) => item.severity === "WARNING").map((item) => item.code).sort();
+const expect = (label, actual, expected) => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${label}: ${actual}`);
+};
+const cited = "- No new framework (decision:no-new-framework).";
+expect("large and uncited", codes(contract(13, "- None.")), ["ACCEPTANCE_SCOPE_LARGE", "DECISION_NOT_REFERENCED"]);
+expect("optional rows do not count", codes(contract(12, cited)), []);
+expect("sentence-final citation", codes(contract(12, "- See decision:no-new-framework.")), []);
+expect("prefix is not a citation", codes(contract(12, "- decision:no-new-framework-extra")), ["DECISION_NOT_REFERENCED"]);
+expect("commented citation is invisible", codes(contract(12, "<!-- decision:no-new-framework -->")), ["DECISION_NOT_REFERENCED"]);
+expect("unsafe task id is ignored", codes(contract(12, "- None.", "2", "../advisory-task")), []);
+expect("v1 is excluded", codes(contract(13, "- None.", "1")).filter((code) => code !== "LEGACY_CONTRACT_UNVERSIONED"), []);
+const freeForm = (body) => ["# Legacy contract", "", ...body, ""].join("\n");
+const acList = Array.from({ length: 13 }, (_, index) => `- AC-${String(index + 1).padStart(2, "0")} passes.`);
+expect("free-form AC ids", codes(freeForm(acList)), ["ACCEPTANCE_SCOPE_LARGE", "LEGACY_CONTRACT_UNVERSIONED"]);
+expect("fenced AC ids are invisible", codes(freeForm(["```text", ...acList, "```"])), ["LEGACY_CONTRACT_UNVERSIONED"]);
+NODE
+then
+  show_failure 'scope and decision advisories warn without failing'
+fi
+pass 'scope and decision advisories warn without failing'
+
 printf '1..%s\n' "$PASS_COUNT"
