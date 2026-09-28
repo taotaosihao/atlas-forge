@@ -51,22 +51,32 @@ BAF or release certification.
   device action or perform another write. An already authorized recovery follows
   its own conditions.
 - **Make the cause observable before rerunning.** When existing output does not
-  show why a check failed, first add a durable observation at the failing
-  boundary, such as a structured rejection reason, a preserved error body or a
-  dead-letter summary, and reach it with the smallest check. Do not temporarily
-  edit migrations, fixtures or product code to print a cause and then revert
-  them. Rerunning a complete journey only to see an error is a last resort.
+  show why a check failed, first use environment-level observation such as log
+  levels, verbose flags or database logs, or add a durable observation at the
+  failing boundary that the product legitimately needs, such as a structured
+  rejection reason or a preserved error body, and reach it with the smallest
+  check. Only when neither reaches the cause, make an authorized temporary
+  change in an isolated copy or bounded scope, keep it out of the candidate and
+  prove its removal. Rerunning a complete journey only to see an error is a
+  last resort.
 - **Treat a repeating repair loop as a design signal.** Progress means new
-  information that narrows the remaining work. When the same failure signature
-  recurs without new information, or a new branch breaks the same consumer
-  again, stop rerunning and analyze the shared cause across the affected
-  branches. Research the established industry solution for that class of
-  problem, choose and record the approach, and continue within the current
-  goal, contract and edit authority; changing frozen scope, acceptance or owned
+  information that narrows the remaining work. Replan when the same failure
+  signature recurs without new information, a new branch breaks the same
+  consumer again, or one complete journey has failed three complete runs since
+  the last replanning even though each run found a different defect. If the
+  same pattern returns after replanning, record why the chosen approach did not
+  hold before choosing the next one. Stop rerunning,
+  analyze the shared cause across the affected branches, and move the remaining
+  risk into producer-backed focused checks before the next complete run.
+  Research the established industry solution for that class of problem, choose
+  and record the approach, and continue within the current goal, contract and
+  edit authority; an approach that adds a shared mechanism, migration or public
+  contract first gets review from someone who did not author it, and changing frozen scope, acceptance or owned
   paths uses its existing amendment path. Ask the user only when the choice
   needs a person: product intent, risk acceptance, permission or authority, an
-  external state change, or reversing an active user decision. Rounds and tokens
-  remain telemetry, not stop conditions.
+  external state change, or reversing an active user decision. Rerun counts
+  trigger replanning, not a stop; elapsed time and tokens remain telemetry.
+  This is the single definition of when repair returns to the user.
 - **Stop on sufficient evidence.** After related checks pass, repeat or expand
   only for new changes, failures or unresolved risks. If a claimed benefit drives
   a decision, use a proportionate comparison under the same relevant conditions

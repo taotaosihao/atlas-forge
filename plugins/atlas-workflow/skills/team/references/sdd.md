@@ -24,7 +24,7 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
 4. Admit a finding into the current delivery whenever its controller resolution is `disposition: current-required`, retaining both `open` and `resolved` requirements in clean rewrites. Only `repair_status: open` blocks the goal or creates repair feedback. Record `visible-follow-up` and `informational` findings as provenance or follow-ups; they do not create new SDD slices or acceptance.
    - Write controller decisions as a temporary JSON object containing exactly `records` and `evidence_gaps`, with exactly one entry for every verdict finding and evidence gap.
    - Run `codex-team-controller-resolution --task <task-id> --slice <slice-id> --decisions <json-file>`. The helper derives `verdict_digest` and `goal_ref`, validates full coverage and authority binding, and atomically writes the canonical `controller-resolution.json`; do not hand-author its envelope.
-5. Continue only when the next implementation or evidence change can materially advance the current goal. Use the existing `fix_progress_stalled` terminal when it cannot.
+5. Continue only when the next implementation or evidence change can materially advance the current goal. A stalled or repeating repair loop follows the shared verification guidance's design-signal rule; use the existing `fix_progress_stalled` terminal only when that analysis needs a person.
 6. When the current authorized goal is the named roadmap or all listed phases, continue to the next internal slice without reapproval. Slice completion is not whole-goal completion, persistence wording does not expand scope, and the controller must not invent slices outside the current goal.
 
 ## Commits, Review Scope, And Evidence
