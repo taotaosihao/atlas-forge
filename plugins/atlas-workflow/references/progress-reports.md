@@ -1,16 +1,71 @@
-# Product-manager progress reports
+# 表达方式与进度报告
 
-Load this reference whenever Task or Team work returns to the user, including
-the final reply. Internal checkpoints update only the rolling checkpoint.
+## 通用表达
 
-Keep the product-manager body to one screen and use this order:
+本节适用于 Codex 和 Claude Code 面向人的说明。它不改变 agent 交接合同、
+schema、JSON、receipt、状态值或认证结论；需要展示这些内容时，保留原文并解释。
 
-- `完成与验收`: describe verified behavior as “用户现在可以……”, followed by the product manager's action, expected result, actual result, and direct evidence.
-- `测试覆盖`: summarize capability, scenario, result, and untested boundary in product language; do not paste agent reports, and a command name or green gate alone is not a capability explanation.
-- `未完成与下一验收点`: state uncompleted or unverified behavior, failed checks, product impact, and the next acceptance point. Never present unverified work as complete.
+- 先回答当前问题，再给支撑结论的证据、重要限制或下一步。调查报告说明原因和
+  不确定性，方案讨论说明选择和取舍，不填实施验收栏目。
+- 用通俗语言解释内部术语。一句话表达一个主要判断，同一对象保持同一名称。
+  借鉴 ASD-STE100 的清晰表达原则，不机械套用英语词数、词性和词表，也不把
+  “80% STE”当作合规结论。
+- 简化时保留影响判断的条件、否定、权限和证据范围。例如“本地测试通过；现场
+  尚未验证”不能压成“验证通过”，“允许不兼容”不能改成“必须拒绝旧版本”。
+  不要求每句附证据或每次重复完整的限制清单。
 
-Agent activity, files changed, and slices closed are not product outcomes. Do not lead with paths, commit hashes, schema versions, gate or slice IDs, agent/backend details, JSON, or command lists. Keep those exact facts in a short `技术追溯` section after the acceptance body when they aid audit or handoff. Structured agent output, ledgers, receipts, and raw logs remain internal evidence inputs rather than user-facing report prose.
+### 按理解问题选择形式
 
-When a formal execution grant exists, use `codex-workflow product-progress <task-id>` for the read-only current objective, blocker, next acceptance point, and authorization impact; do not infer those facts from `progress.jsonl` or hand-edited task state.
+选择足以回答当前问题的形式；短问题直接回答，不逐级升级媒体或重复呈现相同内容。
 
-For canonical phase status, run `codex-workflow project-phase-report <task-id> <phase-id>`. The scaffold is only an unprojected sentinel; never hand-author its acceptance coverage, receipt status, or release decision.
+| 用户需要理解的内容 | 合适的形式 |
+| --- | --- |
+| 结论、事实、命令、下一步 | 简明文字或表格 |
+| 关系、职责、分支、先后依赖 | 关系图、流程图或时序图；能清楚表达时优先 Mermaid |
+| 参数变化、状态比较、因果 | 交互 HTML；每个控件都服务当前问题，默认状态即有信息 |
+| 连续动作或时间变化 | 可暂停的分步动画或讲解视频；需检索的条件保留文字 |
+
+在当前任务授权范围内，普通内嵌图或轻量解释 HTML 可直接生成，无需仅因格式
+另行确认。解释页面只使用已获准读取的信息，交互只改变本地展示。涉及产品原型、业务
+操作、数据写入、收费服务、安装或发布时，按现有范围和权限判断；“没有外部写入”
+本身不代表没有扩大任务。遵守用户明确的只读、不制作和指定交付格式要求。
+
+两种宿主都复用当前可用的技能、工具和项目能力，不依赖本机绝对路径、特定宿主
+工具名或额外媒体平台。能力不足时说明缺口，并用可用形式回答能回答的部分；用户
+明确要求的媒体仍标为未完成，不静默降级；能力缺口本身不授予安装或收费服务权限。
+
+### 解释材料与证据
+
+图、动画和示例页面应与文字含义一致，明确影响结论的假设、模拟数据及省略条件。
+概念演示不能证明产品已实现、真实操作成功或验收通过。HTML 应实际打开并检查
+关键交互，视频应完整观看以检查内容和可读性；文件存在或可解码不等于解释有效。
+理解效率是否改善仍需反馈，不由静态检查或模型自评证明。
+
+真实操作录像和手册沿用
+[操作手册式交付](../skills/team/references/business-acceptance.md#optional-operation-guide-delivery)。
+解释性动画不能替代真实操作录屏；选择解释形式本身不启动业务操作或验收流程。
+
+## 实施结果报告
+
+仅在 Task 或 Team 报告已实施工作的结果时使用本节；调查、讨论和规划使用通用
+表达。内部检查点只更新滚动记录，不转成用户报告。
+
+正文保持简短，按实际结果组织以下内容；无需为了栏目补写无关内容：
+
+- `完成与验收`：先说经过验证的用户可见行为，再说明实际操作、预期和实际结果，
+  附直接证据。源码规则修改说明修改及检查结果；未验证时不宣称模型行为或安装态已改善。
+- `测试覆盖`：用业务或任务语言说明场景、结果与未测边界。命令成功或检查通过
+  本身不是能力说明，不直接粘贴 agent 报告。
+- `未完成与下一验收点`：说明未完成或未验证的行为、失败检查、实际影响和下一
+  验收点，不把未知写成完成。
+
+Agent 活动、修改文件和关闭内部阶段不是产品结果。路径、commit、schema 版本、
+agent/backend 和精确命令在有追溯价值时放入简短的 `技术追溯`。
+结构化 agent 输出、ledger、receipt 和原始日志保留为内部证据输入。
+
+存在正式执行授权时，通过当前宿主的 helper 入口运行
+`codex-workflow product-progress <task-id>`，读取当前目标、阻塞、下一验收点和
+授权影响，不从 `progress.jsonl` 或手写状态推断。
+
+正式阶段状态由 `codex-workflow project-phase-report <task-id> <phase-id>` 生成。
+骨架不是已填入实际结果的报告，不手写验收覆盖、receipt 状态或 release decision。

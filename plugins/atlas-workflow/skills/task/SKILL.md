@@ -13,7 +13,7 @@ Codex invokes this flow as `$atlas-workflow:task`; Claude Code invokes it as `/a
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors where that improves accuracy.
 
-Keep user-facing replies and summaries in plain, conversational language. Do not surface internal process jargon such as `canonical scope source`, `staffing_mode`, `release_mode`, or `frozen Goal` to the user; explain the idea in everyday Chinese first (for example “本次范围以哪份文档为准”), adding the original term in parentheses only when it is genuinely needed.
+面向用户的说明遵循共享的[通用表达](../../references/progress-reports.md#通用表达)。
 
 ## Routing
 
@@ -163,12 +163,9 @@ maintenance work with no GUI outcome does not load it.
 
 ## Product-Manager Progress Reports
 
-Whenever work returns to the user, including the final reply, follow the shared
-[progress report format](../../references/progress-reports.md): a one-screen
-product-manager body led by verified user-visible behavior, with exact
-engineering facts only in `技术追溯`. Internal checkpoints update only the
-rolling checkpoint. For canonical phase status, run
-`codex-workflow project-phase-report <task-id> <phase-id>`.
+按本次回复目的选择共享指导：调查、讨论和规划使用通用表达；报告已实施工作的
+结果时使用[实施结果报告](../../references/progress-reports.md#实施结果报告)。
+内部检查点只更新滚动记录。
 
 ## Review, Commits, And Completion
 
@@ -177,4 +174,5 @@ rolling checkpoint. For canonical phase status, run
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, or external-state dependency. A repeating repair loop follows the Verification guidance's design-signal rule and returns only when that analysis needs a person.
 - Run `atlas-workflow done <task-id>` only when the whole authorized goal is actually complete.
 
-In the final reply, follow the product-manager structure above. Put the task id, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.
+最终回复也按上述目的选择结构；实施报告的任务 id、路径、精确命令和 commit
+放在 `技术追溯`，影响用户判断的残留问题保留在正文。

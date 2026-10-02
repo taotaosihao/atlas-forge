@@ -410,7 +410,7 @@ primitive used by the update command.
 - `skills/team/references/code-review.md`: optional deliberative code-review perspectives, evidence checks, and synthesis guidance
 - `skills/team/references/codex-model-routing.md`: Codex-only exact-model routing, loaded only on Codex
 - `skills/team/references/paseo-lanes.md`: Paseo discovery, Claude manual-only gate, lifecycle and fallback, loaded only after Paseo is selected
-- `references/progress-reports.md`: shared product-manager progress report format for Task and Team
+- `references/progress-reports.md`：Codex / Claude Code 共用的表达方式指导；Analyze、Brainstorm、Clarify 只引用通用表达，Task、Team 按回复目的选择实施结果报告。按理解问题复用当前可用的图解、HTML 或视频能力，不增加必需媒体依赖。
 - `skills/team-v1/SKILL.md`: legacy CLI-backed team entry
 - `skills/learn/SKILL.md`: reusable lesson entry
 - `skills/design-review/SKILL.md`: design fidelity review entry

@@ -12,7 +12,7 @@ Codex invokes this flow as `$atlas-workflow:brainstorm`; Claude Code invokes it 
 ## 输出语言
 
 - 生成或更新项目文档、需求/方案/分析/交接材料、design-review 报告、team 决策、workflow artifacts 和面向用户的总结时，默认使用中文。
-- 面向用户的回复和总结要口语化、通俗易懂：不要把 `canonical scope source`、`staffing_mode`、`release_mode`、`frozen Goal` 这类内部流程术语直接抛给用户，先用平实的中文说清楚意思（例如“本次范围以哪份文档为准”），确有必要时再在括号里附上原术语。
+- 面向用户的说明只加载[通用表达](../../references/progress-reports.md#通用表达)，按理解问题选择文字、图解或交互材料，不套用实施结果报告。
 - 命令、文件路径、代码标识符、配置键、API 名称、错误原文和必须保持的模板字段可以保留原文。
 - 如果 `atlas-workflow` 创建了英文骨架标题，在写入实质内容时改为中文标题；用户明确要求其他语言时，以用户要求为准。
 
@@ -65,7 +65,9 @@ Follow this loop:
    - key components
    - error and edge cases
    - verification strategy
-8. For UI or visual product work, offer visual exploration only when seeing options would be materially clearer than text. If accepted, use the available browser or image workflow; otherwise continue text-only.
+8. 按通用表达指导选择有助理解的形式，适用于 UI、架构、状态与因果解释。
+   当前授权范围内的普通图解或轻量解释 HTML 不另要格式确认；产品原型或扩大
+   制作范围仍按现有授权判断，不因生成解释材料转入 Product Design 或实施。
 9. When a durable record is useful, run `atlas-workflow scaffold-brainstorm <task-id>`,
    then write or update the one current `workflow/artifacts/<task-id>/brainstorm.md` and update
    `context.md` when the factual base changes:

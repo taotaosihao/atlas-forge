@@ -24,6 +24,7 @@ const skillFiles = {
   team: ["plugins", "atlas-workflow", "skills", "team", "SKILL.md"],
   business: ["plugins", "atlas-workflow", "skills", "team", "references", "business-acceptance.md"],
   sdd: ["plugins", "atlas-workflow", "skills", "team", "references", "sdd.md"],
+  progress: ["plugins", "atlas-workflow", "references", "progress-reports.md"],
 };
 const text = Object.fromEntries(Object.entries(skillFiles).map(([name, parts]) => [name, read(...parts)]));
 const implementationTemplates = [
@@ -80,7 +81,12 @@ assert.match(text.task, /route its execution and certification through Team exec
 assert.match(text.task, /Direct Task work may implement or verify only a contributing, non-certification scope; it must not close the product-release goal/);
 assert.match(text.task, /When no decision exists, keep `release_decision` absent and report the readiness assessment as `cannot_verify`/);
 assert.match(text.task, /target_delivery_authority_ref.*controller-recordable `user-message:` or `operator-input:`/s);
-assert.match(text.task, /project-phase-report <task-id> <phase-id>/);
+// Reporting commands live in the shared guidance; entrypoints must load it.
+for (const name of ["task", "team"]) {
+  assert.match(text[name], /\[实施结果报告\]\(\.\.\/\.\.\/references\/progress-reports\.md#实施结果报告\)/);
+}
+assert.match(text.progress, /project-phase-report <task-id> <phase-id>/);
+assert.match(text.progress, /不手写验收覆盖、receipt 状态或 release decision/);
 assert.match(text.clarifyContract, /semantics v6/);
 assert.match(text.clarifyContract, /execution-plan schema version 4/);
 assert.match(text.clarifyContract, /terminal release-certification slice/);
@@ -91,7 +97,6 @@ assert.match(text.team, /Planning or review that directly authors or gates a nam
 assert.match(text.team, /recomputes typed facts from raw inputs/);
 assert.match(text.team, /missing workflow-bound producer provenance makes the fact `cannot_verify`/);
 assert.match(text.team, /target_delivery_authority_ref.*controller-recordable `user-message:` or `operator-input:`/s);
-assert.match(text.team, /project-phase-report <task-id> <phase-id>/);
 assert.match(text.team, /Release-bearing `execution-vnext` admission and completion require the hash-bound `work_type=implementation`/);
 assert.match(text.team, /Never convert an inadmissible sweep into a derived `cannot_verify` decision/);
 assert.match(text.design, /only the four typed formal Web UI facts/);

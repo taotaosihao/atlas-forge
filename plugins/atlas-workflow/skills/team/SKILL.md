@@ -118,7 +118,7 @@ field.
 
 Write workflow artifacts, project documents, and user-facing summaries in Chinese by default. Preserve commands, paths, identifiers, APIs, proper nouns, and quoted errors when accuracy benefits.
 
-Keep user-facing replies and summaries in plain, conversational language. Do not surface internal process jargon such as `canonical scope source`, `staffing_mode`, `release_mode`, or `frozen Goal` to the user; explain the idea in everyday Chinese first (for example “本次范围以哪份文档为准”), adding the original term in parentheses only when it is genuinely needed.
+面向用户的说明遵循共享的[通用表达](../../references/progress-reports.md#通用表达)。
 
 ## Backend Selection
 
@@ -287,7 +287,9 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 
 ## Product-Manager Progress Reports
 
-Whenever work returns to the user, including the final reply, the main Codex follows the shared [progress report format](../../references/progress-reports.md): a one-screen product-manager body led by verified user-visible behavior, with agent, backend and command details only in `技术追溯`; internal checkpoints update only the rolling checkpoint. Generate canonical phase status with `codex-workflow project-phase-report <task-id> <phase-id>`; never hand-write acceptance coverage, receipt results, or a release decision into its scaffold.
+主会话按本次回复目的选择共享指导：调查、讨论和规划使用通用表达；报告已实施
+工作的结果时使用[实施结果报告](../../references/progress-reports.md#实施结果报告)。
+内部检查点只更新滚动记录；选择 Team 本身不启用实施报告。
 
 ## Deliberative Team Review
 
@@ -352,4 +354,5 @@ When Paseo was selected or a fallback occurred, report the selection scope and a
 - Team decision artifacts use `backend: native|paseo|mixed|none` matching admitted results; `none` means no result was admitted and is never a selectable runtime backend. A v2 finalization writes stable provenance to `team/backend-v2.json`; mixed results remain traceable to admitted native and Paseo attempts. Legacy artifacts without that sidecar retain their historical native/Paseo marker contract.
 - Keep raw logs and intermediate agent output outside Git. Persist the smallest conclusion required for verification or handoff.
 
-In the final reply, follow the product-manager structure above. Put the task id, agents/backends used, paths, exact commands, and commits in `技术追溯`; keep actionable residual product risk in the acceptance body.
+最终回复也按上述目的选择结构；实施报告的任务 id、agents/backends、路径、精确
+命令和 commit 放在 `技术追溯`，影响用户判断的残留问题保留在正文。

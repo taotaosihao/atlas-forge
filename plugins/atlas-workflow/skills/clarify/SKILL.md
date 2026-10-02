@@ -16,6 +16,8 @@ Codex invokes this flow as `$atlas-workflow:clarify`; Claude Code invokes it as 
 ## 输出语言
 
 默认用通俗中文编写实质内容和回复，保留准确的命令、路径、标识符与模板字段。
+面向用户的说明只加载[通用表达](../../references/progress-reports.md#通用表达)，
+按理解问题选择形式，不套用实施结果报告；合同字段和机器输出继续遵守原合同。
 内部编排、合同版本与身份摘要留在必要的工程材料中，不进入用户界面或常规回复。
 不要把工作流骨架、空栏目或调试说明当作交付内容。
 

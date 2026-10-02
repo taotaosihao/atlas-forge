@@ -169,7 +169,7 @@ assert_has "$CLARIFY" 'names whether it is a focused check or a complete journey
 assert_has "$COLLABORATION" 'do not accumulate numbered draft files' 'drafts are revised in place'
 assert_has "$COLLABORATION" 'newly raised point blocks\s+only when it changes delivery' 'later review points block only on delivery impact'
 for progress in "$PLUGIN/skills/task/SKILL.md" "$PLUGIN/skills/team/SKILL.md"; do
-  assert_has "$progress" 'Whenever work returns to the user, including the final reply' 'progress reports appear only when work returns to the user'
+  assert_has "$progress" '按本次回复目的选择共享指导：调查、讨论和规划使用通用表达；报告已实施' 'report purpose separates discussion from implementation results'
 done
 assert_has "$PLUGIN/skills/team/references/sdd.md" 'Regenerate review input when a repair is reviewed' 'SDD review input follows review timing'
 printf 'contract_clarify_parallel_routing: ok\n'

@@ -120,6 +120,28 @@ host_noted = [path for path in (plugin / 'skills').glob('*/SKILL.md') if '## Hos
 assert len(host_noted) >= 14, host_noted
 for path in host_noted:
     assert f'`/atlas-workflow:{path.parent.name}`' in path.read_text(), path
+
+# Both hosts consume the same plugin-local guidance, without command shadowing
+# or a dependency on Codex-only presentation tools.
+guidance = plugin / 'references/progress-reports.md'
+guidance_text = guidance.read_text()
+assert '## 通用表达\n' in guidance_text and '## 实施结果报告\n' in guidance_text
+assert 'Codex 和 Claude Code' in guidance_text
+assert '/Users/' not in guidance_text and 'mcp__' not in guidance_text
+for name in ('analyze', 'brainstorm', 'clarify', 'task', 'team'):
+    skill = plugin / 'skills' / name / 'SKILL.md'
+    text = skill.read_text()
+    target = '../../references/progress-reports.md'
+    assert f']({target}#通用表达)' in text, skill
+    assert (skill.parent / target).resolve() == guidance.resolve(), skill
+    if name in ('task', 'team'):
+        assert f']({target}#实施结果报告)' in text, skill
+        assert '按本次回复目的' in text, skill
+    else:
+        assert f']({target}#实施结果报告)' not in text, skill
+        assert '不套用实施结果报告' in text, skill
+print('ok - shared human-facing guidance and purpose-specific report references (both hosts)')
+
 for profile in (plugin / 'agents').glob('*.md'):
     text = profile.read_text()
     assert '\nmodel:' not in text.split('---', 2)[1], profile
