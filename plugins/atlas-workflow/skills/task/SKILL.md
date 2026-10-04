@@ -139,6 +139,13 @@ For a corrected or evidence-challenged decision, first apply the shared
 - For product implementation, make the stable domain or capability identity prominent in the execution objective and name new long-lived files and symbols from that identity plus their actual responsibility. Task, Gate, phase, slice, and acceptance labels are delivery metadata unless the object itself is delivery-scoped; do not copy a nearby delivery-prefixed implementation as a naming precedent solely because it is similar or recent.
 - Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while scope and authority remain unchanged. Persistence wording alone does not expand a narrower goal.
 
+During authorized implementation, follow the shared
+[execution discipline](../../references/execution-discipline.md): make the
+primary flow pass end to end first and record non-blocking defects for review
+and repair after it passes; explore a major decision from several read-only
+perspectives when useful and record it; the main session drives the work while
+a separate frontier `atlas-sdd-planner` lane authors any needed plan.
+
 When choosing or inheriting checks, measurements or diagnostic code, load the
 shared [Verification guidance](../../references/verification.md). It owns check
 selection, diagnostic failure/retirement and evidence reuse for direct execution.

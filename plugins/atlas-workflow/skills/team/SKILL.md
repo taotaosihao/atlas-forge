@@ -59,8 +59,9 @@ For a corrected or evidence-challenged decision, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
 
 Once Team is selected, the controller first freezes the admitted Goal and
-constructs dependency and ownership information, then dispatches the current
-ready frontier. Run useful independent child lanes alongside main integration
+takes dependency and ownership information from the planner lane required by
+the shared [execution discipline](../../references/execution-discipline.md),
+then dispatches the current ready frontier. Run useful independent child lanes alongside main integration
 work; when the frontier contains two or more admitted, independent,
 ready lanes, they run in the same bounded wave by default. Once their outputs are consumed,
 continue with the sole writer when no useful independent lane remains; Team
@@ -146,7 +147,8 @@ Native collaboration is the normal Team backend. Use the smallest useful set of 
 - `collaboration.list_agents` to inspect current capacity and status.
 - `collaboration.interrupt_agent` only to stop work that is still running and should no longer continue.
 
-Freeze the minimum Goal and ready frontier with the main Codex, then prefer
+Freeze the minimum Goal with the main Codex and take the ready frontier from the
+planner lane, then prefer
 parallel native agents for admitted independent lanes when parallelism materially
 improves latency or lowers risk; do not make main-first serial exploration the
 Team default. Do not impose a fixed role set or agent count beyond the bounded
@@ -158,7 +160,7 @@ writer lease. Agent completion is evidence, not controller admission.
 
 On Claude Code, use the callable `Agent` tool and the seven plugin profiles under `agents/*.md`. Use the exact profile identifier exposed by the host (including a plugin namespace when present), not a guessed Codex `agent_type`. If `Agent` or the required profile is unavailable, stay main-only and disclose the missing capability.
 
-- Leave the model override unset. Atlas's Claude profiles do not pin `model`; the host resolves the model from the user's session/configuration. Inheritance is the default and does not require an exact-provider selection event, a Codex catalog, or `atlas-agent-model-policy check`. An explicitly requested different model must be supported by the current Claude tool/configuration; do not silently substitute it or rewrite the root model. Do not claim model/provider diversity merely from separate agents.
+- Leave the model override unset, except the frontier planner override in the shared [execution discipline](../../references/execution-discipline.md). Atlas's Claude profiles do not pin `model`; the host resolves the model from the user's session/configuration. Inheritance is the default and does not require an exact-provider selection event, a Codex catalog, or `atlas-agent-model-policy check`. An explicitly requested different model must be supported by the current Claude tool/configuration; do not silently substitute it or rewrite the root model. Do not claim model/provider diversity merely from separate agents.
 - Pass a self-contained task prompt with the goal, authority, active decisions, owned and forbidden paths, acceptance, checks, stop conditions, and expected output. Use the current `Agent` schema; never send Codex-only `agent_type`, `reasoning_effort`, or `fork_turns` fields.
 - Keep the returned agent/task identifier. Use `SendMessage` for follow-up only when available for that agent; otherwise use the host's exposed resume mechanism. Receive foreground completion directly; for background work use the host completion notification or `Read` on the returned output path (`TaskOutput` only when exposed by that host). Use `TaskStop` only when the host exposes it for the running task. Missing lifecycle tools do not justify inventing calls or starting a replacement writer before the old one is quiesced.
 - `TaskList` / `TaskGet` describe tracked work items, not a complete inventory of live agents. Determine available capacity and completion from actual dispatch results and host status; do not treat an empty task list as proof that no writer is running.
@@ -270,7 +272,7 @@ Release-readiness invariant: only a Team execution-vnext product_release whose i
 
 ## Minimal Agent Planning
 
-1. Freeze the minimum Goal and construct the dependency/ownership ready frontier with the main Codex. In a selected Team, dispatch admitted independent lanes in bounded parallel waves by default; spawn only concrete bounded lanes whose results materially change latency or risk.
+1. The main Codex freezes the minimum Goal; when the work needs a plan, a separate frontier planner lane authors the dependency/ownership ready frontier under the shared [execution discipline](../../references/execution-discipline.md), and the main Codex admits and dispatches from it. In a selected Team, dispatch admitted independent lanes in bounded parallel waves by default; spawn only concrete bounded lanes whose results materially change latency or risk.
 2. Choose roles from the actual task; there is no default role set or required agent count. Do not add lanes merely to follow the model preference table.
 3. Use one writable owner for tightly coupled changes. Multiple writable agents require disjoint path/module ownership and an explicit integration owner.
 4. Reviewers and verifiers stay read-only unless a focused repair is assigned; that assignment follows the write-ownership rule above, so a repair inside an owned outcome returns to its writer.
@@ -316,6 +318,7 @@ materials never authorize an automatic format downgrade.
 - When authoring or rewriting an implementation contract from review results, project only those controller-admitted findings into executable requirements. Preserve `visible-follow-up` and `informational` findings in provenance or follow-up records, never as blocking acceptance, completion, edge-case, or safe-fallback obligations.
 - When authority-backed facts determine an environment, status, verification level, or conclusion, state the goal neutrally and place the condition once in an existing invariant, acceptance row, or edge case. If review invalidates an overbroad or stale claim, replace it in place; do not retain it and append exception sections, parallel requirements, per-value matrices, or mirrored prose.
 - Automatically repair only findings that block the current goal, regressions introduced by the current diff, or safety/data/permission problems that make the current delivery unsafe.
+- Order repairs by the shared [execution discipline](../../references/execution-discipline.md): the primary flow passes end to end first, non-blocking defects are recorded meanwhile, then reviewed and repaired within the current goal. A major decision may draw several read-only perspectives and is recorded in the existing decision carrier.
 - Architecture improvements, adjacent cleanup, historical defects, additional product requirements, and roadmap-external work are follow-ups unless continuing the current delivery would be unsafe.
 - Review repairs at each independently deliverable outcome, covering the repair diff and relevant integration surface; do not ban new regressions, and do not reopen unrelated repository-wide discovery by default. Review a repair immediately when it touches permission, identity, lock order, transaction boundaries, final-send eligibility or data provenance.
 - Continue repair only while a verifiable implementation or evidence change materially advances the current goal. A repeating repair loop follows the shared verification guidance's design-signal rule; record `fix_progress_stalled` and return the concrete blocker only when that analysis cannot continue without a person, instead of generating more lanes or artifacts.

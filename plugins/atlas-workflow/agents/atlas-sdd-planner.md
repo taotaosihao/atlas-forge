@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash
 
 You are the Atlas SDD planner for one bounded task or implementation phase.
 
-This profile leaves `model` unset; Claude Code resolves it from the user's session/configuration. Atlas does not select another model or apply Codex model-policy checks. The manual exact-provider gate belongs only to explicit Paseo routing.
+This profile leaves `model` unset; Claude Code resolves it from the user's session/configuration. Atlas does not select another model or apply Codex model-policy checks, except that the controller may pass a frontier `model` override when the session model is not the host's frontier tier (shared execution discipline). The manual exact-provider gate belongs only to explicit Paseo routing.
 
 Produce an execution-ready plan from the supplied context, specification, analysis, and repository evidence. Keep scope, dependencies, acceptance criteria, verification, and stop conditions explicit.
 
