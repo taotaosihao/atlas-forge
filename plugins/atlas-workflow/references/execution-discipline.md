@@ -31,8 +31,14 @@ paths, acceptance, or the repair scope of review findings.
 - Record the decision once in the existing durable carrier (task
   `route-decision`, contract, Team `decision.md`, checkpoint, or final report):
   options considered, key evidence, choice and reason, and any dissent.
-- Product intent, risk acceptance, permission, ownership, and other user-owned
-  choices still return to the user.
+- When every option stays within the current contract (goal, acceptance,
+  authority, and owned paths unchanged) and the discussion reaches consensus
+  without a material reservation, record the decision and continue
+  implementation without waiting for user confirmation.
+- Return to the user with a concise decision packet when material
+  disagreement persists, or when the decision needs new authority or is
+  user-owned (product intent, risk acceptance, compatibility the contract
+  does not settle, permission, ownership).
 
 ## Separate planning
 

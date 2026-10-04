@@ -143,7 +143,8 @@ During authorized implementation, follow the shared
 [execution discipline](../../references/execution-discipline.md): make the
 primary flow pass end to end first and record non-blocking defects for review
 and repair after it passes; explore a major decision from several read-only
-perspectives when useful and record it; the main session drives the work while
+perspectives when useful, record it, and continue directly on consensus within
+the contract; the main session drives the work while
 a separate frontier `atlas-sdd-planner` lane authors any needed plan.
 
 When choosing or inheriting checks, measurements or diagnostic code, load the
