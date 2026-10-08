@@ -293,6 +293,13 @@ schema checks, and the root provider remains unchanged.
 可用 `CODEX_BIN` 指定 Codex 可执行文件。默认目录读取失败时直接报错，
 不会回退到旧缓存；错误输出不转发 Codex 的配置或认证诊断。
 
+模型按能力描述先区分 `frontier`、`balanced`、`fast`，再为当前模式需要的每个
+档位独立选择最新版本；不同档位不要求同时升级。例如目录只有 workhorse
+升级到 6.1 时，规划仍可选择 6.0 的 frontier，Saving 则使用 6.1 的 workhorse
+和 6.0 的 fast。缺少所需能力、同档最新版本匹配多个模型或所需推理强度
+不受支持时仍报错，不跨档降级。输出 `family` 表示目录最高版本；实际派发
+以 `roles` 中各角色的精确模型 ID 和推理强度为准。
+
 Record a Team run. The backend defaults to Codex native subagents when
 `--backend` is omitted. Any explicit Team-level backend selection, including
 Paseo or an explicit native override, requires a controller-attested user or

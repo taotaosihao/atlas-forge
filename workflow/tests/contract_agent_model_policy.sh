@@ -104,6 +104,38 @@ node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode quality --cata
     and ([.roles["atlas-sdd-verifier", "atlas-sdd-browser-verifier"].model_reasoning_effort] | unique) == ["medium"]
     and .roles["atlas-sdd-explorer"].model_reasoning_effort == "high"' >/dev/null
 
+# Capability tiers can advance independently: 6.1 workhorse, 6.0 frontier/fast.
+jq '.models += [.models[] | select(.slug == "gpt-6-sol")
+  | .slug = "gpt-6.1-sol" | .description = "Latest workhorse model for coding and everyday work."]' \
+  "$TMP_ROOT/6.json" > "$TMP_ROOT/staggered.json"
+for mode in planning-review saving quality; do
+  node "$ROOT/workflow/bin/atlas-agent-model-policy" check --mode "$mode" \
+    --catalog "$TMP_ROOT/staggered.json" --agents-dir "$TMP_ROOT/agents"
+  node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode "$mode" \
+    --catalog "$TMP_ROOT/staggered.json" \
+    | jq -e --arg mode "$mode" '.family == "6.1" and .mode == $mode
+      and (if $mode == "saving" then
+        .roles["atlas-sdd-planner"].model == "gpt-6-astra"
+        and .roles["atlas-sdd-reviewer"].model == "gpt-6.1-sol"
+        and .roles["atlas-sdd-implementer"].model == "gpt-6-luna"
+      else ([.roles[].model] | unique) == ["gpt-6-astra"] end)' >/dev/null
+done
+
+# A present but unusable newest tier must not fall back to an older candidate.
+jq '.models += [.models[] | select(.slug == "gpt-6.1-sol") | .slug = "gpt-6.1-other"]' \
+  "$TMP_ROOT/staggered.json" > "$TMP_ROOT/ambiguous-tier.json"
+jq '(.models[] | select(.slug == "gpt-6.1-sol")).supported_reasoning_levels = [{"effort":"low"}]' \
+  "$TMP_ROOT/staggered.json" > "$TMP_ROOT/unsupported-tier.json"
+for invalid_tier in ambiguous unsupported; do
+  if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving \
+    --catalog "$TMP_ROOT/$invalid_tier-tier.json" > /dev/null 2> "$TMP_ROOT/$invalid_tier.err"; then
+    echo "expected $invalid_tier latest capability tier to fail closed" >&2
+    exit 1
+  fi
+done
+grep -q 'latest family 6.1 resolves 2 models for capability balanced' "$TMP_ROOT/ambiguous.err"
+grep -q 'model gpt-6.1-sol does not support reasoning effort max' "$TMP_ROOT/unsupported.err"
+
 jq '.planning_review_roles["atlas-sdd-reviewer"].capability = "balanced"' \
   "$ROOT/.codex/agents/model-policy.json" > "$TMP_ROOT/low-tier-planning-review-policy.json"
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve \
@@ -195,7 +227,7 @@ make_catalog "$TMP_ROOT/incomplete.json" 5.8 no
 node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --catalog "$TMP_ROOT/incomplete.json" \
   | jq -e '.mode == "planning-review" and ([.roles[].model] | unique) == ["gpt-6-astra"]' >/dev/null
 if node "$ROOT/workflow/bin/atlas-agent-model-policy" resolve --mode saving --catalog "$TMP_ROOT/incomplete.json" >/dev/null 2>&1; then
-  echo "expected an incomplete latest family to fail closed" >&2
+  echo "expected a missing required capability to fail closed" >&2
   exit 1
 fi
 

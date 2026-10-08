@@ -67,7 +67,6 @@ function resolvePolicy(catalog, policy, mode) {
   if (!models.length) fail('catalog contains no matching GPT model family');
 
   const latestFamily = models.map((model) => model.family).sort(compareFamily).at(-1);
-  const latest = models.filter((model) => compareFamily(model.family, latestFamily) === 0);
   const rolePolicy = mode === 'planning-review'
     ? policy.planning_review_roles
     : mode === 'quality'
@@ -87,9 +86,13 @@ function resolvePolicy(catalog, policy, mode) {
   for (const [capability, rule] of Object.entries(policy.capabilities)) {
     if (!requiredCapabilities.has(capability)) continue;
     const pattern = new RegExp(rule.description_pattern, 'i');
-    const matches = latest.filter((model) => pattern.test(model.description || ''));
+    const candidates = models.filter((model) => pattern.test(model.description || ''));
+    if (!candidates.length) fail(`catalog resolves 0 models for capability ${capability}`);
+    // Capability tiers can ship independently of the newest catalog family.
+    const latestCapabilityFamily = candidates.map((model) => model.family).sort(compareFamily).at(-1);
+    const matches = candidates.filter((model) => compareFamily(model.family, latestCapabilityFamily) === 0);
     if (matches.length !== 1) {
-      fail(`latest family ${latestFamily.major}.${latestFamily.minor} resolves ${matches.length} models for capability ${capability}`);
+      fail(`latest family ${latestCapabilityFamily.major}.${latestCapabilityFamily.minor} resolves ${matches.length} models for capability ${capability}`);
     }
     capabilityModels[capability] = matches[0];
   }
