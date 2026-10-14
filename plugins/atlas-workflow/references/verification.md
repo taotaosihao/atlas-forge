@@ -32,13 +32,17 @@ BAF or release certification.
   a long or final run, proof that an unavoidable authorized temporary change was
   reverted, or a migration with history checksum obligations. Formal gate, receipt,
   freshness and final-candidate rules remain binding.
-- **Build focused checks from real producers.** When a focused test stands in
-  for an in-repository producer across a boundary, build its fixture from that
-  producer's actual output, by calling it or capturing what it emits; a
-  hand-written record there expresses a deliberate negative case, not a positive
-  pass. Pure-function tests and external producers keep their own inputs. When a
-  complete journey exposes a defect that a focused check missed, first make the
-  focused check fail for the same reason, then repair.
+- **Build focused checks from real producers, sized to the change.** When a
+  focused test stands in for an in-repository producer across a boundary, build
+  its fixture from that producer's actual output, by calling it or capturing
+  what it emits; a hand-written record there expresses a deliberate negative
+  case, not a positive pass. Pure-function tests and external producers keep
+  their own inputs. New checks cover behavior the change adds, alters,
+  repairs or must preserve on a path it modifies, extending an existing test
+  where one already covers that behavior; paths the change leaves untouched and
+  hypothetical cases the current diff or primary flow cannot reach get no new
+  test. When a complete journey exposes a defect that a focused check missed,
+  first make the nearest focused check fail for the same reason, then repair.
 - **Retire answered diagnostics.** Once an experiment has answered the current
   question or is explicitly closed, stop adding samples. Under the current edit
   authority, remove newly introduced temporary runners, duplicate sampling and
@@ -66,8 +70,8 @@ BAF or release certification.
   the last replanning even though each run found a different defect. If the
   same pattern returns after replanning, record why the chosen approach did not
   hold before choosing the next one. Stop rerunning,
-  analyze the shared cause across the affected branches, and move the remaining
-  risk into producer-backed focused checks before the next complete run.
+  analyze the shared cause across the affected branches, and cover that shared
+  cause with producer-backed focused checks before the next complete run.
   Research the established industry solution for that class of problem, choose
   and record the approach, and continue within the current goal, contract and
   edit authority; an approach that adds a shared mechanism, migration or public
@@ -90,6 +94,8 @@ BAF or release certification.
 
 Permission, data integrity, resource ownership, concurrency isolation, final-send
 eligibility, uncertain-result handling, required migration/recovery and real
-business readback are concrete purposes; they do not need a prior incident to
-justify protection. This guidance never lowers an approved requirement or lets
-prose override formal admission or release evidence.
+business readback are concrete purposes; on a path the current diff or primary
+flow can reach, they do not need a prior incident to justify protection.
+Protection for paths neither can reach is a follow-up. This guidance never
+lowers an approved requirement or lets prose override formal admission or
+release evidence.

@@ -177,7 +177,7 @@ maintenance work with no GUI outcome does not load it.
 
 ## Review, Commits, And Completion
 
-- Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe. Other findings are follow-ups.
+- Reviewer discovery is unrestricted. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe through a failure the current diff or primary flow can reach. Other findings, including guards, checks or tests for unreachable hypothetical cases, are follow-ups.
 - Match commit timing to the work phase: commit a solution/contract as one logical outcome when it is finally confirmed; during authorized implementation, prefer moderate logical commits that are independently understandable, verified, and reversible. Do not commit every step, slice, or fix round, include unrelated user changes, or infer push/PR/release authority.
 - Continue while safe work is materially advancing the current goal. Finish when acceptance is met; return earlier only for new authority, a user-owned decision, or external-state dependency. A repeating repair loop follows the Verification guidance's design-signal rule and returns only when that analysis needs a person.
 - Run `atlas-workflow done <task-id>` only when the whole authorized goal is actually complete.

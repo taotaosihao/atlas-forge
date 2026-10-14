@@ -20,7 +20,7 @@ Implementers and fixers return one `IMPLEMENTER_REPORT_JSON`; reviewers return o
 
 1. Validate the implementer report against its brief (`codex-team-validate-json --type implementer-report --file <report> --brief <brief>`) and inspect the current diff.
 2. Review against the current user goal, slice acceptance, required checks, and directly affected integration surface.
-3. Automatically repair only current-goal blockers, regressions introduced by the current diff, or safety/data/permission issues that make this delivery unsafe.
+3. Automatically repair only what the Team [Review And Focused Repair](../SKILL.md#review-and-focused-repair) rules admit.
 4. Admit a finding into the current delivery whenever its controller resolution is `disposition: current-required`, retaining both `open` and `resolved` requirements in clean rewrites. Only `repair_status: open` blocks the goal or creates repair feedback. Record `visible-follow-up` and `informational` findings as provenance or follow-ups; they do not create new SDD slices or acceptance.
    - Write controller decisions as a temporary JSON object containing exactly `records` and `evidence_gaps`, with exactly one entry for every verdict finding and evidence gap.
    - Run `codex-team-controller-resolution --task <task-id> --slice <slice-id> --decisions <json-file>`. The helper derives `verdict_digest` and `goal_ref`, validates full coverage and authority binding, and atomically writes the canonical `controller-resolution.json`; do not hand-author its envelope.
