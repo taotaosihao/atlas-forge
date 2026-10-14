@@ -33,6 +33,10 @@ for (const [file, link] of Object.entries(consumers)) {
   assert.ok(existsSync(resolve(plugin, dirname(file), link)), `${file} link does not resolve`);
 }
 for (const anchor of ["`user`", "`agent`", "control/index.yaml"]) assert.ok(rules.includes(anchor), `control rules missing ${anchor}`);
+assert.ok(rules.includes("(../scripts/atlas-control-lint)"), "control rules must link the mechanical check");
+assert.ok(existsSync(resolve(plugin, "scripts/atlas-control-lint")), "mechanical check must ship in the plugin");
+assert.match(skill, /scripts\/atlas-control-lint/);
+assert.ok(source("workflow/tests/contract.sh").includes("contract_control_lint.mjs"), "contract.sh must run the lint contract");
 assert.ok(source("plugins/atlas-workflow/hooks/session-baseline.md").includes("`control`"), "Claude baseline must route to control");
 assert.ok(source("workflow/tests/contract.sh").includes("contract_control_skill.mjs"), "contract.sh must run this contract");
 

@@ -17,8 +17,11 @@ paths it governs, the existing checks that verify it, and for an `agent` entry
 the basis it was decided on, pointing at an existing decision record or source
 rather than restating it. The index references existing requirements,
 contracts, interfaces and tests instead of copying them; a requirement with no
-other home gets a short `control/<topic>.md`. The authority files, the index
-and its declaration line are controlled content.
+other home gets a short `control/<topic>.md`. The authority files, the files
+an entry's `checks` name, the index and the `AGENTS.md` that declares it are
+controlled content. `checks` therefore names acceptance-level test files, or a
+command together with the test files it runs, not ordinary unit tests or the
+derived verification map.
 
 Admit an entry only when changing it would change a user promise, business
 meaning, compatibility or a stated engineering boundary. Internal structure,
@@ -33,11 +36,16 @@ every task.
   user message changes it.
 - An `agent` entry records a decision the agent made. The agent may revise or
   remove it through change step 5 below.
+- Editing controlled content without changing what any entry requires, such as
+  adding an acceptance case or updating a reference after a file move, changes
+  no entry; its own commit is the Control change.
 
 ## During work
 
 Writing or committing Control needs the current edit and commit authority.
-Without it, put the proposed entry or change in the handoff or report.
+Without it, put the proposed entry or change in the handoff or report. A commit
+that changes controlled content contains nothing else and lands before the
+work that depends on it.
 
 1. **Select.** Read the index and take the entries the current goal touches.
    Path matches are hints: follow shared interfaces to their callers. The
@@ -63,9 +71,8 @@ Without it, put the proposed entry or change in the handoff or report.
    `user` entry into the questions for the user. Where Control is silent on a major
    decision, research the established industry practice, decide, and cite it
    as the basis. A new entry goes through the task's ordinary review.
-5. **Revise or remove an `agent` entry.** Commit the Control change on its own,
-   before the implementation that depends on it. Its reason must stand without
-   the implementation: a user requirement, real-use evidence or a cited
+5. **Revise or remove an `agent` entry.** Its reason must stand without the
+   implementation: a user requirement, real-use evidence or a cited
    practice; "the code needs it" is not a reason. A reviewer who did not author
    it checks that reason before the dependent implementation proceeds; this is
    not a Team selection. If the reviewer rejects it, keep the old entry and
@@ -73,12 +80,21 @@ Without it, put the proposed entry or change in the handoff or report.
    reviewer may the change proceed, marked unreviewed in the final report.
 6. **Check the result.** A controlled change alters an authority file or the
    behavior an entry controls. Each one needs a matching Control change from
-   this task; acceptance tests, interfaces or index entries must not be
-   weakened to make a check pass. Editing a governed path while keeping its
-   entry needs no Control change, and the entry's `checks` become candidates
-   under the [Verification guidance](verification.md), which keeps check
-   selection: Control adds no new tests by itself. Report each Control change
-   in one line of the final reply.
+   this task; acceptance tests, interfaces or index entries must not be weakened
+   to make a check pass. Editing a governed path that is not itself controlled
+   content, while keeping its entry, needs no Control change, and the entry's
+   `checks` become candidates under the
+   [Verification guidance](verification.md), which keeps check selection:
+   Control adds no new tests by itself. When the task has commits, run the plugin's
+   [`atlas-control-lint`](../scripts/atlas-control-lint) with `--base` at the
+   merge base with the target branch; it checks that non-merge commits keep
+   Control separate and that the index's references still resolve. Fix a finding
+   in the task's own unshared commits before handoff by splitting the commit,
+   restoring what the change broke or updating a moved reference; report
+   findings in shared commits instead of rewriting them. A reference already
+   stale for a reason other than a file move goes through that entry's change
+   path. Never drop or loosen an entry only to silence a finding. Report each
+   Control change in one line of the final reply.
 
 Return to the user under the existing rules of the Verification guidance and
 the execution discipline, plus any change to a `user` entry. Collect those

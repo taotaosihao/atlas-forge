@@ -27,7 +27,10 @@ none, with project-file write permission.
    material. Leave two conflicting `user` sources out of the index and collect
    them into one question for the user; do not stop the rest.
 5. Write `control/index.yaml` and its one-line declaration in the project
-   `AGENTS.md` as one Control commit, without touching other work in the tree.
+   `AGENTS.md` as one Control commit, without touching other work in the tree,
+   then run `scripts/atlas-control-lint --repo <project> --base <commit before
+   it>` from this plugin, two directories above this skill, until it reports
+   `consistent`.
 
 ```yaml
 version: 1
@@ -37,7 +40,7 @@ entries:
     source: user | agent
     authority: [<path or user-message:ref>]
     paths: [<governed path or glob>]
-    checks: [<existing test, command or verification-map entry>]
+    checks: [<existing acceptance test file, or command plus its test files>]
     basis: <agent only: decision, evidence or cited practice>
 ```
 
@@ -47,8 +50,11 @@ merges blocked mechanically.
 
 ## check
 
-Read-only. Apply step 6 of the shared rules to a named diff or the current
-change, and include changes to the index itself. Return exactly one of:
+Read-only. For committed changes, first run this plugin's
+`scripts/atlas-control-lint --repo <project> --base <merge base>` and include
+its findings; it covers commits only, so judge uncommitted edits by reading them.
+Then apply step 6 of the shared rules to a named diff or the current change,
+including changes to the index itself. Return exactly one of:
 
 ```text
 consistent | drift-found | blocked

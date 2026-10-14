@@ -428,5 +428,6 @@ primitive used by the update command.
 - `skills/3d-harness/SKILL.md`: source-checkout-only reviewed-local 3D acceptance entry
 - `skills/project-verification/SKILL.md`: optional project verification map and journey navigation entry
 - `skills/control/SKILL.md` and `references/control.md`: project Control index setup, check and change, and the rules ordinary work follows
+- `scripts/atlas-control-lint`: mechanical Control check for a project: index schema, unresolved references, and commits that mix Control with other changes
 - `skills/system-message-design/SKILL.md`: UI copy and feedback wording guidance shared by both hosts
 - `tools/atlas-3d-harness/README.md`: 3D runtime CLI, evidence, safety, and host limits

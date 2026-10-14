@@ -1,0 +1,481 @@
+#!/usr/bin/env node
+"use strict";
+
+// Mechanical checks for a project's Control index (control/index.yaml).
+// Semantic consistency stays with the control skill; this script only checks
+// what a diff and a tree can prove.
+
+const { execFileSync } = require("child_process");
+const path = require("path");
+
+const INDEX_PATH = "control/index.yaml";
+const REQUIRED_FIELDS = ["id", "controls", "source", "authority", "paths"];
+const KNOWN_FIELDS = new Set([...REQUIRED_FIELDS, "checks", "basis"]);
+const GLOB_CHARS = /[*?{}]/;
+
+function usage() {
+  return [
+    "usage: atlas-control-lint [--repo <dir>] [--base <rev>] [--head <rev>]",
+    "",
+    "Checks control/index.yaml at --head (default HEAD): schema, that every",
+    "authority and check file exists, and that every governed path matches a file.",
+    "With --base, also checks each non-merge commit in <base>..<head>: a commit",
+    "that changes controlled content (control/**, the declaring AGENTS.md, the",
+    "authority files and the check files named by the index before or after the",
+    "commit) must contain nothing else.",
+    "",
+    "Use the merge base with the target branch as --base. Merge commits are not",
+    "checked; their parents are.",
+    "",
+    "Prints consistent | drift-found | blocked; exits 0, 1 or 2 respectively.",
+  ].join("\n");
+}
+
+class Blocked extends Error {}
+
+function parseArgs(argv) {
+  const args = { repo: ".", base: null, head: "HEAD" };
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i];
+    if (flag === "--help" || flag === "-h") {
+      args.help = true;
+      continue;
+    }
+    const value = argv[i + 1];
+    if (!["--repo", "--base", "--head"].includes(flag) || value === undefined) {
+      throw new Blocked(`unknown or incomplete argument: ${flag}`);
+    }
+    args[flag.slice(2)] = value;
+    i += 1;
+  }
+  return args;
+}
+
+function git(repo, args) {
+  try {
+    return execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const detail = String(error.stderr || error.message).trim().split("\n")[0];
+    throw new Blocked(`git ${args.join(" ")} failed: ${detail}`);
+  }
+}
+
+function resolveRev(repo, rev) {
+  return git(repo, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]).trim();
+}
+
+function readAt(repo, rev, file) {
+  try {
+    return execFileSync("git", ["-C", repo, "show", `${rev}:${file}`], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+const treeCache = new Map();
+function treeFiles(repo, rev) {
+  if (!treeCache.has(rev)) {
+    const out = git(repo, ["ls-tree", "-r", "--name-only", "-z", rev]);
+    treeCache.set(rev, new Set(out.split("\0").filter(Boolean)));
+  }
+  return treeCache.get(rev);
+}
+
+// --- Minimal YAML subset reader for the index template -------------------
+// Supports: comments, top-level scalars, `entries:` as a block sequence of
+// mappings, scalar values (plain, single or double quoted), flow sequences on
+// one line, block sequences and `|` / `>` block scalars under an entry key.
+
+function stripComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote === '"') {
+      if (ch === "\\") i += 1;
+      else if (ch === '"') quote = null;
+    } else if (quote === "'") {
+      if (ch === "'") quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i).trimEnd();
+    }
+  }
+  return line.trimEnd();
+}
+
+function parseScalar(raw, lineNo) {
+  const text = raw.trim();
+  if (text.startsWith('"')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Blocked(`${INDEX_PATH}:${lineNo}: unsupported double-quoted value`);
+    }
+  }
+  if (text.startsWith("'")) {
+    if (!text.endsWith("'") || text.length < 2) throw new Blocked(`${INDEX_PATH}:${lineNo}: unterminated quote`);
+    return text.slice(1, -1).replace(/''/g, "'");
+  }
+  if (text.startsWith("[")) return parseFlowSequence(text, lineNo);
+  if (text.startsWith("{") || text.startsWith("&") || text.startsWith("*") || text.startsWith("!")) {
+    throw new Blocked(`${INDEX_PATH}:${lineNo}: unsupported YAML syntax`);
+  }
+  return text;
+}
+
+function parseFlowSequence(text, lineNo) {
+  if (!text.endsWith("]")) throw new Blocked(`${INDEX_PATH}:${lineNo}: flow sequence must close on its line`);
+  const body = text.slice(1, -1).trim();
+  if (!body) return [];
+  const items = [];
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i <= body.length; i += 1) {
+    const ch = body[i];
+    if (quote === '"') {
+      if (ch === "\\") i += 1;
+      else if (ch === '"') quote = null;
+    } else if (quote === "'") {
+      if (ch === "'") quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "[" || ch === "{") {
+      throw new Blocked(`${INDEX_PATH}:${lineNo}: nested flow collections are unsupported`);
+    } else if (ch === "," || i === body.length) {
+      const item = body.slice(start, i).trim();
+      if (item) items.push(parseScalar(item, lineNo));
+      start = i + 1;
+    }
+  }
+  return items;
+}
+
+function parseIndex(text) {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).map((raw, index) => {
+    const content = stripComment(raw);
+    return { no: index + 1, raw, content, indent: content.length - content.trimStart().length };
+  });
+  const result = { version: null, entries: null };
+  let i = 0;
+  const next = () => {
+    while (i < lines.length && !lines[i].content.trim()) i += 1;
+    return lines[i];
+  };
+
+  if (next() && lines[i].content.trim() === "---") i += 1;
+  while (next()) {
+    const line = lines[i];
+    if (line.indent !== 0) throw new Blocked(`${INDEX_PATH}:${line.no}: unexpected indentation`);
+    const match = line.content.match(/^([A-Za-z_][\w-]*):(?:\s+(.*))?$/);
+    if (!match) throw new Blocked(`${INDEX_PATH}:${line.no}: expected a top-level key`);
+    i += 1;
+    if (match[1] === "entries") {
+      if (match[2] !== undefined && match[2].trim() !== "[]") {
+        throw new Blocked(`${INDEX_PATH}:${line.no}: entries must be a block sequence`);
+      }
+      result.entries = match[2] === undefined ? parseEntries() : [];
+    } else if (match[1] === "version") {
+      result.version = parseScalar(match[2] || "", line.no);
+    }
+  }
+  return result;
+
+  function parseEntries() {
+    const entries = [];
+    const first = next();
+    if (!first || first.indent === 0) return entries;
+    const dashIndent = first.indent;
+    while (next() && lines[i].indent >= dashIndent) {
+      const line = lines[i];
+      if (line.indent !== dashIndent || !line.content.trimStart().startsWith("- ")) {
+        throw new Blocked(`${INDEX_PATH}:${line.no}: expected "- " to start an entry`);
+      }
+      const entry = { _line: line.no };
+      const keyIndent = dashIndent + 2;
+      // Treat the dash line as the entry's first key line.
+      lines[i] = { ...line, content: " ".repeat(keyIndent) + line.content.trimStart().slice(2), indent: keyIndent };
+      while (next() && lines[i].indent === keyIndent && !lines[i].content.trimStart().startsWith("- ")) {
+        readEntryKey(entry, keyIndent);
+      }
+      if (next() && lines[i].indent > dashIndent && lines[i].indent !== keyIndent) {
+        throw new Blocked(`${INDEX_PATH}:${lines[i].no}: unexpected indentation`);
+      }
+      entries.push(entry);
+    }
+    return entries;
+  }
+
+  function readEntryKey(entry, keyIndent) {
+    const line = lines[i];
+    const match = line.content.trim().match(/^([A-Za-z_][\w-]*):(?:\s+(.*))?$/);
+    if (!match) throw new Blocked(`${INDEX_PATH}:${line.no}: expected "key: value"`);
+    const [, key, value] = match;
+    i += 1;
+    if (value !== undefined && /^[|>][+-]?$/.test(value.trim())) {
+      const parts = [];
+      while (i < lines.length && (!lines[i].raw.trim() || lines[i].raw.length - lines[i].raw.trimStart().length > keyIndent)) {
+        parts.push(lines[i].raw.trim());
+        i += 1;
+      }
+      entry[key] = parts.join(value.trim().startsWith("|") ? "\n" : " ").trim();
+    } else if (value !== undefined) {
+      let text = value;
+      // A plain scalar may wrap onto more-indented lines.
+      if (!/^["'[]/.test(text.trim())) {
+        while (next() && lines[i].indent > keyIndent && !lines[i].content.trimStart().startsWith("- ")) {
+          const more = lines[i].content.trim();
+          if (/^[\w-]+:(\s|$)/.test(more) || more.includes(": ")) {
+            throw new Blocked(`${INDEX_PATH}:${lines[i].no}: unexpected indentation`);
+          }
+          text += ` ${more}`;
+          i += 1;
+        }
+      }
+      entry[key] = parseScalar(text, line.no);
+    } else {
+      const items = [];
+      while (next() && lines[i].indent >= keyIndent && lines[i].content.trimStart().startsWith("- ")) {
+        const item = lines[i].content.trimStart().slice(2);
+        if (/^[\w-]+:(\s|$)/.test(item.trim())) throw new Blocked(`${INDEX_PATH}:${lines[i].no}: sequence items must be scalars`);
+        items.push(parseScalar(item, lines[i].no));
+        i += 1;
+      }
+      entry[key] = items.length ? items : "";
+    }
+  }
+}
+
+// --- Index interpretation -----------------------------------------------------
+
+function refPath(ref) {
+  if (typeof ref !== "string") return null;
+  const value = ref.trim();
+  if (!value || value.startsWith("user-message:")) return null;
+  const file = value.split("#")[0].replace(/^\.?\//, "").replace(/\/+$/, "");
+  return file || null;
+}
+
+// A check is a file reference when it is one token that names a path; other
+// checks are commands and are not resolved.
+function checkPath(check) {
+  if (typeof check !== "string" || /\s/.test(check.trim())) return null;
+  const file = refPath(check);
+  if (!file) return null;
+  return file.includes("/") || /\.[A-Za-z0-9]+$/.test(file) ? file : null;
+}
+
+function asList(value) {
+  if (value === undefined || value === null || value === "") return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function existsInTree(files, file) {
+  if (files.has(file)) return true;
+  const prefix = `${file}/`;
+  for (const candidate of files) if (candidate.startsWith(prefix)) return true;
+  return false;
+}
+
+function globRegex(glob) {
+  let pattern = glob.replace(/^\.?\//, "");
+  if (pattern.endsWith("/")) pattern += "**";
+  let source = "";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const ch = pattern[i];
+    if (ch === "*" && pattern[i + 1] === "*") {
+      if (pattern[i + 2] === "/") {
+        source += "(?:.*/)?";
+        i += 2;
+      } else {
+        source += ".*";
+        i += 1;
+      }
+    } else if (ch === "*") {
+      source += "[^/]*";
+    } else if (ch === "?") {
+      source += "[^/]";
+    } else {
+      source += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${source}(?:/.*)?$`);
+}
+
+function loadIndex(repo, rev) {
+  const text = readAt(repo, rev, INDEX_PATH);
+  if (text === null) return null;
+  return parseIndex(text);
+}
+
+function controlledFiles(repo, rev, index) {
+  const files = treeFiles(repo, rev);
+  const set = new Set();
+  for (const file of files) if (file.startsWith("control/")) set.add(file);
+  const agents = readAt(repo, rev, "AGENTS.md");
+  if (agents !== null && agents.includes(INDEX_PATH)) set.add("AGENTS.md");
+  for (const entry of index.entries || []) {
+    for (const ref of asList(entry.authority)) {
+      const file = refPath(ref);
+      if (file) addPathOrDir(set, files, file);
+    }
+    for (const check of asList(entry.checks)) {
+      const file = checkPath(check);
+      if (file) addPathOrDir(set, files, file);
+    }
+  }
+  return set;
+}
+
+function addPathOrDir(set, files, file) {
+  set.add(file);
+  const prefix = `${file}/`;
+  for (const candidate of files) if (candidate.startsWith(prefix)) set.add(candidate);
+}
+
+// --- Checks ---------------------------------------------------------------------
+
+function checkIndex(repo, rev, index, findings) {
+  if (String(index.version) !== "1") findings.push(`[schema] ${INDEX_PATH}: version must be 1`);
+  if (!Array.isArray(index.entries)) {
+    findings.push(`[schema] ${INDEX_PATH}: missing entries`);
+    return;
+  }
+  const files = treeFiles(repo, rev);
+  const ids = new Set();
+  for (const entry of index.entries) {
+    const label = `entry ${entry.id || `at line ${entry._line}`}`;
+    for (const field of REQUIRED_FIELDS) {
+      if (entry[field] === undefined || entry[field] === "") findings.push(`[schema] ${label}: missing ${field}`);
+    }
+    if (entry.id) {
+      if (ids.has(entry.id)) findings.push(`[schema] ${label}: duplicate id`);
+      ids.add(entry.id);
+    }
+    if (entry.source !== undefined && !["user", "agent"].includes(entry.source)) {
+      findings.push(`[schema] ${label}: source must be user or agent`);
+    }
+    if (entry.source === "agent" && !entry.basis) findings.push(`[schema] ${label}: agent entry needs basis`);
+    for (const key of Object.keys(entry)) {
+      if (key !== "_line" && !KNOWN_FIELDS.has(key)) findings.push(`[schema] ${label}: unknown field ${key}`);
+    }
+    for (const [field, refs, toPath] of [["authority", entry.authority, refPath], ["checks", entry.checks, checkPath]]) {
+      for (const ref of asList(refs)) {
+        const file = toPath(ref);
+        if (file && GLOB_CHARS.test(file)) findings.push(`[schema] ${label}: ${field} must name files, not a glob: ${ref}`);
+      }
+    }
+    for (const glob of asList(entry.paths)) {
+      if (typeof glob === "string" && /[{}]|^!/.test(glob.trim())) findings.push(`[schema] ${label}: unsupported glob syntax in paths: ${glob}`);
+    }
+    if (Array.isArray(entry.authority) && !entry.authority.length) findings.push(`[schema] ${label}: empty authority`);
+    if (Array.isArray(entry.paths) && !entry.paths.length) findings.push(`[schema] ${label}: empty paths`);
+
+    for (const ref of asList(entry.authority)) {
+      const file = refPath(ref);
+      if (file && !GLOB_CHARS.test(file) && !existsInTree(files, file)) findings.push(`[missing-authority] ${label}: ${file} does not exist`);
+    }
+    for (const check of asList(entry.checks)) {
+      const file = checkPath(check);
+      if (file && !GLOB_CHARS.test(file) && !existsInTree(files, file)) findings.push(`[missing-check] ${label}: ${file} does not exist`);
+    }
+    for (const glob of asList(entry.paths)) {
+      if (typeof glob !== "string" || !glob.trim() || /[{}]|^!/.test(glob.trim())) continue;
+      const regex = globRegex(glob.trim());
+      let matched = false;
+      for (const file of files) {
+        if (regex.test(file)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) findings.push(`[unmatched-path] ${label}: ${glob} matches no file`);
+    }
+  }
+}
+
+function checkCommits(repo, base, head, findings) {
+  const out = git(repo, ["rev-list", "--reverse", "--no-merges", `${base}..${head}`]);
+  for (const commit of out.split("\n").filter(Boolean)) {
+    const parent = git(repo, ["rev-list", "--parents", "-n", "1", commit]).trim().split(" ")[1];
+    const readable = (rev) => {
+      try {
+        return loadIndex(repo, rev);
+      } catch (error) {
+        if (!(error instanceof Blocked)) throw error;
+        findings.push(`[schema] ${commit.slice(0, 9)}: cannot read the index at ${rev.slice(0, 9)} (${error.message})`);
+        return null;
+      }
+    };
+    const before = parent ? readable(parent) : null;
+    const after = readable(commit);
+    if (!before && !after) continue;
+    const controlled = new Set();
+    if (before) for (const file of controlledFiles(repo, parent, before)) controlled.add(file);
+    if (after) for (const file of controlledFiles(repo, commit, after)) controlled.add(file);
+    const diffArgs = parent ? ["diff", "--name-status", "-M", "-z", parent, commit] : ["show", "--name-status", "-M", "-z", "--format=", commit];
+    const fields = git(repo, diffArgs).split("\0").filter(Boolean);
+    const changed = new Set();
+    for (let k = 0; k < fields.length; k += 1) {
+      const status = fields[k];
+      const count = /^[RC]/.test(status) ? 2 : 1;
+      for (let n = 1; n <= count; n += 1) changed.add(fields[k + n]);
+      k += count;
+    }
+    const control = [...changed].filter((file) => controlled.has(file)).sort();
+    const other = [...changed].filter((file) => !controlled.has(file)).sort();
+    if (control.length && other.length) {
+      const subject = git(repo, ["log", "-1", "--format=%s", commit]).trim();
+      findings.push(
+        `[mixed-commit] ${commit.slice(0, 9)} ${subject}: Control changes must be committed on their own\n` +
+          `    control: ${control.join(", ")}\n` +
+          `    other: ${other.join(", ")}`,
+      );
+    }
+  }
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(usage());
+    return 0;
+  }
+  const repo = path.resolve(args.repo);
+  const head = resolveRev(repo, args.head);
+  const base = args.base ? resolveRev(repo, args.base) : null;
+  const findings = [];
+  const index = loadIndex(repo, head);
+  if (!index) {
+    const hadIndex = base && readAt(repo, base, INDEX_PATH) !== null;
+    if (!hadIndex) throw new Blocked(`${INDEX_PATH} not found at ${args.head}`);
+    findings.push(`[schema] ${INDEX_PATH} was removed after ${args.base}`);
+  } else {
+    checkIndex(repo, head, index, findings);
+  }
+  if (base) checkCommits(repo, base, head, findings);
+  if (!findings.length) {
+    console.log("consistent");
+    return 0;
+  }
+  console.log("drift-found");
+  for (const finding of findings) console.log(`- ${finding}`);
+  return 1;
+}
+
+try {
+  process.exitCode = main();
+} catch (error) {
+  if (!(error instanceof Blocked)) throw error;
+  console.log("blocked");
+  console.log(`- ${error.message}`);
+  process.exitCode = 2;
+}
