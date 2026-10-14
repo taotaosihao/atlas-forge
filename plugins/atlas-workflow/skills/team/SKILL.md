@@ -196,6 +196,10 @@ dispatch packet and require it to read them; do not depend on parent history.
 Unrelated read-only fact-finding lanes need no such load. This adds no brief field
 or agent role and does not alter formal admission or required gates.
 
+When the project declares Control, follow the shared
+[Project Control](../../references/control.md) rules, including what a
+dispatch packet carries; this adds no brief field.
+
 ### Discuss
 
 - Use discuss for read-only options, architecture, diagnosis, risk review, or a second opinion.

@@ -35,6 +35,7 @@ After the plugin is installed, these entrypoints are available:
 - `$atlas-workflow:finish`
 - `$atlas-workflow:3d-harness` (source-checkout exploration only)
 - `$atlas-workflow:project-verification` (optional project verification map)
+- `$atlas-workflow:control` (project Control index)
 
 Small features and fixes should stay in the current workspace.
 Use `$atlas-workflow:worktree` only when the work needs isolation, and default to a separate Docker Compose project for that worktree when the repo uses Compose.
@@ -377,6 +378,14 @@ gate. Current valid user decisions, approved design, and applicable contracts
 define the target behavior; project harnesses provide verification entrypoints
 and evidence only. A map is not required for ordinary business delivery.
 
+`$atlas-workflow:control` sets up, checks, or changes a project-owned
+`control/index.yaml`: the small set of confirmed intent, boundaries, controlled
+interfaces and key acceptance that implementation must keep, referencing
+existing authority instead of copying it. Once a project declares it, Task,
+Team, Clarify and Brainstorm follow the shared
+[`references/control.md`](references/control.md) rules. Projects without
+Control are unaffected, and Atlas adds no CI or merge gate.
+
 ## Refresh After Changes
 
 Refresh the installed development copy only when the task explicitly includes an
@@ -418,5 +427,6 @@ primitive used by the update command.
 - `skills/finish/SKILL.md`: isolated branch completion entry
 - `skills/3d-harness/SKILL.md`: source-checkout-only reviewed-local 3D acceptance entry
 - `skills/project-verification/SKILL.md`: optional project verification map and journey navigation entry
+- `skills/control/SKILL.md` and `references/control.md`: project Control index setup, check and change, and the rules ordinary work follows
 - `skills/system-message-design/SKILL.md`: UI copy and feedback wording guidance shared by both hosts
 - `tools/atlas-3d-harness/README.md`: 3D runtime CLI, evidence, safety, and host limits

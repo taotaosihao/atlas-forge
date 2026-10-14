@@ -135,7 +135,7 @@ For a corrected or evidence-challenged decision, first apply the shared
 [decision supersession protocol](../../references/decision-supersession.md).
 
 - Review, analysis, planning, clarification, and documentation do not authorize implementation. Enter execute only after an explicit user implementation request; when a Team promotion is recorded, cite that message with `--authorization-ref`.
-- Treat the current user goal and existing authoritative spec as the scope. Do not create a second roadmap/scope state machine.
+- Treat the current user goal and existing authoritative spec as the scope. Do not create a second roadmap/scope state machine. When the project declares Control, its entries constrain that scope without adding goals; follow the shared [Project Control](../../references/control.md) rules.
 - For product implementation, make the stable domain or capability identity prominent in the execution objective and name new long-lived files and symbols from that identity plus their actual responsibility. Task, Gate, phase, slice, and acceptance labels are delivery metadata unless the object itself is delivery-scoped; do not copy a nearby delivery-prefixed implementation as a naming precedent solely because it is similar or recent.
 - Treat "complete implementation" as authorization to cross all internal slices only when the current authorized goal already is the named roadmap or all listed phases. Continue that roadmap without routine confirmation while scope and authority remain unchanged. Persistence wording alone does not expand a narrower goal.
 

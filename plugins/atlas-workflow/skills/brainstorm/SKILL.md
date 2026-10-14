@@ -92,7 +92,10 @@ Follow this loop:
     assumptions, acceptance shape, verification strategy, real entrypoint or
     implementation dependency, allowed engineering adjustments, the behavior and
     permission/authorization boundaries to preserve by citing current confirmed
-    decisions, and important unresolved items. Reuse an existing project document when possible. Do not
+    decisions and, when the project declares Control, the entries the direction
+    keeps or changes under the shared
+    [Project Control](../../references/control.md) rules, and important
+    unresolved items. Reuse an existing project document when possible. Do not
     create a repository bundle or copy the full workflow notes just to satisfy
     a handoff format.
 13. Self-review artifacts before reporting:

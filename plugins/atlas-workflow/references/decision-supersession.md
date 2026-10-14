@@ -18,7 +18,9 @@ codex-workflow decision-record <task-id> --id <new-id> --authority-ref <user-mes
 - A correction makes older prompt bundles, Team generations, execution grants,
   and verification stale. Rebuild, replan, or reverify as applicable.
 
-Evidence can challenge a decision but cannot replace it. Record the conflict:
+Evidence can challenge a decision but cannot replace it. Evidence against a
+project Control `user` entry follows the narrower [Project Control](control.md)
+scoping instead. Otherwise record the conflict:
 
 ```bash
 codex-workflow decision-conflict <task-id> --id <conflict-id> --decision <active-id> --reason "<conflict>" --evidence <path-or-ref> [--operation-id <id>]

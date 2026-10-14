@@ -12,7 +12,8 @@ and project `CLAUDE.md` or `AGENTS.md` take precedence.
   intent: `office-hours` for product value, `brainstorm` for solution shape,
   `intake` for blocking ambiguity, `clarify` for execution boundaries,
   `analyze` for read-only synthesis, `product-design` for an approved UI flow,
-  `design-review` for UI fidelity, `task` or `cw` for clear bounded work. Use
+  `design-review` for UI fidelity, `control` to set up or change a project's
+  Control index, `task` or `cw` for clear bounded work. Use
   `team` only when agents materially reduce latency or risk, and `worktree`
   only when isolation has concrete value. Say which skill you chose and why,
   and honor an explicit request not to use an Atlas skill.
